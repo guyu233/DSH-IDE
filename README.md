@@ -1,0 +1,2 @@
+# DSH-IDE
+面向deepseekharness的插件，致力于让deepseekharness能有类似cursor的IDE编辑器的体验
