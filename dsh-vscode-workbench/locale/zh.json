@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "VS Code 工作台",
+    "description": "在 DeepSeek Harness 内嵌入真实的 VS Code（完整扩展宿主），带返回对话按钮。"
+  }
+}

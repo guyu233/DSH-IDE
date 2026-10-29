@@ -1,0 +1,17 @@
+- insert:
+    - id: dsh-ide
+      name: 'dsh-ide'
+      config:
+        # 独立原生 IDE 窗口（复用 DSH 自带 Electron 运行时 + 编译好的 VS Code 桌面版）
+        ideExe: 'E:\vscode-dsh\dsh-ide\DeepSeek Harness.exe'
+        ideAppPath: 'E:\vscode-dsh\dsh-ide\resources\app'
+        ideWorkdir: 'E:\vscode-dsh'
+        ideUserDataDir: 'E:\vscode-dsh\.dsh-ide-data'
+        ideExtensionsDir: 'E:\vscode-dsh\.dsh-ide-ext'
+        # 浏览器版工作台（code-server），用于在浏览器里实时查看/调 UI（含右侧 Chat 面板）
+        enableCodeServer: true
+        serverMain: 'E:\vscode-dsh\vscode-1.143.1\out\server-main.js'
+        repoRoot: 'E:\vscode-dsh\vscode-1.143.1'
+        port: 9899
+        basePath: '/vscode'
+        folder: 'E:\vscode-dsh'

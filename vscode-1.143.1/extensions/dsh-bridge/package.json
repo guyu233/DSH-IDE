@@ -1,0 +1,85 @@
+{
+  "name": "dsh-bridge",
+  "displayName": "DSH Bridge",
+  "description": "DeepSeek Harness 深度集成：把选中的代码/问题交给 DSH 的 DeepSeek 回答，并回传结果。",
+  "publisher": "dsh",
+  "license": "MIT",
+  "version": "0.0.1",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+"main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "dsh.askSelection",
+        "title": "Ask DSH (DeepSeek) about selection",
+        "category": "DSH"
+      },
+      {
+        "command": "dsh.askCustom",
+        "title": "Ask DSH (DeepSeek)…",
+        "category": "DSH"
+      },
+      {
+        "command": "dsh.reviewChanges",
+        "title": "Review recent Agent changes (DSH)",
+        "category": "DSH"
+      },
+      {
+        "command": "dsh.openFileDiff",
+        "title": "Open Agent change diff for file (DSH)",
+        "category": "DSH"
+      },
+      {
+        "command": "dsh.openHarness",
+        "title": "Open DeepSeek Harness",
+        "category": "DSH"
+      },
+      {
+        "command": "dsh.openChat",
+        "title": "Open DSH Chat",
+        "category": "DSH"
+      }
+    ],
+    "configuration": {
+      "title": "DSH Bridge",
+      "properties": {
+        "dsh.aiBaseUrl": {
+          "type": "string",
+          "default": "http://127.0.0.1:59602",
+          "description": "DSH Host 地址（用于 /vscode-ai 与 /dsh-ide-changes）。"
+        },
+        "dsh.autoReviewChanges": {
+          "type": "boolean",
+          "default": true,
+          "description": "当 DSH 中的 Agent 改动文件后，自动在 VS Code 打开该轮的原生变更审查 diff。"
+        }
+      }
+    },
+    "menus": {
+      "editor/context": [
+        {
+          "command": "dsh.askSelection",
+          "when": "editorHasSelection",
+          "group": "navigation@100"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/vscode": "^1.85.0",
+    "typescript": "^5.4.0"
+  }
+}

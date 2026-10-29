@@ -1,0 +1,38 @@
+{
+  "name": "dsh-ide",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "description": "DSH-IDE：在 DeepSeek Harness 里一键打开独立的原生 IDE 窗口（复用 DSH 自带 Electron 运行时承载完整的 VS Code 桌面版），并在会话顶部提供 DSH-IDE 入口。",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg"
+  },
+  "files": [
+    "index.js",
+    "ide-tools.js",
+    "client.js",
+    "cordis.patch.yml",
+    "locale/*.json",
+    "icon.svg"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": [
+        "@deepseek-ai/dsh-client-runtime",
+        "@deepseek-ai/dsh-client-ui-layout"
+      ]
+    }
+  },
+  "peerDependencies": {
+    "@deepseek-ai/schemastery": "^3.18.1",
+    "@deepseek-ai/cordis": "^4.0.1"
+  }
+}

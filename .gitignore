@@ -1,0 +1,52 @@
+# ===== DSH-IDE 仓库忽略规则（精简单仓）=====
+# 依赖 / 构建产物 / 运行时 / 日志 / 临时截图 / 反查草稿，一律不入库。
+
+# --- 依赖与构建产物（全层级）---
+**/node_modules/
+**/out/
+**/dist/
+**/.build/
+.build/
+
+# --- 运行时与本地数据 ---
+/dsh-ide/
+/.dsh-ide-data/
+/.dsh-ide-ext/
+*.log
+
+# --- 大体量无关目录 / 草稿 ---
+/vscode-docs/
+/ide-shell/
+/types-stash/
+/_asar/
+/@sinonjs/
+/ex/
+/vendor/
+
+# --- 临时验证截图与反查脚本（开发草稿）---
+/*.png
+verify-*.cjs
+ag.js
+asar*.js
+asar*.mjs
+asar_header.json
+api-catalog.js
+agent-types.js
+session-lib.js
+session-types.js
+q1.mjs
+q2.mjs
+readpkg.mjs
+scan.js
+grepasar.mjs
+
+# --- 系统文件 ---
+Thumbs.db
+.DS_Store
+
+# --- �������� / ���� ---
+**/node_modules.partial*/
+**/*.pdb
+**/*.ilk
+_disabled-extensions/
+vscode-1.143.1/_disabled-extensions/
