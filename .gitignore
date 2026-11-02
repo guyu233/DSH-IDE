@@ -50,3 +50,9 @@ Thumbs.db
 **/*.ilk
 _disabled-extensions/
 vscode-1.143.1/_disabled-extensions/
+
+# --- dsh-ide bundle plugin SOURCE is tracked (built runtime/deps excluded) ---
+!/dsh-ide/
+!/dsh-ide/**
+/dsh-ide/runtime/
+/dsh-ide/node_modules/

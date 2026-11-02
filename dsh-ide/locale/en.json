@@ -1,0 +1,1 @@
+{ "meta": { "title": "DSH-IDE", "description": "Deliver the full VS Code desktop runtime as a DeepSeek Harness plugin: a chat-only DSH subapp embedded in VS Code, all DSH connections carried in-process over a private local pipe, and IDE actions (read/write, LSP, terminal, Git) fed back to the DSH agent as auditable ide_* tools." } }

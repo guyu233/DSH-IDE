@@ -1,0 +1,10 @@
+# DSH-IDE bundle patch（v1.0：私有管道架构）
+#
+# 只声明插件行。所有运行路径由插件自身在 Host 内推导，不写死绝对路径/端口：
+#   - 管道端点：\\.\pipe\dsh-ide-<hostPid>-<nonce>（运行时生成，nonce 握手校验）
+#   - IDE 运行时：包内 runtime/electron/（自带 Electron dist，可分发）；跨卷仍可用
+#   - 工作区根：配置 root 或 process.cwd()
+- insert:
+    - id: dsh-ide
+      name: dsh-ide
+      config: {}

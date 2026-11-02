@@ -1,0 +1,1 @@
+{ "meta": { "title": "DSH-IDE", "description": "以完整 VS Code 桌面运行时承载 DeepSeek Harness：聊天面板内嵌 chat-only DSH 子应用，所有 DSH 连接经插件私有本地管道完成，IDE 动作（读写/LSP/终端/Git）以可审计的 ide_* 工具反喂给 DSH agent。" } }
