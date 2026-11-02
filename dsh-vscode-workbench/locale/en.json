@@ -1,6 +1,0 @@
-{
-  "meta": {
-    "title": "VS Code Workbench",
-    "description": "Embeds a real VS Code (full extension host) inside DeepSeek Harness with a return-to-conversation control."
-  }
-}

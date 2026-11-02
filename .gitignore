@@ -56,3 +56,6 @@ vscode-1.143.1/_disabled-extensions/
 !/dsh-ide/**
 /dsh-ide/runtime/
 /dsh-ide/node_modules/
+
+# --- stray build outputs at repo root (regenerable) ---
+/build/

@@ -1,56 +1,44 @@
 # DSH-IDE
 
-**DSH-IDE = DeepSeek Harness 的一个插件。** 界面是独立的原生 VS Code 窗口，但所有 AI / Agent 能力都依附于 DeepSeek Harness（DSH）——本仓库不含任何独立智能体，只负责把 DSH 的大脑接到一个 Cursor 式的智能体 IDE 外壳上（提供"手和眼"：编辑、终端、LSP、Git 等能力）。
+**DSH-IDE = DeepSeek Harness 的一个插件。** 把完整 VS Code 桌面运行时作为 DSH 的 bundle 插件交付：VS Code 外壳保留（侧栏/编辑/终端/Git/搜索/布局原生不变），聊天面板内嵌 chat-only 的 DSH 客户端子应用，由其字面渲染 DSH 事件。所有 DSH 连接由 DSH Cordis 插件在 Host 进程内完成，经**插件私有本地管道**暴露给 VS Code；只有一个 agent = DSH 本身，IDE 是其"一等公民代码身体"。
 
-## 仓库结构（精简单仓）
-
+## 仓库结构（v1.0）
 ```
 .
-├─ dsh-vscode-workbench/        # DSH Host 插件（核心）
-│  ├─ index.js                  #   注册 /dsh-session/*、/dsh-ide-*、/dsh-account 等 HTTP 端点，
-│  │                            #   桥接 DSH sessionController，拉起 IDE 窗口
-│  ├─ ide-tools.js              #   把 VS Code 能力包装成 ide_* 工具（readFile/listDir/glob/search/
-│  │                            #   terminal/writeFile/editFile/diagnostics + LSP 六件套）+ /ide-cmd/*
-│  ├─ client.js / *.svg / locale/  # DSH Web GUI 侧的小组件
-│  ├─ package.json / cordis.patch.yml
+├─ docs/
+│  ├─ dsh-ide-plan.md            # 唯一事实来源（v1.0 改造计划）
+│  ├─ dsh-ide-facts.md           # 可复用工程事实附录（体积/构建/安全/Electron 陷阱）
+│  └─ archive/                   # 已废旧架构文档（独立窗口 + HTTP /api bridge，仅供考古）
 │
-├─ tools/                       # 辅助脚本（构建、CDP 调试、窗口/进程工具、restart-dsh.bat 等）
+├─ .build/
+│  ├─ migrate-from-wrapper/      # 旧架构 Host 半代码（P0 参考基，会被重写）
+│  └─ dshsrc/                    # DSH 官方源码片段（tool-bash/fs/pwsh/approval/permission-presets 参考）
 │
-└─ vscode-1.143.1/              # VS Code OSS 1.143.1 源码（含 DSH 定制补丁）
-   ├─ src/                      #   完整前端源码
-   ├─ extensions/dsh-bridge/    #   IDE 侧扩展：命令泵（/ide-cmd/poll）、SCM 改动审查、LSP 执行
-   └─ product.json              #   定制项
+├─ tools/                        # 辅助脚本（构建、CDP 调试、窗口/进程、restart-dsh.bat）
+│
+├─ dist/
+│  └─ dsh-ide-0.0.0.tgz          # 现装可用回退产物（profile 已装 0.0.0）
+│
+└─ vscode-1.143.1/               # VS Code OSS 1.143.1 源码（DSH 定制改造对象）
+   ├─ src/                       #   前端源码（D2 核心改造落点）
+   ├─ extensions/                #   v1 会删 dsh-bridge/、保留其余
+   └─ product.json
 ```
 
-> 说明：本仓库**不含** `node_modules/`、`out/`（构建产物）、`dsh-ide/`（运行时）等大目录，请自行安装/构建。
+> 本仓库**不含** `node_modules/`、`out/`（构建产物）、`runtime/`（Electron dist）等大目录，请自行安装/构建。
 
-## 关键定制点（VS Code 源码内）
+## 架构（摘要）
+- **Host 半**（DSH Cordis 插件 `dsh-ide`）：私有命名管道服务端（nonce 校验）；进程内直调 `sessionController / modelCatalog / agentPresetRegistry / approval / permissionPresets / goal`；注册 `ide_*` 工具转通道B 给 VS Code。
+- **VS Code 半**（fork 核心）：主进程管道客户端；`ideExec` 执行 `ide_*`（取代 `dsh-bridge`）；聊天容器 webview 加载 chat-only DSH 子应用（复用 DSH `app.asar` 构建产物）；行内补全 `InlineCompletionItemProvider`。
+- **连接**：仅本地命名管道，**无** `/api`/cookie；删 `dsh-bridge`。详见 `docs/dsh-ide-plan.md`。
 
-- `src/vs/workbench/contrib/chat/common/chatService/dshChatBridge.ts`（新增）
-  —— 把内建 Local 聊天的「应答者」换成 DSH：create/prompt/page/cancel、每工作区活动会话、会话列表与历史回放。
-- `src/vs/workbench/contrib/chat/common/chatService/chatServiceImpl.ts`
-  —— 发送分流到 DSH 桥；点开 DSH 会话时把历史合成为「可恢复会话数据」在原生 Chat 里回放。
-- `src/vs/workbench/contrib/chat/browser/agentSessions/localAgentSessionsController.ts`
-  —— 把当前工作区的 DSH 会话列进右侧 **Sessions** 面板（id 即 DSH sessionId）。
-- `src/vs/workbench/contrib/chat/browser/widgetHosts/viewPane/chatViewPane.ts`
-  —— "New Session" 按钮先建 DSH 会话。
-- `src/vs/workbench/contrib/chat/browser/widget/chatWidget.ts` —— 欢迎页中性化（去 Copilot 文案）。
-- 另有多处 UI 净化（移除模型选择器 / 会话类型选择器 / 委托 / Copilot 状态栏等），详见 git 历史。
-- `extensions/dsh-bridge/` —— IDE 侧扩展（命令泵 + SCM + LSP 执行入口）。
-- `product.json` —— 已清空 `extensionEnabledApiProposals`（扩展不再声明任何 chat 提案）。
+## 关键决策（已冻结）
+- VS Code 固定 `1.143.1`；对准已装 DSH `0.2.1-rc.5`。
+- Electron：**自带 dist（可分发）** + 同卷 dev-only 硬链接兜底（跨卷硬链接本机不可行）。
+- 单一 agent；标尺 = 对齐并超越 Cursor。
 
 ## 构建
-
-```bash
-# VS Code 核心文件（esbuild，单文件）
-node tools/build-ts.mjs vs/workbench/contrib/chat/common/chatService/dshChatBridge.ts
-
-# IDE 侧扩展（需要 node_modules）
-cd extensions/dsh-bridge && npm install && node_modules/.bin/tsc -p ./
-```
-
-首次使用完整 VS Code 工程前，请在 `vscode-1.143.1/` 下执行 `npm install`（依赖未入库）。
+首次使用前在 `vscode-1.143.1/` 下 `npm install`（依赖未入库）。具体构建/打包脚本随 P0–P5 落地，见 `docs/dsh-ide-plan.md` 阶段计划。
 
 ## 定位（务必牢记）
-
 DSH-IDE 始终只是 DSH 的一个插件：界面独立，但 AI 全依附 DSH。它只是帮 DSH 实现 Cursor 式智能体 IDE 体验的壳，而不是另一个 agent。
