@@ -134,6 +134,14 @@ Registry.as<IConfigurationRegistry>(ConfigurationExtensions.Configuration).regis
 			markdownDescription: nls.localize('autoDeleteMarkedAsDoneMergedSessions.description', "After a session with a merged pull request is automatically marked Done, wait this many additional days, then permanently delete the session. Eligible retained worktrees are safely removed first. Set to 0 to disable permanent deletion."),
 			agentHost: { key: AgentHostAutoDeleteArchivedMergedSessionsAfterDaysConfigKey },
 		},
+		// DSH 集成：当前 DeepSeek Harness Host 的地址（插件在拉起 IDE 前写入 User settings）。
+		// 供内建聊天桥与账号按钮连接 DSH 使用，避免硬编码端口。
+		'dsh.hostBaseUrl': {
+			type: 'string',
+			default: '',
+			scope: ConfigurationScope.APPLICATION,
+			markdownDescription: nls.localize('dsh.hostBaseUrl', "DeepSeek Harness Host 的地址（由 DSH-IDE 插件自动写入）。"),
+		},
 	},
 });
 

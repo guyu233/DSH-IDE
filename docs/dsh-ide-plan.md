@@ -127,6 +127,8 @@
 - 参考源码 `E:\deepseek-harness` 已切换到 `0.2.1-rc.5`（旧 `0.2.2-alpha.2` 在 `.bak`）；**逐字段核验的 rc.5 契约见 `.build/rc5-contract.md`**。
 - 本轮已实施（本环境）：Host 半 `dsh-ide/{index.js,host/*.js}` 按 rc.5 真实签名重写并通过 `node --check` 与管道功能自测（握手/通道A 单播+流/通道B 往返）；bundle `package.json`/`cordis.patch.yml`/`locale`/`icon` 落地；`build-host.mjs` 校验脚本；VS Code 侧 TS（`platform/dshPipe/*`、`contrib/dsh/browser/{ideExec,chatWebview,inlineCompletion,dsh.contribution}.ts`、`chatapp/*`）、`build-chatapp.mjs`、`build-runtime.mjs` 落地；**删除 `extensions/dsh-bridge/`**；撤回 3 处旧 HTTP-bridge 装饰性核心改动（chatWidget/chatViewWelcomeController/chatViewWelcome.css）；裁剪 `github/github-authentication/microsoft-authentication`（实测共 -381MB）；`.gitignore` 改为追踪 `dsh-ide` 源码（runtime 除外）。
 - 保留（有意）：`dshChatBridge.ts`（重写为经管道）、`chatServiceImpl.ts`（`isKnownSession` 判据）、`agentSessionsConfiguration.ts`（`dsh.hostBaseUrl` 配置）、`globalCompositeBar.ts`（账号按钮，用 `dsh.hostBaseUrl`）——均为新架构沿用。
+- **核心改动预算（≤2）已达成**：除 `contrib/dsh/*` 与 `platform/dshPipe/*` 自有模块外，仅改 `src/vs/code/electron-main/app.ts`（主进程引导 + 注册 `dshPipe` IPC 频道）与 `src/vs/workbench/workbench.common.main.ts`（一行注册 import）两处。
+- **chatapp 复用实测纠正**：rc.5 的 `vendor-*.js` 仅第三方库；React 18.3.1 + cordis + 共享单例（dsh-client-store/ui-slots/ui-primitives/ui-dockkit）内联在 `dsh-web-frontend/dist/assets/index-*.js`。`build-chatapp.mjs` 据此记录 `react.strategy='single-copy-in-index-shell'`，不重复内置 React；子应用挂载由 `chatWebview.ts` 注入 `__DSH_CHATAPP_STATIC__`+`__ModuleLoader__`+import map（`index-*.js` 导出符号抽取为集成接缝，缺失时子应用回退诊断面板，事件管线仍可验证）。
 - 回退：profile 保留现可用 `dist/dsh-ide-0.0.0.tgz`；各阶段独立 git；Electron 兜底 copy。
 - ⚠️ **验收边界**：本环境无法拉起 Electron/DSH Host 联动，G0/G1/G2/G3/G5 与超越项须在用户机器 GUI 验收（见 §11 与 facts §7）。
 

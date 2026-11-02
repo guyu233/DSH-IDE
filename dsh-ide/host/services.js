@@ -56,16 +56,18 @@ export function createHostServices(ctx) {
   };
 
   /**
-   * 把官方 follow 流逐帧归一为 SessionEventLikeEntry 回推。
-   * 首帧 snapshot -> records 里的 {type:'event',event}；后续 {type:'event',event} 直传；
-   * assistant-stream 帧转 {type:'assistant/live-chunk' 语义的 transient}（子应用可选消费）。
+   * 把官方 follow 流逐帧「原样」回推（不扁平化）：
+   *   首帧 {type:'snapshot', records:[{type:'event',event}], cursor, ...}
+   *   之后 {type:'event', event}（durable）与可选 {type:'assistant-stream', frame}
+   * 子应用需 snapshot 的 cursor 关联后续事件；发送循环需首帧 snapshot 建游标。
+   * 因此这里保留原始帧，交由两个消费者（chatWebview 渲染 / dshChatBridge 发送循环）各自解释。
    */
   async function streamFollow(request, signal, onEvent) {
     const controller = sessionController();
     const iterable = controller.follow(request, signal);
     for await (const frame of iterable) {
       if (signal?.aborted) break;
-      for (const entry of normalizeFollowFrame(frame)) onEvent(entry);
+      onEvent(frame);
     }
   }
 
@@ -139,23 +141,3 @@ export function createHostServices(ctx) {
 }
 
 function ok(result) { return { ok: true, result }; }
-
-/**
- * 归一化官方 follow 帧 → SessionEventLikeEntry 列表（严格按 rc.5 真实帧形状）。
- *  - snapshot：{ type:'snapshot', records:[{type:'event',event}], ... } -> records 直出
- *  - event：{ type:'event', event } -> 直出
- *  - assistant-stream：{ type:'assistant-stream', frame } -> 一句 transient（子应用可忽略）
- */
-function normalizeFollowFrame(frame) {
-  if (!frame || typeof frame !== 'object') return [];
-  if (frame.type === 'snapshot') {
-    const records = Array.isArray(frame.records) ? frame.records : [];
-    return records.map((r) => (r && r.type === 'event' && r.event) ? { type: 'event', event: r.event } : r);
-  }
-  if (frame.type === 'event' && frame.event) return [{ type: 'event', event: frame.event }];
-  if (frame.type === 'assistant-stream' && frame.frame) {
-    // 仅在 assistantStream:true 时出现；交给子应用作为 transient 处理（保持信封合法）。
-    return [{ type: 'transient', event: { type: 'assistant/live-chunk', data: frame.frame } }];
-  }
-  return [];
-}

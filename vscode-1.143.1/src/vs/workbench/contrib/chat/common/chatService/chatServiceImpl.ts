@@ -489,11 +489,6 @@ export class ChatService extends Disposable implements IChatService {
 		if (!LocalChatSessionUri.parseLocalSessionId(session.sessionResource)) {
 			return false;
 		}
-		// DSH 会话的真相在 DSH 服务端；不落本地存档，保证每次打开都从 DSH 拉取最新历史。
-		const localId = LocalChatSessionUri.parseLocalSessionId(session.sessionResource);
-		if (localId && this.looksLikeDshSessionId(localId)) {
-			return false;
-		}
 		return session.initialLocation === ChatAgentLocation.Chat && !session.isImported;
 	}
 
@@ -799,11 +794,10 @@ export class ChatService extends Disposable implements IChatService {
 		}
 
 		if (!sessionData) {
-			// DSH 集成：本地无存档时，若这是某个 DSH 会话（resource id 即 DSH sessionId），
-			// 从 DSH 拉历史合成为“可恢复会话数据”，走与普通会话完全一致的原生反序列化路径。
-			// 点开 Sessions 面板里的历史会话即可回放，且不影响后续发送（发送仍由 dshBridge 接管）。
+			// DSH 集成：本地无存档时，仅当官方会话列表确认这是当前工作区的 DSH 会话时，才拉历史回放。
+			// 普通 Local 会话同样是 UUID，因此绝不靠 id 形状判断。
 			const localSessionId = LocalChatSessionUri.parseLocalSessionId(sessionResource);
-			if (localSessionId && this.looksLikeDshSessionId(localSessionId)) {
+			if (localSessionId && await this.dshBridge.isKnownSession(localSessionId)) {
 				try {
 					const turns = await this.dshBridge.loadHistory(localSessionId);
 					if (turns.length) {
@@ -839,11 +833,6 @@ export class ChatService extends Disposable implements IChatService {
 		}, debugOwner ?? 'ChatService#acquireOrRestoreLocalSession');
 
 		return sessionRef;
-	}
-
-	/** 判断某 local 会话 id 是否是 DSH 会话（DSH 的 sessionId 形如 session-xxxx 或 uuid）。判据与 dshBridge.ensureDshSession 一致。 */
-	private looksLikeDshSessionId(id: string): boolean {
-		return id.startsWith('session-') || /^[0-9a-f]{8}-[0-9a-f]{4}-/i.test(id);
 	}
 
 	/** 把 DSH 的历史 turns（user/assistant）合成为 VS Code 可反序列化的请求数据，用于只读回放。 */

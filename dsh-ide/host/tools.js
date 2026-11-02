@@ -232,6 +232,30 @@ export function createIdeTools(ctx, root, opts = {}) {
     },
   );
 
+  const lspGenericTool = makeTool(
+    'ide_lsp',
+    'Query the workspace language servers (op=hover|definition|references|documentSymbols|workspaceSymbols|codeActions|rename) at a path/position.',
+    { type: 'object', additionalProperties: false, properties: { op: { type: 'string' }, path: { type: 'string' }, line: { type: 'number' }, column: { type: 'number' }, query: { type: 'string' }, newName: { type: 'string' } }, required: ['op', 'path'] },
+    async ({ op, path: p, line, column, query, newName }, exec) => {
+      const abs = resolve(p);
+      const res = await execB('lsp', { op, path: abs, line, column, query, newName }, exec.signal);
+      if (!res.ok) throw new Error(res.error || 'ide_lsp failed');
+      return res.result ?? {};
+    },
+  );
+
+  const inlineCompleteTool = makeTool(
+    'ide_inlineComplete',
+    'Request a DSH inline code completion at a path/position (backend for the editor Tab completion).',
+    { type: 'object', additionalProperties: false, properties: { path: { type: 'string' }, line: { type: 'number' }, column: { type: 'number' }, prefix: { type: 'string' }, suffix: { type: 'string' } }, required: ['path'] },
+    async ({ path: p, line, column, prefix, suffix }, exec) => {
+      const abs = resolve(p);
+      const res = await execB('inlineComplete', { path: abs, line, column, prefix, suffix }, exec.signal);
+      if (!res.ok) throw new Error(res.error || 'ide_inlineComplete failed');
+      return res.result ?? { text: '' };
+    },
+  );
+
   const tools = [
     readFileTool, listDirTool, globTool, searchTool,
     writeFileTool, editFileTool, diagnosticsTool,
@@ -241,7 +265,7 @@ export function createIdeTools(ctx, root, opts = {}) {
     lspTool('ide_documentSymbols', 'List symbols (outline) in a file via the language server.', 'documentSymbols', {}, () => ({})),
     lspTool('ide_workspaceSymbols', 'Search workspace symbols by name via the language server.', 'workspaceSymbols', { query: { type: 'string' } }, a => ({ query: a.query })),
     lspTool('ide_codeActions', 'List available code actions (quick fixes/refactors) at a position. Lists only; does not apply.', 'codeActions', { line: { type: 'number' }, column: { type: 'number' } }, a => ({ line: a.line, column: a.column })),
-    runCommandTool, terminalTool, gitTool,
+    lspGenericTool, inlineCompleteTool, runCommandTool, terminalTool, gitTool,
   ];
 
   /** 注册到 DSH tools 层；返回已注册的工具名。 */
