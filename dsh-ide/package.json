@@ -1,9 +1,9 @@
 {
   "name": "dsh-ide",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "private": true,
   "type": "module",
-  "description": "DSH-IDE: deliver the full VS Code desktop/workbench runtime as an official DeepSeek Harness bundle plugin — chat-only DSH subapp embedded in VS Code, all DSH connections done in-process via a private local pipe.",
+  "description": "DSH-IDE: the second official client of the DSH desktop App's single Host — a Cursor-style IDE surface (modified VS Code workbench) connected to the same Host/agent over the official dsh-client-connection transport (/api + /api/remote.mux + cookie).",
   "exports": {
     ".": "./index.js",
     "./locale/*.json": "./locale/*.json",
@@ -12,18 +12,14 @@
   "files": [
     "index.js",
     "host/",
+    "common/",
     "build-host.mjs",
-    "build-chatapp.mjs",
-    "build-runtime.mjs",
     "cordis.patch.yml",
     "locale/*.json",
-    "icon.svg",
-    "runtime/"
+    "icon.svg"
   ],
   "scripts": {
-    "build:host": "node ./build-host.mjs",
-    "build:chatapp": "node ./build-chatapp.mjs",
-    "build:runtime": "node ./build-runtime.mjs"
+    "build:host": "node ./build-host.mjs"
   },
   "dsh": {
     "bundle": {

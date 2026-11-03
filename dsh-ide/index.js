@@ -1,60 +1,55 @@
 // dsh-ide/index.js
-// DSH-IDE Host Cordis 插件入口（Cordis bundle plugin，apply 形式；纯 Node-ESM）。
+// DSH-IDE Host Cordis 插件入口（v2 / R1，Cordis bundle plugin，apply 形式；纯 Node-ESM）。
 //
-// 职责：
-//  1. 启动时建立私有命名管道服务端（nonce 握手），经它把 DSH 全部连接暴露给 VS Code（无 /api、无 cookie）。
-//  2. 注册 ide_* 工具（进入 DSH 会话日志审计 tool/call + tool/result；写/终端经 approval/*）。
-//  3. 注册 /dsh-ide-launch 端点：同源/nonce 校验后拉起自带 Electron dist 的 VS Code 窗口（单实例）。
+// v2 定稿：DSH-IDE = DSH 桌面 App 单一 Host 的「第二个官方客户端」。传输 100% 官方：
+//   - Host 侧不再有私有命名管道 / 通道 A/B / ide_*。
+//   - IDE（VS Code）作为外部进程，用官方 dsh-client-connection（/api + /api/remote.mux + cookie）
+//     连到本 Host；登录 token 由 ctx.connection.authenticatedUrl() 派生。
 //
-// 所有 DSH 调用都在 Host 进程内经 ctx.get(name) 完成；管道只是传输层。详见 .build/rc5-contract.md。
+// 本插件（Host 侧）职责（R1 最小）：
+//   1. 提供 /dsh-ide-launch：把 官方端点(hostUrl) + launchToken 交给 DSH-IDE 客户端（spawn VS Code）。
+//   2. 提供 /dsh-ide-status：诊断端点（origin + 是否有 connection）。
+//   R3 起：在此注册 @Remote IDE 扩展服务（ctx.remote.ide.*）。
 
 import z from '@deepseek-ai/schemastery';
-import { randomUUID } from 'node:crypto';
-import { pipeName as makePipeName } from './host/protocol.js';
-import { startPipeServer } from './host/pipe.js';
-import { launchIde } from './host/launch.js';
+import { launchIde, resolveIdeRuntime } from './host/launch.js';
 
-/** 目标服务：webServer 提供 /dsh-ide-launch；tools 承载 ide_* 注册。 */
-export const inject = ['webServer', 'tools'];
+/** 目标服务：webServer 提供 launch/status 端点；connection 派生官方 token（可选）。 */
+export const inject = ['webServer'];
 
 export const Config = z.object({
-  /** 工作区根（ide_* 的读写受约束于此；空 = 进程 cwd）。 */
-  root: z.string().default(''),
-  /** 自带 Electron dist 目录（含 DeepSeek Harness.exe）；空 = 包内 runtime/electron。 */
-  ideRuntimeDir: z.string().default(''),
-  /** 显式 exe 覆盖（一般留空）。 */
-  ideExe: z.string().default(''),
   /** 拉起 IDE 时打开的文件夹（空 = process.cwd()）。 */
   ideWorkdir: z.string().default(''),
+  /** DSH-IDE（VS Code）可执行文件路径（用户机器提供；v2 不再自带 Electron dist）。 */
+  ideExe: z.string().default(''),
+  /** 打包后的 app 目录（含 out/）；空 = <exeDir>/resources/app。 */
+  ideAppPath: z.string().default(''),
   ideUserDataDir: z.string().default(''),
   ideExtensionsDir: z.string().default(''),
-  /** 由 DSH 启动注入的 Host base url（供 IDE 侧账号/连接读取）。 */
-  hostBaseUrl: z.string().default(''),
+  /** 新 API Peer 的 interactions：'none'（一元够用）或 'answer'（需要 $events 时）。 */
+  interactions: z.string().default('none'),
 });
 
 export function apply(ctx, config = {}) {
-  const hostPid = process.pid;
-  const nonce = randomUUID().replace(/-/g, '');
-  const pipe = makePipeName(hostPid, nonce);
-  const root = config.root || process.cwd();
+  /** 派生官方登录 URL（tokenized），并拆出 endpoint + token 供 IDE 使用。 */
+  function deriveEndpointAndToken(folder) {
+    const connection = ctx.get('connection');
+    const origin = ctx.webServer.getOrigin();
+    if (!origin) throw new Error('webServer origin unavailable');
+    const base = new URL(origin);
+    // 让 IDE 打开的目标目录带在 URL 的 hash 里仅作提示；沿用官方 mock。
+    if (folder) { base.hash = ''; }
+    const tokenized = connection && typeof connection.authenticatedUrl === 'function'
+      ? connection.authenticatedUrl(base.href)
+      : base.href;
+    const u = new URL(tokenized);
+    const token = u.searchParams.get('token') || '';
+    const endpoint = `${u.protocol}//${u.host}`;
+    if (!token) throw new Error('launch token unavailable (ctx.connection.authenticatedUrl did not yield a token)');
+    return { endpoint, token };
+  }
 
-  // 1) 管道服务端（含 ide_* 分发所需的 execB 通道 B）。
-  let pipeServer;
-  ctx.effect(() => {
-    pipeServer = startPipeServer(ctx, { pipeName: pipe, nonce, root });
-    ctx.logger?.info?.(`[dsh-ide] private pipe listening: ${pipe}`);
-    return () => { try { pipeServer.close(); } catch { /* ignore */ } };
-  }, 'dsh-ide: private pipe server');
-
-  // 2) ide_* 工具注册（审计经 DSH tools 层）。
-  ctx.effect(() => {
-    const names = pipeServer ? pipeServer.ideTools.register() : [];
-    ctx.logger?.info?.(`[dsh-ide] registered ide tools: ${names.join(', ') || '(none)'}`);
-    // ideTools.register 内部已把各 register 的 dispose 挂到 ctx.effect；此处无额外清理。
-    return () => { /* 由各工具 register 的 ctx.effect 负责 */ };
-  }, 'dsh-ide: ide_* tools');
-
-  // 3) /dsh-ide-launch：拉起 IDE 窗口（同源/nonce + 单实例）。
+  // 1) /dsh-ide-launch：交给 IDE 官方端点 + token，并拉起窗口。
   ctx.effect(() => ctx.webServer.register({
     kind: 'exact',
     path: '/dsh-ide-launch',
@@ -63,9 +58,20 @@ export function apply(ctx, config = {}) {
       try {
         const body = await readJsonBody(req);
         const folder = (body && typeof body.folder === 'string' && body.folder) || config.ideWorkdir || process.cwd();
-        const { pid, reused } = launchIde(config, { pipePath: pipe, nonce, folder });
+        const { endpoint, token } = deriveEndpointAndToken(folder);
+        // 先校验运行时是否配置（未配置则不 spawn，仅回报端点，便于用户先配 ideExe）。
+        let launched = null;
+        try {
+          resolveIdeRuntime(config);
+          launched = launchIde(config, { endpoint, token, folder, interactions: config.interactions });
+        } catch (e) {
+          // 未配置 ideExe：仍返回端点+token，供手动启动或首次配置参考。
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ ok: true, launched: false, reason: String((e && e.message) || e), endpoint, token, folder }));
+          return;
+        }
         res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ launched: true, pid, folder, reused }));
+        res.end(JSON.stringify({ ok: true, launched: true, ...launched, endpoint }));
       } catch (e) {
         res.writeHead(500, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ error: String((e && e.message) || e) }));
@@ -73,20 +79,22 @@ export function apply(ctx, config = {}) {
     },
   }), 'dsh-ide: /dsh-ide-launch');
 
-  // 4) /dsh-ide-status：是否已有 IDE 客户端接入（调试/健康检查）。
+  // 2) /dsh-ide-status：诊断（origin、是否有 connection）。
   ctx.effect(() => ctx.webServer.register({
     kind: 'exact',
     path: '/dsh-ide-status',
     handler: (_req, res) => {
+      let origin = '';
+      try { origin = ctx.webServer.getOrigin() || ''; } catch { /* ignore */ }
+      const hasConnection = !!ctx.get('connection');
       res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ pipe, hostPid, root }));
+      res.end(JSON.stringify({ origin, hasConnection, hostPid: process.pid }));
     },
   }), 'dsh-ide: /dsh-ide-status');
 }
 
 function readJsonBody(req, limit = 1024 * 1024) {
   return new Promise((resolve, reject) => {
-    // 部分载体已解析 body。
     if (req.body && typeof req.body === 'object') { resolve(req.body); return; }
     let data = ''; let size = 0;
     req.on('data', (c) => { size += c.length; if (size > limit) { reject(new Error('body too large')); req.destroy(); return; } data += c; });

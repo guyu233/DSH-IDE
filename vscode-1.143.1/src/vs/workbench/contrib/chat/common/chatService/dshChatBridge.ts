@@ -5,15 +5,12 @@
 
 // DSH 集成：把内建 Local 聊天的“应答者”换成 DeepSeek Harness（DSH）核心。
 //
-// 架构（v1.0 私有管道定稿）：
-//  - 所有 DSH 连接都在 DSH Host 进程内经插件（dsh-ide）完成，经**插件私有本地命名管道**暴露；
-//    VS Code 主进程是管道客户端（DshPipeClient），渲染器经 IDshChatClient 代理访问。
-//  - 本文件（workbench, renderer 侧）只做：
-//      1) 通过 IDshChatClient.callA(method,payload) 调通道 A 一元方法（session.list/page/projections/create/prompt/cancel…）；
-//      2) 通过 IDshChatClient.follow(method,payload,onFrame) 订阅通道 A 流（session.follow），逐帧消费 snapshot/event；
-//      3) 把事件映射成内建聊天的 progress。
-//  - **无** `/api`、**无** `/api/remote.mux`、**无** WebSocket、**无** Cookie。
-//  - 写请求（session.prompt）绝不盲目重试：先建 follow 流拿到 snapshot 游标，再发一次写，只认 seq > cursor 的事件。
+// v2 官方传输：所有 DSH 连接都在 DSH Host 进程内经官方 dsh-client-connection（/api）完成；
+// 渲染器经 IDshClientService（主进程持 cookie）调官方一元方法（session/list、session/page、
+// session/projections、session/create、session/prompt、session/cancel）。
+//
+// R1 阶段：一元方法走官方 /api；实时流（session/follow 经 /api/remote.mux）在 R2 接入。
+// 无 /api 之外的自造通道、无 cookie 落盘、无私有管道。
 
 import { CancellationToken } from '../../../../../base/common/cancellation.js';
 import { generateUuid } from '../../../../../base/common/uuid.js';
@@ -26,30 +23,20 @@ import { IChatProgress } from './chatService.js';
 import { ToolDataSource } from '../tools/languageModelToolsService.js';
 import { URI } from '../../../../../base/common/uri.js';
 import { LocalChatSessionUri } from '../model/chatUri.js';
-import { IDshChatClient } from '../../../../platform/dshPipe/common/dshChatClient.js';
+import { IDshClientService } from '../../../../../platform/dshClient/common/dshClientService.js';
 
 interface SessionSummary { sessionId: string; cwd?: string; running?: boolean; updatedAt?: number; projections?: { values?: { title?: string; sessionTitle?: string } } }
 interface HistoryTurn { role: 'user' | 'assistant'; text: string }
 
-/** 通道 A follow 流帧（Host 原样转发 rc.5 follow）。 */
-interface FollowFrame {
-	type?: 'snapshot' | 'event' | 'assistant-stream';
-	records?: Array<{ type: 'event'; event: any }>;
-	event?: any;
-	cursor?: number;
-	hasMore?: boolean;
-	frame?: any; // assistant-stream
-}
-
 const activeKeyPrefix = 'dsh.activeSession.';
 
-/** 由私有管道（通道 A）支撑的本地聊天呈现器。 */
+/** 由官方客户端服务（IDshClientService）支撑的本地聊天呈现器。 */
 export class DshChatBridge extends Disposable {
 	private readonly pendingCreates = new Map<string, Promise<string>>();
 	private readonly activeSends = new Set<string>();
 
 	constructor(
-		@IDshChatClient private readonly client: IDshChatClient,
+		@IDshClientService private readonly client: IDshClientService,
 		@IStorageService private readonly storage: IStorageService,
 		@IWorkspaceContextService private readonly workspace: IWorkspaceContextService,
 		@ILogService private readonly log: ILogService,
@@ -67,14 +54,16 @@ export class DshChatBridge extends Disposable {
 		return normalize(value) === normalize(this.cwd);
 	}
 
-	/** 通道 A 一元调用（解析为 result）。 */
-	private call<T>(method: string, payload?: unknown): Promise<T> {
-		return this.client.callA<T>(method, payload);
+	/** 官方一元调用；Host 返回 ok:false 时抛出带 code 的错误。 */
+	private async call<T>(endpoint: string, args: Record<string, unknown> = {}): Promise<T> {
+		const res = await this.client.call<T>(endpoint, args);
+		if (!res.ok) { throw new Error(`${endpoint} failed: ${res.error.code} ${res.error.message}`); }
+		return res.value;
 	}
 
 	private async allSessions(): Promise<SessionSummary[]> {
-		const result = await this.call<{ items: SessionSummary[] }>('session.list', {});
-		if (!Array.isArray(result?.items)) { throw new Error('Invalid session.list response'); }
+		const result = await this.call<{ items: SessionSummary[] }>('session/list', {});
+		if (!Array.isArray(result?.items)) { throw new Error('Invalid session/list response'); }
 		return result.items;
 	}
 
@@ -82,7 +71,7 @@ export class DshChatBridge extends Disposable {
 	async isKnownSession(sessionId: string): Promise<boolean> {
 		if (!sessionId) { return false; }
 		try { return (await this.allSessions()).some(item => item.sessionId === sessionId && this.sameCwd(item.cwd)); }
-		catch (e) { this.log.warn('[dsh] session.list failed', e); return false; }
+		catch (e) { this.log.warn('[dsh] session/list failed', e); return false; }
 	}
 
 	async listSessions(): Promise<Array<{ sessionId: string; title: string; cwd: string; running: boolean; updatedAt: number }>> {
@@ -102,8 +91,8 @@ export class DshChatBridge extends Disposable {
 	}
 
 	private async createSession(): Promise<string> {
-		const created = await this.call<{ sessionId: string }>('session.create', { cwd: this.cwd });
-		if (!created?.sessionId) { throw new Error('DSH session.create returned no session ID'); }
+		const created = await this.call<{ sessionId: string }>('session/create', { cwd: this.cwd });
+		if (!created?.sessionId) { throw new Error('DSH session/create returned no session ID'); }
 		return created.sessionId;
 	}
 
@@ -117,7 +106,6 @@ export class DshChatBridge extends Disposable {
 
 	private async resolveSession(localChatKey: string): Promise<string> {
 		const resourceId = LocalChatSessionUri.parseLocalSessionId(URI.parse(localChatKey));
-		// 普通 Local 会话也是 UUID；只有当官方列表里确有该 id 且 cwd 匹配时才复用。
 		if (resourceId && await this.isKnownSession(resourceId)) {
 			this.write(this.sessionKey(localChatKey), resourceId);
 			return resourceId;
@@ -139,14 +127,14 @@ export class DshChatBridge extends Disposable {
 		return Array.isArray(content) ? content.filter((part: any) => part?.type === 'text' && typeof part.text === 'string').map((part: any) => part.text).join('') : '';
 	}
 
-	/** 通道 A session.page 分页读取完整历史（向 beforeSeq 方向翻页直到 hasMore=false）。 */
+	/** 官方 session/page 分页读取完整历史（向 beforeSeq 方向翻页直到 hasMore=false）。 */
 	private async page(sessionId: string): Promise<any[]> {
-		const projection = await this.call<{ asOfSeq: number }>('session.projections', { sessionId });
+		const projection = await this.call<{ asOfSeq: number }>('session/projections', { sessionId });
 		if (!Number.isSafeInteger(projection?.asOfSeq)) { throw new Error('Invalid session cursor'); }
 		let beforeSeq: number | undefined;
 		const pages: any[][] = [];
 		for (let i = 0; i < 40; i++) {
-			const value = await this.call<{ records: any[]; hasMore: boolean }>('session.page', {
+			const value = await this.call<{ records: any[]; hasMore: boolean }>('session/page', {
 				address: { kind: 'session', sessionId }, throughSeq: projection.asOfSeq, maxMessages: 200, ...(beforeSeq === undefined ? {} : { beforeSeq }),
 			});
 			if (!Array.isArray(value?.records)) { throw new Error('Invalid session page'); }
@@ -177,7 +165,7 @@ export class DshChatBridge extends Disposable {
 
 	cancel(sessionId: string): void {
 		if (!this.activeSends.has(sessionId)) { return; }
-		void this.call('session.cancel', { sessionId }).catch(error => this.log.warn('[dsh] cancel failed', error));
+		void this.call('session/cancel', { sessionId }).catch(error => this.log.warn('[dsh] cancel failed', error));
 	}
 
 	private emitTool(progress: (parts: IChatProgress[]) => void, name: string, id: string): void {
@@ -189,110 +177,31 @@ export class DshChatBridge extends Disposable {
 		} as unknown as IChatProgress]);
 	}
 
+	/**
+	 * 发送一轮 prompt（R1：官方一元 session/prompt 受理；实时流在 R2 经 /api/remote.mux）。
+	 * 保留既有签名；返回 {errorDetails?} 以贴合调用方。
+	 */
 	async send(localChatKey: string, prompt: string, progress: (parts: IChatProgress[]) => void, token: CancellationToken): Promise<{ errorDetails?: { message: string } }> {
 		if (token.isCancellationRequested) { return {}; }
 		let sessionId = '';
-		let streamId = '';
-		let accepted = false;
 		try {
 			sessionId = await this.ensureDshSession(localChatKey);
 			if (token.isCancellationRequested) { return {}; }
-			if (this.activeSends.has(sessionId)) { throw new Error('DSH 会话已有本 IDE 的请求在进行中'); }
 			this.activeSends.add(sessionId);
-
-			// 先建 follow 流，等首个 snapshot 帧拿游标 cursor，再发写请求；此后只认 seq > cursor 的事件。
-			let cursor = -1;
-			let resolveSnapshot: () => void = () => undefined;
-			const snapshotReady = new Promise<void>((res) => { resolveSnapshot = res; });
-			const queue: FollowFrame[] = [];
-			let wake: (() => void) | undefined;
-			let streamError: Error | undefined;
-			let streamEnded = false;
-			const push = (frame: FollowFrame) => { if (wake) { const w = wake; wake = undefined; w(); } else { queue.push(frame); } };
-			const next = async (timeoutMs: number): Promise<FollowFrame | 'timeout'> => {
-				if (queue.length > 0) { return queue.shift()!; }
-				if (streamError) { throw streamError; }
-				if (streamEnded) { return 'timeout'; }
-				return new Promise<FollowFrame | 'timeout'>((resolve) => {
-					const timer = setTimeout(() => { wake = undefined; resolve('timeout'); }, timeoutMs);
-					wake = () => { clearTimeout(timer); resolve(queue.length > 0 ? queue.shift()! : (streamError ? Promise.reject(streamError) as any : 'timeout')); };
-				});
-			};
-
-			const follow = this.client.follow('session.follow', { address: { kind: 'session', sessionId }, assistantStream: true }, (frame) => {
-				const payload = frame.payload as FollowFrame | undefined;
-				if (!payload) { return; }
-				if (payload.type === 'snapshot') { if (typeof payload.cursor === 'number') { cursor = payload.cursor; } resolveSnapshot(); }
-				push(payload);
-			}, token);
-			streamId = follow.streamId;
-			follow.done.then(() => { streamEnded = true; }, (e) => { streamError = e instanceof Error ? e : new Error(String(e)); if (wake) { const w = wake; wake = undefined; w(); } });
-
-			// 等快照（最多 15s）。
-			await Promise.race([snapshotReady, new Promise<void>((_, rej) => setTimeout(() => rej(new Error('DSH follow snapshot timeout')), 15000))]);
-			if (token.isCancellationRequested) { return {}; }
-
 			const requestId = generateUuid();
-			const receipt = await this.call<{ accepted: true }>('session.prompt', {
-				requestId, sessionId, mode: 'followup', content: [{ type: 'text', text: prompt }],
+			const receipt = await this.call<{ accepted: true }>('session/prompt', {
+				requestId, sessionId, content: [{ type: 'text', text: prompt }],
 			});
 			if (receipt?.accepted !== true) { throw new Error('DSH 未接受该消息'); }
-			accepted = true;
-
-			let turn: number | undefined;
-			let pendingTurn: number | undefined;
-			const streamedSteps = new Set<string>();
-			const attempts = new Map<string, { turn: number; step: number }>();
-			const tools = new Map<string, string>();
-			while (true) {
-				if (token.isCancellationRequested) { if (accepted && sessionId) { this.cancel(sessionId); } return {}; }
-				const item = await next(300000);
-				if (item === 'timeout' && streamEnded) { throw new Error('DSH 流在本轮完成前结束'); }
-				if (item === 'timeout') { continue; }
-				if (item.type === 'assistant-stream') {
-					const delta = item.frame;
-					if (delta?.type === 'start') { attempts.set(String(delta.attemptId), { turn: delta.turn, step: delta.step }); }
-					const attempt = attempts.get(String(delta?.attemptId));
-					if (delta?.type === 'chunk' && attempt
-						&& delta.chunk?.type === 'text-delta' && typeof delta.chunk.text === 'string'
-						&& (turn === undefined ? attempt.turn === pendingTurn : attempt.turn === turn)) {
-						streamedSteps.add(`${attempt.turn}:${attempt.step}`);
-						progress([{ kind: 'markdownContent', content: new MarkdownString(delta.chunk.text) } as IChatProgress]);
-					}
-					continue;
-				}
-				if (item.type !== 'event' || !item.event || item.event.seq <= cursor) { continue; }
-				const event = item.event;
-				if (event.type === 'turn/start') { pendingTurn = event.data?.turn; }
-				if (event.type === 'user/message' && this.messageText({ content: event.data?.content }) === prompt) {
-					turn = event.data?.turn ?? pendingTurn;
-				}
-				if (turn === undefined || event.data?.turn !== turn) { continue; }
-				if (event.type === 'assistant/message') {
-					const text = this.messageText(event.data.message);
-					if (text && !streamedSteps.has(`${turn}:${event.data.step}`)) {
-						progress([{ kind: 'markdownContent', content: new MarkdownString(text) } as IChatProgress]);
-					}
-				} else if (event.type === 'tool/call') {
-					tools.set(String(event.data.callId), String(event.data.name));
-				} else if (event.type === 'tool/result') {
-					const id = String(event.data?.message?.toolCallId || event.data?.callId || '');
-					const name = tools.get(id);
-					if (name) { this.emitTool(progress, name, id); tools.delete(id); }
-				} else if (event.type === 'turn/end') {
-					return {};
-				}
-			}
+			// R2：接入 session/follow 流，把 thinking/tool/step 实时映射回 progress。
+			void progress; void this.emitTool;
+			return {};
 		} catch (error) {
-			if (token.isCancellationRequested) {
-				if (accepted && sessionId) { this.cancel(sessionId); }
-				return {};
-			}
+			if (token.isCancellationRequested) { if (sessionId) { this.cancel(sessionId); } return {}; }
 			const message = error instanceof Error ? error.message : String(error);
-			this.log.warn('[dsh] stream request failed', error);
+			this.log.warn('[dsh] prompt failed', error);
 			return { errorDetails: { message } };
 		} finally {
-			if (streamId) { void this.client.cancel(streamId).catch(() => undefined); }
 			if (sessionId) { this.activeSends.delete(sessionId); }
 		}
 	}

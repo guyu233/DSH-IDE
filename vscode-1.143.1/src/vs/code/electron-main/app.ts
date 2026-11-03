@@ -155,7 +155,7 @@ import { ITerminalSandboxService, NullTerminalSandboxService } from '../../platf
 import ErrorTelemetry from '../../platform/telemetry/electron-main/errorTelemetry.js';
 import { IProtocolMainService } from '../../platform/protocol/electron-main/protocol.js';
 import { createRemoteResourceRequestHandler } from '../../platform/protocol/electron-main/remoteResourceProtocol.js';
-import { bootstrapDshPipe } from '../../platform/dshPipe/electron-main/dshPipeBootstrap.js';
+import { bootstrapDshClient } from '../../platform/dshClient/electron-main/dshClientBootstrap.js';
 import { logNodeCompileCacheStatus, markNodeCompileCacheReady, waitForNodeCompileCacheReady } from '../../base/node/nodeCompileCache.js';
 
 type OSProxyConfigEvent = {
@@ -1476,15 +1476,15 @@ export class CodeApplication extends Disposable {
 		const workspacesChannel = ProxyChannel.fromService(accessor.get(IWorkspacesService), disposables);
 		mainProcessElectronServer.registerChannel('workspaces', workspacesChannel);
 
-		// DSH-IDE private pipe (only when launched by the dsh-ide bundle plugin via DSH_IDE_PIPE)
+		// DSH-IDE official client (only when launched by the dsh-ide bundle plugin via DSH_IDE_ENDPOINT)
 		try {
-			const dshPipe = await bootstrapDshPipe(this.environmentMainService.appRoot, this.logService);
-			if (dshPipe) {
-				mainProcessElectronServer.registerChannel(dshPipe.channelName, dshPipe.channel);
-				disposables.add(dshPipe.channel as any);
+			const dshClient = await bootstrapDshClient(this.logService);
+			if (dshClient) {
+				mainProcessElectronServer.registerChannel(dshClient.channelName, dshClient.channel);
+				disposables.add(dshClient.channel as any);
 			}
 		} catch (e) {
-			this.logService.warn('[dsh-ide] pipe bootstrap failed: ' + String((e && (e as Error).message) || e));
+			this.logService.warn('[dsh-ide] official client bootstrap failed: ' + String((e && (e as Error).message) || e));
 		}
 
 		// Menubar
