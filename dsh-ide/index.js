@@ -13,11 +13,14 @@
 
 import z from '@deepseek-ai/schemastery';
 import { launchIde, resolveIdeRuntime } from './host/launch.js';
+import { IdeRemoteService } from './host/ide-service.js';
 
 /** 目标服务：webServer 提供 launch/status 端点；connection 派生官方 token（可选）。 */
 export const inject = ['webServer'];
 
 export const Config = z.object({
+  /** IDE 专属 @Remote 服务的受约束工作区根（空 = process.cwd()）。 */
+  root: z.string().default(''),
   /** 拉起 IDE 时打开的文件夹（空 = process.cwd()）。 */
   ideWorkdir: z.string().default(''),
   /** DSH-IDE（VS Code）可执行文件路径（用户机器提供；v2 不再自带 Electron dist）。 */
@@ -31,6 +34,9 @@ export const Config = z.object({
 });
 
 export function apply(ctx, config = {}) {
+  // 0) 注册官方 @Remote IDE 扩展服务（命名空间 ide，经官方 Typert Gateway 暴露给客户端）。
+  ctx.plugin(IdeRemoteService, { root: config.root || process.cwd() });
+
   /** 派生官方登录 URL（tokenized），并拆出 endpoint + token 供 IDE 使用。 */
   function deriveEndpointAndToken(folder) {
     const connection = ctx.get('connection');

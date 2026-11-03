@@ -11,7 +11,7 @@ import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = path.dirname(fileURLToPath(import.meta.url));
-const hostFiles = ['index.js', 'host/launch.js', 'common/env.js'];
+const hostFiles = ['index.js', 'host/launch.js', 'host/ide-service.js', 'host/ide-fs.js', 'common/env.js'];
 
 let ok = true;
 for (const f of hostFiles) {
