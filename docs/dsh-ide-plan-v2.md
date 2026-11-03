@@ -194,3 +194,47 @@
 ## K. 结论（确认项）
 
 **确认：本计划的最终形态 = 把 `vscode-1.143.1` 改造为「一个用 DeepSeek Harness 官方标准编写的桌面端插件（bundle）」。** 它作为 DSH 桌面 App 单一内核的第二个官方客户端，通过 `dsh-client-connection/gateway/client-modules` 全官方传输接入同一 Host，提供 Cursor 式 IDE 界面与功能，agent 100% 由 DSH 提供，实现"一个 agent、两种形态（DSH-IDE 形态 / deepseek-harness 形态）、同工作区会话一致"，并全面替换为 DSH 品牌视觉。
+
+---
+
+## L. 本轮定案（Q1–Q13）与落地状态（P-A / P-B / P-C）
+
+经 grilling，「聊天面板如何用 DSH」的核心分叉已定案（用户逐条确认）：
+
+| # | 决策 | 结论 |
+|---|---|---|
+| Q1 | agent 内核 | **DSH 拥有完整循环；VS Code 纯客户端/UI** |
+| Q2 | 分工 | 双向、边界清晰：VS Code 能力→DSH 工具（辅），DSH 事件→IDE UI（主） |
+| Q3 | 交付形态 | **官方 DSH bundle 插件**（`install_bundle`） |
+| Q4 | Host 拓扑 | **复用运行中的 DSH 桌面 Host**（第二客户端，不自起内核） |
+| Q5 | IDE 能力进 DSH | **优先吃官方工具**（tool-fs/bash/lsp 同机同工作区），仅 IDE-only 用**极薄 @Remote** |
+| Q6 | 连接 | **仅 Electron 主进程持 1 条官方连接**，渲染器经 IPC，主进程统一重连 |
+| Q7 | VS Code 改动面 | 后端随便改；前端尽量少改；不搬 DSH 整 UI；**只替换侧边栏逐条消息渲染** |
+| Q8 | AI 面归属 | 聊天/行内补全/行内编辑/诊断解释**全部 DSH**；能不绕弯就不绕 |
+| Q9 | 品牌合规 | 全量 DSH 品牌 + “built on DSH/非官方”声明 + **保留 MIT 许可与版权** |
+| Q10 | 侧边栏控件 | 壳与控件**留 VS Code**，内里改调 DSH 官方方法 |
+| Q11 | 会话/工作区分类 | **不在 VS Code 自造**，直接用 DSH `workspaceController` 核心驱动，IDE 镜像 |
+| Q12 | 双形态 | 桌面 GUI 与 IDE 侧边栏**同会话可并发** |
+| Q13 | 消息渲染 | **B：单接缝改核心 + DSH 视觉原生 ContentPart + 读 `ui-chat` 的 `transcriptView`/`collapseTiming`** |
+
+### 已落地
+
+- **P-A 传输/数据面稳固**（commit `5387698b`）：
+  - `host/ide-service.js`：`inlineComplete` 改用**真实 `ctx.llm.stream`**（`ctx.llm` 无 `complete()`）；删除死代码 `readFile/listDir/diagnostics`（读走官方 `tool-fs`）；方法参数名即 wire 字段（满足 SRC 派发约束）。**已核验** `dsh-api-gateway` 的 `resolveSrcDescriptor` 会从原型 `remote-methods` marker + `typertRemote` 绑定派发 `@Remote`（约束：参数名精确、JSON 结果、signal 末位）。
+  - `host/ide-fs.js` 删除（读不再需要）；`index.js` 的 `/dsh-ide-launch` 复用官方 `ctx.connection.requestRejection` 做 Host/Origin+认证栅栏（本地任意进程不可窃取 token）。
+  - `dshChatBridge.ts`：工作区/会话分类改由官方 **`workspace/list`**（`workspaceId,path,sessionIds`）权威裁决；`session/create` 优先带 `workspaceId`，`cwd` 仅回退。新增 `ui-chat` 设置读取（`settings/describe` → `transcriptView`/`collapseTiming`）与控件面（模型/四模式/权限/审批/目标）。
+- **P-B DSH 视觉渲染**（commit `0b349dd9`）：
+  - `dshEventMap.ts`（纯函数，10/10 单测）：DSH `session/follow` 条目 → 中立回合部件（thinking/text/tool/step/usage），prompt 对齐 + `turn/end`。
+  - `dshPartsContract.ts`：数据面/渲染面共享的进度消息契约（`dsh-tool:`/`dsh-step:`/`dsh-usage` 前缀）+ 原生安全构造器；避免伪造脆弱的 `toolInvocation`/`usage` 富对象。
+  - `dshChatBridge.send()`：忠实产出思考块/步骤行/工具行(状态字形)/用量行(覆盖式 id)/正文。
+  - 单接缝 `chatListRenderer.renderChatContentPart`：新增一支 `renderDshPart(...)`；非 DSH 部件返回 `undefined` 交回原生（**纯净 VS Code 行为不变**）。
+  - `dshChatParts.ts`：DSH 风格原生 ContentPart（思考折叠块/步骤/工具/用量），严格跟随 `ui-chat` 的 `transcriptView`(compact 隐藏步骤用量、detailed/verbose 展开思考) 与 `collapseTiming`；纯原生 DOM + 官方 Markdown，**不嵌 React/Cordis**。
+  - `dsh.contribution.ts`：连通后 `setDshTranscriptEnabled(true)` + 读 `ui-chat` 设置注入渲染层。
+- **P-C 品牌合规 / 收尾**：
+  - `product.json`：`urlProtocol=dsh-ide`（其余 nameShort/nameLong/applicationName/win32Icon/linuxIconName/darwinBundleIdentifier 均已是 DSH）。
+  - 新增根 `NOTICE.md`：非官方声明 + VS Code MIT 版权保留 + 商标说明。
+  - 删除 v1 遗留 `dsh-ide/runtime/`（4MB 死产物，已不上库）。
+
+### 验证现状
+- Host：`node --check` + `build-host.mjs` 通过；TS：全部改动文件 tsc-transpile 语法通过；`dshEventMap` 单测通过。
+- **待用户机器（GUI/真实 Host，E:\vscode-dsh 本环境无法拉起 Electron/DSH 联动）**：G0–G6 端到端——真实 Host 的 `@Remote ide` 派发、`session/*` 多参 arg-wire 形状、`workspace/list`、`settings/describe`、聊天 DSH 视觉与设置跟随、行内补全、品牌、双端同会话并发。

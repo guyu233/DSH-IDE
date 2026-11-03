@@ -7,6 +7,10 @@
 // 无 VS Code / 无 DOM 依赖，便于单测。bridge 再把 DshTurnPart 适配成 IChatProgress；
 // 渲染器再把 IChatProgress 适配成 DSH 视觉 ContentPart（P-B）。
 //
+// 角色：本文件是「DSH 事件 → 中立回合部件」的**纯函数映射规范 + 单测基准(oracle)**，与
+// dshChatBridge.send() 的流式实现语义等价（后者因需处理游标/流式增量而内联）。改动任一处的
+// 映射规则时，需同步本文件与其单测(mapprove)。
+//
 // 输入条目：{ type:'event', event:SessionEvent } | { type:'assistant-stream', frame } | { type:'snapshot', ... }
 // 输出：有序 DshTurnPart[]（thinking/text/tool/step/usage），并给出 turn 完成标志。
 
