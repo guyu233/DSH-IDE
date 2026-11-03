@@ -178,30 +178,109 @@ export class DshChatBridge extends Disposable {
 	}
 
 	/**
-	 * 发送一轮 prompt（R1：官方一元 session/prompt 受理；实时流在 R2 经 /api/remote.mux）。
-	 * 保留既有签名；返回 {errorDetails?} 以贴合调用方。
+	 * 发送一轮 prompt：先开官方 session/follow 流（/api/remote.mux）拿快照游标，再发官方
+	 * session/prompt，随后只认 seq > 游标 的事件，实时映射为 progress（文本/工具/步骤），turn/end 返回。
 	 */
 	async send(localChatKey: string, prompt: string, progress: (parts: IChatProgress[]) => void, token: CancellationToken): Promise<{ errorDetails?: { message: string } }> {
 		if (token.isCancellationRequested) { return {}; }
 		let sessionId = '';
+		let followId = '';
+		let follow: { streamId: string; close: () => void } | undefined;
+		let accepted = false;
 		try {
 			sessionId = await this.ensureDshSession(localChatKey);
 			if (token.isCancellationRequested) { return {}; }
+			if (this.activeSends.has(sessionId)) { throw new Error('DSH 会话已有本 IDE 的请求在进行中'); }
 			this.activeSends.add(sessionId);
+
+			// 帧队列（官方 follow 帧原样）。
+			const queue: any[] = [];
+			let wake: (() => void) | undefined;
+			let streamError: Error | undefined;
+			let ended = false;
+			const push = (f: any) => { if (wake) { const w = wake; wake = undefined; w(); } else { queue.push(f); } };
+			let cursor = -1;
+			let resolveSnapshot: () => void = () => undefined;
+			const snapshotReady = new Promise<void>((r) => { resolveSnapshot = r; });
+
+			follow = this.client.follow('session/follow', { address: { kind: 'session', sessionId }, assistantStream: true }, (frame) => {
+				if (frame.type === 'item') {
+					const p = frame.value as any;
+					if (p?.type === 'snapshot') { if (typeof p.cursor === 'number') { cursor = p.cursor; } resolveSnapshot(); }
+					push(p);
+				} else if (frame.type === 'end') { ended = true; if (wake) { const w = wake; wake = undefined; w(); } }
+				else if (frame.type === 'error') { streamError = new Error(frame.error?.message || 'DSH follow failed'); if (wake) { const w = wake; wake = undefined; w(); } }
+			});
+			followId = follow.streamId;
+			const next = (timeoutMs: number): Promise<any | 'timeout'> => {
+				if (queue.length > 0) { return Promise.resolve(queue.shift()); }
+				if (streamError) { return Promise.reject(streamError); }
+				if (ended) { return Promise.resolve('timeout'); }
+				return new Promise((resolve) => {
+					const timer = setTimeout(() => { wake = undefined; resolve('timeout'); }, timeoutMs);
+					wake = () => { clearTimeout(timer); resolve(queue.length > 0 ? queue.shift() : 'timeout'); };
+				});
+			};
+
+			await Promise.race([snapshotReady, new Promise<void>((_, rej) => setTimeout(() => rej(new Error('DSH follow snapshot timeout')), 15000))]);
+			if (token.isCancellationRequested) { return {}; }
+
 			const requestId = generateUuid();
 			const receipt = await this.call<{ accepted: true }>('session/prompt', {
 				requestId, sessionId, content: [{ type: 'text', text: prompt }],
 			});
 			if (receipt?.accepted !== true) { throw new Error('DSH 未接受该消息'); }
-			// R2：接入 session/follow 流，把 thinking/tool/step 实时映射回 progress。
-			void progress; void this.emitTool;
-			return {};
+			accepted = true;
+
+			let turn: number | undefined;
+			let pendingTurn: number | undefined;
+			const streamedSteps = new Set<string>();
+			const attempts = new Map<string, { turn: number; step: number }>();
+			const tools = new Map<string, string>();
+			while (true) {
+				if (token.isCancellationRequested) { if (accepted && sessionId) { this.cancel(sessionId); } return {}; }
+				const item = await next(300000);
+				if (item === 'timeout' && ended) { throw new Error('DSH 流在本轮完成前结束'); }
+				if (item === 'timeout') { continue; }
+				if (item.type === 'assistant-stream') {
+					const delta = item.frame;
+					if (delta?.type === 'start') { attempts.set(String(delta.attemptId), { turn: delta.turn, step: delta.step }); }
+					const attempt = attempts.get(String(delta?.attemptId));
+					if (delta?.type === 'chunk' && attempt
+						&& delta.chunk?.type === 'text-delta' && typeof delta.chunk.text === 'string'
+						&& (turn === undefined ? attempt.turn === pendingTurn : attempt.turn === turn)) {
+						streamedSteps.add(`${attempt.turn}:${attempt.step}`);
+						progress([{ kind: 'markdownContent', content: new MarkdownString(delta.chunk.text) } as IChatProgress]);
+					}
+					continue;
+				}
+				if (item.type !== 'event' || !item.event || item.event.seq <= cursor) { continue; }
+				const event = item.event;
+				if (event.type === 'turn/start') { pendingTurn = event.data?.turn; }
+				if (event.type === 'user/message' && this.messageText({ content: event.data?.content }) === prompt) { turn = event.data?.turn ?? pendingTurn; }
+				if (turn === undefined || event.data?.turn !== turn) { continue; }
+				if (event.type === 'assistant/message') {
+					const text = this.messageText(event.data.message);
+					if (text && !streamedSteps.has(`${turn}:${event.data.step}`)) {
+						progress([{ kind: 'markdownContent', content: new MarkdownString(text) } as IChatProgress]);
+					}
+				} else if (event.type === 'tool/call') {
+					tools.set(String(event.data.callId), String(event.data.name));
+				} else if (event.type === 'tool/result') {
+					const id = String(event.data?.message?.toolCallId || event.data?.callId || '');
+					const name = tools.get(id);
+					if (name) { this.emitTool(progress, name, id); tools.delete(id); }
+				} else if (event.type === 'turn/end') {
+					return {};
+				}
+			}
 		} catch (error) {
-			if (token.isCancellationRequested) { if (sessionId) { this.cancel(sessionId); } return {}; }
+			if (token.isCancellationRequested) { if (accepted && sessionId) { this.cancel(sessionId); } return {}; }
 			const message = error instanceof Error ? error.message : String(error);
-			this.log.warn('[dsh] prompt failed', error);
+			this.log.warn('[dsh] stream request failed', error);
 			return { errorDetails: { message } };
 		} finally {
+			if (follow) { try { follow.close(); } catch { /* ignore */ } }
 			if (sessionId) { this.activeSends.delete(sessionId); }
 		}
 	}
