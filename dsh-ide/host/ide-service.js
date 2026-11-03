@@ -1,20 +1,20 @@
 // dsh-ide/host/ide-service.js
-// DSH-IDE 官方 @Remote IDE 扩展服务（命名空间 `ide`，走官方 Typert Gateway / @Remote）。
+// DSH-IDE 官方 @Remote IDE 扩展服务（命名空间 `ide`，经官方 Typert Gateway 派发）。
 //
-// v2 D4：agent 的读写/终端/LSP 已由官方 tool-fs/tool-lsp/tool-bash 提供（在本 Host 内执行）；
-// 本服务只补「IDE 专属」能力，供 VS Code 渲染器经官方连接调用（ctx.remote.ide.*）：
-//   - ping()                                     连通自检
-//   - readFile(path) / listDir(path)             读取（受 root 约束，见 ide-fs.js）
-//   - inlineComplete(prefix, suffix, languageId, path)  行内补全（后端 DSH；失败返回空）
-//   - diagnostics(path)                          诊断占位（VS Code LSP 直接在 VS Code 内提供）
+// v2 / Q5：agent 的读写/终端/LSP 已由官方 tool-fs/tool-bash/tool-lsp 在 Host 内提供；
+// 本服务只补「Host 侧能算、VS Code 需要」的极薄能力：
+//   - ping()            连通自检
+//   - inlineComplete(prefix, suffix, languageId, filePath)  行内补全（后端 ctx.llm.stream 真实现）
 //
-// 注册方式（纯 JS，避免 TS 装饰器）：Service + bindTypertRemote + 原型 marker 描述符
-// （与 @deepseek-ai/dsh-typert-protocol 的 @Remote 生成物同构：REMOTE_METHOD_DESCRIPTOR 版本 1）。
-// 说明：SRC/strict 派发语义需在真实 Host 复核；本服务失败不影响其它功能（客户端优雅降级）。
+// 说明（已核验 app.asar 源码）：
+//   - Typert Gateway 的 SRC 模式会从 Service 的 `typertRemote` 绑定 + 原型上的 @Remote marker 描述符
+//     自动派发（gateway.resolveSrcDescriptor）。约束：方法参数名即线上字段名（无解构/默认值/rest），
+//     结果须 JSON 安全；`signal` 若出现必须是最后一个参数。本服务满足。
+//   - ctx.llm 无 complete()，只有 stream(options{provider,model,messages,maxTokens?,...}) 返回 chunk 流；
+//     文本增量 chunk 形如 {type:'text-delta', text}（见 dsh-llm types）。此处按此实现，失败返回空串。
 
 import { Service } from '@deepseek-ai/cordis';
 import { bindTypertRemote } from '@deepseek-ai/dsh-typert-protocol';
-import { makeResolve, readFileAt, listDirAt } from './ide-fs.js';
 
 const REMOTE_METHOD_DESCRIPTOR = '@deepseek-ai/dsh-typert-protocol/remote-methods';
 
@@ -22,8 +22,6 @@ export class IdeRemoteService extends Service {
   constructor(ctx, config = {}) {
     super(ctx, 'ide');
     this.root = config.root || process.cwd();
-    this.resolve = makeResolve(this.root);
-    // 绑定到 Typert Gateway 的 `ide` 命名空间（供 ctx.remote.ide.* 发现）。
     this.typertRemote = bindTypertRemote(this, 'ide', { namespace: 'ide' });
   }
 
@@ -31,44 +29,58 @@ export class IdeRemoteService extends Service {
     return { ok: true, root: this.root, hostPid: process.pid };
   }
 
-  async readFile(filePath) {
-    return readFileAt(this.resolve, filePath);
-  }
-
-  async listDir(dirPath) {
-    return listDirAt(this.resolve, dirPath);
-  }
-
   /**
-   * 行内补全（后端 DSH）。R5 骨架：若 Host 暴露 ctx.llm 且可生成，则用之；否则返回空（客户端降级）。
+   * 行内补全：用官方 llm.stream 生成一段补全文本（后端 DSH）。
+   * @returns {{ text: string }}；任何失败都返回空串（客户端优雅降级，不抛）。
    */
   async inlineComplete(prefix, suffix, languageId, filePath) {
     try {
       const llm = this.ctx.get && this.ctx.get('llm');
-      if (!llm || typeof llm.complete !== 'function') { return { text: '' }; }
-      const prompt = `Complete the code after the cursor. Return ONLY the completion text.\nLanguage: ${languageId || 'text'}\nFile: ${filePath || ''}\n<prefix>\n${String(prefix || '')}\n</prefix>\n<suffix>\n${String(suffix || '')}\n</suffix>`;
-      const out = await llm.complete({ prompt, maxTokens: 128 });
-      return { text: typeof out === 'string' ? out : (out && out.text) || '' };
-    } catch { return { text: '' }; }
-  }
-
-  diagnostics(_filePath) {
-    // Host 侧拿不到 VS Code 的语言服务器诊断；返回空（诊断由 VS Code 内建 LSP 直接提供）。
-    return { diagnostics: [] };
+      if (!llm || typeof llm.stream !== 'function') { return { text: '' }; }
+      const dm = this.ctx.get && this.ctx.get('agentDefaultModel');
+      const sel = (dm && typeof dm.currentSelection === 'function') ? dm.currentSelection() : undefined;
+      if (!sel || !sel.provider || !sel.model) { return { text: '' }; }
+      const prompt = [
+        'You are an inline code completion engine. Continue the code at the cursor.',
+        'Return ONLY the exact text to insert at the cursor. No prose, no backticks, no explanation.',
+        `Language: ${languageId || 'text'}`,
+        filePath ? `File: ${filePath}` : '',
+        '<prefix>',
+        String(prefix || ''),
+        '</prefix>',
+        '<suffix>',
+        String(suffix || ''),
+        '</suffix>',
+      ].filter(Boolean).join('\n');
+      const request = {
+        provider: sel.provider,
+        model: sel.model,
+        messages: [{ role: 'user', content: [{ type: 'text', text: prompt }] }],
+        maxTokens: 192,
+        ...(sel.reasoningEffort === undefined ? {} : { reasoningEffort: sel.reasoningEffort }),
+      };
+      const stream = llm.stream(request);
+      let text = '';
+      for await (const chunk of stream) {
+        if (!chunk || typeof chunk !== 'object') { continue; }
+        if (chunk.type === 'text-delta' && typeof chunk.text === 'string') { text += chunk.text; }
+        else if (chunk.type === 'finish') { break; }
+      }
+      return { text: text.trim() };
+    } catch {
+      return { text: '' };
+    }
   }
 }
 
-// 原型 marker 描述符（等价 @Remote('ping'|'readFile'|...) 的生成物，SRC 源模式发现用）。
+// 原型 @Remote marker 描述符（等价 @Remote('ping'|'inlineComplete') 的生成物，SRC 源模式发现用）。
 Object.defineProperty(IdeRemoteService.prototype, REMOTE_METHOD_DESCRIPTOR, {
   configurable: true,
   value: {
     version: 1,
     methods: [
       { method: 'ping', invocation: { kind: 'direct' } },
-      { method: 'readFile', invocation: { kind: 'direct' } },
-      { method: 'listDir', invocation: { kind: 'direct' } },
       { method: 'inlineComplete', invocation: { kind: 'direct' } },
-      { method: 'diagnostics', invocation: { kind: 'direct' } },
     ],
   },
 });

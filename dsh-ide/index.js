@@ -15,8 +15,8 @@ import z from '@deepseek-ai/schemastery';
 import { launchIde, resolveIdeRuntime } from './host/launch.js';
 import { IdeRemoteService } from './host/ide-service.js';
 
-/** 目标服务：webServer 提供 launch/status 端点；connection 派生官方 token（可选）。 */
-export const inject = ['webServer'];
+/** 目标服务：webServer 提供 launch/status 端点；connection 派生官方 token + 复用官方请求栅栏鉴权。 */
+export const inject = ['webServer', 'connection'];
 
 export const Config = z.object({
   /** IDE 专属 @Remote 服务的受约束工作区根（空 = process.cwd()）。 */
@@ -61,6 +61,13 @@ export function apply(ctx, config = {}) {
     path: '/dsh-ide-launch',
     handler: async (req, res) => {
       if (req.method !== 'POST') { res.writeHead(405); res.end(); return; }
+      // 安全：复用官方 connection 的 Host/Origin 栅栏 + 认证（只允许本机已认证的浏览器/API 调用），
+      // 防止“任意本地进程 POST 即拿到登录 token”。
+      try {
+        const rejection = ctx.connection && typeof ctx.connection.requestRejection === 'function'
+          ? ctx.connection.requestRejection(req) : 403;
+        if (rejection !== undefined) { res.writeHead(rejection); res.end(); return; }
+      } catch { res.writeHead(403); res.end(); return; }
       try {
         const body = await readJsonBody(req);
         const folder = (body && typeof body.folder === 'string' && body.folder) || config.ideWorkdir || process.cwd();
@@ -94,7 +101,7 @@ export function apply(ctx, config = {}) {
       try { origin = ctx.webServer.getOrigin() || ''; } catch { /* ignore */ }
       const hasConnection = !!ctx.get('connection');
       res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ origin, hasConnection, hostPid: process.pid }));
+      res.end(JSON.stringify({ ok: true, origin, hasConnection, hostPid: process.pid, ideService: 'ide' }));
     },
   }), 'dsh-ide: /dsh-ide-status');
 }

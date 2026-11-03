@@ -67,21 +67,89 @@ export class DshChatBridge extends Disposable {
 		return result.items;
 	}
 
-	/** 判断 id 是否确实是当前工作区的 DSH 会话（查官方列表，绝不靠 id 形状猜测）。 */
+	/**
+	 * 工作区/会话分类由 DSH 核心裁决（Q11）：查官方 workspace/list，按 path 找到当前 VS Code 工作区对应的 DSH workspace，
+	 * 以其 sessionIds 为本 IDE 的会话归属。找不到则回退到 session/list 的 cwd 匹配（DSH 未建 workspace 时）。
+	 */
+	private async resolveDshWorkspace(): Promise<{ workspaceId: string; sessionIds: string[] } | undefined> {
+		const norm = (p: unknown) => String(p || '').replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
+		try {
+			const res = await this.call<{ items: Array<{ workspaceId: string; path?: string; sessionIds?: string[] }> }>('workspace/list', {});
+			const items = Array.isArray(res?.items) ? res.items : [];
+			const target = norm(this.cwd);
+			const hit = items.find(w => norm(w.path) === target) ?? (items.length === 1 ? items[0] : undefined);
+			if (hit && Array.isArray(hit.sessionIds)) { return { workspaceId: hit.workspaceId, sessionIds: hit.sessionIds }; }
+		} catch (e) { this.log.warn('[dsh] workspace/list failed; fallback to cwd match', e); }
+		return undefined;
+	}
+
+	/** 当前工作区的会话 id 集合（DSH workspace.list 权威；否则按 session/list 的 cwd 回退）。 */
+	private async currentWorkspaceSessionIds(): Promise<Set<string> | undefined> {
+		const ws = await this.resolveDshWorkspace();
+		if (ws) { return new Set(ws.sessionIds); }
+		return undefined;
+	}
+
+	/** 判断 id 是否确实属于当前工作区的 DSH 会话（DSH 归属优先，绝不靠 id 形状猜测）。 */
 	async isKnownSession(sessionId: string): Promise<boolean> {
 		if (!sessionId) { return false; }
-		try { return (await this.allSessions()).some(item => item.sessionId === sessionId && this.sameCwd(item.cwd)); }
-		catch (e) { this.log.warn('[dsh] session/list failed', e); return false; }
+		try {
+			const ids = await this.currentWorkspaceSessionIds();
+			if (ids) { return ids.has(sessionId); }
+			return (await this.allSessions()).some(item => item.sessionId === sessionId && this.sameCwd(item.cwd));
+		} catch (e) { this.log.warn('[dsh] session/list failed', e); return false; }
 	}
 
 	async listSessions(): Promise<Array<{ sessionId: string; title: string; cwd: string; running: boolean; updatedAt: number }>> {
-		return (await this.allSessions()).filter(item => this.sameCwd(item.cwd)).map(item => ({
+		const all = await this.allSessions();
+		const ids = await this.currentWorkspaceSessionIds();
+		const scoped = ids ? all.filter(item => ids.has(item.sessionId)) : all.filter(item => this.sameCwd(item.cwd));
+		return scoped.map(item => ({
 			sessionId: item.sessionId,
 			title: item.projections?.values?.title || item.projections?.values?.sessionTitle || '',
 			cwd: item.cwd || '',
 			running: item.running === true,
 			updatedAt: item.updatedAt || 0,
 		}));
+	}
+
+	/**
+	 * 读 DSH 的 `ui-chat` 显示设置（transcriptView / collapseTiming），供 IDE 按 DSH 设置渲染（P-B 渲染面读取）。
+	 * 走官方 settings/describe（settingsController @Remote）；失败回退默认。
+	 */
+	async getUiChatSettings(): Promise<{ transcriptView: 'compact' | 'standard' | 'detailed' | 'verbose'; collapseTiming: 'completion' | 'next-input' }> {
+		try {
+			const res = await this.call<{ namespaces: Array<{ namespace: string; values?: Record<string, unknown> }> }>('settings/describe', {});
+			const ns = (res?.namespaces || []).find(n => n.namespace === 'ui-chat' || n.namespace === 'uiChat');
+			const values = (ns?.values || {}) as Record<string, unknown>;
+			const tvRaw = String(values['transcriptView'] ?? 'standard');
+			const tv = tvRaw === 'normal' ? 'detailed' : tvRaw;
+			const transcriptView = (['compact', 'standard', 'detailed', 'verbose'].includes(tv) ? tv : 'standard') as 'compact' | 'standard' | 'detailed' | 'verbose';
+			const collapseTiming = (String(values['collapseTiming'] ?? 'completion') === 'next-input' ? 'next-input' : 'completion') as 'completion' | 'next-input';
+			return { transcriptView, collapseTiming };
+		} catch (e) {
+			this.log.warn('[dsh] settings/describe failed; default transcript', e);
+			return { transcriptView: 'standard', collapseTiming: 'completion' };
+		}
+	}
+
+	// ---- 控件（Q10：UI 留 VS Code，内里调 DSH 官方方法）。多参端点(arg wire)需真实 Host 复核 ----
+	async getModelCatalog(): Promise<unknown> { return this.call('session/modelCatalog', {}); }
+	async selectModel(sessionId: string, provider: string, model: string, reasoningEffort?: string): Promise<unknown> {
+		return this.call('session/selectModel', { sessionId, provider, model, ...(reasoningEffort ? { reasoningEffort } : {}) });
+	}
+	async listAgentPresets(): Promise<unknown> { return this.call('agentPresets/list', {}); }
+	async selectAgentPreset(sessionId: string, preset: string): Promise<unknown> {
+		// 官方 select(agent, preset)：agent 为 lookup 参数；wire 字段名待真实 Host 复核，先按 agent/sessionId 双传。
+		return this.call('agentPresets/select', { agent: sessionId, sessionId, agentPreset: preset, preset });
+	}
+	async getPermissionCatalog(): Promise<unknown> { return this.call('permissionPresets/catalog', {}); }
+	async setApprovalPolicy(sessionId: string, policy: 'ask' | 'never'): Promise<unknown> {
+		return this.call('approval/setPolicy', { sessionId, policy });
+	}
+	async getGoal(sessionId: string): Promise<unknown> { return this.call('goal/get', { sessionId }); }
+	async createGoal(sessionId: string, objective: string, maxGoalRounds?: number): Promise<unknown> {
+		return this.call('goal/create', { sessionId, objective, ...(maxGoalRounds ? { maxGoalRounds } : {}) });
 	}
 
 	async newSession(): Promise<string> {
@@ -91,7 +159,10 @@ export class DshChatBridge extends Disposable {
 	}
 
 	private async createSession(): Promise<string> {
-		const created = await this.call<{ sessionId: string }>('session/create', { cwd: this.cwd });
+		// 优先在 DSH 已登记的工作区下建会话（DSH 归属）；否则按 cwd 建。
+		const ws = await this.resolveDshWorkspace();
+		const args: Record<string, unknown> = ws ? { workspaceId: ws.workspaceId } : { cwd: this.cwd };
+		const created = await this.call<{ sessionId: string }>('session/create', args);
 		if (!created?.sessionId) { throw new Error('DSH session/create returned no session ID'); }
 		return created.sessionId;
 	}
