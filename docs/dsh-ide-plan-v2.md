@@ -178,6 +178,17 @@
 - **待用户机器**：装 bundle 进 desktop profile → DSH 内「在 IDE 中打开」→ `node tools/r1-live-smoke.mjs --endpoint <host> --token <t>` 对**真实 Host** 复核；随后在 VS Code 里观察 smoke 通知（G1 完整）。
 - **说明**：v1 的 `platform/dshPipe/**` 与 `contrib/dsh` 的聊天/通道B 物暂保留（R2 替换删除），以免 R1 一次性大改不可回退；旧 `chatapp/**`（v1 手拼壳）在 `runtime/`（已 gitignore）与源码均待 R2 清理。
 
+### R2–R6 进展（本轮一口气推进）
+
+- **传输载体纠正（重要）**：官方 `/connect` 换得的 API Peer 是**socket 绑定**（"one API socket owns cleanup… later HTTP using that Cookie is refused"），无法在 HTTP 一元与 mux WebSocket 间共用。故改为官方**浏览器 cookie 载体**（`GET /?token=` → authorizeIndex 303+签名 cookie，绑定共享 `browserPeer`），同一 cookie 同时服务 `/api` 一元与 `/api/remote.mux` WS。`dshClientTransport.node.ts` 已实现：token 交换 + 一元 + `openStream()`（`ws` 连 mux，open/item/end/cancel/error）；IPC 频道与渲染器服务已贯通流帧。
+- **R2 聊天官方化**：`dshChatBridge.ts` 改为「先开官方 `session/follow` 流拿 snapshot 游标 → 官方 `session/prompt` → 只认 seq>游标 的事件」，按 `assistant-stream` chunk / `assistant/message` / `tool/call`+`tool/result` / `turn/end` 映射回 progress（文本/思考/工具/步骤）。**删除 v1 物**：`platform/dshPipe/**`、`contrib/dsh/browser/{chatWebview,dshIdeExecBridge,ideExec,inlineCompletion(v1)}.ts`、`contrib/dsh/chatapp/**`（假桩）。
+- **R3 IDE 动作**：agent 侧读写/终端/LSP 由官方 `tool-fs`/`tool-bash`/`tool-lsp`（Host 内）提供，天然留 `tool/call`+`approval/*`；IDE 专属能力由 Host 新增 `@Remote` 服务 `host/ide-service.js`（命名空间 `ide`：`ping/readFile/listDir/inlineComplete/diagnostics`，纯 JS `bindTypertRemote`+原型 marker，等价 `@Remote`），经官方 `/api/ide/<m>` 暴露。文件系统核心 `host/ide-fs.js`（根包含/符号链接校验）——`r3-idefs.mjs` 全 PASS。
+- **R5 保留 AI**：`inlineCompletion.ts`（v2）经 `IDshClientService.call('ide/inlineComplete')` 后端 DSH，超时/未实现优雅降级；在 `dsh.contribution.ts` 注册。
+- **R6 品牌**：`tools/gen-brand-icons.mjs` 程序化生成真实 DSH 鲸鱼图标（`resources/win32/dsh.ico` 多尺寸 + `resources/{linux,}/dsh-ide.png`，并覆盖 `code.ico`/`code.png` 作为构建默认）；`product.json` 精准改 `win32Icon`/`linuxIconName`/`darwinBundleIdentifier`（nameShort/nameLong/applicationName 已是 DSH IDE）。
+- **R4 两形态**：同一 Host/同一 session log；`session.follow`（IDE）+ 桌面端同行；`session/list` 按 cwd 过滤 → 同工作区一致、不同工作区隔离（`dshChatBridge` 已按 `sameCwd` 过滤）。**需真实双端 GUI 复核**。
+- **R1/R2 证据（本环境已跑通）**：`r1-smoke.mjs`（浏览器 cookie 交换 + 一元 + 错误折叠 + 错 token + 懒连接）、`stream-smoke.mjs`（mux open→2 item→end + error 帧）、`r3-idefs.mjs`（路径/../绝对/符号链接逃逸全被拒）——**全 PASS**。全部 TS 通过 tsc transpile 语法检查；Host `node --check` 通过。
+- **待用户机器（GUI/真实 Host，本环境无法代跑）**：装 bundle → 「在 IDE 中打开」→ `node tools/r1-live-smoke.mjs --endpoint <host> --token <t> [--session <id> --stream]` 复核真实 Host + mux；随后在 VS Code 观察 smoke 通知、聊天端到端、行内补全、品牌、双端同步（G0–G6 的 GUI 部分）。`@Remote ide` 服务的 SRC 派发语义亦需真实 Host 复核（客户端已优雅降级）。
+
 ---
 
 ## K. 结论（确认项）

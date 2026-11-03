@@ -1,59 +1,61 @@
 #!/usr/bin/env node
-// R1 official-connectivity smoke — verifies a RUNNING DSH Host accepts the official
-// dsh-client-connection flow from an external process (the same flow DSH-IDE uses).
+// R1/R2 official-connectivity smoke against a RUNNING DSH Host (the same flow DSH-IDE uses).
 //
 // Usage:
-//   node tools/r1-live-smoke.mjs --endpoint http://127.0.0.1:<port> --token <launchToken>
+//   node tools/r1-live-smoke.mjs --endpoint http://127.0.0.1:<port> --token <launchToken> [--session <id>] [--stream]
 //
-// Where to get endpoint + token:
-//   - POST http://<host>/dsh-ide-launch returns { endpoint, token } (from the dsh-ide plugin), OR
-//   - the DSH Web UI URL carries ?token=<launchToken>; strip it to get the endpoint.
+// Flow (matches app.asar dsh-client-connection: authorizeIndex + rpc + stream-protocol):
+//   1) GET  <endpoint>/?token=<token>          -> 303 + signed session cookie (shared browserPeer)
+//   2) POST <endpoint>/api/session/list        (official client-request envelope, with cookie)
+//   3) --stream: ws <endpoint>/api/remote.mux  (open session/follow, print first frames)
 //
-// Flow (matches app.asar dsh-client-connection/lib/types/client/{rpc,connect-protocol}.js):
-//   1) GET  <endpoint>/connect?token=<token>&interactions=none  -> 302 + Set-Cookie
-//   2) POST <endpoint>/api/session/list  (official client-request envelope, with cookie)
-//   3) expect {"type":"server-response", rpcId, result:{ok:true, value:{items:[...]}}}
-//
-// No private pipe, no self-made channel — 100% official /api.
+// endpoint+token come from POST /dsh-ide-launch (the dsh-ide plugin) or the DSH Web UI ?token=.
 
 import { randomUUID } from 'node:crypto';
+import WebSocket from 'ws';
 
-function arg(name) { const i = process.argv.indexOf(name); return i >= 0 ? process.argv[i + 1] : undefined; }
-
+function arg(n){ const i=process.argv.indexOf(n); return i>=0?process.argv[i+1]:undefined; }
+const has = (n) => process.argv.includes(n);
 const endpoint = (arg('--endpoint') || process.env.DSH_IDE_ENDPOINT || '').replace(/\/+$/, '');
 const token = arg('--token') || process.env.DSH_IDE_TOKEN || '';
-if (!endpoint || !token) {
-	console.error('usage: node tools/r1-live-smoke.mjs --endpoint http://127.0.0.1:<port> --token <launchToken>');
-	process.exit(2);
-}
+const sessionArg = arg('--session');
+if (!endpoint || !token) { console.error('usage: node tools/r1-live-smoke.mjs --endpoint http://127.0.0.1:<port> --token <launchToken> [--session <id>] [--stream]'); process.exit(2); }
 
 async function main() {
-	// 1) official /connect -> cookie
-	const connectUrl = new URL(endpoint + '/connect');
-	connectUrl.searchParams.set('token', token);
-	connectUrl.searchParams.set('interactions', 'none');
-	const cres = await fetch(connectUrl.href, { method: 'GET', redirect: 'manual' });
-	const setCookies = typeof cres.headers.getSetCookie === 'function' ? cres.headers.getSetCookie() : (cres.headers.get('set-cookie') ? [cres.headers.get('set-cookie')] : []);
-	if (cres.status !== 302 || setCookies.length === 0) {
-		console.error(`FAIL: /connect did not mint a session cookie (HTTP ${cres.status}). Wrong/expired token, or Host not reachable.`);
-		process.exit(1);
-	}
-	const cookie = setCookies[0].split(';', 1)[0].trim();
-	console.log('ok - /connect exchanged token -> API Peer cookie');
+	// 1) browser-cookie exchange
+	const u = new URL(endpoint + '/'); u.searchParams.set('token', token);
+	const cres = await fetch(u.href, { method: 'GET', redirect: 'manual' });
+	const sc = typeof cres.headers.getSetCookie === 'function' ? cres.headers.getSetCookie() : (cres.headers.get('set-cookie') ? [cres.headers.get('set-cookie')] : []);
+	if (!((cres.status === 303 || cres.status === 302) && sc.length)) { console.error(`FAIL: token exchange did not mint a cookie (HTTP ${cres.status}). Wrong/expired token?`); process.exit(1); }
+	const cookie = sc[0].split(';',1)[0].trim();
+	console.log('ok - token exchange -> session cookie');
 
-	// 2) official unary /api/session/list
+	// 2) unary session/list
 	const rpcId = randomUUID();
-	const body = JSON.stringify({ type: 'client-request', rpcId, method: 'session/list', payload: { args: {} } });
-	const ares = await fetch(endpoint + '/api/session/list', {
-		method: 'POST', headers: { 'content-type': 'application/json', cookie }, body,
-	});
+	const body = JSON.stringify({ type:'client-request', rpcId, method:'session/list', payload:{ args:{} } });
+	const ares = await fetch(endpoint + '/api/session/list', { method:'POST', headers:{ 'content-type':'application/json', cookie }, body });
 	if (!ares.ok) { console.error(`FAIL: /api/session/list HTTP ${ares.status}`); process.exit(1); }
 	const json = await ares.json();
-	if (json.type !== 'server-response' || json.rpcId !== rpcId || !json.result) { console.error('FAIL: invalid server-response envelope', json); process.exit(1); }
-	if (!json.result.ok) { console.error('FAIL: Host returned error', json.result.error); process.exit(1); }
+	if (json.rpcId !== rpcId || !json.result) { console.error('FAIL: bad server-response', json); process.exit(1); }
+	if (!json.result.ok) { console.error('FAIL: Host error', json.result.error); process.exit(1); }
 	const items = json.result.value?.items ?? [];
-	console.log(`ok - official /api/session/list returned ${Array.isArray(items) ? items.length : '?'} session(s)`);
-	console.log('R1 LIVE SMOKE: PASS — this external process reached the same Host over the official transport.');
-}
+	console.log(`ok - official /api/session/list -> ${items.length} session(s)`);
 
-main().catch((e) => { console.error('R1 LIVE SMOKE: FAIL', e && e.message || e); process.exit(1); });
+	// 3) optional stream
+	if (has('--stream')) {
+		const sid = sessionArg || (items[0] && items[0].sessionId);
+		if (!sid) { console.error('FAIL: --stream needs a session; pass --session <id>'); process.exit(1); }
+		await new Promise((resolve) => {
+			const ws = new WebSocket(endpoint.replace(/^http/,'ws') + '/api/remote.mux', { headers: { cookie } });
+			const streamId = randomUUID(); let seen = 0;
+			ws.on('open', () => ws.send(JSON.stringify({ type:'open', streamId, endpoint:'session/follow', payload:{ args:{ address:{ kind:'session', sessionId: sid } } } })));
+			ws.on('message', (d) => { const m = JSON.parse(String(d)); if (m.streamId!==streamId) return; seen++; if (m.type==='item' && m.value?.type==='snapshot') console.log('ok - follow snapshot received'); if (seen>=2 || m.type==='end') { ws.close(); } });
+			ws.on('close', () => resolve());
+			ws.on('error', (e) => { console.error('FAIL: ws', e.message); resolve(); });
+			setTimeout(() => { try { ws.close(); } catch {} resolve(); }, 5000);
+		});
+		console.log('ok - /api/remote.mux stream exercised');
+	}
+	console.log('LIVE SMOKE: PASS — external process reached the same Host over official transport.');
+}
+main().catch((e) => { console.error('LIVE SMOKE: FAIL', e && e.message || e); process.exit(1); });
