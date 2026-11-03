@@ -6,7 +6,8 @@
 ```
 .
 ├─ docs/
-│  ├─ dsh-ide-plan.md            # 唯一事实来源（v1.0 改造计划）
+│  ├─ dsh-ide-plan-v2.md         # 唯一事实来源（v2 定稿：全官方传输/单内核双客户端/DSH品牌）
+│  ├─ dsh-ide-plan.md            # 旧 v1（已作废，仅供考古）
 │  ├─ dsh-ide-facts.md           # 可复用工程事实附录（体积/构建/安全/Electron 陷阱）
 │  └─ archive/                   # 已废旧架构文档（独立窗口 + HTTP /api bridge，仅供考古）
 │

@@ -1,3 +1,5 @@
+> ⚠️ **已被 v2 取代（superseded）**：本文件描述的是 v1（私有命名管道 + 手写桩）架构，已作废。当前唯一事实来源 = [`dsh-ide-plan-v2.md`](./dsh-ide-plan-v2.md)（全官方传输、单内核双客户端、DSH 品牌）。本文件仅留作考古。
+
 # DSH-IDE 最终改造计划 v1.0（唯一事实来源）
 
 > 定位：**让装了 `dsh-ide` 插件的 DeepSeek Harness 成为“超越 Cursor”的产品。** 只有一个 agent = **DSH 本身**；IDE 是 DSH 的“一等公民代码身体”。`E:\deepseek-harness` 仅作**只读参考/复用**，不 fork、不改 DSH 仓库。
