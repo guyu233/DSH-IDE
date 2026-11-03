@@ -20,6 +20,7 @@ import { IDshClientService, DshClientService } from '../../../../platform/dshCli
 import { ILanguageFeaturesService } from '../../../../editor/common/services/languageFeatures.js';
 import { IWorkbenchContribution, registerWorkbenchContribution2, WorkbenchPhase } from '../../../common/contributions.js';
 import { registerDshInlineCompletions } from './inlineCompletion.js';
+import { setDshTranscriptEnabled, setDshTranscriptSettings } from '../../chat/browser/widget/chatContentParts/dshChatParts.js';
 
 // 官方客户端服务单例（始终注册；未注入 endpoint 时 getStatus 返回未连接，安全降级）。
 registerSingleton(IDshClientService, DshClientService, InstantiationType.Delayed);
@@ -34,7 +35,24 @@ if (typeof process !== 'undefined' && process.env && process.env.DSH_IDE_ENDPOIN
 		) {
 			// R5：行内补全（DSH 后端；Host 未实现时优雅降级）。
 			registerDshInlineCompletions(languageFeatures, client);
+			void this.initDshUi();
 			void this.smoke();
+		}
+
+		/** 连上 DSH 后：启用 DSH 视觉渲染，并从 ui-chat 设置读取 transcriptView/collapseTiming。 */
+		private async initDshUi(): Promise<void> {
+			const status = await this.client.getStatus();
+			if (!status.connected) { return; }
+			setDshTranscriptEnabled(true);
+			try {
+				const res = await this.client.call<{ namespaces?: Array<{ namespace?: string; values?: Record<string, unknown> }> }>('settings/describe', {});
+				const ns = (res.ok ? res.value?.namespaces ?? [] : []).find(n => n?.namespace === 'ui-chat' || n?.namespace === 'uiChat');
+				const values = (ns?.values ?? {}) as Record<string, unknown>;
+				const tvRaw = String(values['transcriptView'] ?? 'standard');
+				const tv = (tvRaw === 'normal' ? 'detailed' : tvRaw) as 'compact' | 'standard' | 'detailed' | 'verbose';
+				const collapseTiming = (String(values['collapseTiming'] ?? 'completion') === 'next-input' ? 'next-input' : 'completion') as 'completion' | 'next-input';
+				setDshTranscriptSettings({ transcriptView: ['compact', 'standard', 'detailed', 'verbose'].includes(tv) ? tv : 'standard', collapseTiming });
+			} catch { /* 默认 standard/completion */ }
 		}
 
 		private async smoke(): Promise<void> {

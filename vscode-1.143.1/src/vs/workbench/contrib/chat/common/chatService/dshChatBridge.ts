@@ -20,10 +20,10 @@ import { ILogService } from '../../../../../platform/log/common/log.js';
 import { IStorageService, StorageScope, StorageTarget } from '../../../../../platform/storage/common/storage.js';
 import { IWorkspaceContextService } from '../../../../../platform/workspace/common/workspace.js';
 import { IChatProgress } from './chatService.js';
-import { ToolDataSource } from '../tools/languageModelToolsService.js';
 import { URI } from '../../../../../base/common/uri.js';
 import { LocalChatSessionUri } from '../model/chatUri.js';
 import { IDshClientService } from '../../../../../platform/dshClient/common/dshClientService.js';
+import { dshThinkingProgress, dshToolProgress, dshStepProgress, dshUsageProgress } from './dshPartsContract.js';
 
 interface SessionSummary { sessionId: string; cwd?: string; running?: boolean; updatedAt?: number; projections?: { values?: { title?: string; sessionTitle?: string } } }
 interface HistoryTurn { role: 'user' | 'assistant'; text: string }
@@ -239,13 +239,9 @@ export class DshChatBridge extends Disposable {
 		void this.call('session/cancel', { sessionId }).catch(error => this.log.warn('[dsh] cancel failed', error));
 	}
 
-	private emitTool(progress: (parts: IChatProgress[]) => void, name: string, id: string): void {
-		progress([{
-			kind: 'toolInvocationSerialized', toolCallId: id, toolId: name, source: ToolDataSource.External,
-			presentation: undefined, invocationMessage: new MarkdownString(`\`${name}\` 已完成`),
-			pastTenseMessage: new MarkdownString(`\`${name}\` 已完成`), originMessage: undefined,
-			isComplete: true, isConfirmed: true,
-		} as unknown as IChatProgress]);
+	private emitTool(progress: (parts: IChatProgress[]) => void, name: string, id: string, status: 'running' | 'done' | 'error' = 'done'): void {
+		const glyph = status === 'done' ? '✓' : status === 'error' ? '✕' : '⏳';
+		progress([dshToolProgress(id, glyph + " " + name)]);
 	}
 
 	/**
@@ -331,16 +327,33 @@ export class DshChatBridge extends Disposable {
 				if (event.type === 'user/message' && this.messageText({ content: event.data?.content }) === prompt) { turn = event.data?.turn ?? pendingTurn; }
 				if (turn === undefined || event.data?.turn !== turn) { continue; }
 				if (event.type === 'assistant/message') {
-					const text = this.messageText(event.data.message);
+					const msg: any = event.data.message;
+					// 思考块（DSH 折叠块，seam 渲染）——assistant 消息内容里的 thinking/reasoning 块。
+					const blocks = Array.isArray(msg?.content) ? msg.content : [];
+					for (const b of blocks) {
+						if (b?.type === 'thinking' || b?.type === 'reasoning') {
+							progress([dshThinkingProgress(String(b.text ?? b.value ?? ''), b.id !== undefined ? String(b.id) : undefined)]);
+						}
+					}
+					// 用量行（覆盖式 id dsh-usage）。
+					const usage = msg?.usage;
+					if (usage && (typeof usage.inputTokens === 'number' || typeof usage.outputTokens === 'number' || typeof usage.promptTokens === 'number' || typeof usage.completionTokens === 'number')) {
+						progress([dshUsageProgress(Number(usage.inputTokens ?? usage.promptTokens ?? 0), Number(usage.outputTokens ?? usage.completionTokens ?? 0))]);
+					}
+					const text = this.messageText(msg);
 					if (text && !streamedSteps.has(`${turn}:${event.data.step}`)) {
 						progress([{ kind: 'markdownContent', content: new MarkdownString(text) } as IChatProgress]);
 					}
+				} else if (event.type === 'step/start') {
+					// 步骤行（compact 下由渲染层隐藏）。
+					const stepNo = Number(event.data?.step ?? 0);
+					progress([dshStepProgress(turn, stepNo, `步骤 ${stepNo + 1}`)]);
 				} else if (event.type === 'tool/call') {
 					tools.set(String(event.data.callId), String(event.data.name));
 				} else if (event.type === 'tool/result') {
 					const id = String(event.data?.message?.toolCallId || event.data?.callId || '');
 					const name = tools.get(id);
-					if (name) { this.emitTool(progress, name, id); tools.delete(id); }
+					if (name) { this.emitTool(progress, name, id, (event.data?.isError || event.data?.message?.isError) ? 'error' : 'done'); tools.delete(id); }
 				} else if (event.type === 'turn/end') {
 					return {};
 				}

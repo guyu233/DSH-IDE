@@ -83,6 +83,7 @@ import { ChatForkActionViewItem } from './chatForkActionViewItem.js';
 import { ChatRestoreCheckpointActionViewItem } from './chatRestoreCheckpointActionViewItem.js';
 import { ChatAgentHover, getChatAgentHoverOptions } from './chatAgentHover.js';
 import { ChatContentMarkdownRenderer } from './chatContentMarkdownRenderer.js';
+import { renderDshPart } from './chatContentParts/dshChatParts.js';
 import { ChatAgentCommandContentPart } from './chatContentParts/chatAgentCommandContentPart.js';
 import { ChatAgentMergeContentPart, getAgentMergeRequestSummary } from './chatContentParts/chatAgentMergeContentPart.js';
 import { ChatAnonymousRateLimitedPart } from './chatContentParts/chatAnonymousRateLimitedPart.js';
@@ -4537,6 +4538,13 @@ export class ChatListItemRenderer extends Disposable implements ITreeRenderer<Ch
 
 			const isResponseElement = isResponseVM(context.element);
 			const shouldPin = this.shouldPinPart(content, isResponseElement ? context.element : undefined);
+
+			// DSH：单接缝——启用且为 DSH 展示骨架部件（思考/工具/步骤/用量）时，改用 DSH 视觉渲染；
+			// 其余（markdown/工具卡/引用…）返回 undefined 交回原生逻辑，行为与纯净 VS Code 一致。
+			const dshPart = renderDshPart(content, this.chatContentMarkdownRenderer);
+			if (dshPart) {
+				return dshPart;
+			}
 
 			// Finalize the active thinking part for this element when the response is complete.
 			// Scoped to the current element's templateData to avoid finalizing thinking parts
