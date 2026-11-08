@@ -3,10 +3,10 @@
  *  Licensed under the MIT License.
  *--------------------------------------------------------------------------------------------*/
 
-// Workbench 集成（阶段 3 第三批后）。
+// Workbench 集成。
 //
-// 旧官方客户端连接层已整删，新 DshIdeChannel 骨架返回「重建中」。本文件保留行内补全注册
-// （连接层重建中时优雅降级为无补全，不报错），并显式告知用户 AI 连接层正在重建中。
+// 旧官方客户端连接层已整删，唯一的 `dshIde` 通道由主进程分发（P3）。本文件保留行内补全注册
+// （通道未接线时优雅降级为无补全，不报错），并显式告知用户 AI 连接层尚未接线。
 
 import { localize } from '../../../../nls.js';
 import { registerSingleton, InstantiationType } from '../../../../platform/instantiation/common/extensions.js';

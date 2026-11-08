@@ -20,7 +20,7 @@
 //   - 工具调用（toolInvocation）**保留 VS Code 现有渲染件**：DSH ui-chat 的
 //     AssistantMarkdown 明确跳过 tool-call 块，真正的 ToolRow 属于另一个包，不谎称已复用。
 //
-// 数据契约：DSH session/follow 原始事件映射为 `DshTurnPart`。旧映射实现（chatClient 下）已在阶段 3 第三批删除，由新连接层重建。
+// 数据契约：DSH session/follow 原始事件映射为 `DshTurnPart`。旧映射实现（chatClient 下）已随跨进程连接层删除，由 `dshIde` 通道的投影载荷重建（P4）。
 // 中立回合部件（DshTurnPart），再由本适配层转成 DshPartProps 交给 sidecar 组件。
 
 import { Disposable } from '../../../../base/common/lifecycle.js';

@@ -60,10 +60,10 @@
 | --- | --- | --- |
 | 插件入口 `index.js` | `apply(ctx)` 持有插件上下文，订阅官方事件并注册真实 `IdeViewHost` | `name='dsh-ide'`、`inject=[]`；`ctx.plugin(IdeRemoteService, { root })` + `createDshIdeHostBridge(ctx)`，后者订阅四类官方事件并注册唯一 answerer；传输端口待 P5 接线 |
 | 通道注册 `app.ts` | `registerChannel(DSH_IDE_CHANNEL, new DshIdeChannel(真实 IdeViewHost))` | 已注册 `new DshIdeChannel(new DshIdeViewService())`，并配对 `onDidRemoveConnection → disposeOwner(connection.ctx)`；`DshIdeViewService` 的后端端口当前为 `UnavailableDshIdeBackend` |
-| `DshIdeChannel` | `call` / `listen` / `disposeOwner` 全实现 | `call` 固定 reject `dsh-ide/feature-unavailable`；`listen` 返回 `Event.None`；`disposeOwner` 返回 `0`；`dispose` 调用 `view.close()` |
+| `DshIdeChannel` | `call` / `listen` / `disposeOwner` 全实现 | 已实现：`call` 分发控制命令与 20 method（入参/出参双向校验）；`listen('snapshot')` 三层过滤；`disposeOwner(ctx)` 返回清理的连接数；`dispose` 清理全部连接后 `view.close()` |
 | `IdeViewHost` | 持有插件宿主上下文、执行投影、处理 20 个方法 | `DshIdeViewService`：投影 + 快照版本计数（`starting` → `ready` + `state.view`）已实现；`DshIdeBackend` 端口仍为 `UnavailableDshIdeBackend`，`invoke` 一律以 `dsh-ide/feature-unavailable` 拒绝 |
-| IDE 消费者 | `DshIdeConsumer` 校验连续性并渲染 Chat | 不存在；`DshClientService` 骨架恒返回「重建中」，消费方优雅降级 |
-| 按钮行为 | 打开 IDE 窗口 | `client.js:62` 抛 `Error('launch chain removed; pending phase 2 DshIdeChannel.open')` |
+| IDE 消费者 | `DshIdeConsumer` 校验连续性并渲染 Chat | 不存在（P4）；`DshClientService` 仍为骨架，恒返回 `feature-unavailable`，消费方优雅降级 |
+| 按钮行为 | 打开 IDE 窗口 | 仍抛 `Error('launch chain removed; pending DshIdeChannel.open')`（P5 改为经 `dshIde` 通道开窗） |
 | Chat 面板 | 回填 DSH 投影内容 | `chat.view.contribution` 在 `workbench.common.main.ts:229` 无条件注册，容器仍在；DSH 内容为空；`dshChatSeam.ts` 接缝开关默认关闭 |
 
 当前态残留的逐项登记见第 7 章 §3。
@@ -651,7 +651,7 @@ B1–B5 是流程内的检查点，与开发路线的 K1–K8 不同，二者不
 
 | 步骤 | 当前行为 |
 | --- | --- |
-| T1 | `client.js:62` 抛 `Error('launch chain removed; pending phase 2 DshIdeChannel.open')`，实例终止于 STF |
+| T1 | `client.js` 抛 `Error('launch chain removed; pending DshIdeChannel.open')`，实例终止于 STF |
 | T2 | `DshIdeViewService.open()` 返回 `starting` 首帧；`subscribe` 已注册，后端端口接通后按批次推 `ready` + `state.view` |
 | T3 | `index.js` 已创建 `DshIdeHostBridge` 并订阅四类官方事件、注册唯一 answerer；但桥接与 IDE 主进程之间的传输端口尚未接线 |
 | T4 / T5 | `translator.ts` 与 `ide-view-projector.ts` 已落地（P2），但未被真实 `IdeViewHost` 调用 |
@@ -949,7 +949,7 @@ e:/DSH-IDE/                              git 仓库根 / 唯一代码树
 | `index.js` | 已注册 `IdeRemoteService` 并创建 Host 半身桥接（订阅四类官方事件 + 唯一 answerer）；传输端口与 IDE 主进程接线未完成 | P5 |
 | `common/env.js` | `DSH_IDE_ENDPOINT` / `DSH_IDE_INTERACTIONS` 两个常量在目录内无消费者 | P5 |
 | `common/legacy-account-endpoints.ts` | 账号端点仍由 `globalCompositeBar.ts` 引用，尚未归并入新协议 | P5 |
-| `client/client.js` | `postJson()`、`body`、`showError` 均为死代码；点击抛 `Error('launch chain removed; pending phase 2 DshIdeChannel.open')` | P5 |
+| `client/client.js` | `postJson()`、`body`、`showError` 均为死代码；点击抛 `Error('launch chain removed; pending DshIdeChannel.open')` | P5 |
 | `common/dshClientService.ts` | 骨架：`getStatus()` 恒 `false`，`call()` / `connect()` 恒 `REBUILD_ERROR`，`openWritableStream()` 不发 channel command | P4 |
 | `src/vs/platform/dshClient/PROVENANCE.md` | 记录的文件大小、落地文件数量与 `test-dsh` 命令为删除前快照，已过期；须按 §4 规则更新 | P7 |
 | `dshChatSeam.ts` | `dshChatRenderEnabled` 默认 `false`；`setDshChatRenderEnabled` 全仓无调用方，接缝恒休眠 | P4 |
@@ -1027,13 +1027,13 @@ git grep -nE "dshEventMap\.ts|dshSessionUri\.ts|dshChatSessions\.ts|dshChatProvi
 
 | 位置 | 残留 | 归属阶段 |
 | --- | --- | --- |
-| `src/vs/platform/dshClient/electron-main/dshIdeChannel.ts:6-7,20,28` | `阶段 3 第三批`、`阶段 2.1-2.5`、`阶段 2.x`；`:28` 的 `phase 2.x pending` 是运行时错误字符串 | P3 |
-| `src/vs/platform/dshClient/electron-main/ide-view-service.ts:6-7,23` | `阶段 3 第三批`、`阶段 2.x` | P3 |
-| `src/vs/platform/dshClient/common/translator.ts:6`、`ide-view-projector.ts:6,201` | `阶段 2.2a`、`2.2b / 2.5` | P2 产物注释，P3 同步 |
-| `src/vs/platform/dshClient/common/dshIdeProtocol.ts:6,19,38,348,359`、`dshIdeContract.ts:6` | `阶段 2.1`、`阶段 2.x` | P3 |
-| `src/vs/platform/dshClient/common/dshClientService.ts:8,10,60,82`、`legacy-account-endpoints.ts:6,9` | `阶段 3 第三批`、`阶段 2.1-2.5`、`阶段 2.x` | P4 / P5 |
-| `src/vs/platform/dshClient/client/client.js:5,62` | `phase 2 DshIdeChannel.open`；`:62` 是运行时抛错字符串 | P5 |
-| `src/vs/workbench/contrib/dsh/browser/dsh.contribution.ts:6`、`dshChatSeam.ts:23` | `阶段 3 第三批` | P4 |
+| `src/vs/platform/dshClient/electron-main/dshIdeChannel.ts` | 已清理（P3）：旧阶段标记与 `phase 2.x pending` 运行时错误串全部改为 P 编号/当前语义 | 已闭环 |
+| `src/vs/platform/dshClient/electron-main/ide-view-service.ts` | 已清理（P3）：`阶段 3 第三批` / `阶段 2.x` 全部改为 P 编号 | 已闭环 |
+| `src/vs/platform/dshClient/common/translator.ts`、`ide-view-projector.ts` | 已清理（P3）：`阶段 2.2a` / `2.2b` / `2.5` 改为 P 编号 | 已闭环 |
+| `src/vs/platform/dshClient/common/dshIdeProtocol.ts`、`dshIdeContract.ts` | 已清理（P3）：`阶段 2.1` / `阶段 2.x` 改为 P 编号与当前语义 | 已闭环 |
+| `src/vs/platform/dshClient/common/dshClientService.ts`、`legacy-account-endpoints.ts` | 已清理（P3）：`阶段 3 第三批` / `阶段 2.1-2.5` / `阶段 2.x` 改为 P 编号 | 已闭环 |
+| `src/vs/platform/dshClient/client/client.js` | 已清理（P3）：错误串改为 `pending DshIdeChannel.open`，不再含 `phase 2` | 已闭环 |
+| `src/vs/workbench/contrib/dsh/browser/dsh.contribution.ts`、`dshChatSeam.ts` | 已清理（P3）：`阶段 3 第三批` 改为当前语义 | 已闭环 |
 | `build/lib/dsh/verify/dshIdeVerify.mjs:6,52,110,157,162,196` | `阶段 2.1`、`2.4`、`2.2a` 等脚本注释与一条断言文案 | P6 |
 | `build/lib/test/dshIdeProtocol.test.ts:6`、`dshIdeProjection.test.ts:6`、`dshBundleStaging.test.ts:64` | `阶段 2.1` / `阶段 2.2a` 测试注释 | P6 |
 | `build/gulpfile.vscode.ts:681` | `P5 终端流 runner` | P6 |

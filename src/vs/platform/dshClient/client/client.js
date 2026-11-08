@@ -2,8 +2,8 @@
  * DSH-IDE client half（DSH Web 客户端模块）。
  *
  * 在会话头部工具区（slot `conversation.session.header.utilities`，即右上角工具条）注册一个「DSH-IDE」按钮。
- * 第一批清理已移除私有 HTTP launch 链：点击按钮显式报错（launch chain removed; pending phase 2 DshIdeChannel.open），
- * 待阶段 2 DshIdeChannel 就位后改为此通道开窗。图标使用 DSH 官方鲸鱼图形（取自 dsh-web-frontend/favicon.svg）。
+ * 私有 HTTP launch 链已移除：点击按钮显式报错（launch chain removed; pending DshIdeChannel.open），
+ * 待 P5 接通 `dshIde` 通道开窗后改为经通道调用。图标使用 DSH 官方鲸鱼图形（取自 dsh-web-frontend/favicon.svg）。
  */
 window.__ModuleLoader__.load({
 	id: "dsh-ide",
@@ -29,8 +29,8 @@ window.__ModuleLoader__.load({
 				setBusy(true);
 				setError(null);
 				setBusy(false);
-				// 第一批清理：私有 HTTP launch 链已移除，开窗改由阶段 2 DshIdeChannel.open 承担。
-				throw new Error('launch chain removed; pending phase 2 DshIdeChannel.open');
+				// 私有 HTTP launch 链已移除；开窗由 P5 经 `dshIde` 通道的 open 控制命令承担。
+				throw new Error('launch chain removed; pending DshIdeChannel.open');
 			}, [busy, props, error]);
 			return h("button", {
 				type: "button", className: "dsh-ide-open",
