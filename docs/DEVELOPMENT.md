@@ -396,8 +396,8 @@ P7 打包为 DSH 插件与交付
 #### P5 功能实现与真机接线
 
 - **前置**：K5。
-- **活动**：`app.ts` 构造参数换为真实 `IdeViewHost`；`client.js` 按钮改为经 `dshIde` 通道开窗；一次性接上 20 个 method 对应的功能（审批、问卷、权限预设、模型、effort、斜杠命令、resume / fork / rewind、goal / todo / usage / TPS / workingActivity 投影、`ping` / `inlineComplete`、账号、语音、删除会话）；保持双窗口并存，DSH 主窗口按钮可用；语音未就绪时入口明确不可用。
-- **产出**：`app.ts` 真实接线、`client.js` 开窗、完整功能接线、双窗口镜像。
+- **活动**：实现 `DshIdeBackend` 的唯一真实端口——IDE 侧的**官方客户端传输适配**（Host 的 loopback 端点 + 官方 `dsh-client-connection` + `connection.authenticatedUrl()` 派生的鉴权），把 `session/event` / `agent/assistant-stream` 翻译成中立 `IdeEvent` 交给 `DshIdeViewService` 投影，并把 20 个 method 经同一链路送回 Host 半身；适配层放在 `platform/dshClient/common` 与 `electron-main` 之外以保住 `boundary` 门禁（裁定见第 7 章 §3.1）；`app.ts` 构造参数换为真实 `DshIdeBackend` 的 `DshIdeViewService`；`client.js` 按钮改为经 `dshIde` 通道开窗；一次性接上 20 个 method 对应的功能（审批、问卷、权限预设、模型、effort、斜杠命令、resume / fork / rewind、goal / todo / usage / TPS / workingActivity 投影、`ping` / `inlineComplete`、账号、语音、删除会话）；保持双窗口并存，DSH 主窗口按钮可用；语音未就绪时入口明确不可用。
+- **产出**：官方客户端传输适配（`DshIdeBackend` 真实实现）、`app.ts` 真实接线、`client.js` 开窗、完整功能接线、双窗口镜像。
 - **出口判据 K6**：真机双窗口镜像同一会话；`approval/request` 与 `user-questions/request` 两边弹出且任一 resolve 即消费；按钮开窗成功；`ping` / `inlineComplete` 恢复；Chat 面板可见且 DSH 内容回填；关闭 IDE 窗口不取消 DSH 会话；语音不可用时不启动本地识别后端。
 - **当前态**：未开始。
 
