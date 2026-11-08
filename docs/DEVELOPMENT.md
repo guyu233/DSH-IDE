@@ -510,7 +510,7 @@ waterfall 决议）未观测，原因就是上面第 1 条：插件尚未进入�
 | P0 | 已完成 | 工程基线、bundle 清单、patch、资源、官方打包任务齐备 |
 | P1 | 已完成 | K2 判据实测通过 |
 | P2 | 已完成 | `translator.ts` / `ide-view-projector.ts` / golden / 11 项单测；K3 判据实测通过 |
-| P3 | 进行中 | 通道分发 / 三层过滤 / `state.view` / 3 错误码 / Host 半身四类订阅 + 唯一 answerer / **官方客户端传输适配 + 真机加载实测** 已落地；缺端到端会话与 waterfall 真机观测，K4 未达成 |
+| P3 | 代码闭环 / 真机未观测 | 通道分发、三层过滤、`state.view`、3 错误码、Host 半身四类订阅 + 唯一 answerer、官方传输适配、端点自解析与发布、实时运行时加载实测均已落地；端到端 `session/follow` + waterfall 需重启 DSH 后观测，故 K4 不标 `PASS`，P4 不启动 |
 | P4 | 未开始 | `DshIdeConsumer` 不存在 |
 | P5 | 未开始 | 按钮仍抛显式错误；双窗口镜像未接线 |
 | P6 | 未开始 | 门禁脚手架 3 `PASS` + 1 `PENDING`；真机验收、ABI 重编、终端冒烟未完成 |
