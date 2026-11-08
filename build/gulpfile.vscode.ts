@@ -114,7 +114,9 @@ function getFoundryLocalExcludeFilter(): string[] {
 }
 
 function packageTask(platform: string, arch: string, sourceFolderName: string, destinationFolderName: string, _opts?: { stats?: boolean; appOnly?: boolean }) {
-	const destination = path.join(path.dirname(root), destinationFolderName);
+	// 扁平化后 `root` 即仓库根：产物必须落在仓库内（历史实现写到仓库外的父目录，
+	// 导致 `dsh-ide-pack` 的 staging 里 `runtime/app` 为空、tgz 只有 157 KB）。
+	const destination = path.join(root, destinationFolderName);
 	platform = platform || process.platform;
 
 	const task = () => {
@@ -459,7 +461,7 @@ async function stripAuthenticodeSignature(filePath: string): Promise<void> {
 }
 
 function patchWin32DependenciesTask(destinationFolderName: string) {
-	const cwd = path.join(path.dirname(root), destinationFolderName);
+	const cwd = path.join(root, destinationFolderName);
 
 	return async () => {
 		const versionedResourcesFolder = util.getVersionedResourcesFolder('win32', commit!);
@@ -500,7 +502,7 @@ function patchWin32DependenciesTask(destinationFolderName: string) {
 }
 
 function generateNodeCompileCacheTask(platform: string, destinationFolderName: string) {
-	const outputDirectory = path.join(path.dirname(root), destinationFolderName);
+	const outputDirectory = path.join(root, destinationFolderName);
 
 	return () => generateNodeCompileCache(
 		platform,
@@ -510,7 +512,9 @@ function generateNodeCompileCacheTask(platform: string, destinationFolderName: s
 	);
 }
 
-const buildRoot = path.dirname(root);
+// 仓库已扁平化（README §1）：`root` 就是仓库根，`buildRoot` 不能再取父目录，
+// 否则 dist/ 与 staging 会写到仓库外的上一级（历史实测产物落到了 E:\dist）。
+const buildRoot = root;
 let dshBuildProvenance: DshBuildProvenance | undefined;
 
 async function prepareDshBuildProvenance(): Promise<void> {

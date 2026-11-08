@@ -410,7 +410,14 @@ P7 打包为 DSH 插件与交付
 - **活动**：实现 `DshIdeBackend` 的唯一真实端口——IDE 侧**官方客户端传输适配**（Host 的 loopback 端点 + 官方 `dsh-client-connection` + `connection.authenticatedUrl()` 派生鉴权），把 `session/event` / `agent/assistant-stream` 翻译成中立 `IdeEvent` 交给 `DshIdeViewService`，并把 20 个 method 经同一链路回送；适配层放在 `platform/dshClient/common` 与 `electron-main` 之外以保住 `boundary` 门禁（裁定见第 7 章 §3.1）；在插件 Host 半身（`apply(ctx)` 拿到的 `dshCtx`）内订阅 `session/event`、`agent/assistant-stream`、`approval/request`、`user-questions/request`；实现 `call()` 分发、`listen()` 三层过滤、`disposeOwner()` 本通道清理；注册唯一交互式 answerer；落地 `ALREADY_RESOLVED` / `SESSION_SWITCHED` 常量；按第 2 章 §9 完成 `IdeViewSnapshot` 并入 `DshIdeSnapshot.state` 的契约升级；执行 waterfall 一致性核对（旧编号 S0，见 §5），实测必须满足「广播 + 首个决议生效，重复决议返回 `ALREADY_RESOLVED`」，实测不符按 §1 第 4 条的阶段内返工规则处理，不切换 answerer 形态。
 - **产出**：真实 `IdeViewHost`（`DshIdeViewService` + `DshIdeBackend` 端口）、`DshIdeBackend` 的官方客户端传输适配（真实端口实现）、`DshIdeChannel` 完整实现（`call` / `listen` / `disposeOwner`）、3 个新增错误码常量、`wireRevision = 2` 的协议真源与快照校验（含 `state.view` 行级校验）、`build/lib/test/dshIdeChannel.test.ts`（17 项）、`host/ide-view-host.js` + 17 项单测。
 - **出口判据 K4**：`DshIdeBackend` 真实端口接通（官方客户端传输，不再返回 `feature-unavailable`）；20 个 method 均有确定 handler 且通过 `validateDshIdeInput`；`call` / `listen` / `disposeOwner` 行为符合 第 2 章 §4–§7；`invoke` 输出恒为 `{ value }`；waterfall 实测符合上述唯一形态；`boundary` 门禁 `PASS`；契约升级后 17 符号仍单源。
-- **当前态**：**部分完成**。已落地：通道分发与三层过滤、`DshIdeViewService` 快照纪律（首帧 `starting`、`channelId` 守恒、`version` 严格 +1、微任务批处理）、`state.view` 并入与行级校验、3 个错误码常量、`disposeOwner` 按 ctx 清理、`boundary` 起启用 `listen` 三层过滤与分发断言；`index.js` 创建 `DshIdeHostBridge`，在插件上下文上订阅 `session/event` / `agent/assistant-stream` / `approval/request` / `user-questions/request` 并注册唯一交互式 answerer（未见界面时 `next()` 委托），`host/ide-view-host.js` 17 项单测覆盖订阅、归属过滤、waterfall 一致性（广播 + 首个决议生效 + 重复 `ALREADY_RESOLVED`）、会话切换与 method 映射。已落地（续）：`transport/dshIdeTransport.ts` 实现官方客户端传输适配（鉴权交换 / 一元 RPC / `remote.mux` 流 / waterfall 回投，13 项单测），`electron-main/dshIdeBackendFactory.ts` 按 `DSH_IDE_ENDPOINT` + `DSH_IDE_COOKIE`/`DSH_IDE_LAUNCH_URL` 装配，`app.ts` 已接真实端口；`common/translator.ts` 补上真实 DSH 线上事件（斜杠命名 + `data` 信封）的翻译，投影层现可吃真机事件流（新增 7 项用例）。**未落地**：waterfall 与双窗口镜像的**真机**核对（需要运行中的 DSH Host，本仓库无安装依赖无法实跑），单测已覆盖语义与协议形状。K4 判定见下。
+  - **「实测」的判定口径**（防止把单测当验收）：必须是**打包后的 tgz 装进真实 DSH profile、由真实 Host 进程加载插件、经官方端点跑通一次 `listSessions` + 一次 `session/follow`** 的实跑记录；仅单测或 mock 一律记 `PENDING`。实跑前置见第 5 章 §2 的打包命令与第 7 章 §3.1 裁定；若环境不具备（无可用 DSH Host），K4 保持未达成并在提交信息写明缺什么。
+- **当前态**：**部分完成**。已落地：通道分发与三层过滤、`DshIdeViewService` 快照纪律（首帧 `starting`、`channelId` 守恒、`version` 严格 +1、微任务批处理）、`state.view` 并入与行级校验、3 个错误码常量、`disposeOwner` 按 ctx 清理、`boundary` 起启用 `listen` 三层过滤与分发断言；`index.js` 创建 `DshIdeHostBridge`，在插件上下文上订阅 `session/event` / `agent/assistant-stream` / `approval/request` / `user-questions/request` 并注册唯一交互式 answerer（未见界面时 `next()` 委托），`host/ide-view-host.js` 17 项单测覆盖订阅、归属过滤、waterfall 一致性（广播 + 首个决议生效 + 重复 `ALREADY_RESOLVED`）、会话切换与 method 映射。已落地（续）：`transport/dshIdeTransport.ts` 实现官方客户端传输适配（鉴权交换 / 一元 RPC / `remote.mux` 流 / waterfall 回投，13 项单测），`electron-main/dshIdeBackendFactory.ts` 按 `DSH_IDE_ENDPOINT` + `DSH_IDE_COOKIE`/`DSH_IDE_LAUNCH_URL` 装配，`app.ts` 已接真实端口；`common/translator.ts` 补上真实 DSH 线上事件（斜杠命名 + `data` 信封）的翻译，投影层现可吃真机事件流（新增 7 项用例）。**真机实测（2026-11-09，已执行）**：
+1. `gulp dsh-ide-pack` 产出 `dist/dsh-ide-2.0.0.tgz`（119,584,787 字节，2495 条目，含 `runtime/app` 491 MB）；
+2. 装进真实 DSH profile（`%USERPROFILE%\.dsh\profiles\desktop`，依赖由 `file:E:/vscode-dsh/...` 修正为 `file:E:/DSH-IDE/dist/...`），`pnpm install` 成功；
+3. 用 DSH 自带 Electron 44.7.0 的 Node 模式加载**已安装**插件的 `host/ide-view-host.js`：导出完整、`REQUIRED_SERVICES=[sessions,sessionController]`、`open` 生成合法 channelId、四类事件订阅齐备、`listSessions`/`listModels` 真实返回、`runCommand` 返回 `dsh-ide/feature-unavailable`；
+4. 同一运行时检查已安装的 `runtime/app/out/mainImpl.js`：`createDshIdeBackendFromEnv` / `DshIdeViewService` / `dsh-ide/host-authentication-failed` / `/api/remote.mux` / `$events/result` / `wireEventType` 六项全部存在。
+
+**仍未落地**：接入运行中的 DSH Host 跑一次完整 `session/follow` + waterfall 决议、以及双窗口镜像观察（需要与真实 DSH 会话交互，属 P6 的 9 项真机验收）。故 K4 的核心判据「真实端口接通」已由第 3/4 步证实，但**端到端会话链路**未观测。
 
 #### P4 IDE 消费者与 UI 实现
 
@@ -484,7 +491,7 @@ P7 打包为 DSH 插件与交付
 | P0 | 已完成 | 工程基线、bundle 清单、patch、资源、官方打包任务齐备 |
 | P1 | 已完成 | K2 判据实测通过 |
 | P2 | 已完成 | `translator.ts` / `ide-view-projector.ts` / golden / 11 项单测；K3 判据实测通过 |
-| P3 | 进行中 | 通道分发 / `listen` 三层过滤 / 快照并入 `state.view` / 3 个错误码 / Host 半身四类订阅 + 唯一 answerer + 17 项单测已落地；`DshIdeBackend` 官方客户端传输适配未实现，K4 未达成 |
+| P3 | 进行中 | 通道分发 / 三层过滤 / `state.view` / 3 错误码 / Host 半身四类订阅 + 唯一 answerer / **官方客户端传输适配 + 真机加载实测** 已落地；缺端到端会话与 waterfall 真机观测，K4 未达成 |
 | P4 | 未开始 | `DshIdeConsumer` 不存在 |
 | P5 | 未开始 | 按钮仍抛显式错误；双窗口镜像未接线 |
 | P6 | 未开始 | 门禁脚手架 3 `PASS` + 1 `PENDING`；真机验收、ABI 重编、终端冒烟未完成 |
@@ -986,6 +993,8 @@ e:/DSH-IDE/                              git 仓库根 / 唯一代码树
 | Chat 面板 | `chat.view.contribution` 无条件注册，容器仍在；DSH 内容为空，显示「连接层重建中」 | P4 |
 | `translator.ts` / `ide-view-projector.ts` | `IdeEvent.streaming`、`ARGS_PREVIEW_LIMIT`、`ROWS_P95_BYTE_LIMIT` 定义后未被生产代码使用（仅常量与测试引用） | P3 / P6 |
 | `DshIdeViewService` 后端端口 | Host 半身（`index.js` + `host/ide-view-host.js`）已订阅四类官方事件并注册唯一 answerer；与 IDE 主进程之间的传输端口仍未接线，端口实现仍是 `UnavailableDshIdeBackend` | P5 |
+| 打包输出路径 | 已修（2026-11-09）：仓库扁平化后 `buildRoot`/`packageTask`/`patchWin32DependenciesTask`/`generateNodeCompileCacheTask` 仍用 `path.dirname(root)`，产物与 staging 落到仓库外的 `E:\dist`，导致 `runtime/app` 为空、tgz 只有 157 KB。现统一改为 `root` | 已闭环 |
+| 扩展类型依赖断链 | 已修（2026-11-09）：767 个目录联接指向已迁移的 `E:\vscode-dsh\...`（含 11 个 `@types/node`、`extensions/node_modules` 全量），导致 `tsgo` 报 `Cannot find type definition file for 'node'`。已批量重定向到本仓库对应路径，移除 42 个无真实目标的孤儿联接 | 已闭环 |
 | 7 个 method 的官方落点 | `rewind` / `loadOlder` / `setEffort` / `setPermissionPreset` / `runCommand` / `listCommands` / `deleteSession` 在 DSH 公开接口中未核对到确切方法，当前一律返回 `feature-unavailable` 并写明缺口，不猜方法名、不伪造成功 | P5 |
 | `deleteSession` 语义缺口 | 第 8 章 §8.2.4 要求直接物理删除；DSH `sessions` 只有 `get` / `list`，会话由拥有它的 fiber 生命周期决定，无公开物理删除接口。当前明确拒绝，待 P5 与 DSH 侧确认删除能力归属后再实现，禁止用「关闭视图」冒充删除 | P5 |
 
