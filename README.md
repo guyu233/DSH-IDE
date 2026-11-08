@@ -35,7 +35,7 @@ DSH-IDE 是把整个 VS Code 桌面运行时改造成 DeepSeekHarness 插件的�
 | --- | --- |
 | DSH 主窗口 | DSH 桌面端 UI，持有会话头部「DSH-IDE」按钮 |
 | IDE 窗口 | 由 DSH-IDE 打开的 VS Code `BrowserWindow` 及其 renderer |
-| `dshCtx` | 单进程内唯一的 Cordis 根，DSH 服务的注册与订阅都发生在它上面 |
+| `dshCtx` | DSH Host 进程内唯一的 Cordis 根，DSH 服务的注册与订阅都发生在它上面 |
 | 插件 | `build/lib/dsh/package.json` 定义的 `dsh-ide@2.0.0` bundle 插件，入口 `src/vs/platform/dshClient/index.js` |
 | 通道 | 唯一 `IServerChannel` 实现 `DshIdeChannel`，token `dshIde`，注册点 `src/vs/code/electron-main/app.ts` |
 | 视图宿主 | `IdeViewHost` 窄接口（`open` / `subscribe` / `invoke` / `close`）；当前为 `DshIdeViewService`（投影 + 快照版本计数），DSH 能力经 `DshIdeBackend` 端口由插件 Host 半身注入 |
