@@ -12,13 +12,13 @@
 ## 2. 资源复用优先
 
 - 尽量少自行绘制或手写资源（图标、Logo、SVG、样式、字体、常量图形）。
-- 优先顺序固定为：① 已安装 DSH 的 `resources/app.asar` 内 `dsh/node_modules/@deepseek-ai/**`（官方鲸鱼图形见 `@deepseek-ai/dsh-web-frontend/dist/favicon.svg`，各插件自带 `icon.svg` / locale / 样式）；② VS Code 源码 `vscode-1.143.1/src/**`（`src/vs/workbench/browser/parts/media`、codicons、主题样式、`resources/**`）。
+- 优先顺序固定为：① 已安装 DSH 的 `resources/app.asar` 内 `dsh/node_modules/@deepseek-ai/**`（官方鲸鱼图形见 `@deepseek-ai/dsh-web-frontend/dist/favicon.svg`，各插件自带 `icon.svg` / locale / 样式）；② VS Code 源码 `src/**`（`src/vs/workbench/browser/parts/media`、codicons、主题样式、`resources/**`）。
 - 确无可用资源或必须定制时才自绘，并在提交信息写明「为何不能复用」。禁止手抄近似 LOGO 路径。
 - 现有已复用资源清单与来源凭据见 [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md) 第 1 章 §6 和第 7 章 §4。
 
 ## 3. 代码复用优先
 
-- 先搜官方是否已有，再决定是否自写。只读参考目录固定为：`E:/dsh-TUI/`、`E:/deepseek-harness-0.2.2-rc.1/`（或 `E:/deepseek-harness/`）、已安装 DSH 的 `resources/app.asar`，以及 `vscode-1.143.1/src/**`。这些目录只读，不得在其中写入。
+- 先搜官方是否已有，再决定是否自写。只读参考目录固定为：`E:/dsh-TUI/`、`E:/deepseek-harness-0.2.2-rc.1/`（或 `E:/deepseek-harness/`）、已安装 DSH 的 `resources/app.asar`，以及 `src/**`。这些目录只读，不得在其中写入。
 - 优先搬用现成实现：协议客户端、远程调用、类型定义、适配器、会话/工作区控制器、工具、常量、schema。VS Code 侧同理复用既有服务与组件。
 - 能复用函数或片段时不搬整包；确需完整模块或共享单例时保留必要闭包。
 - 搬用必须保留原许可证与版权头，记录来源与 tree digest（格式见 `build/dsh/chat-render/PROVENANCE.md`），不伪造 Git commit。确需自写时在提交信息写明「为何不能先搬用」。
@@ -26,7 +26,7 @@
 
 ## 4. 构建与保留边界
 
-- 构建/打包一律使用 VS Code 上游官方脚本（`vscode-1.143.1/gulpfile.mjs`、`build/**`），不自造打包脚本；要调整就直接改官方脚本或其参数。唯一打包任务是 `gulp dsh-ide-pack`。
+- 构建/打包一律使用 VS Code 上游官方脚本（`gulpfile.mjs`、`build/**`），不自造打包脚本；要调整就直接改官方脚本或其参数。唯一打包任务是 `gulp dsh-ide-pack`。
 - Mermaid 与 Markdown 功能及其全部运行依赖完整保留；普通扩展宿主、扩展市场、扩展 API、扩展运行依赖、远程连接一律保留。
 - Copilot/AgentHost 与重复的 VS Code Agent Sessions 窗口移除专属源码与入口，不得误删上述保留项。
 - 本地听写只接 DSH 的实验语音识别服务（由 DSH 决定启停、provider 与就绪状态），不另建本地识别后端；未就绪时入口明确不可用。
@@ -34,7 +34,7 @@
 
 ## 5. 许可证凭据
 
-- `src/vs/platform/dshClient/PROVENANCE.md`、`build/dsh/chat-render/PROVENANCE.md`、`build/dsh/chat-render/LICENSE-DSH` 保留且不得删改；`NOTICE.md` 与 `vscode-1.143.1/LICENSE.txt` 保留原文。
+- `src/vs/platform/dshClient/PROVENANCE.md`、`build/dsh/chat-render/PROVENANCE.md`、`build/dsh/chat-render/LICENSE-DSH` 保留且不得删改；`NOTICE.md` 与 `LICENSE.txt` 保留原文。
 - 上游升级时按 [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md) 第 5 章 §7 更新版本、commit 与逐文件 sha256。
 - `NOTICE.md` / `LICENSE` 只在新增第三方依赖或素材时于 `NOTICE.md` 末尾追加条目，原文一字不动；**禁止重写**（维护规则见 [`README.md`](README.md) §1）。
 - 法律/许可文件清单与定稿核验见 [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md) 第 7 章 §4。

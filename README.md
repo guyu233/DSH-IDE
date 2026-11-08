@@ -8,13 +8,13 @@
 
 **想做成什么效果**：把整个 IDE 改造成 DeepSeekHarness 的插件——整个 DSH-IDE 项目打包后就是**一个** DSH bundle 插件（`dsh-ide@2.0.0`，产物 `dist/dsh-ide-2.0.0.tgz`），由 DSH 加载后提供原生 VS Code 的编辑、终端、Git、调试、扩展与远程体验；AI 侧栏由 DSH 驱动，能基于真实工作区上下文调用工具、走审批、多会话并行。不存在独立的 IDE 安装包，也不存在第二套 AI 会话或协议。
 
-DSH-IDE 是把整个 VS Code 桌面运行时改造成 DeepSeekHarness 插件的实现：以 **DeepSeek Harness**（下称 **DSH**）为唯一 AI 内核、以 VS Code 1.143.1 源码树 `vscode-1.143.1/` 为 IDE 载体，整体作为 DSH 的单一 bundle 插件 `dsh-ide@2.0.0` 交付。改造后的形态满足：DSH 主进程逻辑与 VS Code 主进程逻辑在同一个 Electron 主进程内共享**一个 Cordis 根** `dshCtx`；IDE 窗口只经**唯一一条 `IServerChannel`**（token `dshIde`）消费 DTO；会话、模型、工具、权限、审批、问卷、设置与语音全部由 DSH 决定。
+DSH-IDE 是把整个 VS Code 桌面运行时改造成 DeepSeekHarness 插件的实现：以 **DeepSeek Harness**（下称 **DSH**）为唯一 AI 内核、以 VS Code 1.143.1 源码树（仓库根，已扁平化）为 IDE 载体，整体作为 DSH 的单一 bundle 插件 `dsh-ide@2.0.0` 交付。改造后的形态满足：DSH 主进程逻辑与 VS Code 主进程逻辑在同一个 Electron 主进程内共享**一个 Cordis 根** `dshCtx`；IDE 窗口只经**唯一一条 `IServerChannel`**（token `dshIde`）消费 DTO；会话、模型、工具、权限、审批、问卷、设置与语音全部由 DSH 决定。
 
-仓库只有一棵代码树 `vscode-1.143.1/`。所有 DSH-IDE 源码、资源、构建与验证脚本都落在这棵树的 VS Code 原生分层中，不存在第二个子工程。
+仓库只有一棵代码树（仓库根；原 `vscode-1.143.1/` 已扁平化到根）。所有 DSH-IDE 源码、资源、构建与验证脚本都落在这棵树的 VS Code 原生分层中，不存在第二个子工程。
 
 许可、商标与上游归属以 [`NOTICE.md`](NOTICE.md) 与 [`LICENSE`](LICENSE) 为准。二者是法律文件，保留原文，不纳入规格文档分层；本文及 `docs/` 不对资质归属作技术性声明。
 
-**法律文件维护规则（旁注，文件本身不改）**：`NOTICE.md` 声明了 VS Code（MIT，原文见 `vscode-1.143.1/LICENSE.txt`）与 DSH 两处上游来源、商标归属及许可范围；`LICENSE` 是本仓库 MIT 许可文本。二者**不得重写、不得删改原文**；仅当新增第三方依赖或素材时，才允许在 `NOTICE.md` 末尾**追加**条目，原有内容一字不动。定稿时未新增任何依赖或素材，`NOTICE.md` 保持原文。全量法律/许可文件清单与定稿核验见 [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md) 第 7 章 §4。
+**法律文件维护规则（旁注，文件本身不改）**：`NOTICE.md` 声明了 VS Code（MIT，原文见 `LICENSE.txt`）与 DSH 两处上游来源、商标归属及许可范围；`LICENSE` 是本仓库 MIT 许可文本。二者**不得重写、不得删改原文**；仅当新增第三方依赖或素材时，才允许在 `NOTICE.md` 末尾**追加**条目，原有内容一字不动。定稿时未新增任何依赖或素材，`NOTICE.md` 保持原文。全量法律/许可文件清单与定稿核验见 [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md) 第 7 章 §4。
 
 ### 1.1 两种时态（全仓统一用法）
 

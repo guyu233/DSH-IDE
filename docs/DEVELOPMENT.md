@@ -349,7 +349,7 @@ P7 打包为 DSH 插件与交付
 #### P0 项目初始化
 
 - **前置**：无。
-- **活动**：建立唯一代码树 `vscode-1.143.1/`；安装上游依赖；设置 `product.json` 身份（`nameShort` / `nameLong` = `DSH IDE`，`applicationName` = `dsh-ide`，`urlProtocol` = `dsh-ide`；该身份只服务插件内嵌 app 的运行时，不产出独立安装包）；创建 bundle 清单与单行 patch；准备 `resources/dsh/` 真实资源；接入 VS Code 上游官方 gulp / esbuild 任务；准备只读参考目录与上游差异工具。
+- **活动**：建立唯一代码树（现为仓库根 `e:/DSH-IDE/`，已扁平化，不再有 `vscode-1.143.1/` 子目录）；安装上游依赖；设置 `product.json` 身份（`nameShort` / `nameLong` = `DSH IDE`，`applicationName` = `dsh-ide`，`urlProtocol` = `dsh-ide`；该身份只服务插件内嵌 app 的运行时，不产出独立安装包）；创建 bundle 清单与单行 patch；准备 `resources/dsh/` 真实资源；接入 VS Code 上游官方 gulp / esbuild 任务；准备只读参考目录与上游差异工具。
 - **产出**：`build/lib/dsh/package.json`（`dsh-ide@2.0.0`，`dsh.bundle.patch = "./cordis.patch.yml"`，`files` 白名单 11 项）、`build/lib/dsh/cordis.patch.yml`（唯一 `insert: dsh-ide` 行）、`resources/dsh/icon.svg` 与 `locale/{en,zh}.json`、`build/gulpfile.vscode.ts` 的 `dsh-ide-pack` 任务、`scripts/sync-upstream.mjs`。
 - **出口判据 K1**：依赖可安装且官方 gulp 能发现 `dsh-ide-pack`；上述清单、patch、资源文件齐备且内容符合本节；只读参考目录 `E:/dsh-TUI/`、`E:/deepseek-harness-0.2.2-rc.1/` 与已安装 DSH 的 `app.asar` 可读且不写入。
 - **当前态**：已完成。
@@ -662,11 +662,11 @@ B1–B5 是流程内的检查点，与开发路线的 K1–K8 不同，二者不
 ## 第 5 章 验证与交付
 
 >
-> 除标注「项目根」的命令外，工作目录一律为 `e:/vscode-dsh/vscode-1.143.1/`（即项目根，计划更名为 `DSH-IDE`）；命令按 PowerShell 语法给出。
+> 除标注「项目根」的命令外，工作目录一律为 `e:/DSH-IDE/`（即仓库根 / 项目根，已扁平化）；命令按 PowerShell 语法给出。
 
 ### 1. 规则
 
-1. 四条门禁与 `test-dsh:all` 目前**只通过 `vscode-1.143.1/package.json` 的 `scripts` 在本地执行**；`.github/workflows/` 与 `build/azure-pipelines/` 未引用任何 DSH 门禁，**当前 CI 0 引用**（定稿核验确认，登记见第 7 章 §7）。把该组命令接入 CI 属于 第 3 章 P6 步骤⑨；接入前 K7 以本地实测记录为准，不得表述为「CI 已拦截」。接入后 `contract` 启用失败断言，其 `PASS` / `FAIL` 判据见 §9.3（节号已核对）。执行顺序按 P6 的固定顺序。
+1. 四条门禁与 `test-dsh:all` 目前**只通过仓库根 `package.json` 的 `scripts` 在本地执行**；仓库已于 2026-11-09 删除 `.github/` 与 `build/azure-pipelines/`，**当前无 CI 配置**（登记见第 7 章 §7）。把该组命令接入 CI 属于 第 3 章 P6 步骤⑨；接入时再新建 CI 配置，接入前 K7 以本地实测记录为准，不得表述为「CI 已拦截」。接入后 `contract` 启用失败断言，其 `PASS` / `FAIL` 判据见 §9.3（节号已核对）。执行顺序按 P6 的固定顺序。
 2. 门禁状态只允许 `PASS` / `PENDING` / `FAIL`，语义见 §9；`PENDING` 不计入通过，不得标成 `PASS`。
 3. 任何命令的失败都按第 3 章 §1 第 4 条的阶段内返工处理，不跳过、不改写判据。
 
@@ -682,7 +682,7 @@ B1–B5 是流程内的检查点，与开发路线的 K1–K8 不同，二者不
 | 门禁 3 | `npm run verify:dsh-ide-projection-golden` | `STATUS: PASS` |
 | 门禁 4 | `npm run verify:dsh-ide-contract` | `STATUS: PENDING`（当前，见 §3） |
 | 类型检查 | `$env:NODE_OPTIONS='--max-old-space-size=12288'; .\node_modules\.bin\tsc.cmd -p src/tsconfig.json --noEmit` | 变更文件 0 错误（§4） |
-| 官方打包 | `node ./node_modules/gulp/bin/gulp.js dsh-ide-pack` | 产出 `../dist/dsh-ide-2.0.0.tgz`（§8） |
+| 官方打包 | `node ./node_modules/gulp/bin/gulp.js dsh-ide-pack` | 产出 `dist/dsh-ide-2.0.0.tgz`（§8） |
 | sidecar 构建 | `node build/dsh/chat-render/build-render.mjs` | 产出 `build/dsh/chat-render/dist/dsh-chat.js` 与 `.css` |
 | sidecar 源核对 | `node build/dsh/chat-render/regen-sources.mjs --check` | 退出 0，20 个源文件无漂移 |
 | 来源凭据重生成 | `node build/dsh/chat-render/gen-provenance.mjs` | `PROVENANCE.md` 逐文件 sha256 对齐 |
@@ -823,24 +823,25 @@ node --experimental-strip-types --test build/lib/test/dshBuildProvenance.test.ts
 
 ## 第 6 章 仓库结构索引
 
-### 1. 仓库根（项目整树现已并入 `vscode-1.143.1/`，该目录即项目根，计划更名为 `DSH-IDE`）
+### 1. 仓库根（已扁平化；仓库根即项目根，`vscode-1.143.1/` 子目录已不存在）
 
 ```text
-e:/vscode-dsh/                              git 仓库根（仅包裹 .git 与少量生成物）
+e:/DSH-IDE/                              git 仓库根 / 唯一代码树
   .git/
-  vscode-1.143.1/        ← 项目根 / 唯一代码树（计划更名为 DSH-IDE）
-    README.md                      总纲、术语、分层索引、状态入口（L0）
-    AGENTS.md                      协作约定（L0）
-    NOTICE.md / LICENSE            法律声明（保留原文）
-    README.vscode.md / AGENTS.vscode.md   VS Code 上游自带文档（已删除）
-    docs/DEVELOPMENT.md            本手册（由 7 份专题规格合并而来，docs/ 现仅此一份）
-    scripts/sync-upstream.mjs      上游差异报告（只读源 → .build/upstream-diff/）
-    src/ build/ extensions/ cli/ remote/ resources/ test/ …   代码树
-  dist/                               唯一交付物 dist/dsh-ide-2.0.0.tgz（DSH 插件包，生成物，git 忽略）
-  .build/                             上游差异报告（生成物，git 忽略）
+  README.md                      总纲、术语、分层索引、状态入口（L0）
+  AGENTS.md                      协作约定（L0）
+  NOTICE.md / LICENSE / LICENSE.txt   法律声明（保留原文）
+  docs/DEVELOPMENT.md            本手册（docs/ 仅此一份）
+  src/ build/ extensions/ cli/ remote/ resources/ test/ scripts/   代码树
+  .eslint-plugin-local/         仓库自定义 ESLint 规则（eslint.config.js 依赖）
+  .vscode/                      工作区开发配置；.vscode/extensions 被 build/npm/dirs.ts 引用
+  cli/ThirdPartyNotices.txt     原 Rust CLI 唯一保留的法律文件（其余 CLI 源码已删）
+  node_modules/                 安装依赖（生成物，git 忽略）
+  dist/                         唯一交付物 dist/dsh-ide-2.0.0.tgz（DSH 插件包，生成物，git 忽略）
+  .build/                       上游差异报告（生成物，git 忽略）
 ```
 
-### 2. 插件与通道（`vscode-1.143.1/src/vs/platform/dshClient/`）
+### 2. 插件与通道（`src/vs/platform/dshClient/`）
 
 只列 6 个关键节点，其余文件以 `git ls-files` 为准。
 
@@ -855,7 +856,7 @@ e:/vscode-dsh/                              git 仓库根（仅包裹 .git 与�
 
 其余文件（`dshIdeContract.ts`、`dshClientService.ts`、`ide-view-service.ts`、`client/`、`host/`、`test/` 等）不在此表展开；分层边界见第 1 章 §3，当前态残留见第 7 章 §3。
 
-### 3. IDE 侧（`vscode-1.143.1/src/vs/`）
+### 3. IDE 侧（`src/vs/`）
 
 只列职责边界，逐文件清单以 `git ls-files` 为准。
 
@@ -866,14 +867,14 @@ e:/vscode-dsh/                              git 仓库根（仅包裹 .git 与�
 | `workbench/workbench.common.main.ts` | 无条件引入 Chat 与 DSH contribution |
 | `workbench/contrib/chat/browser/widget/chatListRenderer.ts` | `tryRenderDshChatPart` 的唯一消费点 |
 
-`workbench/contrib/dsh/` 下另有 3 个空目录残留：`browser/chatClient/`、`host/`、`test/browser/chatClient/`。
+`workbench/contrib/dsh/` 下另有 2 个空目录残留：`browser/chatClient/`、`host/`；`test/browser/chatClient/` 保留唯一测试文件 `dshChatSeamMap.test.ts`（6 项用例，见第 5 章 §4）。
 
 ### 4. 构建、资源与验证
 
 | 路径 | 职责 |
 | --- | --- |
 | `product.json` | 产品身份：`nameShort/nameLong = "DSH IDE"`、`applicationName = "dsh-ide"`、`urlProtocol = "dsh-ide"` |
-| `package.json:93-100` | 8 条 DSH 脚本：`build-dsh-tests`、`pretest-dsh`、`test-dsh`、`test-dsh:all`、4 条 `verify:dsh-ide-*` |
+| `package.json:85-92` | 8 条 DSH 脚本：`build-dsh-tests`、`pretest-dsh`、`test-dsh`、`test-dsh:all`、4 条 `verify:dsh-ide-*` |
 | `build/lib/dsh/package.json` | bundle 清单模板：`dsh-ide@2.0.0`、`dsh.bundle.patch`、11 项 `files`、3 项 `dsh.client.inject`、2 项 `peerDependencies` |
 | `build/lib/dsh/cordis.patch.yml` | bundle patch：唯一 `insert: dsh-ide` 行 |
 | `build/lib/dsh/verify/dshIdeVerify.mjs` | 四条门禁单脚本，`PASS` / `PENDING` 退出 0、`FAIL` 退出 1、非法 gate 退出 2 |
@@ -965,11 +966,14 @@ e:/vscode-dsh/                              git 仓库根（仅包裹 .git 与�
 | --- | --- | --- |
 | `NOTICE.md` | 上游来源、商标与许可归属声明（VS Code MIT + DSH）；**不得重写** | 未改动 |
 | `LICENSE` | 本仓库 MIT 许可文本 | 未改动 |
-| `vscode-1.143.1/LICENSE.txt` | VS Code 上游 MIT 版权声明 | 未改动 |
-| `vscode-1.143.1/ThirdPartyNotices.txt` | VS Code 第三方许可清单 | 未改动 |
-| `vscode-1.143.1/cglicenses.json` | VS Code 组件许可元数据 | 未改动 |
-| `vscode-1.143.1/build/dsh/chat-render/LICENSE-DSH` | DSH `ui-chat` 复用源的 MIT 副本 | 未改动 |
-| `vscode-1.143.1/build/monaco/LICENSE`、`cli/ThirdPartyNotices.txt`、`extensions/*/ThirdPartyNotices.txt` | 上游随附的局部许可文件 | 未改动 |
+| `LICENSE.txt` | VS Code 上游 MIT 版权声明 | 未改动 |
+| `ThirdPartyNotices.txt` | VS Code 第三方许可清单 | 未改动 |
+| `build/dsh/chat-render/LICENSE-DSH` | DSH `ui-chat` 复用源的 MIT 副本 | 未改动 |
+| `build/monaco/LICENSE`、`cli/ThirdPartyNotices.txt`、`extensions/*/ThirdPartyNotices.txt` | 上游随附的局部许可文件 | 未改动 |
+
+`cglicenses.json` 已随上游 CI/合规配置清理于 2026-11-09 删除，不再列入；`cli/ThirdPartyNotices.txt` 是原 Rust CLI 唯一保留的法律文件。
+
+`NOTICE.md` 为定稿时保留原文的法律文件，其中 `vscode-1.143.1/` 路径是扁平化前的历史表述；实际文件位于仓库根（`LICENSE.txt`、`ThirdPartyNotices.txt`）。按 [`AGENTS.md`](../AGENTS.md) §5 不得改写 `NOTICE.md`，故以本注记说明差异。
 
 本仓库不存在 `COPYING` 类文件（已核实），不得凭空补写。`NOTICE.md` 的维护规则见 [`README.md`](../README.md) §1：只允许末尾追加，原文一字不动。
 
@@ -985,13 +989,13 @@ e:/vscode-dsh/                              git 仓库根（仅包裹 .git 与�
 
 ### 5. 全仓核对命令
 
-删除或重命名文件后的核对范围固定为 `src/` + `build/` + `scripts/` + `resources/`，且必须包含**文件名字符串字面量**（不能只扫符号名）。在项目根 `e:/vscode-dsh/vscode-1.143.1/` 执行：
+删除或重命名文件后的核对范围固定为 `src/` + `build/` + `scripts/` + `resources/`，且必须包含**文件名字符串字面量**（不能只扫符号名）。在项目根 `e:/DSH-IDE/` 执行：
 
 ```powershell
-git grep -nE "launch-guard|launch\.js|buildIdeEnv|buildIdeArgs|handleLaunchRequest|makeReadSessions|resolveLaunchTarget|DSH_IDE_TOKEN_ENV|resolveIdeRuntime|launchIde" -- vscode-1.143.1/src vscode-1.143.1/build vscode-1.143.1/scripts vscode-1.143.1/resources
-git grep -nE "terminal-stream|dshTerminalPty|dshTerminalSpawn|dshTerminalBridge|dshTerminalPrepare|dshTerminalProtocol|runTerminalStream|backendProbe|prepareDshTerminal" -- vscode-1.143.1/src vscode-1.143.1/build vscode-1.143.1/scripts vscode-1.143.1/resources
-git grep -nE "dshClientTransport|dshClientProtocol|dshClientChannel|DshClientChannel|dshRemoteRequests|dshEventMap|bootstrapDshClient|DshClientTransport|dshClientBootstrap" -- vscode-1.143.1/src vscode-1.143.1/build vscode-1.143.1/scripts vscode-1.143.1/resources
-git grep -nE "dshEventMap\.ts|dshSessionUri\.ts|dshChatSessions\.ts|dshChatProvider\.ts|dshChatProvider|dshBundleStaging" -- vscode-1.143.1/src vscode-1.143.1/build vscode-1.143.1/scripts vscode-1.143.1/resources
+git grep -nE "launch-guard|launch\.js|buildIdeEnv|buildIdeArgs|handleLaunchRequest|makeReadSessions|resolveLaunchTarget|DSH_IDE_TOKEN_ENV|resolveIdeRuntime|launchIde" -- src build scripts resources
+git grep -nE "terminal-stream|dshTerminalPty|dshTerminalSpawn|dshTerminalBridge|dshTerminalPrepare|dshTerminalProtocol|runTerminalStream|backendProbe|prepareDshTerminal" -- src build scripts resources
+git grep -nE "dshClientTransport|dshClientProtocol|dshClientChannel|DshClientChannel|dshRemoteRequests|dshEventMap|bootstrapDshClient|DshClientTransport|dshClientBootstrap" -- src build scripts resources
+git grep -nE "dshEventMap\.ts|dshSessionUri\.ts|dshChatSessions\.ts|dshChatProvider\.ts|dshChatProvider|dshBundleStaging" -- src build scripts resources
 ```
 
 判据：代码引用为 0 命中；`PROVENANCE.md` 中的审计 hash 记录与 `docs/` 中的登记性提及属合法残留。`build/lib/test/dshBundleStaging.test.ts` 的字符串字面量断言必须一并核对（P1 的修正教训）。
@@ -1043,17 +1047,29 @@ git grep -nE "dshEventMap\.ts|dshSessionUri\.ts|dshChatSessions\.ts|dshChatProvi
 | `build/lib/dsh/verify/golden/basic-session.json:3` | `docs/DEVELOPMENT.md 第 5 章 §5 的 P95 校准流程` | **已闭环**：原为 `§3.2`；`description` 不参与 golden 比对，`projection-golden` 门禁已复核通过 |
 | `build/dsh/chat-render/gen-provenance.mjs:46` | `docs/DEVELOPMENT.md 第 1 章资源复用章节` | **已同步**：凭据生成器模板随合并一并更新，重生成不会回退 |
 | `scripts/sync-upstream.mjs:6,192` | `verify:dsh-ide-contract`、`verify:dsh-ide-protocol-single-source` | 脚本名未变，有效 |
-| `.github/skills/otel/SKILL.md:34` | `docs/developer-docs/monitor.md` | 上游 VS Code 自带内容的外部路径，与本仓库 `docs/` 无关 |
-| `.github/workflows/*`、`.github/ISSUE_TEMPLATE/*`、`.github/pull_request_template.md`、仓库根 `README.md` | — | 未发现指向本仓库 `docs/` 的链接、旧编号或徽章 |
+| `.github/**` | — | 已于 2026-11-09 整体删除，不再登记；仓库现无 `.github/` 目录 |
+| 仓库根 `README.md` | — | 未发现指向本仓库 `docs/` 的链接、旧编号或徽章 |
 | `build/lib/dsh/verify/dshIdeVerify.mjs:192` | 当前文案：`PENDING(2.5): 真实事件流 P95 字节数校准（见 docs/DEVELOPMENT.md 第 5 章 §5，参数校准非架构回退）` | **已闭环**：合并为单一手册时随引用修复一并替换；`PENDING(2.5)` 字面标记按 §7.1 归 P6⑨；`§9.3` 是 PENDING 判据而非 P95 校准章节，不作目标 |
 
 #### 7.4 CI 接入
 
-`git grep -nE "dsh-ide|dshIde|test-dsh" -- vscode-1.143.1/.github vscode-1.143.1/build/azure-pipelines` 为 **0 命中**：四条门禁与 `test-dsh:all` 当前只在本地 `package.json` scripts 执行，CI 无自动拦截。第 5 章 §1 已按此事实定稿，接入 CI 归属 P6 步骤⑨。
+仓库已于 2026-11-09 删除 `.github/` 与 `build/azure-pipelines/`，当前无 CI 配置；四条门禁与 `test-dsh:all` 只在本地 `package.json` scripts 执行。第 5 章 §1 已按此事实定稿，接入 CI 归属 P6 步骤⑨（届时新建配置）。
 
 #### 7.5 交叉引用图
 
 合并为单一手册后，规格文档只剩 3 份：`README.md`、`AGENTS.md`、`docs/DEVELOPMENT.md`。定义依赖图为 3 节点、3 边（AGENTS→README、DEVELOPMENT→README、DEVELOPMENT→AGENTS），按 [`README.md`](../README.md) §4.1 序号单向、0 环；术语表只在 `README.md` §2 出现。正文导航链接允许双向，不参与定义依赖图、不得复制定义。核验脚本口径见第 5 章 §10.1，实测值以每次核验输出为准。
+
+#### 7.6 2026-11-09 整理记录
+
+| 项 | 结果 |
+| --- | --- |
+| 仓库根 | 已扁平化：`vscode-1.143.1/` 子目录不存在，仓库根即项目根 `e:/DSH-IDE/`；本手册命令与路径已去前缀 |
+| 删除的上游工程配置 | `.github/`、`.config/`、`.devcontainer/`、`build/azure-pipelines/`、`build/vite/`、`build/rspack/`、`build/gulpfile.cli.ts` |
+| 删除的上游测试/CLI | `extensions/vscode-api-tests/`、`vscode-colorize-tests/`、`vscode-colorize-perf-tests/`；`cli/` 源码与 `target/`（保留 `cli/ThirdPartyNotices.txt`） |
+| 删除的根文件 | `README.vscode.md`、`AGENTS.vscode.md`、`.mcp.json`、`.lsifrc.json`、`.mention-bot`、`.mailmap`、`.git-blame-ignore-revs`、`cglicenses.json`、`.vscode-test.js` |
+| 保留 | `.eslint-plugin-local/`（lint 依赖）、`.vscode/`（`extensions/` 被构建引用）、`build/next/`（`build-dsh-tests` 依赖）、`build/dictation-runtime/`（`gulpfile.vscode.ts` 直接 import） |
+| 体积口径 | 压缩包 74,147,715 字节（<100 MB）；解压安装 285 MiB；安全瘦身目标 200–210 MiB，详见 §8.2.5 |
+| 文档核验 | 定义依赖图 3 节点 / 3 边 / 0 环；术语表唯一；无断链 |
 
 ---
 
