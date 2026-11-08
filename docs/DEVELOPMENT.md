@@ -1141,7 +1141,7 @@ DSH-IDE = VS Code 外壳 + DSH 内核，二者共享同一 Electron 主进程内
 
 | 项 | 大小（字节） | 与桌面端关系 | 处置 |
 | --- | --- | --- | --- |
-| `runtime/app` | 299,382,871（约 285 MiB） | 不重复：VS Code IDE 载荷；DSH 桌面端不含 VS Code | 保留；`appOnly` 已复用宿主 Electron/Node |
+| `runtime/app` | 299,381,810（约 285 MiB） | 不重复：VS Code IDE 载荷；DSH 桌面端不含 VS Code | 保留；`appOnly` 已复用宿主 Electron/Node |
 | `chat-render/dist/dsh-chat.js` / `.css` | 408,062 / 61,448（合计 469,510） | **重复**：与 `runtime/app/out/.../chatRender/` 同一份 | 删除插件根副本，只留 `runtime/app/out/.../chatRender/` |
 | `chat-render/PROVENANCE.md` / `LICENSE-DSH` | 小 | 法律与来源凭据 | 保留 |
 | `icon.svg` / `locale/*.json` | 3,573 / 529 | 插件元数据；运行时按钮图标已用宿主 `/favicon.svg` | 保留（安装前元数据） |
@@ -1192,7 +1192,7 @@ DSH-IDE = VS Code 外壳 + DSH 内核，二者共享同一 Electron 主进程内
 
 **（7）结论**
 
-- 插件体积的绝对大头是 `runtime/app`（299,382,871 字节，约 285 MiB，VS Code IDE 载荷），它不是 DSH 资源的重复打包；DSH 桌面端不含 VS Code，无法用桌面端文件替代。
+- 插件体积的绝对大头是 `runtime/app`（299,381,810 字节，约 285 MiB，VS Code IDE 载荷），它不是 DSH 资源的重复打包；DSH 桌面端不含 VS Code，无法用桌面端文件替代。
 - 真正的 DSH 重复只有 sidecar（469,510 字节，且重复两份）与图标/语言元数据（约 4 KB）。允许的优化上限约 **0.6–0.7 MB**，不得以「复用」为名改动 `runtime/app` 或把 DSH client 运行时塞进 VS Code renderer。
 - 版本漂移：宿主 `ui-chat` 源升级时按第 5 章 §7 更新 `PROVENANCE.md` 与 `UPSTREAM_VALIDATED_VERSION`；不得直接引用新版 `lib/client.js`。
 
