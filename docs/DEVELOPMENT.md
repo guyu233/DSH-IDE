@@ -958,6 +958,15 @@ e:/DSH-IDE/                              git 仓库根 / 唯一代码树
 | `DshIdeViewService` 后端端口 | Host 半身（`index.js` + `host/ide-view-host.js`）已订阅四类官方事件并注册唯一 answerer；与 IDE 主进程之间的传输端口仍未接线，端口实现仍是 `UnavailableDshIdeBackend` | P5 |
 | 7 个 method 的官方落点 | `rewind` / `loadOlder` / `setEffort` / `setPermissionPreset` / `runCommand` / `listCommands` / `deleteSession` 在 DSH 公开接口中未核对到确切方法，当前一律返回 `feature-unavailable` 并写明缺口，不猜方法名、不伪造成功 | P5 |
 | `deleteSession` 语义缺口 | 第 8 章 §8.2.4 要求直接物理删除；DSH `sessions` 只有 `get` / `list`，会话由拥有它的 fiber 生命周期决定，无公开物理删除接口。当前明确拒绝，待 P5 与 DSH 侧确认删除能力归属后再实现，禁止用「关闭视图」冒充删除 | P5 |
+
+**§3.1 阻塞项（K4 前置，需代码所有者裁定）**
+
+| # | 事实（可复核） | 与手册的冲突 | 影响 |
+| --- | --- | --- | --- |
+| B1 | DSH `0.2.2-rc.1` 的插件**不在 Electron 主进程**加载：`apps/desktop/src/host-process.ts:212` 用 `spawn()` 起 `node_modules/@deepseek-ai/dsh-desktop-host/lib/index.js` 子进程，`apps/desktop-host/src/index.ts:29-31` 在该子进程内 `loadProfileDirectory()` + `runProfile()` 装载 bundle 插件 | 第 1 章 §1 不变量 I1 要求「DSH 主进程逻辑与 VS Code 主进程逻辑在同一个 Electron 主进程内共享唯一 Cordis 根 `dshCtx`」；实际上 DSH 的 Cordis 根在 **Node 子进程**，Electron 主进程（`apps/desktop/src/main.ts`）只做窗口与 IPC 外壳 | `DshIdeBackend` 与 IDE 主进程之间只能是**跨进程**通道；而第 1 章 §7 已把「跨进程私有管道」列为明确不存在的能力 |
+| B2 | DSH Host 提供官方 HTTP/WS 端点（`runProfile({args: ['--no-open','--host','127.0.0.1','--port','0']})`），客户端经官方 `dsh-client-connection` 连接；`common/env.js` 的 `DSH_IDE_ENDPOINT` / `DSH_IDE_INTERACTIONS` 正是按这一形态设计 | 手册目前的通道设计（主进程 `IServerChannel` + 进程内 `IdeViewHost`）假设同进程；两者不能同时成立 | P3 的 `DshIdeChannel` / `DshIdeViewService` 可实现、可测，但 `DshIdeBackend` 的**真实**实现必须选定其一：① 在 Host 子进程里实现并以官方客户端传输连回；② 改交付形态让 IDE 与 Host 同进程 |
+
+处置纪律：本项**不改代码迁就文档，也不改文档迁就代码**。按 [`README.md`](../README.md) §4 的权威层级，代码事实优先，需先由代码所有者裁定 I1 与第 1 章 §7 的表述（是否保留「单进程单根」，或把「跨进程」从禁止项改为唯一允许的官方传输），再据裁定更新 I1、第 1 章 §7、第 2 章 §2.2 与 P5 活动，然后才允许实现 `DshIdeBackend` 真实端口。K4 在此之前不得标记达成，P4 不得启动。
 | `DSH_IDE_API_VERSION` | 已对齐 `0.2.2-rc.1`（P3） | 已闭环 |
 | `IdeViewSnapshot` 与 `DshIdeSnapshot.state` | 已并入 `state.view`，`wireRevision` 升为 2，行级校验随真源落地（P3） | 已闭环 |
 | 错误码 | 五个码全部落地（`feature-unavailable` / `invalid-argument` / `ALREADY_RESOLVED` / `SESSION_SWITCHED` / `SNAPSHOT_STALE`）；`SNAPSHOT_STALE` 的消费点在 P4 | 已闭环（常量）/ P4（消费点） |
