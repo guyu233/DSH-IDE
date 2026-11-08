@@ -3,7 +3,7 @@
  *  Licensed under the MIT License.
  *--------------------------------------------------------------------------------------------*/
 
-// DSH-IDE 新连接层协议真源（阶段 2.1）。
+// DSH-IDE 连接层协议真源（P1 冻结，P3 升级到 wireRevision 2）。
 //
 // 模式直接从 dsh-TUI 的 `tui-profile/protocols/tui-channel.js` + `src/adapter/channel/{provider,consumer}.ts`
 // 平移：校验原语（exactRecord / jsonValue）、双向校验器（输入/快照）、Consumer 连续性 fail-closed。
@@ -13,20 +13,32 @@
 // 本文件是协议唯一真源：所有类型/常量/校验器只在此声明；dshIdeContract.ts 单向引用本文件常量，
 // 本文件绝不反向引用 contract。插件侧零 electron 直接引用（仅用平台接口）。
 
-/** 新连接层 IPC 频道名（替代旧的 'dshClient'）。 */
+/** 唯一 DSH-IDE IPC 频道名（token 恒为 `dshIde`；全仓只有这一条通道）。 */
 export const DSH_IDE_CHANNEL = 'dshIde';
 
-/** API 版本（阶段 2.x 由 dshIdeContract.UPSTREAM_VALIDATED_VERSION 对齐）。 */
-export const DSH_IDE_API_VERSION = '0.0.0-rebuild';
+/** API 版本（与 `dshIdeContract.UPSTREAM_VALIDATED_VERSION` 同值，由契约单测核对）。 */
+export const DSH_IDE_API_VERSION = '0.2.2-rc.1';
 
-/** 线协议修订号（快照连续性校验依据；wireRevision 不变则协议相容）。 */
-export const DSH_IDE_WIRE_REVISION = 1;
+/**
+ * 线协议修订号（快照连续性校验依据；wireRevision 不变则协议相容）。
+ * P3 把 `IdeViewSnapshot` 并入 `DshIdeViewState.view`，快照形状变化，故由 1 升到 2。
+ */
+export const DSH_IDE_WIRE_REVISION = 2;
 
-/** 连接层重建中 / 功能暂不可用的统一错误码（调用方据此显示「重建中」）。 */
+/** 功能暂不可用的统一错误码：method 不在白名单，或宿主端口尚未接线。 */
 export const DSH_IDE_FEATURE_UNAVAILABLE = 'dsh-ide/feature-unavailable';
 
 /** 入参校验失败的统一错误码（对应 dsh-TUI 的 TypeError 协议违规）。 */
 export const DSH_IDE_INVALID_ARGUMENT = 'dsh-ide/invalid-argument';
+
+/** waterfall 已被另一窗口 resolve，本窗口操作无效（P3 落地）。 */
+export const DSH_IDE_ALREADY_RESOLVED = 'ALREADY_RESOLVED';
+
+/** 目标会话已切换，本次操作上下文失效（P3 落地）。 */
+export const DSH_IDE_SESSION_SWITCHED = 'SESSION_SWITCHED';
+
+/** 本地快照落后过多，需 `refreshSnapshot`（消费点在 P4 的 DshIdeConsumer）。 */
+export const DSH_IDE_SNAPSHOT_STALE = 'SNAPSHOT_STALE';
 
 /** 旧 client 错误类型，随 DshRemoteError 一同迁到此处（保证 IDshClientService 消费方类型不破）。 */
 export interface DshRemoteError {
@@ -35,10 +47,33 @@ export interface DshRemoteError {
 	readonly details?: unknown;
 }
 
-/** 渲染器消费的快照（阶段 2.x 由 Host 投影器真实填充）。 */
+/** 单行类别（中立 DTO；投影器决定行类别，通道快照跨进程只带字符串）。 */
+export type DshIdeRowKind = 'user' | 'assistant' | 'tool' | 'system' | 'notice';
+
+/** 单行投影（`IdeRow` 的快照副本；稳定 id + 行级 revision）。 */
+export interface DshIdeRow {
+	readonly id: string;
+	readonly revision: number;
+	readonly kind: DshIdeRowKind;
+	readonly text?: string;
+	readonly preview?: string;
+	readonly folded: boolean;
+	readonly seq?: number;
+	readonly callId?: string;
+}
+
+/** 投影载荷：增量 reducer 的出口，随快照单向发布。 */
+export interface DshIdeViewSnapshot {
+	readonly rows: readonly DshIdeRow[];
+	readonly version: number;
+}
+
+/** 渲染器消费的视图状态：骨架状态 + 可选投影载荷。 */
 export interface DshIdeViewState {
 	readonly state: 'starting' | 'ready' | 'rebuild';
 	readonly message?: string;
+	/** 投影载荷；`state === 'ready'` 时必填，`starting` / `rebuild` 时省略。 */
+	readonly view?: DshIdeViewSnapshot;
 }
 
 /** 单帧快照：wireRevision + channelId + 单调递增 version + 视图状态。 */
@@ -310,15 +345,58 @@ export function validateDshIdeSnapshot(value: unknown): DshIdeSnapshot {
 	}
 	nonEmptyString(s['channelId'], 'DshIdeSnapshot.channelId');
 	nonNegativeInteger(s['version'], 'DshIdeSnapshot.version');
-	const state = exactRecord(s['state'], ['state', 'message'], 'DshIdeSnapshot.state');
+	const state = exactRecord(s['state'], ['state', 'message', 'view'], 'DshIdeSnapshot.state');
 	if (state['state'] !== 'starting' && state['state'] !== 'ready' && state['state'] !== 'rebuild') {
 		throw new TypeError('DshIdeSnapshot.state.state must be starting|ready|rebuild');
 	}
 	if (state['message'] !== undefined) {
-		jsonValue(state['message'], 'DshIdeSnapshot.state.message', new Set());
+		nonEmptyString(state['message'], 'DshIdeSnapshot.state.message');
+	}
+	const view = state['view'];
+	if (state['state'] === 'ready') {
+		validateDshIdeView(view);
+	} else if (view !== undefined) {
+		throw new TypeError(`DshIdeSnapshot.state.view is only allowed when state is ready (got ${String(state['state'])})`);
 	}
 	jsonValue(state, 'DshIdeSnapshot.state', new Set());
 	return s as unknown as DshIdeSnapshot;
+}
+
+/** 投影载荷校验：`version` 非负整数；`rows` 为数组，逐行按 `DshIdeRow` 收窄。 */
+function validateDshIdeView(value: unknown): asserts value is DshIdeViewSnapshot {
+	const view = exactRecord(value, ['rows', 'version'], 'DshIdeSnapshot.state.view');
+	nonNegativeInteger(view['version'], 'DshIdeSnapshot.state.view.version');
+	const rows = view['rows'];
+	if (!Array.isArray(rows)) {
+		throw new TypeError('DshIdeSnapshot.state.view.rows must be an array');
+	}
+	for (const [index, row] of rows.entries()) {
+		const record = exactRecord(row, ['id', 'revision', 'kind', 'text', 'preview', 'folded', 'seq', 'callId'], `DshIdeSnapshot.state.view.rows[${index}]`);
+		nonEmptyString(record['id'], `DshIdeSnapshot.state.view.rows[${index}].id`);
+		nonNegativeInteger(record['revision'], `DshIdeSnapshot.state.view.rows[${index}].revision`);
+		const kind = record['kind'];
+		if (kind !== 'user' && kind !== 'assistant' && kind !== 'tool' && kind !== 'system' && kind !== 'notice') {
+			throw new TypeError(`DshIdeSnapshot.state.view.rows[${index}].kind must be user|assistant|tool|system|notice`);
+		}
+		if (typeof record['folded'] !== 'boolean') {
+			throw new TypeError(`DshIdeSnapshot.state.view.rows[${index}].folded must be a boolean`);
+		}
+		if (record['text'] !== undefined && typeof record['text'] !== 'string') {
+			throw new TypeError(`DshIdeSnapshot.state.view.rows[${index}].text must be a string`);
+		}
+		if (record['preview'] !== undefined && typeof record['preview'] !== 'string') {
+			throw new TypeError(`DshIdeSnapshot.state.view.rows[${index}].preview must be a string`);
+		}
+		if (record['seq'] !== undefined) {
+			nonNegativeInteger(record['seq'], `DshIdeSnapshot.state.view.rows[${index}].seq`);
+		}
+		if (record['callId'] !== undefined) {
+			nonEmptyString(record['callId'], `DshIdeSnapshot.state.view.rows[${index}].callId`);
+		}
+		if (record['text'] === undefined && record['preview'] === undefined) {
+			throw new TypeError(`DshIdeSnapshot.state.view.rows[${index}] must carry text or preview`);
+		}
+	}
 }
 
 /**
@@ -348,8 +426,8 @@ export function assertSnapshotContinuity(prev: DshIdeSnapshot | undefined, next:
 }
 
 /**
- * 宿主侧视图宿主窄接口：DshIdeChannel 只依赖这四个方法，由阶段 2.x 的真实
- * Host Typert Gateway 适配器实现。当前 `EmptyIdeViewHost` 全是占位返回。
+ * 宿主侧视图宿主窄接口：DshIdeChannel 只依赖这四个方法，由 `DshIdeViewService`
+ * （electron-main）实现，DSH 能力经 `DshIdeBackend` 端口注入。
  */
 export interface IdeViewHost {
 	open(spec: { view: string; params?: Record<string, unknown> }): DshIdeSnapshot;
@@ -359,4 +437,4 @@ export interface IdeViewHost {
 }
 
 // 注：旧「账号」端点常量（DSH_ACCOUNT_*_ENDPOINT / dshAccountClientMetadata）已迁至
-// `legacy-account-endpoints.ts`，不属于本中立 DTO 协议，待阶段 2.x 归并或移除。
+// `legacy-account-endpoints.ts`，不属于本中立 DTO 协议，待 P5 归并或移除。

@@ -3,38 +3,170 @@
  *  Licensed under the MIT License.
  *--------------------------------------------------------------------------------------------*/
 
-// DSH-IDE 新连接层骨架（阶段 3 第三批）：实现 IServerChannel<string>，但当前所有方法
-// 返回 FEATURE_UNAVAILABLE / 空快照。真实现在阶段 2.1-2.5 填充（桥接 Host Typert Gateway）。
+// P3：唯一 DSH-IDE 通道实现（`IServerChannel<string>`，token 恒为 `dshIde`）。
+//
+// 通道只依赖 `IdeViewHost` 窄接口（见 dshIdeProtocol.ts），不持有插件宿主上下文，
+// 也不直连 electron API；DSH 能力的真实实现由插件 Host 层的视图宿主提供。
+//
+// 三个职责：
+//   call()         —— 控制命令（open / close）与 20 个 DTO method 的唯一分发入口；
+//   listen()       —— 只发布本条连接所属视图的快照（三层过滤）；
+//   disposeOwner() —— 窗口断开时只清理该连接持有的订阅，不代用户取消 DSH 会话。
 
+import { Emitter, Event } from '../../../base/common/event.js';
 import { Disposable } from '../../../base/common/lifecycle.js';
-import { Event } from '../../../base/common/event.js';
 import { IServerChannel } from '../../../base/parts/ipc/common/ipc.js';
-import { DSH_IDE_FEATURE_UNAVAILABLE, type IdeViewHost } from '../common/dshIdeProtocol.js';
+import {
+	DSH_IDE_CHANNEL,
+	DSH_IDE_FEATURE_UNAVAILABLE,
+	DSH_IDE_INVALID_ARGUMENT,
+	exactRecord,
+	validateDshIdeInput,
+	validateDshIdeInvokeOutput,
+	type DshIdeSnapshot,
+	type DshRemoteError,
+	type IdeViewHost,
+} from '../common/dshIdeProtocol.js';
+
+/** 通道控制命令：负责建立/释放一条连接，不属于 20 个 DTO method 白名单。 */
+export const DSH_IDE_CONTROL_OPEN = 'open';
+export const DSH_IDE_CONTROL_CLOSE = 'close';
+
+/** 快照事件名（`listen` 唯一允许的事件）。 */
+export const DSH_IDE_SNAPSHOT_EVENT = 'snapshot';
+
+interface DshIdeConnection {
+	/** 该连接绑定的窗口级通道 id，守恒。 */
+	readonly channelId: string;
+	/** 该连接上最近一次发布的快照。 */
+	last: DshIdeSnapshot;
+	/** 快照流订阅句柄。 */
+	readonly subscription: { dispose(): void };
+}
+
+function toDshIdeError(error: unknown, code: string): DshRemoteError {
+	const message = error instanceof Error ? error.message : String(error);
+	return { code, message };
+}
 
 export class DshIdeChannel extends Disposable implements IServerChannel<string> {
-	constructor(private readonly view: IdeViewHost) {
+	private readonly _onDidSnapshot = this._register(new Emitter<{ readonly ctx: string; readonly snapshot: DshIdeSnapshot }>());
+	private readonly _connections = new Map<string, DshIdeConnection>();
+	/** 每个连接已发出的最大 version：丢弃重复/倒退帧，保证消费者看到严格 +1。 */
+	private readonly _lastSentVersion = new Map<string, number>();
+
+	private readonly view: IdeViewHost;
+
+	constructor(view: IdeViewHost) {
 		super();
+		this.view = view;
 	}
 
-	listen<T>(_ctx: string, _event: string, _arg?: any): Event<T> {
-		// 阶段 2.x 改为转发真实投影事件（state / stream）。
-		return Event.None as Event<T>;
+	/**
+	 * 三层过滤：① 事件名白名单只放行 `snapshot`；② 归属过滤只把本连接（ctx）所属视图的
+	 * 帧发出去；③ 连续性过滤丢弃 `version` 未严格递增的重复/倒退帧。
+	 */
+	listen<T>(ctx: string, event: string, _arg?: unknown): Event<T> {
+		if (event !== DSH_IDE_SNAPSHOT_EVENT) {
+			return Event.None as Event<T>;
+		}
+		// 第二代过滤（连接归属）在 listen 上完成，第三代（version 严格递增）在发布侧按 ctx 去重，
+		// 两级都用平台既有的 Event.filter / Event.map，避免自造事件适配层。
+		return Event.map(
+			Event.filter(this._onDidSnapshot.event, emitted => emitted.ctx === ctx),
+			emitted => emitted.snapshot as unknown as T,
+		);
 	}
 
-	call<T>(_ctx: string, _command: string, _arg?: any): Promise<T> {
-		// TODO 2.2-2.5：按 method 桥接 Host Typert Gateway；当前一律拒绝为「重建中」。
-		return Promise.reject({
-			code: DSH_IDE_FEATURE_UNAVAILABLE,
-			message: 'DSH-IDE connection layer is being rebuilt (phase 2.x pending)',
-		}) as unknown as Promise<T>;
+	async call<T>(ctx: string, command: string, arg?: unknown): Promise<T> {
+		if (command === DSH_IDE_CONTROL_OPEN) {
+			return this.open(ctx, arg) as unknown as T;
+		}
+		if (command === DSH_IDE_CONTROL_CLOSE) {
+			this.disposeOwner(ctx);
+			return { closed: true } as unknown as T;
+		}
+		return this.invoke<T>(ctx, command, arg);
 	}
 
-	/** 清理某窗口（ctx）拥有的资源；骨架无状态，返回 0。 */
-	disposeOwner(_ctx: string): number {
-		return 0;
+	/** 建立（或复用）一条连接：同一 ctx 重复 open 不产生第二个 channelId。 */
+	private open(ctx: string, arg: unknown): DshIdeSnapshot {
+		const existing = this._connections.get(ctx);
+		if (existing !== undefined) {
+			return existing.last;
+		}
+		const spec = exactRecord(arg, ['view', 'params'], 'DshIdeChannel.open');
+		const view = spec['view'];
+		if (typeof view !== 'string' || view.trim() === '') {
+			throw toDshIdeError(new TypeError('DshIdeChannel.open.view must be a non-empty string'), DSH_IDE_INVALID_ARGUMENT);
+		}
+		const first = this.view.open(spec as { view: string; params?: Record<string, unknown> });
+		const subscription = this.view.subscribe(snapshot => {
+			const connection = this._connections.get(ctx);
+			if (connection === undefined || snapshot.channelId !== connection.channelId) {
+				// 归属过滤：别的视图的帧不会经由本连接发出。
+				return;
+			}
+			const sent = this._lastSentVersion.get(ctx) ?? -1;
+			if (snapshot.version <= sent) {
+				// 连续性过滤：重复或倒退帧一律丢弃（第 2 章 §5.1 第 1 条）。
+				return;
+			}
+			this._lastSentVersion.set(ctx, snapshot.version);
+			connection.last = snapshot;
+			this._onDidSnapshot.fire({ ctx, snapshot });
+		});
+		this._connections.set(ctx, { channelId: first.channelId, last: first, subscription });
+		return first;
+	}
+
+	/** 20 个 DTO method 的唯一分发路径：入参校验 → 宿主调用 → 出参校验。 */
+	private async invoke<T>(ctx: string, method: string, arg: unknown): Promise<T> {
+		this.assertOpen(ctx);
+		let validated: unknown;
+		try {
+			validated = validateDshIdeInput(method as never, arg);
+		} catch (error) {
+			const code = error instanceof TypeError
+				? (String((error as Error).message).includes('is not defined') ? DSH_IDE_FEATURE_UNAVAILABLE : DSH_IDE_INVALID_ARGUMENT)
+				: DSH_IDE_INVALID_ARGUMENT;
+			throw toDshIdeError(error, code);
+		}
+		let value: unknown;
+		try {
+			value = await this.view.invoke(method, validated);
+		} catch (error) {
+			throw (typeof error === 'object' && error !== null && 'code' in error) ? error : toDshIdeError(error, DSH_IDE_FEATURE_UNAVAILABLE);
+		}
+		try {
+			return validateDshIdeInvokeOutput({ value }) as T;
+		} catch (error) {
+			throw toDshIdeError(error, DSH_IDE_INVALID_ARGUMENT);
+		}
+	}
+
+	private assertOpen(ctx: string): void {
+		if (!this._connections.has(ctx)) {
+			throw { code: DSH_IDE_FEATURE_UNAVAILABLE, message: `${DSH_IDE_CHANNEL}: connection ${ctx} is not open` } satisfies DshRemoteError;
+		}
+	}
+
+	/** 清理某窗口（ctx）拥有的资源；返回被清理的连接数。 */
+	disposeOwner(ctx: string): number {
+		const connection = this._connections.get(ctx);
+		if (connection === undefined) {
+			return 0;
+		}
+		this._connections.delete(ctx);
+		this._lastSentVersion.delete(ctx);
+		connection.subscription.dispose();
+		return 1;
 	}
 
 	override dispose(): void {
+		for (const ctx of [...this._connections.keys()]) {
+			this.disposeOwner(ctx);
+		}
 		this.view.close();
 		super.dispose();
 	}

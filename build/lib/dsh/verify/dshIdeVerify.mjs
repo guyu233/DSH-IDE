@@ -3,13 +3,13 @@
  *  Licensed under the MIT License.
  *--------------------------------------------------------------------------------------------*/
 
-// DSH-IDE 四条门禁（阶段 2.1 建脚手架，随各步填充）。
+// DSH-IDE 四条门禁（P1 建脚手架，随各阶段填充）。
 //
 //   node build/lib/dsh/verify/dshIdeVerify.mjs <gate>
 //   gate ∈ protocol-single-source | boundary | projection-golden | contract
 //
 // 状态语义（诚实标注，不假装修复/通过）：
-//   PASS    —— 门禁已实现且检查通过（2.1 仅 protocol-single-source / boundary 可达）
+//   PASS    —— 门禁已实现且检查通过
 //   PENDING —— 该门禁依赖后续阶段产物，脚手架已就位但未启用断言
 //   FAIL    —— 检查失败，退出码 1
 
@@ -49,7 +49,7 @@ function countMatches(text, re) {
 }
 
 // ---------------------------------------------------------------------------
-// 1. verify:dsh-ide-protocol-single-source  —— 2.1 强制门禁，已实现
+// 1. verify:dsh-ide-protocol-single-source  —— P1 强制门禁，已实现
 // ---------------------------------------------------------------------------
 function protocolSingleSource() {
 	const protocol = read(protocolRel);
@@ -107,7 +107,7 @@ function protocolSingleSource() {
 }
 
 // ---------------------------------------------------------------------------
-// 2. verify:dsh-ide-boundary  —— 2.4 填充完整 UI 隔离断言；基础检查 2.1 已启用
+// 2. verify:dsh-ide-boundary  —— P1 基础检查 + P4 完整 UI 隔离断言；P3 起 listen 三层过滤已启用
 // ---------------------------------------------------------------------------
 function boundary() {
 	// workbench/** 零 @deepseek-ai/* import（DTO → IChatProgress 的 UI 投影层不 import DSH 包）。
@@ -149,12 +149,26 @@ function boundary() {
 			`${file} must not depend on Cordis Context`);
 	}
 
-	console.log(`PASS  boundary: workbench/** zero @deepseek-ai/* imports (${workbenchTs.length} files); channel zero Cordis ctx; ${pluginSources.length} plugin sources zero electron/@deepseek-ai/*/Cordis refs`);
-	console.log('      PENDING(2.4): DTO → IChatProgress UI 投影层隔离断言、listen 三层过滤断言');
+	// listen 三层过滤（P3 启用）：事件名白名单 / 连接归属 / version 严格递增必须同时在代码里存在。
+	const listenBody = /listen<T>\(([\s\S]*?)\n\t}/.exec(channel);
+	assert.ok(listenBody !== null, 'DshIdeChannel.listen must be implemented (not a stub)');
+	assert.match(channel, /if \(event !== DSH_IDE_SNAPSHOT_EVENT\)/,
+		'listen must gate Event.None behind the snapshot event-name whitelist');
+	assert.match(channel, /DSH_IDE_SNAPSHOT_EVENT/, 'listen must whitelist the snapshot event name');
+	assert.match(channel, /emitted => emitted\.ctx === ctx/, 'listen must filter frames by owning connection');
+	assert.match(channel, /snapshot\.version <= sent/, 'publish path must drop non-advancing versions');
+
+	// 通道分发（P3 启用）：call() 不得再无条件 reject，必须走 validateDshIdeInput + 出参校验。
+	assert.doesNotMatch(channel, /return Promise\.reject\(\{[\s\S]*?FEATURE_UNAVAILABLE[\s\S]*?\}\) as unknown as Promise<T>/,
+		'DshIdeChannel.call must dispatch instead of rejecting every command');
+	assert.match(channel, /validateDshIdeInput/, 'call must validate inputs with the protocol validator');
+	assert.match(channel, /validateDshIdeInvokeOutput/, 'call must validate the { value } output contract');
+
+	console.log(`PASS  boundary: workbench/** zero @deepseek-ai/* imports (${workbenchTs.length} files); channel zero Cordis ctx; ${pluginSources.length} plugin sources zero electron/@deepseek-ai/*/Cordis refs; listen three-layer filter + dispatch enforced`);
 }
 
 // ---------------------------------------------------------------------------
-// 3. verify:dsh-ide-projection-golden  —— 2.2a 已实现（真实回放比对）
+// 3. verify:dsh-ide-projection-golden  —— P2 已实现（真实回放比对）
 // ---------------------------------------------------------------------------
 function projectionGolden() {
 	const goldenDir = path.join(import.meta.dirname, 'golden');
@@ -189,11 +203,11 @@ function projectionGolden() {
 	}
 
 	console.log(`PASS  projection-golden: ${fixtures.length} fixture(s) replayed against ${path.relative(repoRoot, common)}/translator.ts + ide-view-projector.ts, byte-exact match`);
-	console.log('      PENDING(2.5): 真实事件流 P95 字节数校准（见 docs/DEVELOPMENT.md 第 5 章 §5，参数校准非架构回退）');
+	console.log('      PENDING(P6): 真实事件流 P95 字节数校准（见 docs/DEVELOPMENT.md 第 5 章 §5，参数校准非架构回退）');
 }
 
 // ---------------------------------------------------------------------------
-// 4. verify:dsh-ide-contract  —— 上游升级时启用失败门禁；2.1 建立脚手架
+// 4. verify:dsh-ide-contract  —— 上游升级时启用失败门禁；P1 建立脚手架
 // ---------------------------------------------------------------------------
 function contract() {
 	const text = read(contractRel);

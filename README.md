@@ -38,7 +38,7 @@ DSH-IDE 是把整个 VS Code 桌面运行时改造成 DeepSeekHarness 插件的�
 | `dshCtx` | 单进程内唯一的 Cordis 根，DSH 服务的注册与订阅都发生在它上面 |
 | 插件 | `build/lib/dsh/package.json` 定义的 `dsh-ide@2.0.0` bundle 插件，入口 `src/vs/platform/dshClient/index.js` |
 | 通道 | 唯一 `IServerChannel` 实现 `DshIdeChannel`，token `dshIde`，注册点 `src/vs/code/electron-main/app.ts` |
-| 视图宿主 | `IdeViewHost` 窄接口（`open` / `subscribe` / `invoke` / `close`）；当前为占位实现 `EmptyIdeViewHost`，交付态为持有 `dshCtx` 的真实实现 |
+| 视图宿主 | `IdeViewHost` 窄接口（`open` / `subscribe` / `invoke` / `close`）；当前为 `DshIdeViewService`（投影 + 快照版本计数），DSH 能力经 `DshIdeBackend` 端口由插件 Host 半身注入 |
 | 中立事件 | `IdeEvent`，`translator.ts` 输出的与 DSH 内部模型无关的封闭事件联合 |
 | 投影快照 | `IdeViewSnapshot`，`ide-view-projector.ts` 折叠出的 `{ rows, version }` |
 | 通道快照 | `DshIdeSnapshot`，跨 `dshIde` 通道传输的 `{ wireRevision, channelId, version, state }` |
@@ -117,7 +117,7 @@ P0 初始化 → P1 契约 → P2 适配层 → P3 通道与宿主 → P4 消费
 
 ## 7. 当前状态入口
 
-- 时态：**骨架期**。`DshIdeChannel` 仅注册骨架，`EmptyIdeViewHost` 占位，`client.js` 的按钮点击抛显式错误，`DshIdeConsumer` 尚未实现。
+- 时态：**流程打通前**（P3 进行中）。`DshIdeChannel` 已实现按 method 分发、`listen('snapshot')` 三层过滤与 `disposeOwner`；`DshIdeViewService` 已按 `wireRevision = 2` 发布 `state.view` 投影快照；Host 侧真源订阅与 answerer 尚未接线，`DshIdeBackend` 仍为 `UnavailableDshIdeBackend`（所有调用明确 `feature-unavailable`），`client.js` 按钮仍抛显式错误，`DshIdeConsumer` 尚未实现。
 - 阶段进度（唯一表）：[`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md) 第 3 章 §6。
 - 门禁与测试实测（唯一表）：开发手册第 5 章 §3–§4。
 - 代码实况与残留登记：开发手册第 7 章 §3；全局扫描与引用图登记：第 7 章 §7。

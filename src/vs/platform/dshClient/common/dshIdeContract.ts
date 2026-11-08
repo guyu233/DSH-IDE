@@ -3,7 +3,7 @@
  *  Licensed under the MIT License.
  *--------------------------------------------------------------------------------------------*/
 
-// DSH-IDE 协议契约与版本门禁（阶段 2.1）。
+// DSH-IDE 协议契约与版本门禁（P1）。
 //
 // 依赖方向单向：本文件引用 `dshIdeProtocol.ts` 的常量；`dshIdeProtocol.ts` 绝不反向引用本文件。
 // 版本策略：优先跟随 DSH stable，不在 rc 迭代期盲目追新；`installedMeetsVersion` / `upstreamDrift`

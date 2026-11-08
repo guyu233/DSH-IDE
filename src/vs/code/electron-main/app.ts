@@ -151,7 +151,7 @@ import ErrorTelemetry from '../../platform/telemetry/electron-main/errorTelemetr
 import { IProtocolMainService } from '../../platform/protocol/electron-main/protocol.js';
 import { createRemoteResourceRequestHandler } from '../../platform/protocol/electron-main/remoteResourceProtocol.js';
 import { DshIdeChannel } from '../../platform/dshClient/electron-main/dshIdeChannel.js';
-import { EmptyIdeViewHost } from '../../platform/dshClient/electron-main/ide-view-service.js';
+import { DshIdeViewService } from '../../platform/dshClient/electron-main/ide-view-service.js';
 import { DSH_IDE_CHANNEL } from '../../platform/dshClient/common/dshIdeProtocol.js';
 import { logNodeCompileCacheStatus, markNodeCompileCacheReady, waitForNodeCompileCacheReady } from '../../base/node/nodeCompileCache.js';
 
@@ -1440,12 +1440,14 @@ export class CodeApplication extends Disposable {
 		const workspacesChannel = ProxyChannel.fromService(accessor.get(IWorkspacesService), disposables);
 		mainProcessElectronServer.registerChannel('workspaces', workspacesChannel);
 
-		// 阶段 3 第三批：旧 dshClient 连接层已删，新 DshIdeChannel 骨架注册为 'dshIde'。
-		// 当前返回「重建中」；阶段 2.x 桥接 Host Typert Gateway 后恢复 Chat/账号/语音。
-		const dshIdeChannel = new DshIdeChannel(new EmptyIdeViewHost());
+		// P3：唯一 DSH-IDE 通道注册点。视图宿主在这里创建，DSH 能力经 `DshIdeBackend` 端口
+		// 由插件 Host 半身注入；端口未接线时构造 `UnavailableDshIdeBackend`，所有调用以
+		// feature-unavailable 明确拒绝，绝不伪造事件或快照。
+		const dshIdeViewHost = new DshIdeViewService();
+		const dshIdeChannel = new DshIdeChannel(dshIdeViewHost);
 		mainProcessElectronServer.registerChannel(DSH_IDE_CHANNEL, dshIdeChannel);
 		disposables.add(dshIdeChannel);
-		// 窗口断开时清理该窗口（ctx = `window:<id>`）拥有的资源；骨架无状态，disposeOwner 为 no-op。
+		// 窗口断开时清理该窗口（ctx = `window:<id>`）拥有的连接与订阅，不取消 DSH 会话。
 		disposables.add(mainProcessElectronServer.onDidRemoveConnection(connection => dshIdeChannel.disposeOwner(connection.ctx)));
 
 		// Menubar

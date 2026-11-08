@@ -9,16 +9,17 @@ import fs from 'node:fs';
 import * as path from 'node:path';
 
 /** Repository-relative source inputs used by the DSH desktop and bundle build. */
+// 仓库已扁平化（README §1）：仓库根即项目根，路径不带 `vscode-1.143.1/` 前缀。
 export const DSH_BUILD_INPUT_PATHS = [
-	'vscode-1.143.1/src', 'vscode-1.143.1/build', 'vscode-1.143.1/extensions',
-	'vscode-1.143.1/resources', 'vscode-1.143.1/remote', 'vscode-1.143.1/licenses',
-	'vscode-1.143.1/package.json', 'vscode-1.143.1/package-lock.json',
-	'vscode-1.143.1/product.json', 'vscode-1.143.1/gulpfile.mjs',
-	'vscode-1.143.1/LICENSE.txt', 'vscode-1.143.1/ThirdPartyNotices.txt',
-	// §3.7 职责归位后的 DSH-IDE 输入：bundle 清单模板在 build/lib/dsh/，图标与 NLS 在 resources/dsh/，
+	'src', 'build', 'extensions',
+	'resources', 'remote',
+	'package.json', 'package-lock.json',
+	'product.json', 'gulpfile.mjs',
+	'LICENSE.txt', 'ThirdPartyNotices.txt',
+	// DSH-IDE 输入：bundle 清单模板在 build/lib/dsh/，图标与 NLS 在 resources/dsh/，
 	// 渲染 sidecar 在 build/dsh/chat-render/，Host/客户端半身在 src/vs/platform/dshClient/（已被上行 src 覆盖）。
-	'vscode-1.143.1/build/lib/dsh', 'vscode-1.143.1/build/dsh',
-	'vscode-1.143.1/resources/dsh',
+	'build/lib/dsh', 'build/dsh',
+	'resources/dsh',
 ] as const;
 
 const excludedNames = /(?:^|\/)(?:node_modules|\.git|\.build|\.dsh-build|dist|out(?:-[^/]*)?|\.env(?:\..*)?|\.npmrc|\.pypirc|credentials?(?:\..*)?|secrets?(?:\..*)?|id_rsa|id_ed25519|[^/]*(?:private[-_.]?key|secret|credential)[^/]*|[^/]*\.(?:pem|key|p12|pfx))(?=\/|$)/i;

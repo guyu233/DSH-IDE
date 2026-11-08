@@ -58,10 +58,10 @@
 
 | 部件 | 交付态 | 当前态（代码实况） |
 | --- | --- | --- |
-| 插件入口 `index.js` | `apply(ctx)` 持有 `dshCtx`，订阅官方事件并注册真实 `IdeViewHost` | `name='dsh-ide'`、`inject=[]`，仅 `ctx.plugin(IdeRemoteService, { root })`；不订阅事件、不注册通道 |
-| 通道注册 `app.ts` | `registerChannel(DSH_IDE_CHANNEL, new DshIdeChannel(真实 IdeViewHost))` | `app.ts:1445-1449` 已注册 `new DshIdeChannel(new EmptyIdeViewHost())`，并配对 `onDidRemoveConnection → disposeOwner(connection.ctx)` |
+| 插件入口 `index.js` | `apply(ctx)` 持有插件上下文，订阅官方事件并注册真实 `IdeViewHost` | `name='dsh-ide'`、`inject=[]`；`ctx.plugin(IdeRemoteService, { root })` + `createDshIdeHostBridge(ctx)`，后者订阅四类官方事件并注册唯一 answerer；传输端口待 P5 接线 |
+| 通道注册 `app.ts` | `registerChannel(DSH_IDE_CHANNEL, new DshIdeChannel(真实 IdeViewHost))` | 已注册 `new DshIdeChannel(new DshIdeViewService())`，并配对 `onDidRemoveConnection → disposeOwner(connection.ctx)`；`DshIdeViewService` 的后端端口当前为 `UnavailableDshIdeBackend` |
 | `DshIdeChannel` | `call` / `listen` / `disposeOwner` 全实现 | `call` 固定 reject `dsh-ide/feature-unavailable`；`listen` 返回 `Event.None`；`disposeOwner` 返回 `0`；`dispose` 调用 `view.close()` |
-| `IdeViewHost` | 持有 `dshCtx`、执行投影、处理 20 个方法 | `EmptyIdeViewHost` 占位：`open` 返回 `starting` 快照、`subscribe` 空实现、`invoke` 抛 `dsh-ide/feature-unavailable`、`close` 返回 `{closed:true}` |
+| `IdeViewHost` | 持有插件宿主上下文、执行投影、处理 20 个方法 | `DshIdeViewService`：投影 + 快照版本计数（`starting` → `ready` + `state.view`）已实现；`DshIdeBackend` 端口仍为 `UnavailableDshIdeBackend`，`invoke` 一律以 `dsh-ide/feature-unavailable` 拒绝 |
 | IDE 消费者 | `DshIdeConsumer` 校验连续性并渲染 Chat | 不存在；`DshClientService` 骨架恒返回「重建中」，消费方优雅降级 |
 | 按钮行为 | 打开 IDE 窗口 | `client.js:62` 抛 `Error('launch chain removed; pending phase 2 DshIdeChannel.open')` |
 | Chat 面板 | 回填 DSH 投影内容 | `chat.view.contribution` 在 `workbench.common.main.ts:229` 无条件注册，容器仍在；DSH 内容为空；`dshChatSeam.ts` 接缝开关默认关闭 |
@@ -127,8 +127,8 @@ dshCtx 官方服务与事件
 | 项 | 值 | 定义位置 |
 | --- | --- | --- |
 | 通道 token | `dshIde` | `DSH_IDE_CHANNEL`，`dshIdeProtocol.ts:17` |
-| 协议版本 | `dshIde/v1` | `DSH_IDE_API_VERSION = '0.0.0-rebuild'`，`dshIdeProtocol.ts:20`（重建期占位值） |
-| 线协议修订号 | `wireRevision = 1` | `DSH_IDE_WIRE_REVISION`，`dshIdeProtocol.ts:23` |
+| 协议版本 | `dshIde/v1` | `DSH_IDE_API_VERSION = '0.2.2-rc.1'`（与契约基准同值，P3 对齐） |
+| 线协议修订号 | `wireRevision = 2` | `DSH_IDE_WIRE_REVISION`（P3 把投影载荷并入 `state.view`，形状变化故由 1 升到 2） |
 | 真源文件 | `common/dshIdeProtocol.ts` | 17 个导出符号：5 常量 + 6 类型/接口 + 6 校验函数 |
 | 版本契约 | `common/dshIdeContract.ts` | 只承载版本与注入点，**单向**引用 `dshIdeProtocol.ts` |
 
@@ -140,7 +140,7 @@ dshCtx 官方服务与事件
 
 ```ts
 interface DshIdeSnapshot {
-  readonly wireRevision: number;   // 恒等于 DSH_IDE_WIRE_REVISION(=1)
+  readonly wireRevision: number;   // 恒等于 DSH_IDE_WIRE_REVISION(=2)
   readonly channelId: string;      // 窗口级唯一，守恒
   readonly version: number;        // 非负整数，严格单调 +1
   readonly state: DshIdeViewState;
@@ -148,6 +148,11 @@ interface DshIdeSnapshot {
 interface DshIdeViewState {
   readonly state: 'starting' | 'ready' | 'rebuild';
   readonly message?: string;
+  readonly view?: DshIdeViewSnapshot;   // ready 时必填，其余状态禁止出现
+}
+interface DshIdeViewSnapshot {
+  readonly rows: readonly DshIdeRow[];   // 渐进投影行
+  readonly version: number;              // 投影器自增计数，非 event.seq
 }
 interface DshRemoteError {
   readonly code: string;
@@ -156,7 +161,7 @@ interface DshRemoteError {
 }
 ```
 
-`channelId` 标识一次连接；窗口 A 不得消费窗口 B 的 `channelId`。`state` 的三种取值分别表示「首帧未就绪」「投影可用」「要求重建全量快照」。`DshIdeSnapshot.state` 目前只承载这三种骨架状态；交付态的完整投影载荷由 `IdeViewSnapshot` 经同一快照流发布（见 §3），并入时须升 `wireRevision` 并同步真源与本章。
+`channelId` 标识一次连接；窗口 A 不得消费窗口 B 的 `channelId`。`state` 的三种取值分别表示「首帧未就绪」「投影可用」「要求重建全量快照」。P3 起投影载荷 `IdeViewSnapshot` 已并入 `state.view`，因此 `wireRevision` 升为 2；`ready` 之外的任何状态都不得携带 `view`，`validateDshIdeSnapshot` 对此 fail-closed。
 
 #### 2.2 `IdeViewHost`（通道层唯一接缝）
 
@@ -169,7 +174,7 @@ interface IdeViewHost {
 }
 ```
 
-`DshIdeChannel` 的构造函数只接收 `IdeViewHost`，不接收 Cordis `ctx`。`open` 产出首帧；`subscribe` 建立单向快照流；`invoke` 执行 IDE→DSH 调用；`close` 结束宿主。`EmptyIdeViewHost` 是当前占位实现，交付态实现必须持有 `dshCtx`。
+`DshIdeChannel` 的构造函数只接收 `IdeViewHost`，不接收插件宿主上下文。`open` 产出首帧；`subscribe` 建立单向快照流；`invoke` 执行 IDE→DSH 调用；`close` 结束宿主。当前实现是 `DshIdeViewService`（electron-main），DSH 能力经 `DshIdeBackend` 端口注入，端口由插件 Host 半身实现。
 
 ### 3. 适配层的中立 DTO
 
@@ -223,7 +228,7 @@ interface IdeViewHost {
 | `jsonValue(value, label, ancestors)` | 值合法性 | 拒绝非有限数、循环引用、非纯对象、class 实例 |
 | `validateDshIdeInput(command, args)` | `DshIdeChannel.call()` 入口 | 白名单外 method 抛确定性 `TypeError`；再按 `DSH_IDE_METHOD_KEYS[command]` 做 `exactRecord`；再按 §4 表逐方法校验；返回按 method 收窄的参数 |
 | `validateDshIdeInvokeOutput(value)` | `call()` 组装输出 | 只允许 `{ value }`；`value` 必须是合法 JSON 值；出现 `snapshot` 等额外字段即抛错 |
-| `validateDshIdeSnapshot(value)` | `DshIdeConsumer.accept()` 入口 | 四字段精确匹配；`wireRevision === 1`；`channelId` 非空字符串；`version` 非负整数；`state.state` 属于三种取值；`message` 必须合法 JSON 值 |
+| `validateDshIdeSnapshot(value)` | `DshIdeConsumer.accept()` 入口 | 四字段精确匹配；`wireRevision === 2`；`channelId` 非空字符串；`version` 非负整数；`state.state` 属于三种取值；`message` 可省略；`state.view` 仅在 `ready` 时允许且必须通过行级校验（逐行 `id` / `revision` / `kind` / `folded`，`text` 或 `preview` 至少一项） |
 | `assertSnapshotContinuity(prev, next)` | `accept()` 入口 | `prev` 为 `undefined` 时直接通过；否则 `channelId` 与 `wireRevision` 必须不变、`version` 必须严格等于 `prev.version + 1`；倒退、等值、gap 一律抛 `TypeError` |
 
 #### 5.1 三条硬规则
@@ -238,11 +243,11 @@ interface IdeViewHost {
 | --- | --- | --- | --- |
 | `dsh-ide/feature-unavailable` | method 不在白名单，或连接层处于重建中 | `validateDshIdeInput` / `DshIdeChannel.call()` | 已落地（常量 `DSH_IDE_FEATURE_UNAVAILABLE`） |
 | `dsh-ide/invalid-argument` | 入参违反 `exactRecord` / `jsonValue` / 逐方法约束 | `validateDshIdeInput` | 已落地（常量 `DSH_IDE_INVALID_ARGUMENT`） |
-| `ALREADY_RESOLVED` | waterfall 已被另一窗口 resolve，本窗口操作无效 | `answerApproval` / `answerQuestion` 处理 | 交付态定义，P3 落地 |
-| `SESSION_SWITCHED` | 目标会话已切换，本次操作上下文失效 | `IdeViewHost.invoke` 会话归属校验 | 交付态定义，P3 落地 |
-| `SNAPSHOT_STALE` | 本地 `version` 落后过多，需 `refreshSnapshot` | `DshIdeConsumer.accept()` | 交付态定义，P4 落地 |
+| `ALREADY_RESOLVED` | waterfall 已被另一窗口 resolve，本窗口操作无效 | `DshIdeChannel.call()` 的 `answerApproval` / `answerQuestion` | 已落地（常量 `DSH_IDE_ALREADY_RESOLVED`，P3） |
+| `SESSION_SWITCHED` | 目标会话已切换，本次操作上下文失效 | `IdeViewHost.invoke` 会话归属校验 | 已落地（常量 `DSH_IDE_SESSION_SWITCHED`，P3） |
+| `SNAPSHOT_STALE` | 本地 `version` 落后过多，需 `refreshSnapshot` | `DshIdeConsumer.accept()` | 已落地（常量 `DSH_IDE_SNAPSHOT_STALE`，P3）；消费者接线在 P4 |
 
-连续性违规（`version` gap / 倒退、`channelId` / `wireRevision` 变化）由 `assertSnapshotContinuity` 抛 `TypeError`，**不**走错误码表。当前态代码中不存在后三个常量，禁止把它们当作可用错误码引用。
+连续性违规（`version` gap / 倒退、`channelId` / `wireRevision` 变化）由 `assertSnapshotContinuity` 抛 `TypeError`，**不**走错误码表。后三个常量已在真源声明（P3）；`SNAPSHOT_STALE` 的消费点是 P4 的 `DshIdeConsumer`，在此之前没有任何生产代码使用它。
 
 ### 7. 接口级异常定义
 
@@ -257,7 +262,7 @@ interface IdeViewHost {
 | E5 | waterfall 重复决议 | `answerApproval` / `answerQuestion` 处理 | 不重复消费 | `ALREADY_RESOLVED` | 首个决议生效后请求即关闭 |
 | E6 | 会话归属失效 | `IdeViewHost.invoke` | 拒绝本次调用 | `SESSION_SWITCHED` | 以 `channelId` 与会话归属为准 |
 | E7 | 本地快照落后过多 | `DshIdeConsumer.accept()` | 拒绝增量合并 | `SNAPSHOT_STALE` | 下一次流程实例通过 `refreshSnapshot` 取全量 |
-| E8 | 连接层重建中 | `DshIdeChannel.call()` / `EmptyIdeViewHost.invoke` | 一律拒绝 | `dsh-ide/feature-unavailable` | 当前态的实际行为；不伪造事件、不伪造快照 |
+| E8 | 连接层未接线 | `DshIdeChannel.call()`（未 open）/ `UnavailableDshIdeBackend.invoke` | 一律拒绝 | `dsh-ide/feature-unavailable` | 当前态的实际行为；不伪造事件、不伪造快照 |
 | E9 | 折叠行全文不可得 | `IdeViewProjector.fetchRowDetail()` | 依次查本地 `fullText` → 本地 `row.text` → `deps.fetchRowDetail(rowId)` → 返回 `undefined` | `fetchRowDetail` 的 `value = null` | 不抛错、不返回截断文本冒充全文 |
 | E10 | 投影行数或字节数越界 | `foldOldest()` / P95 校验 | 折叠最老行；P95 参数按第 5 章 §5 的固定序列校准 | 快照仍合法 | `rows` 数组不裁剪；`MAX_ROWS = 600`、阈值 512 KiB |
 | E11 | 上游版本漂移 | `installedMeetsVersion()` / `upstreamDrift()` | 插件启动告警、CI 失败门禁 | drift 报告 | 以 `UPSTREAM_VALIDATED_VERSION = 0.2.2-rc.1` 为唯一基准 |
@@ -293,11 +298,11 @@ interface IdeViewHost {
 | --- | --- |
 | 17 个协议符号、20 方法 schema、6 个校验函数 | 已落地（P1） |
 | `translator.ts` / `ide-view-projector.ts` / `IdeViewSnapshot` / golden fixture | 已落地（P2） |
-| 投影快照并入 `DshIdeSnapshot.state` | 未落地；并入须升 `wireRevision`（P3/P4） |
-| `call()` 使用 `validateDshIdeInput` 并分发 20 方法 | 未落地；当前一律 reject `dsh-ide/feature-unavailable` |
-| `listen('snapshot')` 推送真实快照 | 未落地；当前返回 `Event.None` |
-| `validateDshIdeSnapshot` / `assertSnapshotContinuity` 被消费者调用 | 未落地；消费者不存在 |
-| `ALREADY_RESOLVED` / `SESSION_SWITCHED` / `SNAPSHOT_STALE` 常量 | 未落地，仅为交付态契约 |
+| 投影快照并入 `DshIdeSnapshot.state` | 已落地（P3，`wireRevision = 2`，`state.view` 由 `DshIdeViewService` 填充） |
+| `call()` 使用 `validateDshIdeInput` 并分发 20 方法 | 已落地（P3；未知 method 映射 `feature-unavailable`，形状违规映射 `invalid-argument`，输出过 `validateDshIdeInvokeOutput`） |
+| `listen('snapshot')` 推送真实快照 | 已落地（P3；三层过滤：事件名白名单 / 连接归属 / version 严格递增） |
+| `validateDshIdeSnapshot` / `assertSnapshotContinuity` 被消费者调用 | 未落地；消费者不存在（P4） |
+| `ALREADY_RESOLVED` / `SESSION_SWITCHED` / `SNAPSHOT_STALE` 常量 | 已落地（P3） |
 
 ---
 
@@ -373,10 +378,10 @@ P7 打包为 DSH 插件与交付
 #### P3 通道与宿主实现
 
 - **前置**：K3。
-- **活动**：以持有 `dshCtx` 的真实 `IdeViewHost` 替换 `EmptyIdeViewHost`；在 `dshCtx` 上订阅 `session/event`、`agent/assistant-stream`、`approval/request`、`user-questions/request`；实现 `call()` 分发、`listen()` 三层过滤、`disposeOwner()` 本通道清理；注册唯一交互式 answerer；落地 `ALREADY_RESOLVED` / `SESSION_SWITCHED` 常量；按第 2 章 §9 完成 `IdeViewSnapshot` 并入 `DshIdeSnapshot.state` 的契约升级；执行 waterfall 一致性核对（旧编号 S0，见 §5），实测必须满足「广播 + 首个决议生效，重复决议返回 `ALREADY_RESOLVED`」，实测不符按 §1 第 4 条的阶段内返工规则处理，不切换 answerer 形态。
-- **产出**：真实 `IdeViewHost`、`DshIdeChannel` 完整实现、3 个新增错误码常量、升级后的协议真源与 golden 快照、waterfall 一致性核对记录。
+- **活动**：以持有插件上下文（`apply(ctx)` 上下文，即 `dshCtx`）的真实 `IdeViewHost` 替换骨架占位；在该上下文上订阅 `session/event`、`agent/assistant-stream`、`approval/request`、`user-questions/request`；实现 `call()` 分发、`listen()` 三层过滤、`disposeOwner()` 本通道清理；注册唯一交互式 answerer；落地 `ALREADY_RESOLVED` / `SESSION_SWITCHED` 常量；按第 2 章 §9 完成 `IdeViewSnapshot` 并入 `DshIdeSnapshot.state` 的契约升级；执行 waterfall 一致性核对（旧编号 S0，见 §5），实测必须满足「广播 + 首个决议生效，重复决议返回 `ALREADY_RESOLVED`」，实测不符按 §1 第 4 条的阶段内返工规则处理，不切换 answerer 形态。
+- **产出**：真实 `IdeViewHost`（`DshIdeViewService` + `DshIdeBackend` 端口）、`DshIdeChannel` 完整实现（`call` / `listen` / `disposeOwner`）、3 个新增错误码常量、`wireRevision = 2` 的协议真源与快照校验（含 `state.view` 行级校验）、`build/lib/test/dshIdeChannel.test.ts`（17 项）。
 - **出口判据 K4**：20 个 method 均有确定 handler 且通过 `validateDshIdeInput`；`call` / `listen` / `disposeOwner` 行为符合 第 2 章 §4–§7；`invoke` 输出恒为 `{ value }`；waterfall 实测符合上述唯一形态；`boundary` 门禁 `PASS`；契约升级后 17 符号仍单源。
-- **当前态**：未开始。
+- **当前态**：**部分完成**。已落地：通道分发与三层过滤、`DshIdeViewService` 快照纪律（首帧 `starting`、`channelId` 守恒、`version` 严格 +1、微任务批处理）、`state.view` 并入与行级校验、3 个错误码常量、`disposeOwner` 按 ctx 清理、`boundary` 起启用 `listen` 三层过滤与分发断言。已落地（续）：`index.js` 创建 `DshIdeHostBridge`，在插件上下文上订阅 `session/event` / `agent/assistant-stream` / `approval/request` / `user-questions/request` 并注册唯一交互式 answerer（未见界面时 `next()` 委托），`host/ide-view-host.js` 15 项单测覆盖订阅、归属过滤、重复决议与会话切换。**未落地**：`DshIdeBackend` 到 Host 半身的传输端口（IDE 主进程 ↔ Host）仍是 `UnavailableDshIdeBackend`（所有 method 明确以 `feature-unavailable` 拒绝）；waterfall 一致性真机核对未执行。K4 未达成，故 P4 不得启动。
 
 #### P4 IDE 消费者与 UI 实现
 
@@ -399,7 +404,7 @@ P7 打包为 DSH 插件与交付
 - **前置**：K6。
 - **活动（固定顺序，不并行、不调换）**：① 四条门禁 → ② `test-dsh:all` → ③ `tsc --noEmit` 本批文件 0 错误 → ④ 第 5 章 §6 的 9 项真机验收 → ⑤ 真实事件流 P95 校准 → ⑥ `node-pty` 按宿主 Electron 44.7.0 的 `NODE_MODULE_VERSION` 重编 → ⑦ IDE 终端冒烟 → ⑧ 第 5 章 §7 的上游核对（同时把 `contract` 改为启用失败断言） → ⑨ 把 第 5 章 §2 的四条门禁与 `test-dsh:all` 接入 CI 配置，并按第 7 章 §7.1 的 11 行清单逐文件把代码注释中的历史阶段标记改为 P 编号；`client.js:62` 与 `dshIdeChannel.ts:28` 是**运行时错误字符串**，单独记录、不与注释清理混同，改字符串后须同步核对 `packaging.test.mjs` 及通道相关测试断言，并跑 第 5 章 §2 的 `test-dsh:all` 确认基线不变；第 7 章 §7.3 的失效章节引用同步修复。P95 超标时按固定序列执行：下调 `MAX_ROWS` → 收紧 `preview` 折叠阈值 → 重新生成 golden，直至 rows 序列化后 P95 ≤ 512 KiB；这是阶段内的参数校准迭代，不是架构变更。
 - **产出**：门禁与测试实测记录、9 项真机验收记录、P95 校准后的常量与 golden、ABI 重编产物、终端冒烟记录、上游差异报告、CI 配置改动、历史阶段标记清理记录。
-- **出口判据 K7**：`protocol-single-source` / `boundary` / `projection-golden` 均 `PASS`；`contract` 启用失败断言后完成一次上游核对且 4 个注入点指纹一致，并按第 5 章 §9 记录状态；`test-dsh:all` 不低于 59/59；9 项真机验收全部通过；P95 ≤ 512 KiB；IDE 终端可开且 PTY 数据流走原生 `node-pty`；CI 配置中可见同一组命令；第 7 章登记的历史阶段标记与失效章节引用零残留。
+- **出口判据 K7**：`protocol-single-source` / `boundary` / `projection-golden` 均 `PASS`；`contract` 启用失败断言后完成一次上游核对且 4 个注入点指纹一致，并按第 5 章 §9 记录状态；`test-dsh:all` 不低于 91/91；9 项真机验收全部通过；P95 ≤ 512 KiB；IDE 终端可开且 PTY 数据流走原生 `node-pty`；CI 配置中可见同一组命令；第 7 章登记的历史阶段标记与失效章节引用零残留。
 - **当前态**：未开始。门禁脚手架已就位（3 `PASS` + 1 `PENDING`，见第 5 章 §3），不构成 K7 达成。
 
 #### P7 打包为 DSH 插件与交付
@@ -450,7 +455,7 @@ P7 打包为 DSH 插件与交付
 | P0 | 已完成 | 工程基线、bundle 清单、patch、资源、官方打包任务齐备 |
 | P1 | 已完成 | K2 判据实测通过 |
 | P2 | 已完成 | `translator.ts` / `ide-view-projector.ts` / golden / 11 项单测；K3 判据实测通过 |
-| P3 | 未开始 | K3 已达成后才启动；`DshIdeChannel` 仍为骨架 |
+| P3 | 进行中 | 通道分发 / `listen` 三层过滤 / 快照并入 `state.view` / 3 个错误码已落地；Host 侧真源订阅与 answerer 未接线，K4 未达成 |
 | P4 | 未开始 | `DshIdeConsumer` 不存在 |
 | P5 | 未开始 | 按钮仍抛显式错误；双窗口镜像未接线 |
 | P6 | 未开始 | 门禁脚手架 3 `PASS` + 1 `PENDING`；真机验收、ABI 重编、终端冒烟未完成 |
@@ -525,10 +530,10 @@ P7 打包为 DSH 插件与交付
 
 - 输入：T1 的连接。
 - 处理：`IdeViewHost.open()` 产出首帧 `DshIdeSnapshot`；`IdeViewHost.subscribe(onSnapshot)` 注册快照回调；IDE renderer 建立唯一的 `listen('snapshot')` 订阅。
-- 接口：`DshIdeSnapshot { wireRevision: 1, channelId, version: 1, state: { state: 'starting' } }`；`IServerChannel.listen(_ctx, 'snapshot')`。
+- 接口：`DshIdeSnapshot { wireRevision: 2, channelId, version: 1, state: { state: 'starting' } }`；`IServerChannel.listen(_ctx, 'snapshot')`。
 - 输出：首帧快照与订阅句柄。
 - 状态：保持 ST1。
-- 边界：`wireRevision` 恒为 1；`version` 从 1 起；`invoke` 不参与首帧；首帧不得携带未校验的投影载荷。
+- 边界：`wireRevision` 恒为 2；`version` 从 1 起；`invoke` 不参与首帧；首帧不得携带未校验的投影载荷。
 
 #### T3 订阅真源
 
@@ -647,8 +652,8 @@ B1–B5 是流程内的检查点，与开发路线的 K1–K8 不同，二者不
 | 步骤 | 当前行为 |
 | --- | --- |
 | T1 | `client.js:62` 抛 `Error('launch chain removed; pending phase 2 DshIdeChannel.open')`，实例终止于 STF |
-| T2 | `EmptyIdeViewHost.open()` 返回 `starting` 占位快照；`subscribe` 为空实现 |
-| T3 | `index.js` 只注册 `IdeRemoteService`，不订阅 `dshCtx` 事件、不注册 answerer |
+| T2 | `DshIdeViewService.open()` 返回 `starting` 首帧；`subscribe` 已注册，后端端口接通后按批次推 `ready` + `state.view` |
+| T3 | `index.js` 已创建 `DshIdeHostBridge` 并订阅四类官方事件、注册唯一 answerer；但桥接与 IDE 主进程之间的传输端口尚未接线 |
 | T4 / T5 | `translator.ts` 与 `ide-view-projector.ts` 已落地（P2），但未被真实 `IdeViewHost` 调用 |
 | T6 | `DshIdeChannel.listen()` 返回 `Event.None`，无快照推送 |
 | T7 | `DshIdeConsumer` 不存在；`DshClientService` 骨架恒返回「重建中」；Chat 容器在、DSH 内容为空；`inlineComplete` / 语音 / 账号优雅降级 |
@@ -676,7 +681,7 @@ B1–B5 是流程内的检查点，与开发路线的 K1–K8 不同，二者不
 | --- | --- | --- |
 | 编译 DSH 测试 | `npm run build-dsh-tests` | 退出 0，产出 `out/` |
 | mocha tdd 半场 | `npm run test-dsh` | `13 passing` |
-| 全量 DSH 测试 | `npm run test-dsh:all` | `13 passing` + `46/46`，合计 59/59 |
+| 全量 DSH 测试 | `npm run test-dsh:all` | `13 passing` + `78/78`，合计 91/91 |
 | 门禁 1 | `npm run verify:dsh-ide-protocol-single-source` | `STATUS: PASS` |
 | 门禁 2 | `npm run verify:dsh-ide-boundary` | `STATUS: PASS` |
 | 门禁 3 | `npm run verify:dsh-ide-projection-golden` | `STATUS: PASS` |
@@ -695,7 +700,7 @@ B1–B5 是流程内的检查点，与开发路线的 K1–K8 不同，二者不
 
 ```powershell
 node node_modules/mocha/bin/mocha.js --ui tdd "out/vs/platform/dshClient/test/node/*.test.mjs" "out/vs/workbench/contrib/dsh/test/browser/chatClient/*.test.js" "out/vs/workbench/contrib/dsh/test/browser/chatClient/*.test.mjs"
-node --experimental-strip-types --test build/lib/test/dshBuildProvenance.test.ts build/lib/test/dshBundleStaging.test.ts build/lib/test/ripgrep.test.ts build/lib/test/dshIdeProtocol.test.ts build/lib/test/dshIdeProjection.test.ts
+node --experimental-strip-types --test build/lib/test/dshBuildProvenance.test.ts build/lib/test/dshBundleStaging.test.ts build/lib/test/ripgrep.test.ts build/lib/test/dshIdeProtocol.test.ts build/lib/test/dshIdeProjection.test.ts build/lib/test/dshIdeChannel.test.ts src/vs/platform/dshClient/test/host/ideViewHost.test.mjs
 ```
 
 ### 3. 四条门禁判据与当前实测
@@ -705,15 +710,15 @@ node --experimental-strip-types --test build/lib/test/dshBuildProvenance.test.ts
 | 门禁 | 精确判据 | 当前实测 |
 | --- | --- | --- |
 | `protocol-single-source` | 17 个协议符号各在 `platform/dshClient/common/dshIdeProtocol.ts` 声明且只声明一次；扫描范围为 `platform/dshClient`、`workbench/contrib/dsh`、`workbench/browser/parts` 下全部 `.ts`；`dshIdeProtocol.ts` 不得引用 contract，contract 必须引用 protocol；`platform/dshClient` 下 `.js` / `.mjs` 不得出现第二份 `exactRecord` / `jsonValue` / `validateDshIde*` 校验器 | **PASS**，退出 0 |
-| `boundary` | `src/vs/workbench` 全部 `.ts`（实测 4439 文件）零 `from '@deepseek-ai/` 与 `require('@deepseek-ai/`；`dshIdeChannel.ts` 零 Cordis / `dshCtx` / `apply(ctx)` 且构造函数必须含 `IdeViewHost`；`platform/dshClient/common` 与 `electron-main` 下 `.ts`（排除 `test/`，实测 9 个文件）零 electron API、`@deepseek-ai/*`、Cordis 引用 | **PASS**，退出 0；脚本内附 `PENDING(2.4)` 说明：UI 投影层隔离与 `listen` 三层过滤断言尚未启用，按 P4 转为启用断言 |
-| `projection-golden` | `verify/golden/*.json` 至少 1 个 fixture；每个 fixture 起子进程真实执行 `projectIdeView(translateAll(fx.events))`，与 `fixture.expected` 做 `JSON.stringify` 逐字节比对；`fx.events` 必须为非空数组 | **PASS**，退出 0，1 个 fixture；脚本内附 `PENDING(2.5)` 说明：真实事件流 P95 校准未执行（§5） |
+| `boundary` | `src/vs/workbench` 全部 `.ts`（实测 4439 文件）零 `from '@deepseek-ai/` 与 `require('@deepseek-ai/`；`dshIdeChannel.ts` 零 Cordis / `dshCtx` / `apply(ctx)` 且构造函数必须含 `IdeViewHost`；`platform/dshClient/common` 与 `electron-main` 下 `.ts`（排除 `test/`，实测 8 个文件）零 electron API、`@deepseek-ai/*`、Cordis 引用；P3 起同时断言 `listen` 三层过滤（事件名白名单 / 连接归属 / version 严格递增）与 `call` 真实分发（`validateDshIdeInput` + `validateDshIdeInvokeOutput`） | **PASS**，退出 0；UI 投影层隔离断言按 P4 追加 |
+| `projection-golden` | `verify/golden/*.json` 至少 1 个 fixture；每个 fixture 起子进程真实执行 `projectIdeView(translateAll(fx.events))`，与 `fixture.expected` 做 `JSON.stringify` 逐字节比对；`fx.events` 必须为非空数组 | **PASS**，退出 0，1 个 fixture；脚本内附 `PENDING(P6)` 说明：真实事件流 P95 校准未执行（§5） |
 | `contract` | `dshIdeContract.ts` 必须导出 `UPSTREAM_VALIDATED_VERSION`、`BLESSED_PACKAGES`、`installedMeetsVersion`、`upstreamDrift`、`VSCODE_PATCH_POINTS`；正则抽取的注入点恰好 4 个；逐文件计算 sha256 前 16 位指纹并打印基线 | **PENDING**（状态语义见 §9），退出 0；首次基线：`validated=0.2.2-rc.1`，4 个指纹已产出 |
 
 本表只记录实测结果；`PENDING` 的状态语义、触发条件、升级条件与交付口径（含脚本内 `PENDING(2.4)` / `PENDING(2.5)` 说明项）一律见 §9。
 
 ### 4. 测试基线与类型检查
 
-`test-dsh:all` = `npm run test-dsh` + `node --experimental-strip-types --test` 的 5 个文件。`build/package.json` 的默认 `test` 不覆盖这 5 个文件，必须由 `test-dsh:all` 显式列出。
+`test-dsh:all` = `npm run test-dsh` + `node --experimental-strip-types --test` 的 6 个 `build/lib/test` 文件 + 1 个插件侧 `.mjs`（`src/vs/platform/dshClient/test/host/ideViewHost.test.mjs`）。`build/package.json` 的默认 `test` 不覆盖这组文件，必须由 `test-dsh:all` 显式列出。
 
 | 分组 | 文件 | 用例数 |
 | --- | --- | --- |
@@ -723,9 +728,11 @@ node --experimental-strip-types --test build/lib/test/dshBuildProvenance.test.ts
 | `ripgrep.test.ts` | 平台过滤 | 5 |
 | `dshIdeProtocol.test.ts` | 20 方法白名单、双向校验器、连续性 fail-closed | 19 |
 | `dshIdeProjection.test.ts` | golden 回放、事件分类、seq 幂等、稳定 id、600 行折叠、P95 脚手架、架构边界 | 11 |
-| **合计** | — | **13 + 46 = 59** |
+| `dshIdeChannel.test.ts` | 通道分发（20 method）、三层过滤、`disposeOwner`、快照纪律、`state.view` 行级校验 | 17 |
+| `ideViewHost.test.mjs` | Host 半身：四类事件订阅与归属过滤、唯一 answerer 形态、重复决议、会话归属、method 映射 | 15 |
+| **合计** | — | **13 + 78 = 91** |
 
-- 当前唯一基线：**59/59**（mocha `13 passing` + node:test `46/46`），实测退出 0。
+- 当前唯一基线：**91/91**（mocha `13 passing` + node:test `78/78`），实测退出 0。
 - mocha 的 13 个用例来自 `packaging.test.mjs`（7 项）与 `dshChatSeamMap.test.js`（6 项）；第三个 glob `chatClient/*.test.mjs` 当前无匹配文件（既有现象，不减少测试项）。`client.test.mjs`（原零用例、仅 harness）与 `dshClientService.test.ts`（原 stale、不兼容）已在全面清理（2026-11-08）中删除，不计入基线。
 - 上述两文件（stale / 零用例）已在全面清理（2026-11-08）中删除，原登记见第 7 章 §3。
 - 类型检查判据：全仓既有 electron 类型解析错误集中在 `app.ts`，改动前后基线对比确认非 DSH 改动引入；**变更文件 0 错误**即为通过。
@@ -814,6 +821,7 @@ node --experimental-strip-types --test build/lib/test/dshBuildProvenance.test.ts
 每次文档结构调整后，按 [`README.md`](../README.md) §4.1 的引用图规则执行三项核验，结果写入提交信息：
 
 1. 抽取各文档头部 blockquote 段的跨文档链接构成**定义依赖图**，用传递闭包检查 `reach[i][i]`，环数必须为 **0**；同时核对 [`README.md`](../README.md) §4.1 的 Mermaid 图注**边数 / 节点数 = 脚本实测 `DEF_EDGES` / 节点数**（当前 3 / 3），不一致即判文档漂移。
+   核验脚本：`npm run verify:docs-graph`（`build/lib/dsh/verify/dshDocsGraph.mjs`，串联本节三项检查；`PASS` 退出 0，任一不符退出 1）。
 2. `git grep -nE '^## .*术语'` 必须只有 `README.md:## 2. 统一术语` 一处；L1–L5 不得出现术语表或术语重定义。
 3. 全仓 `唯一定义` / `唯一职责` 声明按主题去重，不得有两个文件声称定义同一主题。
 
@@ -874,10 +882,11 @@ e:/DSH-IDE/                              git 仓库根 / 唯一代码树
 | 路径 | 职责 |
 | --- | --- |
 | `product.json` | 产品身份：`nameShort/nameLong = "DSH IDE"`、`applicationName = "dsh-ide"`、`urlProtocol = "dsh-ide"` |
-| `package.json:85-92` | 8 条 DSH 脚本：`build-dsh-tests`、`pretest-dsh`、`test-dsh`、`test-dsh:all`、4 条 `verify:dsh-ide-*` |
+| `package.json` | 9 条 DSH 脚本：`build-dsh-tests`、`pretest-dsh`、`test-dsh`、`test-dsh:all`、4 条 `verify:dsh-ide-*`、`verify:docs-graph` |
 | `build/lib/dsh/package.json` | bundle 清单模板：`dsh-ide@2.0.0`、`dsh.bundle.patch`、11 项 `files`、3 项 `dsh.client.inject`、2 项 `peerDependencies` |
 | `build/lib/dsh/cordis.patch.yml` | bundle patch：唯一 `insert: dsh-ide` 行 |
 | `build/lib/dsh/verify/dshIdeVerify.mjs` | 四条门禁单脚本，`PASS` / `PENDING` 退出 0、`FAIL` 退出 1、非法 gate 退出 2 |
+| `build/lib/dsh/verify/dshDocsGraph.mjs` | 文档结构核验（定义依赖图 0 环 / 术语表唯一 / 声明去重） |
 | `build/lib/dsh/verify/golden/basic-session.json` | mock 事件流 + 冻结快照（`version = 7`） |
 | `build/lib/test/` | 5 个 node:test 文件（4 / 7 / 5 / 19 / 11 项），由 `test-dsh:all` 显式列出 |
 | `build/lib/dshBuildProvenance.ts` | 构建来源凭据采集 |
@@ -937,7 +946,7 @@ e:/DSH-IDE/                              git 仓库根 / 唯一代码树
 
 | 项 | 实况 | 归属阶段 |
 | --- | --- | --- |
-| `index.js` | 仅注册 `IdeRemoteService`，不订阅 `dshCtx` 事件、不注册通道、不注册 answerer | P3 |
+| `index.js` | 已注册 `IdeRemoteService` 并创建 Host 半身桥接（订阅四类官方事件 + 唯一 answerer）；传输端口与 IDE 主进程接线未完成 | P5 |
 | `common/env.js` | `DSH_IDE_ENDPOINT` / `DSH_IDE_INTERACTIONS` 两个常量在目录内无消费者 | P5 |
 | `common/legacy-account-endpoints.ts` | 账号端点仍由 `globalCompositeBar.ts` 引用，尚未归并入新协议 | P5 |
 | `client/client.js` | `postJson()`、`body`、`showError` 均为死代码；点击抛 `Error('launch chain removed; pending phase 2 DshIdeChannel.open')` | P5 |
@@ -946,10 +955,10 @@ e:/DSH-IDE/                              git 仓库根 / 唯一代码树
 | `dshChatSeam.ts` | `dshChatRenderEnabled` 默认 `false`；`setDshChatRenderEnabled` 全仓无调用方，接缝恒休眠 | P4 |
 | Chat 面板 | `chat.view.contribution` 无条件注册，容器仍在；DSH 内容为空，显示「连接层重建中」 | P4 |
 | `translator.ts` / `ide-view-projector.ts` | `IdeEvent.streaming`、`ARGS_PREVIEW_LIMIT`、`ROWS_P95_BYTE_LIMIT` 定义后未被生产代码使用（仅常量与测试引用） | P3 / P6 |
-| `EmptyIdeViewHost` | `open` / `invoke` 的参数类型与 `IdeViewHost` 接口不完全一致（TS 方法参数双变使其仍通过 `implements`） | P3 |
-| `DSH_IDE_API_VERSION` | 占位值 `'0.0.0-rebuild'`，未与 `UPSTREAM_VALIDATED_VERSION` 对齐 | P3 |
-| `IdeViewSnapshot` 与 `DshIdeSnapshot.state` | 投影快照尚未并入通道快照；并入须升 `wireRevision` 并同步 golden | P3 / P4 |
-| 错误码 | 仅 `dsh-ide/feature-unavailable` 与 `dsh-ide/invalid-argument` 已落地；`ALREADY_RESOLVED` / `SESSION_SWITCHED` / `SNAPSHOT_STALE` 仅为交付态契约 | P3 / P4 |
+| `DshIdeViewService` 后端端口 | Host 半身（`index.js` + `host/ide-view-host.js`）已订阅四类官方事件并注册唯一 answerer；与 IDE 主进程之间的传输端口仍未接线，端口实现仍是 `UnavailableDshIdeBackend` | P5 |
+| `DSH_IDE_API_VERSION` | 已对齐 `0.2.2-rc.1`（P3） | 已闭环 |
+| `IdeViewSnapshot` 与 `DshIdeSnapshot.state` | 已并入 `state.view`，`wireRevision` 升为 2，行级校验随真源落地（P3） | 已闭环 |
+| 错误码 | 五个码全部落地（`feature-unavailable` / `invalid-argument` / `ALREADY_RESOLVED` / `SESSION_SWITCHED` / `SNAPSHOT_STALE`）；`SNAPSHOT_STALE` 的消费点在 P4 | 已闭环（常量）/ P4（消费点） |
 | `DshIdeConsumer` | 不存在；`validateDshIdeSnapshot` / `assertSnapshotContinuity` 尚未被生产代码调用 | P4 |
 | 三批清理后的引用核对 | 第三批曾漏扫 `build/lib/test/dshBundleStaging.test.ts` 的字符串字面量断言，导致门禁持续红到 P1 才修正 | 已修复，规则见 §5 |
 | P2 产物组的版本控制状态 | `golden/basic-session.json` 未被 `.gitignore` 命中（`git check-ignore` 退出 1），定稿时已 `git add`；同组 `translator.ts`、`ide-view-projector.ts`、`dshIdeProjection.test.ts`、`dshIdeVerify.mjs`、`package.json` 仍未纳入版本控制 / 未提交，而 `projection-golden` 门禁依赖前两个文件 | P6⑨ 一并 `git add` 并提交 |

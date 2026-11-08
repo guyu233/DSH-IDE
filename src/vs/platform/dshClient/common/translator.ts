@@ -3,7 +3,7 @@
  *  Licensed under the MIT License.
  *--------------------------------------------------------------------------------------------*/
 
-// 阶段 2.2a：DSH → 中立 IdeEvent translator（插件侧 common 层）。
+// P2：DSH → 中立 IdeEvent translator（插件侧 common 层）。
 //
 // 平移自 e:/dsh-TUI/src/dsh-adapter/backend/translate.ts 的 dshEmits() 穷举 switch
 // （translate.ts:63-129）与「DSH 私有知识全部留在 translator、投影器只见中立事件」的边界。

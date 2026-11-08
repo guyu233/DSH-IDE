@@ -1,0 +1,304 @@
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) DSH-IDE contributors. All rights reserved.
+ *  Licensed under the MIT License.
+ *--------------------------------------------------------------------------------------------*/
+
+// P3 验收单测：通道分发（20 method 全覆盖）、listen 三层过滤、disposeOwner 本通道清理、
+// 视图宿主快照纪律（channelId 守恒 / version 严格 +1 / 首帧 starting / 投影 ready）。
+// 运行：node --experimental-strip-types --test build/lib/test/dshIdeChannel.test.ts
+// 通道与视图宿主经 `out/`（`build-dsh-tests` 转译产物）加载：两者依赖 base/common 的 .js 说明符，
+// 直接指向 src/*.ts 会解析不到同目录的 .js 兄弟文件。协议常量仍从 src 真源加载。
+
+import assert from 'node:assert/strict';
+import { test } from 'node:test';
+import {
+	DSH_IDE_ALREADY_RESOLVED,
+	DSH_IDE_CHANNEL,
+	DSH_IDE_FEATURE_UNAVAILABLE,
+	DSH_IDE_INVALID_ARGUMENT,
+	DSH_IDE_SESSION_SWITCHED,
+	DSH_IDE_SNAPSHOT_STALE,
+	DSH_IDE_WIRE_REVISION,
+	assertSnapshotContinuity,
+	validateDshIdeSnapshot,
+	type DshIdeMethod,
+	type DshIdeSnapshot,
+} from '../../../src/vs/platform/dshClient/common/dshIdeProtocol.ts';
+import {
+	DSH_IDE_CONTROL_CLOSE,
+	DSH_IDE_CONTROL_OPEN,
+	DSH_IDE_SNAPSHOT_EVENT,
+	DshIdeChannel,
+} from '../../../out/vs/platform/dshClient/electron-main/dshIdeChannel.js';
+import {
+	DshIdeViewService,
+	UnavailableDshIdeBackend,
+	type DshIdeBackend,
+} from '../../../out/vs/platform/dshClient/electron-main/ide-view-service.js';
+
+const ALL_METHODS: DshIdeMethod[] = [
+	'submit', 'interrupt', 'resume', 'newSession', 'fork', 'rewind', 'loadOlder',
+	'answerApproval', 'answerQuestion', 'cancelRequest', 'setModel', 'setEffort',
+	'setPermissionPreset', 'runCommand', 'listSessions', 'deleteSession', 'listModels',
+	'listCommands', 'fetchRowDetail', 'refreshSnapshot',
+];
+
+interface FakeBackend extends DshIdeBackend {
+	readonly calls: string[];
+	emit(raw: unknown): void;
+}
+
+/** 假后端：记录调用，并暴露 `emit` 让测试从 follow 回调注入真实事件。 */
+function fakeBackend(overrides: Partial<DshIdeBackend> = {}): FakeBackend {
+	const calls: string[] = [];
+	let sink: ((raw: unknown) => void) | undefined;
+	const backend: FakeBackend = {
+		calls,
+		emit: raw => sink?.(raw),
+		open: () => ({ channelId: 'ch-1', sessionId: 's-1' }),
+		follow: (_sessionId, onEvent) => {
+			sink = onEvent;
+			return { dispose: () => { calls.push('unfollow'); sink = undefined; } };
+		},
+		invoke: async (method: string) => { calls.push(String(method)); return { accepted: true }; },
+		close: () => { calls.push('close'); },
+		...overrides,
+	};
+	return backend;
+}
+
+// ---------------------------------------------------------------------------
+// 协议常量：P3 落地三个错误码，wireRevision 升到 2
+// ---------------------------------------------------------------------------
+
+test('P3 error codes are declared and distinct', () => {
+	assert.equal(DSH_IDE_ALREADY_RESOLVED, 'ALREADY_RESOLVED');
+	assert.equal(DSH_IDE_SESSION_SWITCHED, 'SESSION_SWITCHED');
+	assert.equal(DSH_IDE_SNAPSHOT_STALE, 'SNAPSHOT_STALE');
+	const all = [DSH_IDE_FEATURE_UNAVAILABLE, DSH_IDE_INVALID_ARGUMENT, DSH_IDE_ALREADY_RESOLVED, DSH_IDE_SESSION_SWITCHED, DSH_IDE_SNAPSHOT_STALE];
+	assert.equal(new Set(all).size, all.length);
+	assert.equal(DSH_IDE_CHANNEL, 'dshIde');
+	assert.equal(DSH_IDE_WIRE_REVISION, 2, 'projection payload merged into state.view bumps wireRevision to 2');
+});
+
+// ---------------------------------------------------------------------------
+// 快照形状：starting 不带 view；ready 必须带合法 view
+// ---------------------------------------------------------------------------
+
+function starting(): DshIdeSnapshot {
+	return { wireRevision: DSH_IDE_WIRE_REVISION, channelId: 'c1', version: 1, state: { state: 'starting' } };
+}
+
+test('validateDshIdeSnapshot accepts starting without view', () => {
+	assert.doesNotThrow(() => validateDshIdeSnapshot(starting()));
+});
+
+test('validateDshIdeSnapshot requires a valid view when ready', () => {
+	assert.throws(() => validateDshIdeSnapshot({ ...starting(), state: { state: 'ready' } }), /must be an object/);
+	assert.throws(
+		() => validateDshIdeSnapshot({ ...starting(), state: { state: 'ready', view: { rows: [{ id: 'row:1' }], version: 1 } } }),
+		/revision must be a non-negative integer/,
+	);
+	const view = { rows: [{ id: 'row:1', revision: 1, kind: 'user', text: 'hi', folded: false, seq: 1 }], version: 1 };
+	assert.doesNotThrow(() => validateDshIdeSnapshot({ ...starting(), state: { state: 'ready', view } }));
+});
+
+test('validateDshIdeSnapshot rejects view on non-ready states and bad row kinds', () => {
+	const view = { rows: [], version: 0 };
+	assert.throws(() => validateDshIdeSnapshot({ ...starting(), state: { state: 'rebuild', view } }), /only allowed when state is ready/);
+	const bad = { rows: [{ id: 'row:1', revision: 1, kind: 'mystery', text: 'x', folded: false }], version: 1 };
+	assert.throws(() => validateDshIdeSnapshot({ ...starting(), state: { state: 'ready', view: bad } }), /kind must be/);
+});
+
+test('validateDshIdeSnapshot rejects rows without text or preview', () => {
+	const bad = { rows: [{ id: 'row:1', revision: 1, kind: 'user', folded: false }], version: 1 };
+	assert.throws(() => validateDshIdeSnapshot({ ...starting(), state: { state: 'ready', view: bad } }), /must carry text or preview/);
+});
+
+// ---------------------------------------------------------------------------
+// 视图宿主：首帧 starting、重复 open 复用 channelId、投影 ready、version 严格 +1
+// ---------------------------------------------------------------------------
+
+test('view service emits starting first and reuses channelId on repeated open', () => {
+	const backend = fakeBackend();
+	const view = new DshIdeViewService(backend);
+	const first = view.open({ view: 'chat', params: { sessionId: 's-1' } });
+	assert.equal(first.state.state, 'starting');
+	assert.equal(first.version, 1);
+	assert.equal(first.wireRevision, DSH_IDE_WIRE_REVISION);
+
+	const again = view.open({ view: 'chat' });
+	assert.equal(again.channelId, first.channelId, 'repeated open must reuse the same channelId');
+	assert.equal(again.version, first.version);
+	view.close();
+	assert.ok(backend.calls.includes('close'));
+});
+
+test('view service publishes ready snapshots with strictly increasing versions', async () => {
+	const backend = fakeBackend();
+	const view = new DshIdeViewService(backend);
+	view.open({ view: 'chat', params: { sessionId: 's-1' } });
+
+	const frames: DshIdeSnapshot[] = [];
+	view.subscribe(snapshot => frames.push(snapshot));
+
+	backend.emit({ type: 'user.message', seq: 1, text: 'hello' });
+	await microtasks();
+	backend.emit({ type: 'custom', seq: 2, text: 'done' });
+	await microtasks();
+
+	assert.ok(frames.length >= 1, 'ready frames must be published');
+	const ready = frames.at(-1)!;
+	assert.equal(ready.state.state, 'ready');
+	assert.equal(ready.wireRevision, DSH_IDE_WIRE_REVISION);
+	assert.ok(ready.state.view !== undefined);
+	assert.equal(ready.state.view.rows.length, 2);
+	assert.deepEqual(ready.state.view.rows.map(r => r.id), ['row:1', 'row:2']);
+
+	let prev: DshIdeSnapshot | undefined;
+	for (const frame of frames) {
+		assert.doesNotThrow(() => validateDshIdeSnapshot(frame));
+		assert.doesNotThrow(() => assertSnapshotContinuity(prev, frame));
+		prev = frame;
+	}
+	view.close();
+});
+
+test('view service batches multiple events into one published frame', async () => {
+	const backend = fakeBackend();
+	const view = new DshIdeViewService(backend);
+	view.open({ view: 'chat', params: { sessionId: 's-1' } });
+	const frames: DshIdeSnapshot[] = [];
+	view.subscribe(snapshot => frames.push(snapshot));
+
+	backend.emit({ type: 'user.message', seq: 1, text: 'a' });
+	backend.emit({ type: 'user.message', seq: 2, text: 'b' });
+	backend.emit({ type: 'user.message', seq: 3, text: 'c' });
+	await microtasks();
+
+	assert.equal(frames.length, 1, 'a microtask batch publishes a single frame');
+	assert.equal(frames[0].state.view?.rows.length, 3);
+	view.close();
+});
+
+test('view service rejects invoke before open with feature-unavailable', async () => {
+	const view = new DshIdeViewService(fakeBackend());
+	await assert.rejects(() => view.invoke('listSessions', {}), (error: { code?: string }) => error.code === DSH_IDE_FEATURE_UNAVAILABLE);
+});
+
+test('unavailable backend never fabricates snapshots or events', () => {
+	const view = new DshIdeViewService(new UnavailableDshIdeBackend());
+	assert.throws(() => view.open({ view: 'chat' }), (error: { code?: string }) => error.code === DSH_IDE_FEATURE_UNAVAILABLE);
+});
+
+// ---------------------------------------------------------------------------
+// 通道：20 method 全覆盖 + 未知 method + 入参违规
+// ---------------------------------------------------------------------------
+
+const VALID: Record<DshIdeMethod, unknown> = {
+	submit: { text: 'hello' },
+	interrupt: {},
+	resume: { sessionId: 's-1' },
+	newSession: { workspace: 'w1', options: { preset: 'standard' } },
+	fork: { sessionId: 's-1', point: 'p1' },
+	rewind: { sessionId: 's-1', to: 'p0' },
+	loadOlder: { sessionId: 's-1', before: 'm1' },
+	answerApproval: { requestId: 'r1', decision: 'approve' },
+	answerQuestion: { requestId: 'r1', answer: 'yes' },
+	cancelRequest: { requestId: 'r1' },
+	setModel: { model: 'deepseek/deepseek-chat' },
+	setEffort: { effort: 'high' },
+	setPermissionPreset: { preset: 'balanced' },
+	runCommand: { command: '/help', args: ['a'] },
+	listSessions: {},
+	deleteSession: { sessionId: 's-1' },
+	listModels: { workspace: 'w1' },
+	listCommands: { workspace: 'w1' },
+	fetchRowDetail: { rowId: 'row:1' },
+	refreshSnapshot: {},
+};
+
+async function openedChannel(backend = fakeBackend()) {
+	const view = new DshIdeViewService(backend);
+	const channel = new DshIdeChannel(view);
+	const first = await channel.call<DshIdeSnapshot>('ctx-a', DSH_IDE_CONTROL_OPEN, { view: 'chat', params: { sessionId: 's-1' } });
+	return { view, channel, backend, first };
+}
+
+test('channel dispatches all 20 DTO methods through validateDshIdeInput', async () => {
+	const { channel, backend } = await openedChannel();
+	for (const method of ALL_METHODS) {
+		const output = await channel.call<{ value: unknown }>('ctx-a', method, VALID[method]);
+		assert.ok('value' in output, `${method} must return { value }`);
+		assert.deepEqual(Object.keys(output), ['value'], `${method} must not leak extra keys`);
+	}
+	assert.deepEqual(backend.calls.filter(c => c !== 'unfollow' && c !== 'close'), ALL_METHODS);
+});
+
+test('channel rejects unknown method and malformed args with defined codes', async () => {
+	const { channel } = await openedChannel();
+	await assert.rejects(() => channel.call('ctx-a', '__bogus', {}), (error: { code?: string }) => error.code === DSH_IDE_FEATURE_UNAVAILABLE);
+	await assert.rejects(() => channel.call('ctx-a', 'submit', { text: 'x', __extra: 1 }), (error: { code?: string }) => error.code === DSH_IDE_INVALID_ARGUMENT);
+	await assert.rejects(() => channel.call('ctx-a', 'submit', { text: '' }), (error: { code?: string }) => error.code === DSH_IDE_INVALID_ARGUMENT);
+});
+
+test('channel requires an open connection for DTO calls', async () => {
+	const channel = new DshIdeChannel(new DshIdeViewService(fakeBackend()));
+	await assert.rejects(() => channel.call('ctx-x', 'listSessions', {}), (error: { code?: string }) => error.code === DSH_IDE_FEATURE_UNAVAILABLE);
+});
+
+// ---------------------------------------------------------------------------
+// listen 三层过滤：事件名白名单 / 连接归属 / version 严格递增
+// ---------------------------------------------------------------------------
+
+test('listen ignores non-snapshot event names', async () => {
+	const { channel, backend } = await openedChannel();
+	const seen: DshIdeSnapshot[] = [];
+	channel.listen<DshIdeSnapshot>('ctx-a', 'state')(snapshot => seen.push(snapshot));
+	backend.emit({ type: 'user.message', seq: 1, text: 'a' });
+	await microtasks();
+	assert.equal(seen.length, 0, 'only the snapshot event name is forwarded');
+});
+
+test('listen filters frames by owning connection and drops non-advancing versions', async () => {
+	const { channel, backend } = await openedChannel();
+	const mine: DshIdeSnapshot[] = [];
+	const other: DshIdeSnapshot[] = [];
+	channel.listen<DshIdeSnapshot>('ctx-a', DSH_IDE_SNAPSHOT_EVENT)(snapshot => mine.push(snapshot));
+	channel.listen<DshIdeSnapshot>('ctx-b', DSH_IDE_SNAPSHOT_EVENT)(snapshot => other.push(snapshot));
+
+	backend.emit({ type: 'user.message', seq: 1, text: 'a' });
+	await microtasks();
+	backend.emit({ type: 'custom', seq: 2, text: 'b' });
+	await microtasks();
+
+	assert.ok(mine.length >= 2, 'owning connection receives published frames');
+	assert.equal(other.length, 0, 'another connection must not consume this view frames');
+	for (let i = 1; i < mine.length; i++) {
+		assert.ok(mine[i].version > mine[i - 1].version, 'version must strictly increase');
+	}
+});
+
+test('disposeOwner removes only the named connection and is idempotent', async () => {
+	const { channel } = await openedChannel();
+	await channel.call('ctx-b', DSH_IDE_CONTROL_OPEN, { view: 'chat' });
+	assert.equal(channel.disposeOwner('ctx-a'), 1);
+	assert.equal(channel.disposeOwner('ctx-a'), 0);
+	await assert.rejects(() => channel.call('ctx-a', 'listSessions', {}), (error: { code?: string }) => error.code === DSH_IDE_FEATURE_UNAVAILABLE);
+	const output = await channel.call<{ value: unknown }>('ctx-b', 'listSessions', {});
+	assert.deepEqual(Object.keys(output), ['value']);
+});
+
+test('close control command releases the connection without cancelling sessions', async () => {
+	const { channel, backend } = await openedChannel();
+	const result = await channel.call<{ closed: true }>('ctx-a', DSH_IDE_CONTROL_CLOSE, {});
+	assert.deepEqual(result, { closed: true });
+	assert.ok(!backend.calls.includes('cancel'), 'closing the view must not cancel the DSH session');
+});
+
+/** 让已排队的 microtask（快照批处理）跑完。 */
+async function microtasks(): Promise<void> {
+	for (let i = 0; i < 3; i++) {
+		await Promise.resolve();
+	}
+}

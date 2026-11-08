@@ -3,15 +3,15 @@
  *  Licensed under the MIT License.
  *--------------------------------------------------------------------------------------------*/
 
-// 阶段 2.2a：IdeViewProjector（增量 reducer，插件侧 common 层）。
+// P2：IdeViewProjector（增量 reducer，插件侧 common 层）。
 //
 // 平移自 e:/dsh-TUI/src/channel/projection.ts：会话日志为唯一真源、row 稳定 id、
 // callId 关联、seq 幂等、有界窗口与折叠 preview；常量搬自
 // e:/dsh-TUI/src/channel/transcript.ts:19（MAX_ROWS = 600）与其 preview()/trimLocalRows()。
 //
 // 边界：投影器出口**不做运行时校验**（由第三步 golden 门禁守护）；不 import @deepseek-ai/*、
-// 不接收 Cordis Context、不直连 electron、不修改 DshIdeChannel（2.3 才填充）。
-// translator 只以 `import type` 引入（strip-types 擦除），运行时零跨模块解析。
+// 不接收插件宿主上下文、不直连 electron。translator 只以 `import type` 引入（strip-types 擦除），
+// 运行时零跨模块解析。
 
 import type { IdeEvent, IdeRowKind } from './translator.js';
 
@@ -44,7 +44,7 @@ export interface IdeViewSnapshot {
 }
 
 export interface IdeViewProjectorDeps {
-	/** 折叠行回 Host 取完整内容；2.3 由真实 IdeViewHost 提供，骨架期可选。 */
+	/** 折叠行回 Host 取完整内容；由真实 IdeViewHost 提供，未接线时可选。 */
 	fetchRowDetail?(rowId: string): Promise<string>;
 }
 
@@ -198,7 +198,7 @@ export function createIdeViewProjector(deps: IdeViewProjectorDeps = {}): IdeView
 			default:
 				// 其余 emit 事件（session.* / goal / todo / preset / request.header /
 				// context.capacity / compaction.* / turn.start / step.start / pending.changed）
-				// 记入日志但不产生 row，留给 2.2b / 2.5 的投影扩展。
+				// 记入日志但不产生 row，留给 P4 / P6 的投影扩展。
 				log.push(event);
 				break;
 		}

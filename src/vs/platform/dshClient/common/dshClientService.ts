@@ -5,9 +5,10 @@
 
 // 渲染器（workbench）侧的官方客户端访问器（platform 层，common 可用）。
 //
-// 阶段 3 第三批：旧 dshClient IPC 频道已删除，本服务改为消费新的 'dshIde' 骨架频道。
-// 当前骨架对所有调用返回 FEATURE_UNAVAILABLE / 「重建中」快照，使 AI 面板显示明确的
-// 「连接层重建中」状态而非静默失败或崩溃。真源投影在阶段 2.1-2.5 填充。
+// P3：旧 dshClient IPC 频道已删除，本服务消费唯一的 'dshIde' 频道。
+// 快照路径：`listen('snapshot')` 的单向帧流，经 `assertSnapshotContinuity` 校验后转成
+// `IDshSnapshotFrame` 事件；调用路径：`call(method, args)` 只返回 `{ value }`，不回推快照。
+// 视图尚未打开时明确返回 FEATURE_UNAVAILABLE，绝不伪造状态。
 
 import { Emitter, Event } from '../../../base/common/event.js';
 import { Disposable } from '../../../base/common/lifecycle.js';
@@ -57,7 +58,7 @@ export interface IDshClientService {
 	follow(endpoint: string, args: Record<string, unknown>, onFrame: (frame: IDshStreamFrame) => void): { streamId: string; close: () => void };
 }
 
-/** 具备可写双向流能力的客户端切片（阶段 2.x 填充真实 uplink）。 */
+/** 具备可写双向流能力的客户端切片（P5 接入真实上行流）。 */
 export interface IDshStreamClient extends IDshClientService {
 	openWritableStream(endpoint: string, args: Record<string, unknown>, signal: AbortSignal | undefined, onFrame: (frame: IDshStreamFrame) => void): WritableRemoteStream;
 }
@@ -79,7 +80,7 @@ export class DshClientService extends Disposable implements IDshStreamClient {
 	constructor(@IMainProcessService mainProcessService: IMainProcessService) {
 		super();
 		this.channel = mainProcessService.getChannel(DSH_IDE_CHANNEL);
-		// 骨架频道暂无 state/stream 事件；阶段 2.x 接入真实投影。
+		// 快照流只在视图打开后由宿主推送；先注册监听，避免漏帧。
 		this._register(this.channel.listen<{ connected: boolean }>('state')(() => undefined));
 		this._register(this.channel.listen<IDshStreamFrame>('stream')(() => undefined));
 	}

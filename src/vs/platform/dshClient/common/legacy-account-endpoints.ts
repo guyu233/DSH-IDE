@@ -3,10 +3,10 @@
  *  Licensed under the MIT License.
  *--------------------------------------------------------------------------------------------*/
 
-// 旧 requests 文件中「账号」端点常量与元数据的暂留（阶段 3 第三批）。
+// 旧 requests 文件中「账号」端点常量与元数据的暂留（P0 清理批次）。
 //
 // 这些 DSH 私有概念不属于新「中立 DTO」协议（dshIdeProtocol.ts），故单独放置本文件，
-// 待阶段 2.x 归并到新协议或随账号功能重建时移除。当前仅 globalCompositeBar.ts（鲸鱼按钮）仍用。
+// 待 P5 归并到新协议或随账号功能重建时移除。当前仅 globalCompositeBar.ts（鲸鱼按钮）仍用。
 
 import { env } from '../../../base/common/process.js';
 

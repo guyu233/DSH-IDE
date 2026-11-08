@@ -9,8 +9,9 @@ import * as path from 'node:path';
 import { test } from 'node:test';
 import * as ts from 'typescript';
 
-const repoRoot = path.resolve(import.meta.dirname, '../../../..');
-const vscodeRoot = path.join(repoRoot, 'vscode-1.143.1');
+// 仓库已扁平化（README §1）：仓库根即项目根，原 vscode-1.143.1/ 子目录不存在。
+const repoRoot = path.resolve(import.meta.dirname, '../../..');
+const vscodeRoot = repoRoot;
 
 function readGulpfile(): ts.SourceFile {
 	return ts.createSourceFile('gulpfile.vscode.ts', fs.readFileSync(path.join(vscodeRoot, 'build/gulpfile.vscode.ts'), 'utf8'), ts.ScriptTarget.Latest, true);

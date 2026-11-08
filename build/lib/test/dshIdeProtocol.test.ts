@@ -149,7 +149,10 @@ function snapshot(overrides: Record<string, unknown> = {}): DshIdeSnapshot {
 
 test('validateDshIdeSnapshot accepts positive cases', () => {
 	assert.doesNotThrow(() => validateDshIdeSnapshot(snapshot()));
-	assert.doesNotThrow(() => validateDshIdeSnapshot(snapshot({ version: 42, state: { state: 'ready', message: 'ok' } })));
+	// P3：wireRevision 升到 2，`ready` 必须携带投影载荷 `view`（第 2 章 §2.1）。
+	const view = { rows: [{ id: 'row:1', revision: 1, kind: 'user', text: 'hi', folded: false, seq: 1 }], version: 3 };
+	assert.doesNotThrow(() => validateDshIdeSnapshot(snapshot({ version: 42, state: { state: 'ready', view } })));
+	assert.throws(() => validateDshIdeSnapshot(snapshot({ version: 42, state: { state: 'ready', message: 'ok' } })), /must be an object/);
 });
 
 test('validateDshIdeSnapshot rejects unknown fields', () => {
@@ -186,7 +189,7 @@ test('assertSnapshotContinuity rejects version backwards, equal and gap', () => 
 
 test('assertSnapshotContinuity rejects channelId and wireRevision changes', () => {
 	assert.throws(() => assertSnapshotContinuity(snapshot(), snapshot({ channelId: 'c2' })), /channel id changed/);
-	assert.throws(() => assertSnapshotContinuity(snapshot(), snapshot({ wireRevision: 2 })), /wire revision changed/);
+	assert.throws(() => assertSnapshotContinuity(snapshot(), snapshot({ wireRevision: DSH_IDE_WIRE_REVISION + 1 })), /wire revision changed/);
 });
 
 // ---------------------------------------------------------------------------
