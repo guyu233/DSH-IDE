@@ -380,10 +380,10 @@ P7 打包为 DSH 插件与交付
 #### P3 通道与宿主实现
 
 - **前置**：K3。
-- **活动**：在插件 Host 半身（`apply(ctx)` 拿到的 `dshCtx`）内订阅 `session/event`、`agent/assistant-stream`、`approval/request`、`user-questions/request`；实现 `call()` 分发、`listen()` 三层过滤、`disposeOwner()` 本通道清理；注册唯一交互式 answerer；落地 `ALREADY_RESOLVED` / `SESSION_SWITCHED` 常量；按第 2 章 §9 完成 `IdeViewSnapshot` 并入 `DshIdeSnapshot.state` 的契约升级；执行 waterfall 一致性核对（旧编号 S0，见 §5），实测必须满足「广播 + 首个决议生效，重复决议返回 `ALREADY_RESOLVED`」，实测不符按 §1 第 4 条的阶段内返工规则处理，不切换 answerer 形态。
-- **产出**：真实 `IdeViewHost`（`DshIdeViewService` + `DshIdeBackend` 端口）、`DshIdeChannel` 完整实现（`call` / `listen` / `disposeOwner`）、3 个新增错误码常量、`wireRevision = 2` 的协议真源与快照校验（含 `state.view` 行级校验）、`build/lib/test/dshIdeChannel.test.ts`（17 项）。
-- **出口判据 K4**：20 个 method 均有确定 handler 且通过 `validateDshIdeInput`；`call` / `listen` / `disposeOwner` 行为符合 第 2 章 §4–§7；`invoke` 输出恒为 `{ value }`；waterfall 实测符合上述唯一形态；`boundary` 门禁 `PASS`；契约升级后 17 符号仍单源。
-- **当前态**：**部分完成**。已落地：通道分发与三层过滤、`DshIdeViewService` 快照纪律（首帧 `starting`、`channelId` 守恒、`version` 严格 +1、微任务批处理）、`state.view` 并入与行级校验、3 个错误码常量、`disposeOwner` 按 ctx 清理、`boundary` 起启用 `listen` 三层过滤与分发断言；`index.js` 创建 `DshIdeHostBridge`，在插件上下文上订阅 `session/event` / `agent/assistant-stream` / `approval/request` / `user-questions/request` 并注册唯一交互式 answerer（未见界面时 `next()` 委托），`host/ide-view-host.js` 17 项单测覆盖订阅、归属过滤、waterfall 一致性（广播 + 首个决议生效 + 重复 `ALREADY_RESOLVED`）、会话切换与 method 映射。**未落地**：`DshIdeBackend` 到 Host 半身的跨进程传输端口仍是 `UnavailableDshIdeBackend`（所有 method 明确以 `feature-unavailable` 拒绝）；waterfall 的**真机**核对未执行（单测已覆盖语义）。K4 未达成，故 P4 不得启动。
+- **活动**：实现 `DshIdeBackend` 的唯一真实端口——IDE 侧**官方客户端传输适配**（Host 的 loopback 端点 + 官方 `dsh-client-connection` + `connection.authenticatedUrl()` 派生鉴权），把 `session/event` / `agent/assistant-stream` 翻译成中立 `IdeEvent` 交给 `DshIdeViewService`，并把 20 个 method 经同一链路回送；适配层放在 `platform/dshClient/common` 与 `electron-main` 之外以保住 `boundary` 门禁（裁定见第 7 章 §3.1）；在插件 Host 半身（`apply(ctx)` 拿到的 `dshCtx`）内订阅 `session/event`、`agent/assistant-stream`、`approval/request`、`user-questions/request`；实现 `call()` 分发、`listen()` 三层过滤、`disposeOwner()` 本通道清理；注册唯一交互式 answerer；落地 `ALREADY_RESOLVED` / `SESSION_SWITCHED` 常量；按第 2 章 §9 完成 `IdeViewSnapshot` 并入 `DshIdeSnapshot.state` 的契约升级；执行 waterfall 一致性核对（旧编号 S0，见 §5），实测必须满足「广播 + 首个决议生效，重复决议返回 `ALREADY_RESOLVED`」，实测不符按 §1 第 4 条的阶段内返工规则处理，不切换 answerer 形态。
+- **产出**：真实 `IdeViewHost`（`DshIdeViewService` + `DshIdeBackend` 端口）、`DshIdeBackend` 的官方客户端传输适配（真实端口实现）、`DshIdeChannel` 完整实现（`call` / `listen` / `disposeOwner`）、3 个新增错误码常量、`wireRevision = 2` 的协议真源与快照校验（含 `state.view` 行级校验）、`build/lib/test/dshIdeChannel.test.ts`（17 项）、`host/ide-view-host.js` + 17 项单测。
+- **出口判据 K4**：`DshIdeBackend` 真实端口接通（官方客户端传输，不再返回 `feature-unavailable`）；20 个 method 均有确定 handler 且通过 `validateDshIdeInput`；`call` / `listen` / `disposeOwner` 行为符合 第 2 章 §4–§7；`invoke` 输出恒为 `{ value }`；waterfall 实测符合上述唯一形态；`boundary` 门禁 `PASS`；契约升级后 17 符号仍单源。
+- **当前态**：**部分完成**。已落地：通道分发与三层过滤、`DshIdeViewService` 快照纪律（首帧 `starting`、`channelId` 守恒、`version` 严格 +1、微任务批处理）、`state.view` 并入与行级校验、3 个错误码常量、`disposeOwner` 按 ctx 清理、`boundary` 起启用 `listen` 三层过滤与分发断言；`index.js` 创建 `DshIdeHostBridge`，在插件上下文上订阅 `session/event` / `agent/assistant-stream` / `approval/request` / `user-questions/request` 并注册唯一交互式 answerer（未见界面时 `next()` 委托），`host/ide-view-host.js` 17 项单测覆盖订阅、归属过滤、waterfall 一致性（广播 + 首个决议生效 + 重复 `ALREADY_RESOLVED`）、会话切换与 method 映射。**未落地**：`DshIdeBackend` 的官方客户端传输适配尚未实现，端口仍由 `UnavailableDshIdeBackend` 承担（所有 method 明确以 `feature-unavailable` 拒绝，不伪造）；waterfall 的**真机**核对因此未执行（单测已覆盖语义）。K4 未达成，故 P4 不得启动。
 
 #### P4 IDE 消费者与 UI 实现
 
@@ -396,8 +396,8 @@ P7 打包为 DSH 插件与交付
 #### P5 功能实现与真机接线
 
 - **前置**：K5。
-- **活动**：实现 `DshIdeBackend` 的唯一真实端口——IDE 侧的**官方客户端传输适配**（Host 的 loopback 端点 + 官方 `dsh-client-connection` + `connection.authenticatedUrl()` 派生的鉴权），把 `session/event` / `agent/assistant-stream` 翻译成中立 `IdeEvent` 交给 `DshIdeViewService` 投影，并把 20 个 method 经同一链路送回 Host 半身；适配层放在 `platform/dshClient/common` 与 `electron-main` 之外以保住 `boundary` 门禁（裁定见第 7 章 §3.1）；`app.ts` 构造参数换为真实 `DshIdeBackend` 的 `DshIdeViewService`；`client.js` 按钮改为经 `dshIde` 通道开窗；一次性接上 20 个 method 对应的功能（审批、问卷、权限预设、模型、effort、斜杠命令、resume / fork / rewind、goal / todo / usage / TPS / workingActivity 投影、`ping` / `inlineComplete`、账号、语音、删除会话）；保持双窗口并存，DSH 主窗口按钮可用；语音未就绪时入口明确不可用。
-- **产出**：官方客户端传输适配（`DshIdeBackend` 真实实现）、`app.ts` 真实接线、`client.js` 开窗、完整功能接线、双窗口镜像。
+- **活动**：`app.ts` 构造参数换为真实 `DshIdeBackend` 的 `DshIdeViewService`；`client.js` 按钮改为经 `dshIde` 通道开窗；一次性接上 20 个 method 对应的功能（审批、问卷、权限预设、模型、effort、斜杠命令、resume / fork / rewind、goal / todo / usage / TPS / workingActivity 投影、`ping` / `inlineComplete`、账号、语音、删除会话）；保持双窗口并存，DSH 主窗口按钮可用；语音未就绪时入口明确不可用。
+- **产出**：`app.ts` 真实接线、`client.js` 开窗、完整功能接线、双窗口镜像。
 - **出口判据 K6**：真机双窗口镜像同一会话；`approval/request` 与 `user-questions/request` 两边弹出且任一 resolve 即消费；按钮开窗成功；`ping` / `inlineComplete` 恢复；Chat 面板可见且 DSH 内容回填；关闭 IDE 窗口不取消 DSH 会话；语音不可用时不启动本地识别后端。
 - **当前态**：未开始。
 
@@ -977,7 +977,7 @@ e:/DSH-IDE/                              git 仓库根 / 唯一代码树
 3. `DshIdeBackend` 的唯一实现形态：在 IDE 侧做官方客户端传输适配（P5 落地），把官方事件翻译成中立 `IdeEvent` 后交给 `DshIdeViewService` 投影；适配层文件必须放在 `platform/dshClient/common` 与 `electron-main` 之外，以保持 `boundary` 门禁（这两目录零 `@deepseek-ai/*`）成立。
 4. 因此 P3 的 `DshIdeChannel` / `DshIdeViewService` 保持不变：二者只在 IDE 进程内工作，`IdeViewHost` 仍是通道层与 DSH 能力域之间的唯一接缝。
 
-K4 仍**未达成**：裁定解除了设计歧义，但第 3 条的实现（官方客户端传输适配）属 P5 活动，尚未落地。P4 不得启动。
+K4 仍**未达成**：裁定解除了设计歧义，但第 3 条的实现（官方客户端传输适配）属 **P3 活动**（K4 前置），尚未落地。写回 P5 会造成「K4 等 K5」的循环依赖，故明确归 P3。P4 不得启动。
 | `DSH_IDE_API_VERSION` | 已对齐 `0.2.2-rc.1`（P3） | 已闭环 |
 | `IdeViewSnapshot` 与 `DshIdeSnapshot.state` | 已并入 `state.view`，`wireRevision` 升为 2，行级校验随真源落地（P3） | 已闭环 |
 | 错误码 | 五个码全部落地（`feature-unavailable` / `invalid-argument` / `ALREADY_RESOLVED` / `SESSION_SWITCHED` / `SNAPSHOT_STALE`）；`SNAPSHOT_STALE` 的消费点在 P4 | 已闭环（常量）/ P4（消费点） |
