@@ -134,9 +134,12 @@ function boundary() {
 	// 门禁仍绿」——这与 tsc 过滤列表硬编码同族（见 docs/DEVELOPMENT.md 第 7 章）。
 	// 排除：test/（测试可用测试设施）；Host 侧 JS 桥接层（host/ide-service.js、index.js、
 	// client/client.js）合法持有 Cordis 与官方包，且非 .ts，不在本扫描范围。
+	// 目录扫描而非文件名白名单：新增目录自动纳入，避免「新建文件漏检、门禁仍绿」。
+	// transport/ 是 IDE 侧官方传输适配（P3），同样必须零 electron / Cordis 引用。
 	const pluginSources = [
 		...walk(path.join(srcRoot, 'platform/dshClient/common')),
 		...walk(path.join(srcRoot, 'platform/dshClient/electron-main')),
+		...walk(path.join(srcRoot, 'platform/dshClient/transport')),
 	].filter(f => f.endsWith('.ts') && !rel(f).includes('/test/')).map(rel).sort();
 	assert.ok(pluginSources.length >= 6, `plugin source sweep found only ${pluginSources.length} .ts files`);
 	for (const file of pluginSources) {

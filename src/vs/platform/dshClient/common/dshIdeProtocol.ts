@@ -425,6 +425,28 @@ export function assertSnapshotContinuity(prev: DshIdeSnapshot | undefined, next:
 	}
 }
 
+/** `open` 的规格：视图名 + 会话/工作区参数。 */
+export interface DshIdeOpenSpec {
+	readonly view: string;
+	readonly params?: Record<string, unknown>;
+}
+
+/**
+ * DSH 能力端口：由 IDE 侧的官方客户端传输适配实现（`platform/dshClient/transport/`）。
+ * 四个方法逐一对应 `IdeViewHost` 的四个语义，不承载任何传输细节，因此不存在第二条协议。
+ * 定义在 common 层是为了让 `transport/` 与 `electron-main/` 都只依赖本文件，避免反向依赖。
+ */
+export interface DshIdeBackend {
+	/** 绑定会话并返回该视图的通道 id（一次打开一个，守恒）。 */
+	open(spec: DshIdeOpenSpec): { readonly channelId: string; readonly sessionId?: string };
+	/** 订阅会话真源（历史回放 + 实时流）；返回解绑句柄。 */
+	follow(sessionId: string | undefined, onEvent: (raw: unknown) => void): { dispose(): void };
+	/** 执行一个 DTO method（参数已过 `validateDshIdeInput`）。 */
+	invoke(method: DshIdeMethod, args: unknown): Promise<unknown>;
+	/** 释放传输资源；不取消 DSH 会话。 */
+	close(): void;
+}
+
 /**
  * 宿主侧视图宿主窄接口：DshIdeChannel 只依赖这四个方法，由 `DshIdeViewService`
  * （electron-main）实现，DSH 能力经 `DshIdeBackend` 端口注入。

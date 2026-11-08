@@ -1,0 +1,380 @@
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) DSH-IDE contributors. All rights reserved.
+ *  Licensed under the MIT License.
+ *--------------------------------------------------------------------------------------------*/
+
+// P3：`DshIdeBackend` 的唯一真实端口——IDE 侧官方客户端传输适配。
+//
+// 为什么在这里：`boundary` 门禁要求 `platform/dshClient/common` 与 `electron-main` 零
+// `@deepseek-ai/*` 引用（第 1 章 §3 分层）。本文件放在 `platform/dshClient/transport/`。
+//
+// 为什么不 import `@deepseek-ai/dsh-client-connection`：手册 §8.2.5 已实测插件 `runtime/app`
+// **不含** `@deepseek-ai/*` 包（它们只在 DSH 宿主 asar 里，IDE 进程不可达）。因此这里按
+// 官方线协议（第 2 章 §2.2.1 冻结的四个形态）手写最小客户端，只依赖 fetch/WebSocket，
+// 不复制业务逻辑、不引入第二套协议。
+//
+// 它只做传输，不做业务：连接 / 一元调用 / 流式调用 / waterfall 决议四条原语，
+// 事件翻译与投影仍由 `common/translator.ts` + `IdeViewProjector` 完成（单一实现）。
+//
+// 线上形态见 docs/DEVELOPMENT.md 第 2 章 §2.2.1：
+//   鉴权   GET /?token=…            → 303 + set-cookie（官方 launch token 交换）
+//   一元   POST /api/<ns>/<method>  → { type:'client-request', rpcId, method, payload:{args} }
+//   流式   WS  /api/remote.mux      → { type:'open', streamId, endpoint, payload:{args} }
+//   waterfall WS item → POST /api/$events/result → { clientId, eventId, outcome }
+
+import type { DshIdeBackend, DshIdeMethod, DshIdeOpenSpec } from '../common/dshIdeProtocol.js';
+
+/** 通道 id：由 Host 侧绑定生成，这里只做透传。 */
+type ChannelBinding = { readonly channelId: string; readonly sessionId?: string };
+
+/** 一条打开的 WebSocket 连接（只取本适配用到的四个能力）。 */
+export interface DshIdeWebSocket {
+	readonly readyState: number;
+	send(data: string): void;
+	close(code?: number, reason?: string): void;
+	addEventListener(event: 'open' | 'error' | 'close', listener: (payload: unknown) => void): void;
+	addEventListener(event: 'message', listener: (payload: { readonly data: unknown }) => void): void;
+}
+
+/** 官方传输的最小原生能力：fetch 与 WebSocket（IDE 主进程用 Electron/Node 全局）。 */
+export interface DshIdeTransportPrimitives {
+	readonly fetch: (input: string | URL, init: RequestInit) => Promise<Response>;
+	readonly WebSocket: new (url: string, options?: { headers?: Record<string, string> }) => DshIdeWebSocket;
+}
+
+/** 连接配置：Host origin + 已换取的 cookie。 */
+export interface DshIdeTransportOptions {
+	/** Host origin，例如 `http://127.0.0.1:51234`。 */
+	readonly origin: string;
+	/** 官方 launch token 交换后得到的 cookie（`name=value`）。 */
+	readonly cookie: string;
+	/** 原生传输能力；默认取全局 fetch / WebSocket。 */
+	readonly primitives?: DshIdeTransportPrimitives;
+}
+
+/** 统一的传输错误：保留官方错误码，便于上层映射 FEATURE_UNAVAILABLE / INVALID_ARGUMENT。 */
+export class DshIdeTransportError extends Error {
+	readonly code: string;
+	readonly details: unknown;
+
+	constructor(code: string, message: string, details?: unknown) {
+		super(message);
+		this.name = 'DshIdeTransportError';
+		this.code = code;
+		this.details = details;
+	}
+}
+
+interface RpcEnvelope {
+	readonly type: 'server-response';
+	readonly rpcId: string;
+	readonly result: { readonly ok: true; readonly value: unknown } | { readonly ok: false; readonly error: { code: string; message: string; details?: unknown } };
+}
+
+/** 官方 launch token 交换：`GET /?token=…` → `303` + `set-cookie`。 */
+export async function authenticateHost(origin: string, launchUrl: string, primitives?: DshIdeTransportPrimitives): Promise<string> {
+	const doFetch = primitives?.fetch ?? ((input: string | URL, init: RequestInit) => fetch(input, init));
+	const response = await doFetch(launchUrl, { redirect: 'manual' });
+	const cookie = response.headers.get('set-cookie');
+	await response.body?.cancel();
+	if (response.status !== 303 || cookie === null) {
+		throw new DshIdeTransportError('dsh-ide/host-authentication-failed', `Host authentication failed at ${origin} (status ${response.status})`);
+	}
+	const end = cookie.indexOf(';');
+	return end < 0 ? cookie : cookie.slice(0, end);
+}
+
+/**
+ * 事件流帧：`session/follow` 的 item，或 Gateway 转发的 waterfall / 取消帧。
+ * 全部 shape 按线上原样保留（翻译在 common/translator.ts）。
+ */
+export type DshIdeStreamFrame =
+	| { readonly type: 'snapshot' | 'event' | 'assistant-stream'; readonly [key: string]: unknown }
+	| { readonly type: 'waterfall'; readonly eventId: string; readonly event: string; readonly agentId: string; readonly request: Readonly<Record<string, unknown>> }
+	| { readonly type: 'cancel'; readonly eventId: string }
+	| { readonly type: 'ready'; readonly clientId: string; readonly host?: Readonly<Record<string, unknown>> };
+
+/** 界面决议：`next` 交还下一个 answerer，`result` 提交答案。 */
+export type DshIdeDecision = { readonly kind: 'next' } | { readonly kind: 'result'; readonly value?: unknown };
+
+/**
+ * 官方客户端传输适配。一个实例对应一个 Host origin + 一条 cookie；
+ * 所有方法都只用官方端点，不存在私有握手（第 7 章 §3.1 裁定）。
+ */
+export class DshIdeTransport {
+	private readonly origin: string;
+	private readonly cookie: string;
+	private readonly primitives: DshIdeTransportPrimitives;
+	private socket: DshIdeWebSocket | undefined;
+	/** 每个 streamId 的下行回调。 */
+	private readonly streams = new Map<string, { onFrame: (frame: DshIdeStreamFrame) => void; onError: (error: DshIdeTransportError) => void }>();
+	/** `$events` 流的 clientId（waterfall 决议要用它回投）。 */
+	private eventClientId: string | undefined;
+
+	constructor(options: DshIdeTransportOptions) {
+		this.origin = options.origin.replace(/\/$/, '');
+		this.cookie = options.cookie;
+		this.primitives = options.primitives ?? {
+			fetch: (input, init) => fetch(input, init),
+			WebSocket: WebSocket as unknown as DshIdeTransportPrimitives['WebSocket'],
+		};
+	}
+
+	/** 一元调用：官方 `client-request` 信封 + cookie，返回 `result.value`。 */
+	async call(namespace: string, method: string, args: Record<string, unknown>): Promise<unknown> {
+		const endpoint = `${namespace}/${method}`;
+		const rpcId = crypto.randomUUID();
+		const body = JSON.stringify({ type: 'client-request', rpcId, method: endpoint, payload: { args } });
+		const response = await this.primitives.fetch(`${this.origin}/api/${endpoint}`, {
+			method: 'POST',
+			headers: { 'content-type': 'application/json', cookie: this.cookie },
+			body,
+		});
+		if (!response.ok) {
+			throw new DshIdeTransportError('dsh-ide/transport-failure', `transport failure for ${endpoint}: HTTP ${response.status}`);
+		}
+		const envelope = (await response.json()) as RpcEnvelope;
+		if (envelope.type !== 'server-response' || envelope.rpcId !== rpcId) {
+			throw new DshIdeTransportError('dsh-ide/transport-corrupt', `rpcId mismatch for ${endpoint}`);
+		}
+		if (!envelope.result.ok) {
+			throw new DshIdeTransportError(envelope.result.error.code, envelope.result.error.message, envelope.result.error.details);
+		}
+		return envelope.result.value;
+	}
+
+	/** 打开一条逻辑流（`session/follow` 等），帧经 `onFrame` 原样回调。 */
+	openStream(endpoint: string, args: Record<string, unknown>, onFrame: (frame: DshIdeStreamFrame) => void, onError?: (error: DshIdeTransportError) => void): { streamId: string; close(): void } {
+		const streamId = crypto.randomUUID();
+		const socket = this.ensureSocket();
+		this.streams.set(streamId, { onFrame, onError: onError ?? (() => undefined) });
+		socket.send(JSON.stringify({ type: 'open', streamId, endpoint, payload: { args } }));
+		return {
+			streamId,
+			close: () => {
+				if (!this.streams.delete(streamId)) {
+					return;
+				}
+				socket.send(JSON.stringify({ type: 'cancel', streamId }));
+			},
+		};
+	}
+
+	/** waterfall 决议回投：`next` 或具体结果，经 `$events/result` 一元端点。 */
+	async answerWaterfall(eventId: string, decision: DshIdeDecision): Promise<void> {
+		if (this.eventClientId === undefined) {
+			throw new DshIdeTransportError('dsh-ide/event-stream-not-ready', 'forwarded-event stream has no clientId yet');
+		}
+		await this.call('$events', 'result', {
+			clientId: this.eventClientId,
+			eventId,
+			outcome: decision,
+		});
+	}
+
+	/** 关闭全部逻辑流与物理 socket。 */
+	dispose(): void {
+		this.streams.clear();
+		this.socket?.close(1000, 'dsh-ide transport disposed');
+		this.socket = undefined;
+		this.eventClientId = undefined;
+	}
+
+	private ensureSocket(): DshIdeWebSocket {
+		if (this.socket !== undefined && this.socket.readyState <= 1) {
+			return this.socket;
+		}
+		const url = `${this.origin.replace(/^http/, 'ws')}/api/remote.mux`;
+		const socket = new this.primitives.WebSocket(url, { headers: { cookie: this.cookie } });
+		socket.addEventListener('message', payload => this.receive(payload.data));
+		socket.addEventListener('close', () => {
+			for (const [, sink] of this.streams) {
+				sink.onError(new DshIdeTransportError('dsh-ide/stream-closed', 'Remote stream socket closed'));
+			}
+			this.streams.clear();
+			this.socket = undefined;
+		});
+		this.socket = socket;
+		return socket;
+	}
+
+	private receive(data: unknown): void {
+		if (typeof data !== 'string') {
+			return;
+		}
+		let message: Record<string, unknown>;
+		try {
+			message = JSON.parse(data) as Record<string, unknown>;
+		} catch {
+			return;
+		}
+		const streamId = message['streamId'];
+		if (typeof streamId !== 'string') {
+			return;
+		}
+		const sink = this.streams.get(streamId);
+		if (sink === undefined) {
+			return;
+		}
+		if (message['type'] === 'item') {
+			const value = message['value'];
+			if (isFrame(value)) {
+				if (value.type === 'ready') {
+					this.eventClientId = value.clientId;
+				}
+				sink.onFrame(value);
+			}
+			return;
+		}
+		if (message['type'] === 'end') {
+			this.streams.delete(streamId);
+			return;
+		}
+		if (message['type'] === 'error') {
+			this.streams.delete(streamId);
+			const error = message['error'];
+			const code = isRecord(error) && typeof error['code'] === 'string' ? error['code'] : 'dsh-ide/stream-error';
+			const text = isRecord(error) && typeof error['message'] === 'string' ? error['message'] : 'Remote stream failed';
+			sink.onError(new DshIdeTransportError(code, text));
+		}
+	}
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function isFrame(value: unknown): value is DshIdeStreamFrame {
+	if (!isRecord(value) || typeof value['type'] !== 'string') {
+		return false;
+	}
+	if (value['type'] === 'waterfall') {
+		return typeof value['eventId'] === 'string' && typeof value['event'] === 'string';
+	}
+	if (value['type'] === 'ready') {
+		return typeof value['clientId'] === 'string';
+	}
+	return true;
+}
+
+/**
+ * 把官方传输包装成 `DshIdeBackend`：`open` 绑定会话、`follow` 打开 `session/follow` 逻辑流、
+ * `invoke` 按 method 映射到官方一元端点、`close` 释放本视图的流。
+ *
+ * 映射表与 Host 半身（`host/ide-view-host.js`）保持同一组官方方法名；未核对的 method
+ * 明确抛 `dsh-ide/feature-unavailable`，与 Host 侧口径一致，不猜端点。
+ */
+export class DshIdeTransportBackend implements DshIdeBackend {
+	private readonly transport: DshIdeTransport;
+	private channelId: string | undefined;
+	private sessionId: string | undefined;
+	private stream: { streamId: string; close(): void } | undefined;
+
+	constructor(transport: DshIdeTransport) {
+		this.transport = transport;
+	}
+
+	open(spec: DshIdeOpenSpec): ChannelBinding {
+		if (this.channelId !== undefined) {
+			return { channelId: this.channelId, sessionId: this.sessionId };
+		}
+		const params = spec.params ?? {};
+		this.sessionId = typeof params['sessionId'] === 'string' ? params['sessionId'] : undefined;
+		this.channelId = `dsh-ide:${crypto.randomUUID()}`;
+		return { channelId: this.channelId, sessionId: this.sessionId };
+	}
+
+	follow(sessionId: string | undefined, onEvent: (raw: unknown) => void): { dispose(): void } {
+		if (sessionId === undefined) {
+			// 无绑定会话时只订阅转发的 waterfall/事件流，不开 session/follow。
+			return this.followEvents(onEvent);
+		}
+		const stream = this.transport.openStream('session/follow', {
+			address: { kind: 'session', sessionId },
+			assistantStream: true,
+		}, frame => onEvent(frame));
+		this.stream = stream;
+		return { dispose: () => stream.close() };
+	}
+
+	/** 只订阅 Gateway 转发的事件（waterfall 决议入口在这里）。 */
+	followEvents(onEvent: (raw: unknown) => void): { dispose(): void } {
+		const stream = this.transport.openStream('$events', {}, frame => onEvent(frame));
+		this.stream = stream;
+		return { dispose: () => stream.close() };
+	}
+
+	async invoke(method: DshIdeMethod, args: unknown): Promise<unknown> {
+		const record = isRecord(args) ? args : {};
+		const sessionId = this.sessionId;
+		switch (method) {
+			case 'submit':
+				return this.transport.call('session', 'prompt', {
+					requestId: crypto.randomUUID(),
+					sessionId,
+					mode: 'queue',
+					content: [{ type: 'text', text: String(record['text'] ?? '') }],
+				});
+			case 'interrupt':
+				return this.transport.call('session', 'cancel', { sessionId });
+			case 'resume':
+				return this.transport.call('session', 'state', { address: { kind: 'session', sessionId: record['sessionId'] ?? sessionId } });
+			case 'newSession':
+				return this.transport.call('session', 'create', {
+					...(typeof record['workspace'] === 'string' ? { cwd: record['workspace'] } : {}),
+				});
+			case 'fork':
+				return this.transport.call('session', 'fork', {
+					sessionId: record['sessionId'] ?? sessionId,
+					...(typeof record['point'] === 'string' && record['point'] !== '' ? { atSeq: Number(record['point']) } : {}),
+				});
+			case 'answerApproval':
+				await this.transport.answerWaterfall(String(record['requestId']), {
+					kind: 'result',
+					value: record['decision'] === 'approve' ? 'allowed-once' : 'rejected',
+				});
+				return { accepted: true };
+			case 'answerQuestion':
+				await this.transport.answerWaterfall(String(record['requestId']), { kind: 'result', value: record['answer'] });
+				return { accepted: true };
+			case 'cancelRequest':
+				await this.transport.answerWaterfall(String(record['requestId']), { kind: 'next' });
+				return { accepted: true };
+			case 'setModel': {
+				const [provider, model] = splitModel(String(record['model'] ?? ''));
+				return this.transport.call('session', 'selectModel', { sessionId, provider, model });
+			}
+			case 'listSessions':
+				return this.transport.call('session', 'list', {});
+			case 'listModels':
+				return this.transport.call('session', 'modelCatalog', {});
+			case 'fetchRowDetail':
+				return null;
+			case 'refreshSnapshot':
+				return { accepted: true };
+			case 'deleteSession':
+			case 'rewind':
+			case 'loadOlder':
+			case 'setEffort':
+			case 'setPermissionPreset':
+			case 'runCommand':
+			case 'listCommands':
+				throw new DshIdeTransportError('dsh-ide/feature-unavailable', `DSH-IDE capability "${method}" has no verified DSH endpoint yet`, { capability: method });
+			default:
+				throw new DshIdeTransportError('dsh-ide/feature-unavailable', `DSH-IDE method ${JSON.stringify(method)} is not mapped`);
+		}
+	}
+
+	close(): void {
+		this.stream?.close();
+		this.stream = undefined;
+		this.transport.dispose();
+		this.channelId = undefined;
+		this.sessionId = undefined;
+	}
+}
+
+function splitModel(model: string): [string, string] {
+	const slash = model.indexOf('/');
+	return slash <= 0 ? ['deepseek', model] : [model.slice(0, slash), model.slice(slash + 1)];
+}

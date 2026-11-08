@@ -19,31 +19,16 @@ import { translateDshEvent } from '../common/translator.js';
 import {
 	DSH_IDE_FEATURE_UNAVAILABLE,
 	DSH_IDE_WIRE_REVISION,
+	type DshIdeBackend,
 	type DshIdeMethod,
+	type DshIdeOpenSpec,
 	type DshIdeSnapshot,
 	type IdeViewHost,
 } from '../common/dshIdeProtocol.js';
 
-/** `open` 的规格：视图名 + 会话/工作区参数。 */
-export interface DshIdeOpenSpec {
-	readonly view: string;
-	readonly params?: Record<string, unknown>;
-}
-
-/**
- * DSH 能力端口：由插件 Host 层实现（插件入口的 apply 上下文）。四个方法逐一对应
- * `IdeViewHost` 的四个语义，不承载任何传输细节，因此不存在第二条协议。
- */
-export interface DshIdeBackend {
-	/** 绑定会话并返回该视图的通道 id（一次打开一个，守恒）。 */
-	open(spec: DshIdeOpenSpec): { readonly channelId: string; readonly sessionId?: string };
-	/** 订阅会话真源（历史回放 + 实时流）；返回解绑句柄。 */
-	follow(sessionId: string | undefined, onEvent: (raw: unknown) => void): { dispose(): void };
-	/** 执行一个 DTO method（参数已过 `validateDshIdeInput`）。 */
-	invoke(method: DshIdeMethod, args: unknown): Promise<unknown>;
-	/** 释放 Host 侧资源；不取消 DSH 会话。 */
-	close(): void;
-}
+// 端口类型与 `open` 规格定义在 common/dshIdeProtocol.ts（单一真源）：
+// transport/ 与 electron-main/ 都只依赖它，避免反向依赖。
+export type { DshIdeBackend, DshIdeOpenSpec } from '../common/dshIdeProtocol.js';
 
 /** 端口未接线时的实现：一律以 `dsh-ide/feature-unavailable` 拒绝，绝不伪造事件或快照。 */
 export class UnavailableDshIdeBackend implements DshIdeBackend {

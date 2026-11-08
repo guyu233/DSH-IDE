@@ -58,6 +58,54 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
+/**
+ * 真实 DSH 会话事件的线上类型名（斜杠命名）→ 中立 `IdeEventType`（点号命名）。
+ *
+ * 依据 `E:/deepseek-harness-0.2.2-rc.1/packages/core/session/src/types.ts:SessionEventMap`：
+ * 真实事件形如 `{ type: 'user/message', seq, time, data: {...} }`，与 dsh-TUI 抽象出来的点号
+ * 名字不是同一套。两边都收，避免适配层再复制一份映射。
+ */
+const DSH_WIRE_EVENT_TYPES: Readonly<Record<string, IdeEventType>> = {
+	'turn/start': 'turn.start',
+	'turn/end': 'turn.end',
+	'step/start': 'step.start',
+	'step/end': 'step.end',
+	'user/message': 'user.message',
+	'system/message': 'system.prompt',
+	'assistant/message': 'assistant.message',
+	'assistant/attempt': 'assistant.attempt.end',
+	'tool/call': 'tool.call',
+	'tool/result': 'tool.result',
+	'request/header': 'request.header',
+	'request/context': 'context.capacity',
+	'session/title': 'session.title',
+	'goal/change': 'goal.change',
+	'compaction/start': 'compaction.start',
+	'compaction/end': 'compaction.end',
+};
+
+/** 真实 DSH 事件的线上类型名；不是线上名时返回 undefined。 */
+export function wireEventType(raw: string): IdeEventType | undefined {
+	return DSH_WIRE_EVENT_TYPES[raw];
+}
+
+/** 把内容块数组或纯字符串统一成投影用的文本（多段文本按出现顺序拼接）。 */
+function textOfContent(value: unknown): string | undefined {
+	if (typeof value === 'string') {
+		return value;
+	}
+	if (!Array.isArray(value)) {
+		return undefined;
+	}
+	const parts: string[] = [];
+	for (const block of value) {
+		if (isRecord(block) && block['type'] === 'text' && typeof block['text'] === 'string') {
+			parts.push(block['text']);
+		}
+	}
+	return parts.length === 0 ? undefined : parts.join('');
+}
+
 function nonEmptyString(value: unknown): string | undefined {
 	return typeof value === 'string' ? value : undefined;
 }
@@ -163,21 +211,94 @@ export function translateDshEvent(raw: unknown, fallbackSeq: number): IdeEvent |
 	if (!isRecord(raw) || typeof raw['type'] !== 'string') {
 		return undefined;
 	}
-	const type = raw['type'] as IdeEventType;
+	const wire = raw['type'];
+	const type = wireEventType(wire) ?? (wire as IdeEventType);
 	if (dshEmits(type) !== true) {
 		return undefined;
 	}
+	// 真实 DSH 事件把所有载荷放在 `data` 下；dsh-TUI 的抽象事件把字段平铺。
+	// 两种形状都要能读，且只取白名单字段（DSH 私有 payload 一律不透传）。
+	const data = isRecord(raw['data']) ? raw['data'] : undefined;
+	const seq = safeInteger(raw['seq']) ?? fallbackSeq;
+	const callId = nonEmptyString(raw['callId'])
+		?? (data !== undefined ? nonEmptyString(data['callId']) ?? nonEmptyString((isRecord(data['message']) && isRecord(data['message']['source']) ? data['message']['source']['callId'] : undefined)) : undefined);
+	const turn = safeInteger(raw['turn']) ?? (data !== undefined ? safeInteger(data['turn']) : undefined);
+	const step = safeInteger(raw['step']) ?? (data !== undefined ? safeInteger(data['step']) : undefined);
+
 	const event: IdeEvent = {
 		type,
-		seq: safeInteger(raw['seq']) ?? fallbackSeq,
-		...(nonEmptyString(raw['callId']) !== undefined ? { callId: nonEmptyString(raw['callId'])! } : {}),
-		...(safeInteger(raw['turn']) !== undefined ? { turn: safeInteger(raw['turn'])! } : {}),
-		...(safeInteger(raw['step']) !== undefined ? { step: safeInteger(raw['step'])! } : {}),
-		...(nonEmptyString(raw['text']) !== undefined ? { text: nonEmptyString(raw['text'])! } : {}),
-		...(nonEmptyString(raw['title']) !== undefined ? { title: nonEmptyString(raw['title'])! } : {}),
+		seq,
+		...(callId !== undefined ? { callId } : {}),
+		...(turn !== undefined ? { turn } : {}),
+		...(step !== undefined ? { step } : {}),
+		...textField(type, raw, data),
+		...titleField(type, raw, data),
 		...(rowKindOf(type) !== undefined ? { kind: rowKindOf(type)! } : {}),
 	};
 	return event;
+}
+
+/** 按事件类型从线上形状取文本；取不到就不带该字段（显式 undefined 一律省略）。 */
+function textField(type: IdeEventType, raw: Record<string, unknown>, data: Record<string, unknown> | undefined): { text?: string } {
+	// 抽象形状（dsh-TUI mock / 回放）：字段平铺在顶层。
+	const flat = nonEmptyString(raw['text']);
+	if (flat !== undefined) {
+		return { text: flat };
+	}
+	if (data === undefined) {
+		return {};
+	}
+	switch (type) {
+		case 'user.message': {
+			const text = textOfContent(data['content']);
+			return text !== undefined ? { text } : {};
+		}
+		case 'assistant.message': {
+			const message = isRecord(data['message']) ? data['message'] : undefined;
+			const text = message !== undefined ? textOfContent(message['content']) : undefined;
+			return text !== undefined ? { text } : {};
+		}
+		case 'assistant.delta': {
+			const text = nonEmptyString(data['text']) ?? nonEmptyString(data['delta']);
+			return text !== undefined ? { text } : {};
+		}
+		case 'tool.call': {
+			const name = nonEmptyString(data['name']);
+			return name !== undefined ? { text: name } : {};
+		}
+		case 'tool.result': {
+			const message = isRecord(data['message']) ? data['message'] : undefined;
+			const text = message !== undefined ? textOfContent(message['content']) : undefined;
+			return text !== undefined ? { text } : {};
+		}
+		case 'system.prompt': {
+			const message = isRecord(data['message']) ? data['message'] : undefined;
+			const text = message !== undefined ? textOfContent(message['content']) : undefined;
+			return text !== undefined ? { text } : {};
+		}
+		default:
+			return {};
+	}
+}
+
+/** 按事件类型从线上形状取标题（工具名 / 会话标题）；取不到就不带该字段。 */
+function titleField(type: IdeEventType, raw: Record<string, unknown>, data: Record<string, unknown> | undefined): { title?: string } {
+	const flat = nonEmptyString(raw['title']);
+	if (flat !== undefined) {
+		return { title: flat };
+	}
+	if (data === undefined) {
+		return {};
+	}
+	if (type === 'tool.call') {
+		const name = nonEmptyString(data['name']);
+		return name !== undefined ? { title: name } : {};
+	}
+	if (type === 'session.title') {
+		const title = nonEmptyString(data['title']);
+		return title !== undefined ? { title } : {};
+	}
+	return {};
 }
 
 /** 批量翻译（回放脚本 / golden 脚手架入口）。 */

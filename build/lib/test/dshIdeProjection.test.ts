@@ -10,7 +10,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
-import { dshEmits, translateAll, translateDshEvent } from '../../../src/vs/platform/dshClient/common/translator.ts';
+import { dshEmits, translateAll, translateDshEvent, wireEventType } from '../../../src/vs/platform/dshClient/common/translator.ts';
 import {
 	MAX_ROWS,
 	ROWS_P95_BYTE_LIMIT,
@@ -60,6 +60,80 @@ test('translateDshEvent drops DSH private payload and non-emitted events', () =>
 	assert.equal(translateDshEvent({ type: '__unknown.dsh.event', seq: 44 }, 0), undefined);
 	assert.equal(translateDshEvent(null, 0), undefined);
 	assert.equal(translateDshEvent('not-an-object', 0), undefined);
+});
+
+// ---------------------------------------------------------------------------
+// 真实 DSH 线上事件（斜杠命名 + data 信封）
+//
+// 依据 E:/deepseek-harness-0.2.2-rc.1/packages/core/session/src/types.ts:SessionEventMap：
+// 线上事件是 { type: 'user/message', seq, time, data: {...} }，与 dsh-TUI 抽象出的点号名字不是同一套。
+// 本组用例守护「真实事件能被翻译」，避免只有 mock golden 通过而真机流全丢。
+// ---------------------------------------------------------------------------
+
+test('wireEventType maps every DSH slash-named session event to a neutral type', () => {
+	assert.equal(wireEventType('user/message'), 'user.message');
+	assert.equal(wireEventType('assistant/message'), 'assistant.message');
+	assert.equal(wireEventType('tool/call'), 'tool.call');
+	assert.equal(wireEventType('tool/result'), 'tool.result');
+	assert.equal(wireEventType('system/message'), 'system.prompt');
+	assert.equal(wireEventType('request/header'), 'request.header');
+	assert.equal(wireEventType('turn/start'), 'turn.start');
+	assert.equal(wireEventType('__unknown/x'), undefined);
+});
+
+test('translates a real DSH user/message (content blocks under data)', () => {
+	const translated = translateDshEvent({
+		type: 'user/message', seq: 7, time: 1_700_000_000_000,
+		data: { id: 'm1', content: [{ type: 'text', text: 'list files' }], source: { kind: 'user' } },
+	}, 0);
+	assert.deepEqual(translated, { type: 'user.message', seq: 7, text: 'list files', kind: 'user' });
+});
+
+test('translates a real DSH assistant/message (nested message.content)', () => {
+	const translated = translateDshEvent({
+		type: 'assistant/message', seq: 9, time: 1,
+		data: { turn: 1, step: 2, message: { id: 'a1', role: 'assistant', content: [{ type: 'text', text: 'done' }] }, usage: {} },
+	}, 0);
+	assert.deepEqual(translated, { type: 'assistant.message', seq: 9, turn: 1, step: 2, text: 'done', kind: 'assistant' });
+});
+
+test('translates a real DSH tool/call and tool/result by callId', () => {
+	const call = translateDshEvent({
+		type: 'tool/call', seq: 11, time: 1,
+		data: { turn: 1, step: 2, callId: 'c1', name: 'terminal', arguments: '{"command":"ls"}' },
+	}, 0);
+	assert.deepEqual(call, { type: 'tool.call', seq: 11, callId: 'c1', turn: 1, step: 2, text: 'terminal', title: 'terminal', kind: 'tool' });
+
+	const result = translateDshEvent({
+		type: 'tool/result', seq: 12, time: 1,
+		data: { turn: 1, step: 2, message: { role: 'tool', source: { kind: 'tool', callId: 'c1' }, toolCallId: 'c1', content: [{ type: 'text', text: 'a.txt' }] } },
+	}, 0);
+	assert.deepEqual(result, { type: 'tool.result', seq: 12, callId: 'c1', turn: 1, step: 2, text: 'a.txt', kind: 'tool' });
+});
+
+test('translates a real DSH system/message into system.prompt', () => {
+	const translated = translateDshEvent({
+		type: 'system/message', seq: 1, time: 1,
+		data: { message: { id: 's1', role: 'system', content: [{ type: 'text', text: 'You are helpful.' }], source: { kind: 'system-prompt' } } },
+	}, 0);
+	assert.deepEqual(translated, { type: 'system.prompt', seq: 1, text: 'You are helpful.', kind: 'system' });
+});
+
+test('real DSH event stream projects into transcript rows end-to-end', () => {
+	const rows = projectIdeView(translateAll([
+		{ type: 'user/message', seq: 1, data: { content: [{ type: 'text', text: 'ls?' }], source: { kind: 'user' } } },
+		{ type: 'assistant/message', seq: 2, data: { turn: 1, step: 1, message: { content: [{ type: 'text', text: 'sure' }] } } },
+		{ type: 'tool/call', seq: 3, data: { turn: 1, step: 1, callId: 'c1', name: 'terminal', arguments: '{}' } },
+		{ type: 'tool/result', seq: 4, data: { turn: 1, step: 1, message: { source: { callId: 'c1' }, content: [{ type: 'text', text: 'a.txt' }] } } },
+	])).rows;
+	assert.deepEqual(rows.map(row => row.kind), ['user', 'assistant', 'tool']);
+	assert.equal(rows[2].id, 'call:c1');
+	assert.equal(rows[2].text, 'a.txt');
+});
+
+test('unknown wire types are dropped, never fabricated', () => {
+	assert.equal(translateDshEvent({ type: 'plugin/something', seq: 1 }, 0), undefined);
+	assert.equal(translateDshEvent({ type: 'user/message', seq: 1, data: {} }, 0)?.text, undefined);
 });
 
 test('translateAll assigns fallbackSeq for missing seq', () => {

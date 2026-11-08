@@ -151,6 +151,7 @@ import ErrorTelemetry from '../../platform/telemetry/electron-main/errorTelemetr
 import { IProtocolMainService } from '../../platform/protocol/electron-main/protocol.js';
 import { createRemoteResourceRequestHandler } from '../../platform/protocol/electron-main/remoteResourceProtocol.js';
 import { DshIdeChannel } from '../../platform/dshClient/electron-main/dshIdeChannel.js';
+import { createDshIdeBackendFromEnv } from '../../platform/dshClient/electron-main/dshIdeBackendFactory.js';
 import { DshIdeViewService } from '../../platform/dshClient/electron-main/ide-view-service.js';
 import { DSH_IDE_CHANNEL } from '../../platform/dshClient/common/dshIdeProtocol.js';
 import { logNodeCompileCacheStatus, markNodeCompileCacheReady, waitForNodeCompileCacheReady } from '../../base/node/nodeCompileCache.js';
@@ -1440,10 +1441,11 @@ export class CodeApplication extends Disposable {
 		const workspacesChannel = ProxyChannel.fromService(accessor.get(IWorkspacesService), disposables);
 		mainProcessElectronServer.registerChannel('workspaces', workspacesChannel);
 
-		// P3：唯一 DSH-IDE 通道注册点。视图宿主在这里创建，DSH 能力经 `DshIdeBackend` 端口
-		// 由插件 Host 半身注入；端口未接线时构造 `UnavailableDshIdeBackend`，所有调用以
-		// feature-unavailable 明确拒绝，绝不伪造事件或快照。
-		const dshIdeViewHost = new DshIdeViewService();
+		// P3：唯一 DSH-IDE 通道注册点。视图宿主在这里创建，DSH 能力经 `DshIdeBackend` 端口注入。
+		// 端口按环境选择：配置了 Host origin + cookie 时用官方客户端传输适配（本机 loopback 官方端点，
+		// 见第 2 章 §2.2.1）；未配置时退化为 `UnavailableDshIdeBackend`，所有调用以 feature-unavailable
+		// 明确拒绝，绝不伪造事件或快照。
+		const dshIdeViewHost = new DshIdeViewService(createDshIdeBackendFromEnv());
 		const dshIdeChannel = new DshIdeChannel(dshIdeViewHost);
 		mainProcessElectronServer.registerChannel(DSH_IDE_CHANNEL, dshIdeChannel);
 		disposables.add(dshIdeChannel);

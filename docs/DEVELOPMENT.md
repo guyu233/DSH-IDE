@@ -178,6 +178,33 @@ interface IdeViewHost {
 
 `DshIdeChannel` 的构造函数只接收 `IdeViewHost`，不接收插件宿主上下文。`open` 产出首帧；`subscribe` 建立单向快照流；`invoke` 执行 IDE→DSH 调用；`close` 结束宿主。当前实现是 `DshIdeViewService`（electron-main），DSH 能力经 `DshIdeBackend` 端口注入，端口由插件 Host 半身实现。
 
+#### 2.2.1 `DshIdeBackend`（IDE 侧官方传输适配的唯一形状）
+
+```ts
+interface DshIdeBackend {
+  open(spec: DshIdeOpenSpec): { channelId: string; sessionId?: string };
+  follow(sessionId: string | undefined, onEvent: (raw: unknown) => void): { dispose(): void };
+  invoke(method: DshIdeMethod, args: unknown): Promise<unknown>;
+  close(): void;
+}
+```
+
+实现只用 DSH Host 自己提供的官方端点（不是私有管道，见第 7 章 §3.1 裁定），四段调用形态固定：
+
+| 用途 | 端点 / 形态 | 依据（`E:/deepseek-harness-0.2.2-rc.1`） |
+| --- | --- | --- |
+| 鉴权 | `GET <origin>/?token=<launch token>` → `303` + `set-cookie`（launch token 由 `ctx.connection.authenticatedUrl()` 派生） | `apps/desktop/src/web-document.ts:43`；`packages/client/connection/src/browser-auth.ts:312` |
+| 一元调用 | `POST <origin>/api/<namespace>/<method>`，body `{ type:'client-request', rpcId, method:'<namespace>/<method>', payload:{ args } }`，头带 cookie；响应 `{ type:'server-response', rpcId, result:{ ok:true, value } \| { ok:false, error } }` | `packages/client/connection/src/rpc-schema.ts`；`packages/api/gateway/src/index.ts:1261` |
+| 流式调用（`follow`） | WebSocket `<origin>/api/remote.mux`，`{ type:'open', streamId, endpoint:'session/follow', payload:{ args:{ address:{ kind:'session', sessionId }, assistantStream:true } } }`；下行 `{ type:'item', streamId, value }` / `{ type:'end' }` / `{ type:'error', streamId, error }` | `packages/api/gateway/src/stream-protocol.ts:235-315`；`packages/api/session-controller/src/types.ts:488` |
+| waterfall 决议 | 事件流 `item` 里的 `{ type:'waterfall', eventId, event, agentId, request }` → 界面决议后 `POST /api/$events/result`，payload `{ args:{ clientId, eventId, outcome:{ kind:'result', value } \| { kind:'next' } } }` | `packages/api/gateway/src/stream-protocol.ts:83-134` |
+
+约束：
+
+1. `namespace` 必须与服务的 `{ namespace }` 一致（`sessionController` 用 `session`），不按类名猜。
+2. 载荷恒为 `{ args }` 单字段对象；网关用 `exactRecord` 口径校验，多余字段直接拒绝。
+3. 事件类型名按 §3.1 的线上名翻译（`user/message` 等斜杠名），不是 dsh-TUI 的点号名。
+4. 适配层文件不得放进 `platform/dshClient/common` 或 `electron-main`（那两目录零 `@deepseek-ai/*`，`boundary` 门禁会拦）；它属于 `platform/dshClient/common` 之外的新目录，且只允许用 `@deepseek-ai/dsh-client-connection/client` 的**纯函数**（`createWebConnectionRpc`），不引入需要 Cordis 的 `ConnectionController`。
+
 ### 3. 适配层的中立 DTO
 
 | 类型 | 定义 | 边界 |
@@ -383,7 +410,7 @@ P7 打包为 DSH 插件与交付
 - **活动**：实现 `DshIdeBackend` 的唯一真实端口——IDE 侧**官方客户端传输适配**（Host 的 loopback 端点 + 官方 `dsh-client-connection` + `connection.authenticatedUrl()` 派生鉴权），把 `session/event` / `agent/assistant-stream` 翻译成中立 `IdeEvent` 交给 `DshIdeViewService`，并把 20 个 method 经同一链路回送；适配层放在 `platform/dshClient/common` 与 `electron-main` 之外以保住 `boundary` 门禁（裁定见第 7 章 §3.1）；在插件 Host 半身（`apply(ctx)` 拿到的 `dshCtx`）内订阅 `session/event`、`agent/assistant-stream`、`approval/request`、`user-questions/request`；实现 `call()` 分发、`listen()` 三层过滤、`disposeOwner()` 本通道清理；注册唯一交互式 answerer；落地 `ALREADY_RESOLVED` / `SESSION_SWITCHED` 常量；按第 2 章 §9 完成 `IdeViewSnapshot` 并入 `DshIdeSnapshot.state` 的契约升级；执行 waterfall 一致性核对（旧编号 S0，见 §5），实测必须满足「广播 + 首个决议生效，重复决议返回 `ALREADY_RESOLVED`」，实测不符按 §1 第 4 条的阶段内返工规则处理，不切换 answerer 形态。
 - **产出**：真实 `IdeViewHost`（`DshIdeViewService` + `DshIdeBackend` 端口）、`DshIdeBackend` 的官方客户端传输适配（真实端口实现）、`DshIdeChannel` 完整实现（`call` / `listen` / `disposeOwner`）、3 个新增错误码常量、`wireRevision = 2` 的协议真源与快照校验（含 `state.view` 行级校验）、`build/lib/test/dshIdeChannel.test.ts`（17 项）、`host/ide-view-host.js` + 17 项单测。
 - **出口判据 K4**：`DshIdeBackend` 真实端口接通（官方客户端传输，不再返回 `feature-unavailable`）；20 个 method 均有确定 handler 且通过 `validateDshIdeInput`；`call` / `listen` / `disposeOwner` 行为符合 第 2 章 §4–§7；`invoke` 输出恒为 `{ value }`；waterfall 实测符合上述唯一形态；`boundary` 门禁 `PASS`；契约升级后 17 符号仍单源。
-- **当前态**：**部分完成**。已落地：通道分发与三层过滤、`DshIdeViewService` 快照纪律（首帧 `starting`、`channelId` 守恒、`version` 严格 +1、微任务批处理）、`state.view` 并入与行级校验、3 个错误码常量、`disposeOwner` 按 ctx 清理、`boundary` 起启用 `listen` 三层过滤与分发断言；`index.js` 创建 `DshIdeHostBridge`，在插件上下文上订阅 `session/event` / `agent/assistant-stream` / `approval/request` / `user-questions/request` 并注册唯一交互式 answerer（未见界面时 `next()` 委托），`host/ide-view-host.js` 17 项单测覆盖订阅、归属过滤、waterfall 一致性（广播 + 首个决议生效 + 重复 `ALREADY_RESOLVED`）、会话切换与 method 映射。**未落地**：`DshIdeBackend` 的官方客户端传输适配尚未实现，端口仍由 `UnavailableDshIdeBackend` 承担（所有 method 明确以 `feature-unavailable` 拒绝，不伪造）；waterfall 的**真机**核对因此未执行（单测已覆盖语义）。K4 未达成，故 P4 不得启动。
+- **当前态**：**部分完成**。已落地：通道分发与三层过滤、`DshIdeViewService` 快照纪律（首帧 `starting`、`channelId` 守恒、`version` 严格 +1、微任务批处理）、`state.view` 并入与行级校验、3 个错误码常量、`disposeOwner` 按 ctx 清理、`boundary` 起启用 `listen` 三层过滤与分发断言；`index.js` 创建 `DshIdeHostBridge`，在插件上下文上订阅 `session/event` / `agent/assistant-stream` / `approval/request` / `user-questions/request` 并注册唯一交互式 answerer（未见界面时 `next()` 委托），`host/ide-view-host.js` 17 项单测覆盖订阅、归属过滤、waterfall 一致性（广播 + 首个决议生效 + 重复 `ALREADY_RESOLVED`）、会话切换与 method 映射。已落地（续）：`transport/dshIdeTransport.ts` 实现官方客户端传输适配（鉴权交换 / 一元 RPC / `remote.mux` 流 / waterfall 回投，13 项单测），`electron-main/dshIdeBackendFactory.ts` 按 `DSH_IDE_ENDPOINT` + `DSH_IDE_COOKIE`/`DSH_IDE_LAUNCH_URL` 装配，`app.ts` 已接真实端口；`common/translator.ts` 补上真实 DSH 线上事件（斜杠命名 + `data` 信封）的翻译，投影层现可吃真机事件流（新增 7 项用例）。**未落地**：waterfall 与双窗口镜像的**真机**核对（需要运行中的 DSH Host，本仓库无安装依赖无法实跑），单测已覆盖语义与协议形状。K4 判定见下。
 
 #### P4 IDE 消费者与 UI 实现
 
@@ -406,7 +433,7 @@ P7 打包为 DSH 插件与交付
 - **前置**：K6。
 - **活动（固定顺序，不并行、不调换）**：① 四条门禁 → ② `test-dsh:all` → ③ `tsc --noEmit` 本批文件 0 错误 → ④ 第 5 章 §6 的 9 项真机验收 → ⑤ 真实事件流 P95 校准 → ⑥ `node-pty` 按宿主 Electron 44.7.0 的 `NODE_MODULE_VERSION` 重编 → ⑦ IDE 终端冒烟 → ⑧ 第 5 章 §7 的上游核对（同时把 `contract` 改为启用失败断言） → ⑨ 把 第 5 章 §2 的四条门禁与 `test-dsh:all` 接入 CI 配置，并按第 7 章 §7.1 的 11 行清单逐文件把代码注释中的历史阶段标记改为 P 编号；`client.js:62` 与 `dshIdeChannel.ts:28` 是**运行时错误字符串**，单独记录、不与注释清理混同，改字符串后须同步核对 `packaging.test.mjs` 及通道相关测试断言，并跑 第 5 章 §2 的 `test-dsh:all` 确认基线不变；第 7 章 §7.3 的失效章节引用同步修复。P95 超标时按固定序列执行：下调 `MAX_ROWS` → 收紧 `preview` 折叠阈值 → 重新生成 golden，直至 rows 序列化后 P95 ≤ 512 KiB；这是阶段内的参数校准迭代，不是架构变更。
 - **产出**：门禁与测试实测记录、9 项真机验收记录、P95 校准后的常量与 golden、ABI 重编产物、终端冒烟记录、上游差异报告、CI 配置改动、历史阶段标记清理记录。
-- **出口判据 K7**：`protocol-single-source` / `boundary` / `projection-golden` 均 `PASS`；`contract` 启用失败断言后完成一次上游核对且 4 个注入点指纹一致，并按第 5 章 §9 记录状态；`test-dsh:all` 不低于 93/93；9 项真机验收全部通过；P95 ≤ 512 KiB；IDE 终端可开且 PTY 数据流走原生 `node-pty`；CI 配置中可见同一组命令；第 7 章登记的历史阶段标记与失效章节引用零残留。
+- **出口判据 K7**：`protocol-single-source` / `boundary` / `projection-golden` 均 `PASS`；`contract` 启用失败断言后完成一次上游核对且 4 个注入点指纹一致，并按第 5 章 §9 记录状态；`test-dsh:all` 不低于 113/113；9 项真机验收全部通过；P95 ≤ 512 KiB；IDE 终端可开且 PTY 数据流走原生 `node-pty`；CI 配置中可见同一组命令；第 7 章登记的历史阶段标记与失效章节引用零残留。
 - **当前态**：未开始。门禁脚手架已就位（3 `PASS` + 1 `PENDING`，见第 5 章 §3），不构成 K7 达成。
 
 #### P7 打包为 DSH 插件与交付
@@ -683,7 +710,7 @@ B1–B5 是流程内的检查点，与开发路线的 K1–K8 不同，二者不
 | --- | --- | --- |
 | 编译 DSH 测试 | `npm run build-dsh-tests` | 退出 0，产出 `out/` |
 | mocha tdd 半场 | `npm run test-dsh` | `13 passing` |
-| 全量 DSH 测试 | `npm run test-dsh:all` | `13 passing` + `80/80`，合计 93/93 |
+| 全量 DSH 测试 | `npm run test-dsh:all` | `13 passing` + `100/100`，合计 113/113 |
 | 门禁 1 | `npm run verify:dsh-ide-protocol-single-source` | `STATUS: PASS` |
 | 门禁 2 | `npm run verify:dsh-ide-boundary` | `STATUS: PASS` |
 | 门禁 3 | `npm run verify:dsh-ide-projection-golden` | `STATUS: PASS` |
@@ -702,7 +729,7 @@ B1–B5 是流程内的检查点，与开发路线的 K1–K8 不同，二者不
 
 ```powershell
 node node_modules/mocha/bin/mocha.js --ui tdd "out/vs/platform/dshClient/test/node/*.test.mjs" "out/vs/workbench/contrib/dsh/test/browser/chatClient/*.test.js" "out/vs/workbench/contrib/dsh/test/browser/chatClient/*.test.mjs"
-node --experimental-strip-types --test build/lib/test/dshBuildProvenance.test.ts build/lib/test/dshBundleStaging.test.ts build/lib/test/ripgrep.test.ts build/lib/test/dshIdeProtocol.test.ts build/lib/test/dshIdeProjection.test.ts build/lib/test/dshIdeChannel.test.ts src/vs/platform/dshClient/test/host/ideViewHost.test.mjs
+node --experimental-strip-types --test build/lib/test/dshBuildProvenance.test.ts build/lib/test/dshBundleStaging.test.ts build/lib/test/ripgrep.test.ts build/lib/test/dshIdeProtocol.test.ts build/lib/test/dshIdeProjection.test.ts build/lib/test/dshIdeChannel.test.ts build/lib/test/dshIdeTransport.test.ts src/vs/platform/dshClient/test/host/ideViewHost.test.mjs
 ```
 
 ### 3. 四条门禁判据与当前实测
@@ -720,7 +747,7 @@ node --experimental-strip-types --test build/lib/test/dshBuildProvenance.test.ts
 
 ### 4. 测试基线与类型检查
 
-`test-dsh:all` = `npm run test-dsh` + `node --experimental-strip-types --test` 的 6 个 `build/lib/test` 文件 + 1 个插件侧 `.mjs`（`src/vs/platform/dshClient/test/host/ideViewHost.test.mjs`）。`build/package.json` 的默认 `test` 不覆盖这组文件，必须由 `test-dsh:all` 显式列出。
+`test-dsh:all` = `npm run test-dsh` + `node --experimental-strip-types --test` 的 7 个 `build/lib/test` 文件 + 1 个插件侧 `.mjs`（`src/vs/platform/dshClient/test/host/ideViewHost.test.mjs`）。`build/package.json` 的默认 `test` 不覆盖这组文件，必须由 `test-dsh:all` 显式列出。
 
 | 分组 | 文件 | 用例数 |
 | --- | --- | --- |
@@ -729,12 +756,13 @@ node --experimental-strip-types --test build/lib/test/dshBuildProvenance.test.ts
 | `dshBundleStaging.test.ts` | bundle 清单与 stage 字面量 | 7 |
 | `ripgrep.test.ts` | 平台过滤 | 5 |
 | `dshIdeProtocol.test.ts` | 20 方法白名单、双向校验器、连续性 fail-closed | 19 |
-| `dshIdeProjection.test.ts` | golden 回放、事件分类、seq 幂等、稳定 id、600 行折叠、P95 脚手架、架构边界 | 11 |
+| `dshIdeProjection.test.ts` | golden 回放、事件分类、seq 幂等、稳定 id、600 行折叠、P95 脚手架、架构边界、**真实 DSH 线上事件（斜杠命名 + data 信封）翻译** | 18 |
 | `dshIdeChannel.test.ts` | 通道分发（20 method）、三层过滤、`disposeOwner`、快照纪律、`state.view` 行级校验 | 17 |
 | `ideViewHost.test.mjs` | Host 半身：四类事件订阅与归属过滤、唯一 answerer 形态、waterfall 一致性（广播 + 首个决议生效 + 重复 ALREADY_RESOLVED）、会话归属、method 映射 | 17 |
-| **合计** | — | **13 + 80 = 93** |
+| `dshIdeTransport.test.ts` | IDE 侧传输适配：鉴权交换、一元信封、remote.mux 流、waterfall 回投、method 映射与拒绝 | 13 |
+| **合计** | — | **13 + 100 = 113** |
 
-- 当前唯一基线：**93/93**（mocha `13 passing` + node:test `80/80`），实测退出 0。
+- 当前唯一基线：**113/113**（mocha `13 passing` + node:test `100/100`），实测退出 0。
 - mocha 的 13 个用例来自 `packaging.test.mjs`（7 项）与 `dshChatSeamMap.test.js`（6 项）；第三个 glob `chatClient/*.test.mjs` 当前无匹配文件（既有现象，不减少测试项）。`client.test.mjs`（原零用例、仅 harness）与 `dshClientService.test.ts`（原 stale、不兼容）已在全面清理（2026-11-08）中删除，不计入基线。
 - 上述两文件（stale / 零用例）已在全面清理（2026-11-08）中删除，原登记见第 7 章 §3。
 - 类型检查判据：全仓既有 electron 类型解析错误集中在 `app.ts`，改动前后基线对比确认非 DSH 改动引入；**变更文件 0 错误**即为通过。
