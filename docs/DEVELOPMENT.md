@@ -1142,12 +1142,17 @@ DSH-IDE = VS Code 外壳 + DSH 内核，二者共享同一 Electron 主进程内
 | 项 | 大小（字节） | 与桌面端关系 | 处置 |
 | --- | --- | --- | --- |
 | `runtime/app` | 299,381,810（约 285 MiB） | 不重复：VS Code IDE 载荷；DSH 桌面端不含 VS Code | 保留；`appOnly` 已复用宿主 Electron/Node |
+| `dist/dsh-ide-2.0.0.tgz`（压缩包，tar.gz 同口径） | 74,147,715（约 70.7 MiB） | 压缩分发物；**< 100 MB** | 保持；与安装体积 285 MiB 区分 |
 | `chat-render/dist/dsh-chat.js` / `.css` | 408,062 / 61,448（合计 469,510） | **重复**：与 `runtime/app/out/.../chatRender/` 同一份 | 删除插件根副本，只留 `runtime/app/out/.../chatRender/` |
 | `chat-render/PROVENANCE.md` / `LICENSE-DSH` | 小 | 法律与来源凭据 | 保留 |
 | `icon.svg` / `locale/*.json` | 3,573 / 529 | 插件元数据；运行时按钮图标已用宿主 `/favicon.svg` | 保留（安装前元数据） |
 | `client.js` / `index.js` / `host/` / `common/` | 4,562 / 7,244 / 34,036 / 590 | 不重复 | 保留 |
 
 `runtime/app` 的构成（同一次实测）：`extensions` 115,846,593、`out` 74,990,508、`node_modules.asar` 72,146,952、`node_modules.asar.unpacked` 31,330,250、`node_modules` 4,858,615，其余为 `product.json` 等小文件；全部是 VS Code IDE 载荷，不是 DSH 资源副本。
+
+其中 `extensions` 的大头：`mermaid-markdown-features` 47,782,907、`markdown-language-features` 9,449,263、共享 `node_modules` 34,506,641（`typescript` 23,031,995 + `@esbuild` 11,365,750），其余扩展合计约 24 MB。按 AGENTS §4，Mermaid/Markdown 及其运行依赖必须完整保留，前三项合计约 91.7 MB 是安装体积的硬下限。
+
+压缩包同口径（tar.gz）实测 74,147,715 字节（约 70.7 MiB），低于 100 MB；285 MiB 是解压安装体积。分发体积看压缩包，磁盘占用看安装体积，两者不可混用。
 
 **（3）可在运行时直接复用的桌面端资源**
 
@@ -1160,6 +1165,11 @@ DSH-IDE = VS Code 外壳 + DSH 内核，二者共享同一 Electron 主进程内
 | `dsh-client-ui-chat` 的 APNG | `.../ui-chat/lib/assets/running-whale@2x-*.png` | 仅 DSH client 半身可 `require.asset('plugins/@deepseek-ai/dsh-client-ui-chat/assets/...')` | DSH 窗口内聊天气泡 | 可用；当前侧栏在 VS Code renderer，不适用 |
 | `dsh-client-ui-chat` 的 locale JSON | `.../ui-chat/locale/{en,zh}.json` | 构建期只读源；运行期仅 DSH client 可读 | 聊天文案 | 构建期已复用（`src/locale.ts` 逐字副本） |
 | `dsh-client-ui-theme` 字体 | `.../ui-theme/lib/styles/montserrat-*.woff2` | 仅 DSH client 可 import | DSH 品牌字体 | 不适用（侧栏使用 VS Code 主题字体） |
+| `@vscode/ripgrep` 的 `rg.exe` | `app.asar.unpacked/dsh/node_modules/@vscode/ripgrep-win32-x64/bin/rg.exe`（5,443,048） | 重定向 `@vscode/ripgrep` 的 `rgPath`（包名/路径与插件侧 `@vscode/ripgrep-universal` 不同） | 搜索 | 可复用；需路径与版本核对 |
+| `node-pty` 原生二进制 | `.../node-pty/prebuilds/win32-x64/*.node`（约 0.45 MB） | 重定向 `node-pty` 的原生加载路径 | 终端 PTY | 可复用；插件侧为 `build/Release`（约 2.4 MB），ABI 同为 Electron 44.7.0，需加载路径核对 |
+| 64 个共享 JS 包 | `app.asar/dsh/node_modules` | 去重/路径重定向 | 工具库（`zod`、`semver`、`ws`、`undici`、`@xterm/*` 等） | 需版本矩阵核对；收益小于风险 |
+
+已复用且无需改动：Electron/Chromium/Node（`runtime/app` 无 `electron.exe`、`resources.pak`、`icudtl.dat`）、Host 包（`runtime/app` 无 `@deepseek-ai`）、`/favicon.svg`、React/slots（见上表）。
 
 **（4）禁止复用（耦合 / 路径 / 版本）**
 
@@ -1188,12 +1198,17 @@ DSH-IDE = VS Code 外壳 + DSH 内核，二者共享同一 Electron 主进程内
 | 删除插件根 `chat-render/dist/` 重复副本 | 约 469 KB | 改 `build/lib/dsh/package.json` 的 `files` 与 `gulpfile.vscode.ts` 的 staging；跑 `packaging.test.mjs` + 真机开窗 |
 | sidecar JS/CSS 开启 minify | 预计 150–200 KB | 改 `build-render.mjs` 的 `minify`；视觉回归 + `projection-golden` |
 | APNG 从 CSS data URL 改为独立文件 | 约 7 KB | 用 `FileAccess.asBrowserUri` 重写 URL；动画回归 |
+| `out` 改用 `out-vscode-min`（当前 `dsh-ide-pack` 绑定非压缩 `out-vscode`） | 预计 35–45 MB | 改 `dsh-ide-pack` 绑定 minified 构建；跑打包 + 真机开窗 + 视觉回归 |
+| 复用 DSH `@vscode/ripgrep` / `node-pty` | 约 7–8 MB | 路径/ABI/版本核对；搜索与终端回归 |
+| 裁剪非必需内置扩展（保留 Mermaid/Markdown + 共享依赖约 91.7 MB） | 最多约 24 MB | 产品决策；与「91 个内置扩展」交付口径冲突，需批准 |
 | 复用宿主 Electron/Node | 已生效（`appOnly`） | 保持 |
 
 **（7）结论**
 
-- 插件体积的绝对大头是 `runtime/app`（299,381,810 字节，约 285 MiB，VS Code IDE 载荷），它不是 DSH 资源的重复打包；DSH 桌面端不含 VS Code，无法用桌面端文件替代。
-- 真正的 DSH 重复只有 sidecar（469,510 字节，且重复两份）与图标/语言元数据（约 4 KB）。允许的优化上限约 **0.6–0.7 MB**，不得以「复用」为名改动 `runtime/app` 或把 DSH client 运行时塞进 VS Code renderer。
+- **分发体积**：压缩包同口径（tar.gz）74,147,715 字节（约 70.7 MiB），已低于 100 MB；285 MiB 是解压安装体积。两者不可混用。
+- **安装体积**：`runtime/app` 299,381,810 字节，其中 `extensions` 115.8 MB（Mermaid/Markdown + 共享依赖约 91.7 MB 为 AGENTS §4 必须保留）、`out` 75 MB（当前非 minified）、`node_modules.asar` 72 MB + unpacked 31 MB（VS Code 运行依赖，DSH 无对应包）。
+- **DSH 资源复用上限**预计 8–10 MB（`@vscode/ripgrep` 5.4 MB、`node-pty` 约 1.8 MB、64 个共享 JS 包需实测），需路径/ABI/版本核对；不得为了复用把 DSH client 运行时塞进 VS Code renderer。
+- **安装体积下探**：唯一可行方向是 `out-vscode-min`（预计省 35–45 MB）+ 裁剪非必需内置扩展（最多约 24 MB）；这不是 DSH 资源复用，且扩展裁剪与「91 个内置扩展」的交付口径冲突，需产品决策。
 - 版本漂移：宿主 `ui-chat` 源升级时按第 5 章 §7 更新 `PROVENANCE.md` 与 `UPSTREAM_VALIDATED_VERSION`；不得直接引用新版 `lib/client.js`。
 
 > 证据：DSH 源码 `apps/desktop/src/paths.ts`（profile 目录）、`packages/boot/app-boot/src/profile.ts`（bundle 解析）、`packages/client/modules/src/index.ts`（`/plugins` 与 module table）、`packages/client/web/src/seed.ts`（平台单例）、`packages/host/frontend-static/src/index.ts`（静态服务白名单）、`packages/client/ui-chat/package.json`（`./assets/*` 与 `./client`）；安装目录、文件大小与本机实测一致（2026-11-09）。
