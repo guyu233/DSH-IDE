@@ -84,9 +84,6 @@ const compilations = [
 	'extensions/tunnel-forwarding/tsconfig.json',
 	'extensions/typescript-language-features/web/tsconfig.json',
 	'extensions/typescript-language-features/tsconfig.json',
-	'extensions/vscode-api-tests/tsconfig.json',
-	'extensions/vscode-colorize-tests/tsconfig.json',
-	'extensions/vscode-colorize-perf-tests/tsconfig.json',
 	'extensions/vscode-test-resolver/tsconfig.json',
 
 	// DSH: 仓库自带的开发用 selfhost 测试扩展，服务端不需要，暂时排除编译（其依赖未完整安装）。
