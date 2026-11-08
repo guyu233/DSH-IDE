@@ -457,7 +457,7 @@ P7 打包为 DSH 插件与交付
 | P0 | 已完成 | 工程基线、bundle 清单、patch、资源、官方打包任务齐备 |
 | P1 | 已完成 | K2 判据实测通过 |
 | P2 | 已完成 | `translator.ts` / `ide-view-projector.ts` / golden / 11 项单测；K3 判据实测通过 |
-| P3 | 进行中 | 通道分发 / `listen` 三层过滤 / 快照并入 `state.view` / 3 个错误码已落地；Host 侧真源订阅与 answerer 未接线，K4 未达成 |
+| P3 | 进行中 | 通道分发 / `listen` 三层过滤 / 快照并入 `state.view` / 3 个错误码 / Host 半身四类订阅 + 唯一 answerer + 17 项单测已落地；`DshIdeBackend` 官方客户端传输适配未实现，K4 未达成 |
 | P4 | 未开始 | `DshIdeConsumer` 不存在 |
 | P5 | 未开始 | 按钮仍抛显式错误；双窗口镜像未接线 |
 | P6 | 未开始 | 门禁脚手架 3 `PASS` + 1 `PENDING`；真机验收、ABI 重编、终端冒烟未完成 |
