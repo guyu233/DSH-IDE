@@ -188,32 +188,6 @@ function clearInheritedNpmrcConfig(dir: string, env: NodeJS.ProcessEnv): void {
 	}
 }
 
-function ensureAgentHarnessLink(sourceRelativePath: string, linkPath: string): 'existing' | 'junction' | 'symlink' | 'hard link' {
-	if (fs.existsSync(linkPath)) {
-		return 'existing';
-	}
-
-	const sourcePath = path.resolve(path.dirname(linkPath), sourceRelativePath);
-	const isDirectory = fs.statSync(sourcePath).isDirectory();
-
-	try {
-		if (process.platform === 'win32' && isDirectory) {
-			fs.symlinkSync(sourcePath, linkPath, 'junction');
-			return 'junction';
-		}
-
-		fs.symlinkSync(sourceRelativePath, linkPath, isDirectory ? 'dir' : 'file');
-		return 'symlink';
-	} catch (error) {
-		if (process.platform === 'win32' && !isDirectory && (error as NodeJS.ErrnoException).code === 'EPERM') {
-			fs.linkSync(sourcePath, linkPath);
-			return 'hard link';
-		}
-
-		throw error;
-	}
-}
-
 async function runWithConcurrency(tasks: (() => Promise<void>)[], concurrency: number): Promise<void> {
 	const errors: Error[] = [];
 	let index = 0;
@@ -246,8 +220,7 @@ async function main() {
 		finishCloudSandbox();
 		log('.', 'All dependencies up to date, skipping postinstall.');
 		child_process.execSync('git config pull.rebase merges');
-		child_process.execSync('git config blame.ignoreRevsFile .git-blame-ignore-revs');
-		return;
+			return;
 	}
 
 	const _state = computeState();
@@ -319,22 +292,11 @@ async function main() {
 	await runWithConcurrency(parallelTasks, concurrency);
 
 	child_process.execSync('git config pull.rebase merges');
-	child_process.execSync('git config blame.ignoreRevsFile .git-blame-ignore-revs');
 
 	finishCloudSandbox();
 
 	fs.writeFileSync(stateFile, JSON.stringify(_state));
 	fs.writeFileSync(stateContentsFile, JSON.stringify(computeContents()));
-
-	// Symlink .claude/ files to their canonical locations to test Claude agent harness
-	const claudeDir = path.join(root, '.claude');
-	fs.mkdirSync(claudeDir, { recursive: true });
-
-	const claudeMdLink = path.join(claudeDir, 'CLAUDE.md');
-	const claudeMdLinkType = ensureAgentHarnessLink(path.join('..', '.github', 'copilot-instructions.md'), claudeMdLink);
-	if (claudeMdLinkType !== 'existing') {
-		log('.', `Created ${claudeMdLinkType} .claude/CLAUDE.md -> .github/copilot-instructions.md`);
-	}
 
 	// foundry-local-sdk's libraryPath redirects its shared libraries but not its
 	// two N-API addons. Packaged builds provision all native files together, so
