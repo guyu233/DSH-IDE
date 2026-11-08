@@ -4,6 +4,10 @@
 
 ## 1. 项目定义
 
+**为什么做**：DSH（DeepSeek Harness）是本地 AI 内核，具备会话、模型、工具、审批、语音能力，但缺少成熟的桌面编辑器外壳；普通 AI 编辑器又把 AI 与工作区割裂成两套状态。DSH-IDE 把两者合成一个进程、一个工作区、一套状态。
+
+**想做成什么效果**：打开 DSH-IDE 就是原生 VS Code 的编辑、终端、Git、调试、扩展与远程体验；AI 侧栏由 DSH 驱动，能基于真实工作区上下文调用工具、走审批、多会话并行；最终交付一个可安装的桌面 IDE 与一个 DSH bundle 插件，不需要再装第二套 AI 扩展，也不存在第二套 AI 会话或协议。
+
 DSH-IDE 是以 **DeepSeek Harness**（下称 **DSH**）为唯一 AI 内核、以 VS Code 1.143.1 源码树 `vscode-1.143.1/` 为 IDE 载体的桌面客户端实现。改造后的形态满足：DSH 主进程逻辑与 VS Code 主进程逻辑在同一个 Electron 主进程内共享**一个 Cordis 根** `dshCtx`；IDE 窗口只经**唯一一条 `IServerChannel`**（token `dshIde`）消费 DTO；会话、模型、工具、权限、审批、问卷、设置与语音全部由 DSH 决定。
 
 仓库只有一棵代码树 `vscode-1.143.1/`。所有 DSH-IDE 源码、资源、构建与验证脚本都落在这棵树的 VS Code 原生分层中，不存在第二个子工程。

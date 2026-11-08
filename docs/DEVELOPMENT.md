@@ -830,7 +830,7 @@ e:/vscode-dsh/                              git 仓库根（仅包裹 .git 与�
     README.md                      总纲、术语、分层索引、状态入口（L0）
     AGENTS.md                      协作约定（L0）
     NOTICE.md / LICENSE            法律声明（保留原文）
-    README.vscode.md / AGENTS.vscode.md   VS Code 上游自带文档（改名保留，不删）
+    README.vscode.md / AGENTS.vscode.md   VS Code 上游自带文档（删）
     docs/DEVELOPMENT.md            本手册（由 7 份专题规格合并而来，docs/ 现仅此一份）
     scripts/sync-upstream.mjs      上游差异报告（只读源 → .build/upstream-diff/）
     src/ build/ extensions/ cli/ remote/ resources/ test/ …   代码树
