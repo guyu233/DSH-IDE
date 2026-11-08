@@ -956,6 +956,8 @@ e:/DSH-IDE/                              git 仓库根 / 唯一代码树
 | Chat 面板 | `chat.view.contribution` 无条件注册，容器仍在；DSH 内容为空，显示「连接层重建中」 | P4 |
 | `translator.ts` / `ide-view-projector.ts` | `IdeEvent.streaming`、`ARGS_PREVIEW_LIMIT`、`ROWS_P95_BYTE_LIMIT` 定义后未被生产代码使用（仅常量与测试引用） | P3 / P6 |
 | `DshIdeViewService` 后端端口 | Host 半身（`index.js` + `host/ide-view-host.js`）已订阅四类官方事件并注册唯一 answerer；与 IDE 主进程之间的传输端口仍未接线，端口实现仍是 `UnavailableDshIdeBackend` | P5 |
+| 7 个 method 的官方落点 | `rewind` / `loadOlder` / `setEffort` / `setPermissionPreset` / `runCommand` / `listCommands` / `deleteSession` 在 DSH 公开接口中未核对到确切方法，当前一律返回 `feature-unavailable` 并写明缺口，不猜方法名、不伪造成功 | P5 |
+| `deleteSession` 语义缺口 | 第 8 章 §8.2.4 要求直接物理删除；DSH `sessions` 只有 `get` / `list`，会话由拥有它的 fiber 生命周期决定，无公开物理删除接口。当前明确拒绝，待 P5 与 DSH 侧确认删除能力归属后再实现，禁止用「关闭视图」冒充删除 | P5 |
 | `DSH_IDE_API_VERSION` | 已对齐 `0.2.2-rc.1`（P3） | 已闭环 |
 | `IdeViewSnapshot` 与 `DshIdeSnapshot.state` | 已并入 `state.view`，`wireRevision` 升为 2，行级校验随真源落地（P3） | 已闭环 |
 | 错误码 | 五个码全部落地（`feature-unavailable` / `invalid-argument` / `ALREADY_RESOLVED` / `SESSION_SWITCHED` / `SNAPSHOT_STALE`）；`SNAPSHOT_STALE` 的消费点在 P4 | 已闭环（常量）/ P4（消费点） |
