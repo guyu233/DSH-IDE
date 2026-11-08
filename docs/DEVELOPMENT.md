@@ -1199,6 +1199,9 @@ DSH-IDE = VS Code 外壳 + DSH 内核，二者共享同一 Electron 主进程内
 | sidecar JS/CSS 开启 minify | 预计 150–200 KB | 改 `build-render.mjs` 的 `minify`；视觉回归 + `projection-golden` |
 | APNG 从 CSS data URL 改为独立文件 | 约 7 KB | 用 `FileAccess.asBrowserUri` 重写 URL；动画回归 |
 | `out` 改用 `out-vscode-min`（当前 `dsh-ide-pack` 绑定非压缩 `out-vscode`） | 预计 35–45 MB | 改 `dsh-ide-pack` 绑定 minified 构建；跑打包 + 真机开窗 + 视觉回归 |
+| 剔除 `playwright-core`（测试专用，`src`/扩展运行时零引用） | 12,718,734 字节 | `gulpfile.vscode.ts` 的 `dependenciesSrc`/`filter` 增加排除；跑 `test-dsh:all` + 真机 |
+| 剔除 `esbuild` / `@esbuild`（构建工具） | 约 22.8 MB（asar 11.5 MB + `extensions/node_modules` 11.4 MB） | 同上 + `build/lib/extensions.ts` 过滤；打包后确认无运行时引用 |
+| 剔除 `@types/*`（纯类型声明） | 约 23 KB | 同上；可忽略 |
 | 复用 DSH `@vscode/ripgrep` / `node-pty` | 约 7–8 MB | 路径/ABI/版本核对；搜索与终端回归 |
 | 裁剪非必需内置扩展（保留 Mermaid/Markdown + 共享依赖约 91.7 MB） | 最多约 24 MB | 产品决策；与「91 个内置扩展」交付口径冲突，需批准 |
 | 复用宿主 Electron/Node | 已生效（`appOnly`） | 保持 |
@@ -1208,7 +1211,7 @@ DSH-IDE = VS Code 外壳 + DSH 内核，二者共享同一 Electron 主进程内
 - **分发体积**：压缩包同口径（tar.gz）74,147,715 字节（约 70.7 MiB），已低于 100 MB；285 MiB 是解压安装体积。两者不可混用。
 - **安装体积**：`runtime/app` 299,381,810 字节，其中 `extensions` 115.8 MB（Mermaid/Markdown + 共享依赖约 91.7 MB 为 AGENTS §4 必须保留）、`out` 75 MB（当前非 minified）、`node_modules.asar` 72 MB + unpacked 31 MB（VS Code 运行依赖，DSH 无对应包）。
 - **DSH 资源复用上限**预计 8–10 MB（`@vscode/ripgrep` 5.4 MB、`node-pty` 约 1.8 MB、64 个共享 JS 包需实测），需路径/ABI/版本核对；不得为了复用把 DSH client 运行时塞进 VS Code renderer。
-- **安装体积下探**：唯一可行方向是 `out-vscode-min`（预计省 35–45 MB）+ 裁剪非必需内置扩展（最多约 24 MB）；这不是 DSH 资源复用，且扩展裁剪与「91 个内置扩展」的交付口径冲突，需产品决策。
+- **安装体积下探**：先剔除构建/测试依赖（`playwright-core` 12.7 MB + `esbuild`/`@esbuild` 约 22.8 MB + `@types/*`），再加 `out-vscode-min`（35–45 MB）、sidecar 去重/minify（约 0.6 MB）、复用 DSH `ripgrep`/`node-pty`（约 7 MB），安装体积可到 **约 200–210 MiB**；再裁剪非必需扩展（最多约 24 MB）可到 **约 180–190 MiB**。仍无法到 <100 MiB：Mermaid/Markdown + 共享依赖约 91.7 MB、VS Code `out`/`node_modules` 是硬下限。扩展裁剪与「91 个内置扩展」交付口径冲突，需产品决策。
 - 版本漂移：宿主 `ui-chat` 源升级时按第 5 章 §7 更新 `PROVENANCE.md` 与 `UPSTREAM_VALIDATED_VERSION`；不得直接引用新版 `lib/client.js`。
 
 > 证据：DSH 源码 `apps/desktop/src/paths.ts`（profile 目录）、`packages/boot/app-boot/src/profile.ts`（bundle 解析）、`packages/client/modules/src/index.ts`（`/plugins` 与 module table）、`packages/client/web/src/seed.ts`（平台单例）、`packages/host/frontend-static/src/index.ts`（静态服务白名单）、`packages/client/ui-chat/package.json`（`./assets/*` 与 `./client`）；安装目录、文件大小与本机实测一致（2026-11-09）。
