@@ -303,6 +303,8 @@ interface IdeViewHost {
 
 ## 第 3 章 唯一开发路线（P0–P7）
 
+**交付形态**：整仓（VS Code 运行时 + 内置扩展 + sidecar + provenance）经 `gulp dsh-ide-pack` 打成**一个** DSH bundle 插件包 `dist/dsh-ide-2.0.0.tgz`；整条路线的终点就是该插件包，不存在独立的 IDE 安装包，也不存在第二份交付物。
+
 ### 1. 路线规则
 
 1. **只有一条路线**：P0 → P1 → P2 → P3 → P4 → P5 → P6 → P7。没有并行阶段、可选阶段、回退路径、替代方案或条件分叉。
@@ -335,7 +337,7 @@ P5 功能实现与真机接线
 P6 测试与验证
    │ K7 验证通过
    ▼
-P7 打包与交付
+P7 打包为 DSH 插件与交付
    │ K8 交付完成
    ▼ 终态
 ```
@@ -347,7 +349,7 @@ P7 打包与交付
 #### P0 项目初始化
 
 - **前置**：无。
-- **活动**：建立唯一代码树 `vscode-1.143.1/`；安装上游依赖；设置 `product.json` 身份（`nameShort` / `nameLong` = `DSH IDE`，`applicationName` = `dsh-ide`，`urlProtocol` = `dsh-ide`）；创建 bundle 清单与单行 patch；准备 `resources/dsh/` 真实资源；接入 VS Code 上游官方 gulp / esbuild 任务；准备只读参考目录与上游差异工具。
+- **活动**：建立唯一代码树 `vscode-1.143.1/`；安装上游依赖；设置 `product.json` 身份（`nameShort` / `nameLong` = `DSH IDE`，`applicationName` = `dsh-ide`，`urlProtocol` = `dsh-ide`；该身份只服务插件内嵌 app 的运行时，不产出独立安装包）；创建 bundle 清单与单行 patch；准备 `resources/dsh/` 真实资源；接入 VS Code 上游官方 gulp / esbuild 任务；准备只读参考目录与上游差异工具。
 - **产出**：`build/lib/dsh/package.json`（`dsh-ide@2.0.0`，`dsh.bundle.patch = "./cordis.patch.yml"`，`files` 白名单 11 项）、`build/lib/dsh/cordis.patch.yml`（唯一 `insert: dsh-ide` 行）、`resources/dsh/icon.svg` 与 `locale/{en,zh}.json`、`build/gulpfile.vscode.ts` 的 `dsh-ide-pack` 任务、`scripts/sync-upstream.mjs`。
 - **出口判据 K1**：依赖可安装且官方 gulp 能发现 `dsh-ide-pack`；上述清单、patch、资源文件齐备且内容符合本节；只读参考目录 `E:/dsh-TUI/`、`E:/deepseek-harness-0.2.2-rc.1/` 与已安装 DSH 的 `app.asar` 可读且不写入。
 - **当前态**：已完成。
@@ -400,11 +402,11 @@ P7 打包与交付
 - **出口判据 K7**：`protocol-single-source` / `boundary` / `projection-golden` 均 `PASS`；`contract` 启用失败断言后完成一次上游核对且 4 个注入点指纹一致，并按第 5 章 §9 记录状态；`test-dsh:all` 不低于 59/59；9 项真机验收全部通过；P95 ≤ 512 KiB；IDE 终端可开且 PTY 数据流走原生 `node-pty`；CI 配置中可见同一组命令；第 7 章登记的历史阶段标记与失效章节引用零残留。
 - **当前态**：未开始。门禁脚手架已就位（3 `PASS` + 1 `PENDING`，见第 5 章 §3），不构成 K7 达成。
 
-#### P7 打包与交付
+#### P7 打包为 DSH 插件与交付
 
 - **前置**：K7。
-- **活动**：运行上游官方 `gulp dsh-ide-pack`（`build/gulpfile.vscode.ts:664`）生成 `dist/dsh-ide-2.0.0.tgz`；执行 stage 声明式自校验；更新 `build/dsh/chat-render/PROVENANCE.md` 的版本 / commit / sha256；核对 `NOTICE.md` 与 `LICENSE` 原文保留；按 [`AGENTS.md`](../AGENTS.md) §6 写提交信息并提交。
-- **产出**：`dist/dsh-ide-2.0.0.tgz`（含 `runtime/app` appOnly 载荷、91 个内置扩展、sidecar 4 文件、`runtime/build-provenance.json`、bundle 清单白名单 11 项）、更新后的来源凭据、交付提交。
+- **活动**：运行上游官方 `gulp dsh-ide-pack`（`build/gulpfile.vscode.ts:664`）把**整仓**打成**唯一交付物** `dist/dsh-ide-2.0.0.tgz`（即 DSH bundle 插件包，不是独立 IDE 安装包）；执行 stage 声明式自校验；更新 `build/dsh/chat-render/PROVENANCE.md` 的版本 / commit / sha256；核对 `NOTICE.md` 与 `LICENSE` 原文保留；按 [`AGENTS.md`](../AGENTS.md) §6 写提交信息并提交。
+- **产出**：`dist/dsh-ide-2.0.0.tgz`（唯一交付物；含 `runtime/app` appOnly 载荷、91 个内置扩展、sidecar 4 文件、`runtime/build-provenance.json`、bundle 清单白名单 11 项）、更新后的来源凭据、交付提交。
 - **出口判据 K8**：tgz 生成成功；stage 白名单 11 项逐项存在且 glob 项至少命中 1 个文件；PROVENANCE 逐文件 sha256 与源一致；提交信息含门禁实测与未完成项；`git status --short` 无临时产物。
 - **当前态**：打包链路已实测可执行并产出过 tgz，但 K7 未达成，故本阶段出口未满足，不标记为完成。
 
@@ -760,9 +762,9 @@ node --experimental-strip-types --test build/lib/test/dshBuildProvenance.test.ts
 
 版本基准恒为 `UPSTREAM_VALIDATED_VERSION = '0.2.2-rc.1'`；优先跟随 DSH stable，不在 rc 迭代期盲目追新。
 
-### 8. 交付验收
+### 8. 交付验收（单一 DSH 插件包）
 
-上游官方任务 `gulp dsh-ide-pack`（定义于 `build/gulpfile.vscode.ts:664`）在 `e:/vscode-dsh/dist/` 产出 `dsh-ide-2.0.0.tgz`。验收项：
+上游官方任务 `gulp dsh-ide-pack`（定义于 `build/gulpfile.vscode.ts:664`）在 `e:/vscode-dsh/dist/` 把整仓打成 `dsh-ide-2.0.0.tgz`，这是**唯一交付物**（DSH bundle 插件包；包内 `runtime/app` 是插件载荷，不是独立安装包）。验收项：
 
 1. stage 声明式自校验通过：`build/lib/dsh/package.json` 的 `files` 白名单 11 项逐项存在，glob 项（`locale/*.json`、`chat-render/dist/`）至少命中 1 个文件。
 2. 包内含 `runtime/app` appOnly 载荷、91 个内置扩展、`chat-render/dist/dsh-chat.js` / `dsh-chat.css` / `PROVENANCE.md` / `LICENSE-DSH`、`runtime/build-provenance.json`。
@@ -830,11 +832,11 @@ e:/vscode-dsh/                              git 仓库根（仅包裹 .git 与�
     README.md                      总纲、术语、分层索引、状态入口（L0）
     AGENTS.md                      协作约定（L0）
     NOTICE.md / LICENSE            法律声明（保留原文）
-    README.vscode.md / AGENTS.vscode.md   VS Code 上游自带文档（删）
+    README.vscode.md / AGENTS.vscode.md   VS Code 上游自带文档（已删除）
     docs/DEVELOPMENT.md            本手册（由 7 份专题规格合并而来，docs/ 现仅此一份）
     scripts/sync-upstream.mjs      上游差异报告（只读源 → .build/upstream-diff/）
     src/ build/ extensions/ cli/ remote/ resources/ test/ …   代码树
-  dist/                               打包产物（生成物，git 忽略）
+  dist/                               唯一交付物 dist/dsh-ide-2.0.0.tgz（DSH 插件包，生成物，git 忽略）
   .build/                             上游差异报告（生成物，git 忽略）
 ```
 
@@ -1123,7 +1125,7 @@ DSH-IDE = VS Code 外壳 + DSH 内核，二者共享同一 Electron 主进程内
 #### 8.3.1 插件生态保障
 
 - 功能边界：完整保留扩展宿主、扩展市场、扩展 API、扩展运行依赖、远程连接；移除的只是 Copilot/AgentHost 与重复 VS Code Agent Sessions 的专属源码与入口，通用宿主保留。
-- 集成方式：DSH 作为唯一插件 `dsh-ide@2.0.0` 注入（入口 `index.js`，bundle 清单 `build/lib/dsh/package.json`），不改动扩展加载机制；Mermaid、Markdown 功能及其运行依赖完整保留。
+- 集成方式：DSH 作为唯一插件 `dsh-ide@2.0.0` 注入（入口 `index.js`，bundle 清单 `build/lib/dsh/package.json`；整仓构建产物即该插件，IDE 是其内嵌运行时，不是独立产品），不改动扩展加载机制；Mermaid、Markdown 功能及其运行依赖完整保留。
 
 #### 8.3.2 非 AI 功能正常运作
 
