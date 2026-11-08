@@ -16,6 +16,6 @@ export default new class NoAnyCasts implements eslint.Rule.RuleModule {
 					message: `Avoid casting to 'any' type. Consider using a more specific type or type guards for better type safety.`
 				});
 			}
-		};
+		} as unknown as eslint.Rule.RuleListener;
 	}
 };

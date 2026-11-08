@@ -76,6 +76,6 @@ export default new class NoPrivateAgentHostMetaImport implements eslint.Rule.Rul
 					checkImport(node, node.value);
 				}
 			},
-		};
+		} as unknown as eslint.Rule.RuleListener;
 	}
 };

@@ -30,6 +30,6 @@ export default new class NoAsyncSuite implements eslint.Rule.RuleModule {
 
 		return {
 			['MethodDefinition[override][key.name="dispose"]']: doesCallSuperDispose,
-		};
+		} as unknown as eslint.Rule.RuleListener;
 	}
 };

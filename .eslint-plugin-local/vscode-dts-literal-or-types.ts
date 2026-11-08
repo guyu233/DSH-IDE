@@ -24,6 +24,6 @@ export default new class ApiLiteralOrTypes implements eslint.Rule.RuleModule {
 					});
 				}
 			}
-		};
+		} as unknown as eslint.Rule.RuleListener;
 	}
 };

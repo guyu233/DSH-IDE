@@ -39,6 +39,6 @@ export default new class ApiProviderNaming implements eslint.Rule.RuleModule {
 					});
 				}
 			}
-		};
+		} as unknown as eslint.Rule.RuleListener;
 	}
 };

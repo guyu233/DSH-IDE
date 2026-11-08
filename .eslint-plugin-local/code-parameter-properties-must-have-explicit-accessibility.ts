@@ -35,6 +35,6 @@ export default new class implements eslint.Rule.RuleModule {
 
 		return {
 			['TSParameterProperty']: check,
-		};
+		} as unknown as eslint.Rule.RuleListener;
 	}
 };

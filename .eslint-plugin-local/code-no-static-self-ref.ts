@@ -51,6 +51,6 @@ export default new class implements eslint.Rule.RuleModule {
 
 		return {
 			'PropertyDefinition[static=true]': checkProperty,
-		};
+		} as unknown as eslint.Rule.RuleListener;
 	}
 };

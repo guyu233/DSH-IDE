@@ -193,6 +193,6 @@ export default new class NoUnexternalizedStrings implements eslint.Rule.RuleModu
 			['CallExpression[callee.name="localize"][arguments.length>=2]:exit']: (node: TSESTree.CallExpression) => visitLocalizeCall(node),
 			['CallExpression[callee.name="localize2"][arguments.length>=2]:exit']: (node: TSESTree.CallExpression) => visitLocalizeCall(node),
 			['Program:exit']: reportBadStringsAndBadKeys,
-		};
+		} as unknown as eslint.Rule.RuleListener;
 	}
 };

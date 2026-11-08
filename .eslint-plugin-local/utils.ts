@@ -37,5 +37,5 @@ export function createImportRuleListener(validateImport: (node: TSESTree.Literal
 			_checkImport((node as TSESTree.ExportNamedDeclaration).source);
 		},
 
-	};
+	} as unknown as eslint.Rule.RuleListener;
 }

@@ -65,6 +65,6 @@ export default new class NoUntypedMetaAccess implements eslint.Rule.RuleModule {
 					context.report({ node, messageId: 'noMetaCast' });
 				}
 			},
-		};
+		} as unknown as eslint.Rule.RuleListener;
 	}
 };
