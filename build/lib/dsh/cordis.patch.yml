@@ -1,0 +1,6 @@
+# DSH-IDE bundle：Host 插件入口。IDE app 载荷由官方构建任务组装，
+# 运行时复用已安装的 DSH Electron；连接和会话由 DSH Host 提供。
+- insert:
+    - id: dsh-ide
+      name: dsh-ide
+      config: {}

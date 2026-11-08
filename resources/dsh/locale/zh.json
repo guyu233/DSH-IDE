@@ -1,0 +1,1 @@
+{ "meta": { "title": "DSH-IDE", "description": "在会话头部提供 DSH-IDE 入口：复用 DSH 宿主 Electron，打开独立 VS Code 窗口并打开当前工作区，连接同一 DSH Host（全官方传输，AI 100% 由 DSH 提供）。" } }

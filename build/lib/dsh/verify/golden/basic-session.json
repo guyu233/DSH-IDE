@@ -1,0 +1,30 @@
+{
+  "name": "basic-session-mock",
+  "description": "P2 mock 事件流 golden：覆盖 user/assistant delta 合并、callId 关联、重复 seq 幂等、dshEmits=false 丢弃、DSH 私有 payload 不透传。真实事件流样本到位后按 docs/DEVELOPMENT.md 第 5 章 §5 的 P95 校准流程替换并更新本 golden。",
+  "events": [
+    { "type": "session.status", "seq": 1, "status": "ready", "dshPrivateToken": "must-be-dropped" },
+    { "type": "user.message", "seq": 2, "text": "list files", "attachments": ["secret"] },
+    { "type": "turn.start", "seq": 3 },
+    { "type": "step.start", "seq": 4 },
+    { "type": "assistant.delta", "seq": 5, "text": "Sure, " },
+    { "type": "assistant.delta", "seq": 6, "text": "I will " },
+    { "type": "assistant.delta", "seq": 7, "text": "run ls." },
+    { "type": "assistant.delta", "seq": 7, "text": "DUPLICATE-SEQ" },
+    { "type": "tool.call", "seq": 8, "callId": "c1", "title": "terminal: ls" },
+    { "type": "tool.result", "seq": 9, "callId": "c1", "text": "a.txt\nb.txt" },
+    { "type": "notice", "seq": 10, "text": "dshEmits=false" },
+    { "type": "assistant.attempt.end", "seq": 11 },
+    { "type": "step.end", "seq": 12 },
+    { "type": "turn.end", "seq": 13 },
+    { "type": "custom", "seq": 14, "text": "done" }
+  ],
+  "expected": {
+    "rows": [
+      { "id": "row:2", "revision": 1, "kind": "user", "text": "list files", "folded": false, "seq": 2 },
+      { "id": "row:5", "revision": 3, "kind": "assistant", "text": "Sure, I will run ls.", "folded": false, "seq": 5 },
+      { "id": "call:c1", "revision": 2, "kind": "tool", "text": "a.txt b.txt", "folded": false, "seq": 8, "callId": "c1" },
+      { "id": "row:14", "revision": 1, "kind": "system", "text": "done", "folded": false, "seq": 14 }
+    ],
+    "version": 7
+  }
+}

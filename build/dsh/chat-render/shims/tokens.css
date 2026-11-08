@@ -1,0 +1,90 @@
+/*
+ * DSH design tokens (--dsw-* / --dsh-*) mapped to VS Code theme variables.
+ *
+ * This is a SIDECAR THEME BRIDGE, not a copy of DSH's theme package: DSH's
+ * real token sheet lives in dsh-client-ui-primitives (127 files, deliberately
+ * excluded — see docs/DEVELOPMENT.md 第 1 章 §3). The copied ui-chat CSS
+ * only reads custom properties, so mapping them here keeps the ORIGINAL CSS
+ * byte-for-byte while making it render with the surrounding VS Code theme.
+ *
+ * Every token referenced by ../dsh-chat.css is defined here. Missing tokens
+ * fall back to the inline defaults already present in the original CSS.
+ * Ownership: this file is original work of the DSH-IDE integration, not DSH
+ * source (see PROVENANCE.md §"Original sidecar files").
+ */
+
+.dsh-chat-part,
+:root {
+  /* ---- label / foreground ---- */
+  --dsw-alias-label-primary: var(--vscode-foreground, #cccccc);
+  --dsw-alias-label-secondary: var(--vscode-descriptionForeground, #9d9d9d);
+  --dsw-alias-label-tertiary: var(--vscode-descriptionForeground, #9d9d9d);
+  --dsw-alias-label-caption: var(--vscode-descriptionForeground, #9d9d9d);
+  --dsw-alias-label-deep-diving: var(--vscode-textLink-foreground, #3794ff);
+  --dsw-alias-label-deep-diving-shimmer: var(--vscode-textLink-activeForeground, #3794ff);
+  --dsw-alias-label-shimmer: var(--vscode-textLink-foreground, #3794ff);
+
+  /* ---- surfaces / backgrounds ---- */
+  --dsw-alias-bg-base: var(--vscode-editor-background, #1f1f1f);
+  --dsw-alias-bg-layer-1: var(--vscode-sideBar-background, #181818);
+  --dsw-specific-bubble: var(--vscode-chat-requestBubbleBackground, var(--vscode-editor-inactiveSelectionBackground, #2a2d2e));
+  --dsw-specific-input-major: var(--vscode-input-background, #313131);
+  --dsw-specific-menu: var(--vscode-menu-background, var(--vscode-editorWidget-background, #252526));
+  --dsw-alias-turn-trigger-bg: var(--vscode-badge-background, #4d4d4d);
+  --dsw-alias-turn-trigger-bg-hover: var(--vscode-toolbar-hoverBackground, #2a2d2e);
+
+  /* ---- interaction / hover ---- */
+  --dsw-alias-interactive-bg-hover: var(--vscode-toolbar-hoverBackground, rgba(90, 93, 94, 0.31));
+  --dsw-alias-interactive-bg-hover-solid: var(--vscode-editorWidget-background, #252526);
+  --dsw-alias-button-floating-fill: var(--vscode-button-background, #0e639c);
+  --dsw-alias-button-floating-hover: var(--vscode-button-hoverBackground, #1177bb);
+
+  /* ---- borders / separator ---- */
+  --dsw-alias-border-l1: var(--vscode-panel-border, rgba(128, 128, 128, 0.35));
+  --dsw-alias-border-l2: var(--vscode-editorWidget-border, rgba(128, 128, 128, 0.35));
+  --dsw-alias-border-l3: var(--vscode-widget-border, rgba(128, 128, 128, 0.35));
+  --dsw-alias-border-l4: var(--vscode-widget-border, rgba(128, 128, 128, 0.2));
+  --dsw-alias-separator-primary: var(--vscode-descriptionForeground, rgba(128, 128, 128, 0.5));
+
+  /* ---- state ---- */
+  --dsw-alias-state-business-primary: var(--vscode-textLink-foreground, #3794ff);
+  --dsw-alias-state-error-primary: var(--vscode-errorForeground, #f14c4c);
+  --dsw-alias-state-warn-primary: var(--vscode-editorWarning-foreground, #cca700);
+
+  /* ---- radii ---- */
+  --dsw-radius-sm: 4px;
+  --dsw-radius-md: 6px;
+  --dsw-radius-lg: 10px;
+  --dsw-radius-xl: 16px;
+
+  /* ---- typography ---- */
+  --ds-font-family-code: var(--vscode-editor-font-family, monospace);
+  --dsw-font-markdown-code-block-small: 12px/18px var(--vscode-editor-font-family, monospace);
+  --dsw-font-xs-strong-13: 500 13px/18px var(--vscode-font-family, sans-serif);
+  --dsw-font-xxs-12: 12px/18px var(--vscode-font-family, sans-serif);
+  --dsh-content-font-size: var(--vscode-chat-font-size, 14px);
+  --dsh-content-font-size-secondary: calc(var(--dsh-content-font-size, 14px) - 1px);
+  --dsh-content-font-delta: 0px;
+  --dsh-content-font-delta-secondary: 0px;
+
+  /* ---- markdown / elevation / menu ---- */
+  --dsw-alias-markdown-code-block: var(--vscode-textCodeBlock-background, rgba(128, 128, 128, 0.15));
+  --dsw-elevation-stroke-color: var(--vscode-widget-border, rgba(128, 128, 128, 0.35));
+  --dsw-elevation-panel: 0 4px 16px rgba(0, 0, 0, 0.36);
+  --dsw-elevation-prominent: 0 8px 28px rgba(0, 0, 0, 0.5);
+  --dsw-focus-ring-color: var(--vscode-focusBorder, #007fd4);
+  --dsw-menu-backdrop-filter: none;
+
+  /* ---- chat layout axes (VS Code sidebar owns the real width) ---- */
+  --dsh-chat-content-width: 100%;
+  --dsh-chat-flow-gap: 8px;
+  --dsh-composer-side-clearance: 0px;
+  --dsh-composer-height: 0px;
+  --dsh-conversation-viewport-height: auto;
+  --turn-preview-center: 0px;
+  --turn-preview-height: 0px;
+  --turn-rail-band: 0px;
+  --dsh-table-lead: 0px;
+  --dsh-table-spare: 0px;
+  --dsh-compaction-header-height: 24px;
+}

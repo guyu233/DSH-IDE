@@ -1,0 +1,1 @@
+{ "meta": { "title": "DSH-IDE", "description": "Adds a DSH-IDE entry in the session header: reuses the DSH host Electron to open an independent VS Code window bound to the current workspace, connected to the same DSH Host over the official transport (AI fully provided by DSH)." } }

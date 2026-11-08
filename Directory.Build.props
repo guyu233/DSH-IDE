@@ -1,0 +1,7 @@
+<Project>
+  <PropertyGroup>
+    <!-- VS Code 的原生模块 gyp 默认要求 Spectre 库；本机未装。
+         Microsoft.Cpp.VCTools.Content.props 仅在值为空或 'false' 时不启用，故显式设为 false。 -->
+    <SpectreMitigation>false</SpectreMitigation>
+  </PropertyGroup>
+</Project>
