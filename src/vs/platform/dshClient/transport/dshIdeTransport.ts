@@ -156,7 +156,8 @@ export class DshIdeTransport {
 	/** 打开一条逻辑流（`session/follow` 等），帧经 `onFrame` 原样回调。 */
 	openStream(endpoint: string, args: Record<string, unknown>, onFrame: (frame: DshIdeStreamFrame) => void, onError?: (error: DshIdeTransportError) => void): { streamId: string; close(): void } {
 		const streamId = crypto.randomUUID();
-		const socket = this.ensureSocket();
+		// 建立 socket（若尚未建立）；具体发送由 sendWhenOpen 排队，不直接用返回值。
+		this.ensureSocket();
 		this.streams.set(streamId, { onFrame, onError: onError ?? (() => undefined) });
 		this.sendWhenOpen(JSON.stringify({ type: 'open', streamId, endpoint, payload: { args } }));
 		return {

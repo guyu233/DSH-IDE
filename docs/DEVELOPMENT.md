@@ -64,7 +64,7 @@
 | 通道注册 `app.ts` | `registerChannel(DSH_IDE_CHANNEL, new DshIdeChannel(真实 IdeViewHost))` | 已注册 `new DshIdeChannel(new DshIdeViewService())`，并配对 `onDidRemoveConnection → disposeOwner(connection.ctx)`；`DshIdeViewService` 的后端端口当前为 `UnavailableDshIdeBackend` |
 | `DshIdeChannel` | `call` / `listen` / `disposeOwner` 全实现 | 已实现：`call` 分发控制命令与 20 method（入参/出参双向校验）；`listen('snapshot')` 三层过滤；`disposeOwner(ctx)` 返回清理的连接数；`dispose` 清理全部连接后 `view.close()` |
 | `IdeViewHost` | 持有插件宿主上下文、执行投影、处理 20 个方法 | `DshIdeViewService`：投影 + 快照版本计数（`starting` → `ready` + `state.view`）已实现；`DshIdeBackend` 端口仍为 `UnavailableDshIdeBackend`，`invoke` 一律以 `dsh-ide/feature-unavailable` 拒绝 |
-| IDE 消费者 | `DshIdeConsumer` 校验连续性并渲染 Chat | 不存在（P4）；`DshClientService` 仍为骨架，恒返回 `feature-unavailable`，消费方优雅降级 |
+| IDE 消费者 | `DshIdeConsumer` 校验连续性并渲染 Chat | `DshIdeConsumer` 已实现并接入：`onDidSnapshot` → `accept()`（校验/fail-closed/16ms/行级 diff）；`DshClientService` 已改为真实通道调用；Chat 侧栏回填待接线 |
 | 按钮行为 | 打开 IDE 窗口 | 仍抛 `Error('launch chain removed; pending DshIdeChannel.open')`（P5 改为经 `dshIde` 通道开窗） |
 | Chat 面板 | 回填 DSH 投影内容 | `chat.view.contribution` 在 `workbench.common.main.ts:229` 无条件注册，容器仍在；DSH 内容为空；`dshChatSeam.ts` 接缝开关默认关闭 |
 
@@ -546,7 +546,7 @@ waterfall 语义单测覆盖、boundary PASS、17 符号单源、端到端实跑
 | P1 | 已完成 | K2 判据实测通过 |
 | P2 | 已完成 | `translator.ts` / `ide-view-projector.ts` / golden / 11 项单测；K3 判据实测通过 |
 | P3 | 已完成 | K4 判据全部满足：真实端口接通、20 method 确定、`call`/`listen`/`disposeOwner` 合规、`invoke` 恒 `{ value }`、waterfall 单测覆盖、`boundary` PASS；端到端实跑（独立真实 Host）listSessions=52 / listModels=3 / follow=329 records → 98 行投影 |
-| P4 | 进行中 | `DshIdeConsumer` 已落地（10 项单测：校验 / fail-closed / 16ms 合并 / 行级 diff）；UI 投影层与 Chat 回填未接线 |
+| P4 | 进行中 | `DshIdeConsumer` 已落地并接到唯一快照流（`IDshClientService.onDidSnapshot` → `accept()`）；`DshClientService` 已改为真实通道调用（`openView`/`closeView`/`call`）；UI 投影层与 Chat 回填未接线 |
 | P5 | 未开始 | 按钮仍抛显式错误；双窗口镜像未接线 |
 | P6 | 未开始 | 门禁脚手架 3 `PASS` + 1 `PENDING`；真机验收、ABI 重编、终端冒烟未完成 |
 | P7 | 未满足出口 | 打包链路可执行，但前置 K7 未达成 |
