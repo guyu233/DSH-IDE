@@ -22,7 +22,11 @@ export const INVALID_ARGUMENT = 'dsh-ide/invalid-argument';
 export const ALREADY_RESOLVED = 'ALREADY_RESOLVED';
 export const SESSION_SWITCHED = 'SESSION_SWITCHED';
 
-/** 本桥接依赖的官方服务（缺任一即按 feature-unavailable 拒绝）。 */
+/**
+ * 本桥接依赖的官方服务（缺任一即按 feature-unavailable 拒绝）。
+ * 必须与插件入口 `index.js` 的 `export const inject` 完全一致，
+ * 否则会出现「inject 等到了但桥接仍自检失败」或反之的漂移。
+ */
 export const REQUIRED_SERVICES = Object.freeze(['sessions', 'sessionController']);
 
 function coded(code, message, details) {
@@ -439,6 +443,37 @@ export async function publishHostEndpoint(ctx, targetPath) {
 		// 写失败不影响插件加载：IDE 会按「无端点」明确降级，不伪造。
 		return undefined;
 	}
+}
+
+
+
+/**
+ * 等 `webServer.port` 出现后再发布端点。
+ *
+ * 为什么不能只等 `ctx.inject(['webServer'])`：服务注册与 HTTP 监听是两件事，
+ * `port` 由 `server.listen()` 回调回填（webserver/src/index.ts:624），apply 阶段为 undefined。
+ * 这里按固定间隔轮询有限次数，超时就明确记录并放弃，绝不伪造端点。
+ *
+ * @param ctx - 插件上下文
+ * @param targetPath - 端点文件路径
+ * @param options - `timeoutMs` 总等待时长，`intervalMs` 轮询间隔
+ * @returns 端点或 undefined
+ */
+export async function publishHostEndpointWhenListening(ctx, targetPath, options = {}) {
+	const timeoutMs = typeof options.timeoutMs === 'number' ? options.timeoutMs : 30_000;
+	const intervalMs = typeof options.intervalMs === 'number' ? options.intervalMs : 250;
+	const deadline = Date.now() + timeoutMs;
+	while (Date.now() < deadline) {
+		const endpoint = resolveHostEndpoint(ctx);
+		if (endpoint !== undefined) {
+			const written = await publishHostEndpoint(ctx, targetPath);
+			if (written !== undefined) {
+				return written;
+			}
+		}
+		await new Promise(resolve => setTimeout(resolve, intervalMs));
+	}
+	return undefined;
 }
 
 /** 插件入口与单测共用：核对必需服务后创建桥接。 */

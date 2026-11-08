@@ -197,10 +197,16 @@ test('openStream sends the official open frame and delivers items', () => {
 
 	const socket = FakeWebSocket.instances[0];
 	assert.match(socket.url, /^ws:\/\/127\.0\.0\.1:9\/api\/remote\.mux$/, 'stream socket must use the official mux path');
+	// CONNECTING 期间不得直接 send（真机实测会抛 InvalidStateError: Sent before connected），
+	// 帧必须先入队，等 open 事件后按序 flush。
+	assert.equal(socket.sent.length, 0, 'no frame may be sent before the socket is open');
+	socket.open();
+	assert.equal(socket.sent.length, 1, 'the queued open frame flushes on open');
 	const open = socket.sent[0] as Record<string, unknown>;
 	assert.equal(open['type'], 'open');
 	assert.equal(open['endpoint'], 'session/follow');
 	assert.equal(open['streamId'], stream.streamId);
+	// 传输层原样转发调用方给的 args（形参名约定由 backend 负责）。
 	assert.deepEqual(open['payload'], { args: { address: { kind: 'session', sessionId: 's-1' }, assistantStream: true } });
 
 	socket.deliver({ type: 'item', streamId: stream.streamId, value: { type: 'snapshot', cursor: 3 } });
@@ -219,6 +225,7 @@ test('stream errors surface as transport errors and drop the stream', () => {
 	const errors: DshIdeTransportError[] = [];
 	transport.openStream('session/follow', {}, () => undefined, error => errors.push(error));
 	const socket = FakeWebSocket.instances[0];
+	socket.open();
 	const streamId = (socket.sent[0] as { streamId: string }).streamId;
 	socket.deliver({ type: 'error', streamId, error: { code: 'gateway/arguments-invalid', message: 'bad args', details: {} } });
 	assert.equal(errors.length, 1);
@@ -242,6 +249,7 @@ test('waterfall decisions post clientId + eventId + outcome', async () => {
 	const frames: DshIdeStreamFrame[] = [];
 	transport.openStream('$events', {}, frame => frames.push(frame));
 	const socket = FakeWebSocket.instances[0];
+	socket.open();
 	const streamId = (socket.sent[0] as { streamId: string }).streamId;
 
 	socket.deliver({ type: 'item', streamId, value: { type: 'ready', clientId: 'client-1', host: { home: '/home' } } });
@@ -293,12 +301,18 @@ test('backend maps submit/interrupt/setModel to verified session endpoints', asy
 	await backend.invoke('setModel', { model: 'deepseek/deepseek-chat' });
 
 	assert.deepEqual(requests.map(request => request.url.split('/api/')[1]), ['session/prompt', 'session/cancel', 'session/selectModel']);
-	const prompt = requests[0].body as { payload: { args: Record<string, unknown> } };
-	assert.equal(prompt.payload.args['sessionId'], 's-1');
-	assert.equal(prompt.payload.args['mode'], 'queue');
-	assert.deepEqual(prompt.payload.args['content'], [{ type: 'text', text: 'hi' }]);
-	const select = requests[2].body as { payload: { args: Record<string, unknown> } };
-	assert.deepEqual({ provider: select.payload.args['provider'], model: select.payload.args['model'] }, { provider: 'deepseek', model: 'deepseek-chat' });
+	// 参数键必须等于服务方法形参名：prompt(request, signal) / cancel(request)
+	const prompt = requests[0].body as { payload: { args: { request: Record<string, unknown> } } };
+	assert.equal(prompt.payload.args.request['sessionId'], 's-1');
+	assert.equal(prompt.payload.args.request['mode'], 'queue');
+	assert.deepEqual(prompt.payload.args.request['content'], [{ type: 'text', text: 'hi' }]);
+	const cancel = requests[1].body as { payload: { args: { request: Record<string, unknown> } } };
+	assert.equal(cancel.payload.args.request['sessionId'], 's-1');
+	const select = requests[2].body as { payload: { args: { request: Record<string, unknown> } } };
+	assert.deepEqual(
+		{ provider: select.payload.args.request['provider'], model: select.payload.args.request['model'] },
+		{ provider: 'deepseek', model: 'deepseek-chat' },
+	);
 	transport.dispose();
 });
 
@@ -321,9 +335,11 @@ test('backend opens session/follow with the official follow args and closes it',
 	const seen: unknown[] = [];
 	const handle = backend.follow('s-1', event => seen.push(event));
 	const socket = FakeWebSocket.instances[0];
-	const open = socket.sent[0] as { endpoint: string; payload: { args: Record<string, unknown> } };
+	socket.open();
+	const open = socket.sent[0] as { endpoint: string; payload: { args: { request: Record<string, unknown> } } };
 	assert.equal(open.endpoint, 'session/follow');
-	assert.deepEqual(open.payload.args, { address: { kind: 'session', sessionId: 's-1' }, assistantStream: true });
+	// follow(request, signal)：形参名是 request
+	assert.deepEqual(open.payload.args.request, { address: { kind: 'session', sessionId: 's-1' }, assistantStream: true });
 
 	const streamId = (socket.sent[0] as { streamId: string }).streamId;
 	socket.deliver({ type: 'item', streamId, value: { type: 'event', event: { type: 'user/message', seq: 1 } } });
@@ -341,4 +357,28 @@ test('backend reuses the channel id on repeated open', () => {
 	assert.equal(second.channelId, first.channelId);
 	assert.equal(second.sessionId, 's-1', 'the first binding wins');
 	transport.dispose();
+});
+
+
+test('openStream never sends before the socket is connected', () => {
+	resetSockets();
+	const { primitives } = fakeHost(() => ({ json: null }));
+	const realSend = FakeWebSocket.prototype.send;
+	FakeWebSocket.prototype.send = function (this: FakeWebSocket, data: string) {
+		if (this.readyState !== 1) {
+			throw new Error('InvalidStateError: Sent before connected');
+		}
+		realSend.call(this, data);
+	};
+	try {
+		const transport = new DshIdeTransport({ origin: 'http://127.0.0.1:9', cookie: 'c', primitives });
+		assert.doesNotThrow(() => transport.openStream('session/follow', { request: {} }, () => undefined));
+		const socket = FakeWebSocket.instances[0];
+		assert.equal(socket.sent.length, 0);
+		assert.doesNotThrow(() => socket.open(), 'the queued frame must flush cleanly once connected');
+		assert.equal(socket.sent.length, 1);
+		transport.dispose();
+	} finally {
+		FakeWebSocket.prototype.send = realSend;
+	}
 });

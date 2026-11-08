@@ -20,6 +20,7 @@ import {
 	approvalOutcome,
 	createDshIdeHostBridge,
 	publishHostEndpoint,
+	publishHostEndpointWhenListening,
 	resolveHostEndpoint,
 } from '../../host/ide-view-host.js';
 
@@ -345,5 +346,75 @@ test('publishHostEndpoint is a no-op when the endpoint cannot be resolved', asyn
 	const file = path.join(dir, 'host-endpoint.json');
 	assert.equal(await publishHostEndpoint(fakeCtx({}), file), undefined);
 	await assert.rejects(() => fsp.access(file), 'no file must be written when there is nothing to publish');
+	await fsp.rm(dir, { recursive: true, force: true });
+});
+
+
+// ---------------------------------------------------------------------------
+// 插件入口的 Cordis inject 与桥接自检清单必须一致
+//
+// 真机实测教训：入口曾写 `inject = []`，apply() 在 sessionController 注册前就跑，
+// ctx.get('sessionController') 返回 undefined → 桥接被跳过且只留一行 warn。
+// 两处清单漂移会静默降级，必须由测试锁住。
+// ---------------------------------------------------------------------------
+
+test('plugin entry inject matches REQUIRED_SERVICES', async () => {
+	// 静态读取而非 import：index.js 会引入 host/ide-service.js（依赖 @deepseek-ai/cordis），
+	// 本仓没有官方包，动态 import 会在解析阶段失败，测不到 inject。
+	const { readFile } = await import('node:fs/promises');
+	const source = await readFile(new URL('../../index.js', import.meta.url), 'utf8');
+	const match = /export const inject = \[([^\]]*)\]/.exec(source);
+	assert.ok(match !== null, 'index.js must declare `export const inject = [...]`');
+	const declared = [...match[1].matchAll(/'([^']+)'/g)].map(m => m[1]).sort();
+	// inject 只放内核级、启动即有的服务；sessionController 由 ctx.inject 延迟等待，
+	// 放进顶层 inject 会让整插件一直等它（真机实测）。
+	assert.deepEqual(declared, ['sessions'], 'top-level inject must only wait for the kernel service');
+	assert.ok(source.includes("ctx.inject(['sessionController']"), 'sessionController must be awaited via ctx.inject before building the bridge');
+	for (const service of REQUIRED_SERVICES) {
+		assert.ok(source.includes(`'${service}'`), `plugin entry must reference required service ${service}`);
+	}
+});
+
+
+test('publishHostEndpointWhenListening waits until webServer reports a port', async () => {
+	const os = await import('node:os');
+	const fsp = await import('node:fs/promises');
+	const path = await import('node:path');
+	const dir = await fsp.mkdtemp(path.join(os.tmpdir(), 'dsh-endpoint-wait-'));
+	const file = path.join(dir, 'host-endpoint.json');
+
+	// 模拟 webServer 先注册、后监听：前两次读 port 返回 undefined。
+	let reads = 0;
+	const ctx = {
+		get: name => {
+			if (name === 'webServer') {
+				reads += 1;
+				return reads <= 2 ? { host: '127.0.0.1', protocol: 'http:' } : { port: 4321, host: '127.0.0.1', protocol: 'http:' };
+			}
+			if (name === 'connection') {
+				return { authenticatedUrl: base => `${base}?token=t` };
+			}
+			return undefined;
+		},
+	};
+
+	const endpoint = await publishHostEndpointWhenListening(ctx, file, { timeoutMs: 3000, intervalMs: 10 });
+	assert.equal(endpoint.origin, 'http://127.0.0.1:4321');
+	assert.ok(reads > 2, 'it must poll until a port appears');
+	const parsed = JSON.parse(await fsp.readFile(file, 'utf8'));
+	assert.equal(parsed.port, 4321);
+	await fsp.rm(dir, { recursive: true, force: true });
+});
+
+test('publishHostEndpointWhenListening gives up instead of inventing an endpoint', async () => {
+	const os = await import('node:os');
+	const fsp = await import('node:fs/promises');
+	const path = await import('node:path');
+	const dir = await fsp.mkdtemp(path.join(os.tmpdir(), 'dsh-endpoint-timeout-'));
+	const file = path.join(dir, 'host-endpoint.json');
+	const ctx = { get: name => (name === 'webServer' ? { host: '127.0.0.1', protocol: 'http:' } : undefined) };
+	const endpoint = await publishHostEndpointWhenListening(ctx, file, { timeoutMs: 120, intervalMs: 20 });
+	assert.equal(endpoint, undefined);
+	await assert.rejects(() => fsp.access(file), 'nothing must be written when the port never appears');
 	await fsp.rm(dir, { recursive: true, force: true });
 });

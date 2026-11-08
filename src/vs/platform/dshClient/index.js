@@ -13,10 +13,13 @@
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { IdeRemoteService } from './host/ide-service.js';
-import { createDshIdeHostBridge, publishHostEndpoint } from './host/ide-view-host.js';
+import { createDshIdeHostBridge, publishHostEndpointWhenListening } from './host/ide-view-host.js';
 
 export const name = 'dsh-ide';
-export const inject = [];
+// 只硬依赖 `sessions`（内核级、必然存在）。`sessionController` 是 API 层服务，
+// 若把它写进 inject，插件会一直等它注册才 apply——真机实测会导致整插件静默不加载。
+// 因此 apply 立即执行（注册 @Remote ide 服务），桥接则用 ctx.inject 等会话服务就绪后再建。
+export const inject = ['sessions'];
 
 export function apply(ctx, config = {}) {
 	const root = (config && config.root) || process.cwd();
@@ -27,20 +30,32 @@ export function apply(ctx, config = {}) {
 	// 端点自解析：由 Host 自己算出 IDE 可用的 origin + launch URL，并写入插件目录下的
 	// `runtime/host-endpoint.json`。IDE 进程由操作系统单独拉起，环境变量无法传递，
 	// 而文件只解决「怎么找到端口」的引导问题——传输仍是官方 HTTP/WS（第 7 章 §3.1 裁定）。
+	//
+	// 必须等 `webServer` 真正开始监听：`apply` 时 `webServer.port` 还是 undefined
+	// （端口由 listen 回填），立刻发布只会得到「无从发布」并静默跳过（真机实测踩过）。
 	const pluginRoot = dirname(fileURLToPath(import.meta.url));
-	void publishHostEndpoint(ctx, join(pluginRoot, 'runtime', 'host-endpoint.json')).then(endpoint => {
-		if (endpoint !== undefined) {
-			console.log(`[dsh-ide] host endpoint published: ${endpoint.origin}`);
-		}
+	const endpointFile = join(pluginRoot, 'runtime', 'host-endpoint.json');
+	ctx.inject(['webServer', 'connection'], endpointCtx => {
+		void publishHostEndpointWhenListening(endpointCtx, endpointFile).then(endpoint => {
+			if (endpoint !== undefined) {
+				console.log(`[dsh-ide] host endpoint published: ${endpoint.origin}`);
+			} else {
+				console.warn('[dsh-ide] host endpoint not published within timeout: webServer never reported a port');
+			}
+		});
 	});
 
-	// Host 半身：订阅四类官方事件 + 唯一 answerer。服务缺失时按 feature-unavailable
-	// 记录并跳过，不阻止插件加载，也不产生第二条连接。
-	try {
-		const bridge = createDshIdeHostBridge(ctx, config && config.transport ? { transport: config.transport } : {});
-		bridge.follow(undefined, () => undefined);
-		ctx.effect(() => () => bridge.close(), 'dsh-ide.host-bridge');
-	} catch (error) {
-		console.warn(`[dsh-ide] host bridge is not available: ${error && error.message ? error.message : String(error)}`);
-	}
+	// Host 半身：订阅四类官方事件 + 唯一 answerer。
+	// 用 ctx.inject 等 `sessionController` 就绪（它有 init 生命周期，比 apply 晚），
+	// 就绪后建立桥接；不等它会导致桥接在启动早期自检失败并被静默跳过（真机实测踩过）。
+	ctx.inject(['sessionController'], bridgeCtx => {
+		try {
+			const bridge = createDshIdeHostBridge(bridgeCtx, config && config.transport ? { transport: config.transport } : {});
+			bridge.follow(undefined, () => undefined);
+			bridgeCtx.effect(() => () => bridge.close(), 'dsh-ide.host-bridge');
+			console.log('[dsh-ide] host bridge attached');
+		} catch (error) {
+			console.warn(`[dsh-ide] host bridge is not available: ${error && error.message ? error.message : String(error)}`);
+		}
+	});
 }

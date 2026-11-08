@@ -21,6 +21,11 @@
 //   一元   POST /api/<ns>/<method>  → { type:'client-request', rpcId, method, payload:{args} }
 //   流式   WS  /api/remote.mux      → { type:'open', streamId, endpoint, payload:{args} }
 //   waterfall WS item → POST /api/$events/result → { clientId, eventId, outcome }
+//
+// **`args` 的键必须等于服务方法的形参名**（Typert 按 descriptor 逐字段校验，不是自由对象）：
+// 例如 `session/list(_request, signal)` 要传 `{ _request: {...} }`，`session/prompt(request, signal)`
+// 要传 `{ request: {...} }`。`signal` 由 Host 侧注入，客户端不传。真机实测：
+// 传自由字段会得到 `gateway/arguments-invalid: missing "_request"`。
 
 import type { DshIdeBackend, DshIdeMethod, DshIdeOpenSpec } from '../common/dshIdeProtocol.js';
 
@@ -106,6 +111,8 @@ export class DshIdeTransport {
 	private readonly cookie: string;
 	private readonly primitives: DshIdeTransportPrimitives;
 	private socket: DshIdeWebSocket | undefined;
+	/** socket 已 open 前暂存的出站帧：`send()` 在 CONNECTING 状态会抛 InvalidStateError。 */
+	private outbox: string[] = [];
 	/** 每个 streamId 的下行回调。 */
 	private readonly streams = new Map<string, { onFrame: (frame: DshIdeStreamFrame) => void; onError: (error: DshIdeTransportError) => void }>();
 	/** `$events` 流的 clientId（waterfall 决议要用它回投）。 */
@@ -120,7 +127,10 @@ export class DshIdeTransport {
 		};
 	}
 
-	/** 一元调用：官方 `client-request` 信封 + cookie，返回 `result.value`。 */
+	/**
+	 * 一元调用：官方 `client-request` 信封 + cookie，返回 `result.value`。
+	 * @param args - **形参名 → 值**的映射（不是自由字段）；见文件头说明。
+	 */
 	async call(namespace: string, method: string, args: Record<string, unknown>): Promise<unknown> {
 		const endpoint = `${namespace}/${method}`;
 		const rpcId = crypto.randomUUID();
@@ -148,14 +158,14 @@ export class DshIdeTransport {
 		const streamId = crypto.randomUUID();
 		const socket = this.ensureSocket();
 		this.streams.set(streamId, { onFrame, onError: onError ?? (() => undefined) });
-		socket.send(JSON.stringify({ type: 'open', streamId, endpoint, payload: { args } }));
+		this.sendWhenOpen(JSON.stringify({ type: 'open', streamId, endpoint, payload: { args } }));
 		return {
 			streamId,
 			close: () => {
 				if (!this.streams.delete(streamId)) {
 					return;
 				}
-				socket.send(JSON.stringify({ type: 'cancel', streamId }));
+				this.sendWhenOpen(JSON.stringify({ type: 'cancel', streamId }));
 			},
 		};
 	}
@@ -177,6 +187,7 @@ export class DshIdeTransport {
 		this.streams.clear();
 		this.socket?.close(1000, 'dsh-ide transport disposed');
 		this.socket = undefined;
+		this.outbox = [];
 		this.eventClientId = undefined;
 	}
 
@@ -186,16 +197,40 @@ export class DshIdeTransport {
 		}
 		const url = `${this.origin.replace(/^http/, 'ws')}/api/remote.mux`;
 		const socket = new this.primitives.WebSocket(url, { headers: { cookie: this.cookie } });
+		socket.addEventListener('open', () => this.flushOutbox());
 		socket.addEventListener('message', payload => this.receive(payload.data));
 		socket.addEventListener('close', () => {
 			for (const [, sink] of this.streams) {
 				sink.onError(new DshIdeTransportError('dsh-ide/stream-closed', 'Remote stream socket closed'));
 			}
 			this.streams.clear();
+			this.outbox = [];
 			this.socket = undefined;
 		});
 		this.socket = socket;
 		return socket;
+	}
+
+	/** 已 open 就直接发；CONNECTING 时入队，等 open 事件后按序 flush。 */
+	private sendWhenOpen(frame: string): void {
+		const socket = this.socket;
+		if (socket !== undefined && socket.readyState === 1) {
+			socket.send(frame);
+			return;
+		}
+		this.outbox.push(frame);
+	}
+
+	private flushOutbox(): void {
+		const socket = this.socket;
+		if (socket === undefined || socket.readyState !== 1) {
+			return;
+		}
+		const pending = this.outbox;
+		this.outbox = [];
+		for (const frame of pending) {
+			socket.send(frame);
+		}
 	}
 
 	private receive(data: unknown): void {
@@ -289,9 +324,12 @@ export class DshIdeTransportBackend implements DshIdeBackend {
 			// 无绑定会话时只订阅转发的 waterfall/事件流，不开 session/follow。
 			return this.followEvents(onEvent);
 		}
+		// `follow(request, signal)`：形参名是 `request`。
 		const stream = this.transport.openStream('session/follow', {
-			address: { kind: 'session', sessionId },
-			assistantStream: true,
+			request: {
+				address: { kind: 'session', sessionId },
+				assistantStream: true,
+			},
 		}, frame => onEvent(frame));
 		this.stream = stream;
 		return { dispose: () => stream.close() };
@@ -307,26 +345,37 @@ export class DshIdeTransportBackend implements DshIdeBackend {
 	async invoke(method: DshIdeMethod, args: unknown): Promise<unknown> {
 		const record = isRecord(args) ? args : {};
 		const sessionId = this.sessionId;
+		// 每个调用的键名 = 服务方法的形参名（见文件头：传自由字段会被 gateway/arguments-invalid 拒绝）。
 		switch (method) {
 			case 'submit':
-				return this.transport.call('session', 'prompt', {
-					requestId: crypto.randomUUID(),
-					sessionId,
-					mode: 'queue',
-					content: [{ type: 'text', text: String(record['text'] ?? '') }],
+				await this.transport.call('session', 'prompt', {
+					request: {
+						requestId: crypto.randomUUID(),
+						sessionId,
+						mode: 'queue',
+						content: [{ type: 'text', text: String(record['text'] ?? '') }],
+					},
 				});
+				return { accepted: true };
 			case 'interrupt':
-				return this.transport.call('session', 'cancel', { sessionId });
+				await this.transport.call('session', 'cancel', { request: { sessionId } });
+				return { accepted: true };
 			case 'resume':
-				return this.transport.call('session', 'state', { address: { kind: 'session', sessionId: record['sessionId'] ?? sessionId } });
+				return this.transport.call('session', 'state', {
+					request: { address: { kind: 'session', sessionId: record['sessionId'] ?? sessionId } },
+				});
 			case 'newSession':
 				return this.transport.call('session', 'create', {
-					...(typeof record['workspace'] === 'string' ? { cwd: record['workspace'] } : {}),
+					request: {
+						...(typeof record['workspace'] === 'string' ? { cwd: record['workspace'] } : {}),
+					},
 				});
 			case 'fork':
 				return this.transport.call('session', 'fork', {
-					sessionId: record['sessionId'] ?? sessionId,
-					...(typeof record['point'] === 'string' && record['point'] !== '' ? { atSeq: Number(record['point']) } : {}),
+					request: {
+						sessionId: record['sessionId'] ?? sessionId,
+						...(typeof record['point'] === 'string' && record['point'] !== '' ? { atSeq: Number(record['point']) } : {}),
+					},
 				});
 			case 'answerApproval':
 				await this.transport.answerWaterfall(String(record['requestId']), {
@@ -342,12 +391,41 @@ export class DshIdeTransportBackend implements DshIdeBackend {
 				return { accepted: true };
 			case 'setModel': {
 				const [provider, model] = splitModel(String(record['model'] ?? ''));
-				return this.transport.call('session', 'selectModel', { sessionId, provider, model });
+				return this.transport.call('session', 'selectModel', { request: { sessionId, provider, model } });
 			}
-			case 'listSessions':
-				return this.transport.call('session', 'list', {});
-			case 'listModels':
-				return this.transport.call('session', 'modelCatalog', {});
+			case 'listSessions': {
+				// `list(_request, signal)`：形参名是 `_request`（真机实测，不是 `request`）。
+				// 契约要求列表类返回数组，Host 给的是 `{ items: [...] }`，这里只投影中立字段。
+				const value = await this.transport.call('session', 'list', { _request: {} });
+				const items = isRecord(value) && Array.isArray(value['items']) ? value['items'] : [];
+				return items.filter(isRecord).map(item => ({
+					sessionId: String(item['sessionId'] ?? ''),
+					...(typeof item['title'] === 'string' ? { title: item['title'] } : {}),
+				}));
+			}
+			case 'listModels': {
+				// `modelCatalog()` 无参数；Host 给 `{ groups: [{ id, models: [...] }] }`。
+				const catalog = await this.transport.call('session', 'modelCatalog', {});
+				const groups = isRecord(catalog) && Array.isArray(catalog['groups']) ? catalog['groups'] : [];
+				const models: { provider: string; model: string; name?: string }[] = [];
+				for (const group of groups) {
+					if (!isRecord(group)) {
+						continue;
+					}
+					const provider = String(group['id'] ?? '');
+					for (const model of (Array.isArray(group['models']) ? group['models'] : [])) {
+						if (!isRecord(model)) {
+							continue;
+						}
+						models.push({
+							provider,
+							model: String(model['id'] ?? ''),
+							...(typeof model['name'] === 'string' ? { name: model['name'] } : {}),
+						});
+					}
+				}
+				return models;
+			}
 			case 'fetchRowDetail':
 				return null;
 			case 'refreshSnapshot':
