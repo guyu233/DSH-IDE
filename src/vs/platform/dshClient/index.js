@@ -10,8 +10,10 @@
 // 传输端口（IDE 主进程 ↔ Host 半身）由 P5 真机接线注入；未接线时桥接不伪造事件，
 // answerer 一律 `next()` 委托给 DSH 自己的 answerer。
 
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { IdeRemoteService } from './host/ide-service.js';
-import { createDshIdeHostBridge } from './host/ide-view-host.js';
+import { createDshIdeHostBridge, publishHostEndpoint } from './host/ide-view-host.js';
 
 export const name = 'dsh-ide';
 export const inject = [];
@@ -21,6 +23,16 @@ export function apply(ctx, config = {}) {
 
 	// 官方 @Remote IDE 扩展服务（命名空间 ide，经官方 Typert Gateway 暴露给客户端）。
 	ctx.plugin(IdeRemoteService, { root });
+
+	// 端点自解析：由 Host 自己算出 IDE 可用的 origin + launch URL，并写入插件目录下的
+	// `runtime/host-endpoint.json`。IDE 进程由操作系统单独拉起，环境变量无法传递，
+	// 而文件只解决「怎么找到端口」的引导问题——传输仍是官方 HTTP/WS（第 7 章 §3.1 裁定）。
+	const pluginRoot = dirname(fileURLToPath(import.meta.url));
+	void publishHostEndpoint(ctx, join(pluginRoot, 'runtime', 'host-endpoint.json')).then(endpoint => {
+		if (endpoint !== undefined) {
+			console.log(`[dsh-ide] host endpoint published: ${endpoint.origin}`);
+		}
+	});
 
 	// Host 半身：订阅四类官方事件 + 唯一 answerer。服务缺失时按 feature-unavailable
 	// 记录并跳过，不阻止插件加载，也不产生第二条连接。

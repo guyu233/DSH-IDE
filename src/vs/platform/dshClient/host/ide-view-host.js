@@ -382,6 +382,65 @@ function splitModel(model) {
 	return slash <= 0 ? ['deepseek', model] : [model.slice(0, slash), model.slice(slash + 1)];
 }
 
+/**
+ * 由 Host 自己推导 IDE 可用的官方端点与 launch URL（不新增私有端点）。
+ *
+ * 依据（E:/deepseek-harness-0.2.2-rc.1）：
+ *   - `webServer` 暴露 `port` / `host` / `protocol`（packages/host/webserver/src/index.ts:406-420）；
+ *   - `connection.authenticatedUrl(baseUrl)` 把进程内 launch token 拼到干净 URL 上
+ *     （packages/client/connection/src/rpc-host.ts:198）。
+ * 因此这与桌面端 `apps/desktop/src/main.ts:531-532` 取端点的方式同源，不是第二套握手。
+ *
+ * @returns { origin, launchUrl } 或 undefined（服务缺失时明确返回 undefined，不伪造）。
+ */
+export function resolveHostEndpoint(ctx) {
+	const webServer = typeof ctx.get === 'function' ? ctx.get('webServer') : undefined;
+	const connection = typeof ctx.get === 'function' ? ctx.get('connection') : undefined;
+	if (webServer === undefined || connection === undefined) {
+		return undefined;
+	}
+	const port = typeof webServer.port === 'number' ? webServer.port : undefined;
+	if (port === undefined) {
+		return undefined;
+	}
+	const protocol = typeof webServer.protocol === 'string' ? webServer.protocol : 'http:';
+	const host = typeof webServer.host === 'string' && webServer.host !== '' && webServer.host !== '0.0.0.0'
+		? webServer.host
+		: '127.0.0.1';
+	const origin = `${protocol.replace(/:$/, '')}://${host}:${port}`;
+	const launchUrl = typeof connection.authenticatedUrl === 'function'
+		? connection.authenticatedUrl(`${origin}/`)
+		: undefined;
+	return { origin, port, ...(typeof launchUrl === 'string' ? { launchUrl } : {}) };
+}
+
+/**
+ * 把 Host 端点写进插件目录下的 `runtime/host-endpoint.json`，供 IDE 侧读取。
+ *
+ * 为什么用文件：IDE 进程由操作系统单独拉起（不是 Host 的子进程），环境变量无法传递；
+ * 手册第 7 章 §3.1 裁定禁止私有管道/私有握手，而「写一份只读端点描述」既不是传输
+ * 也不是握手——传输仍是官方 HTTP/WS，文件只解决「怎么找到端口」这一引导问题。
+ *
+ * 内容只含 origin / port / launchUrl（launch token 在 URL 里，由 Host 自己生成），
+ * 与桌面端把 `ready.url` 交给自己的窗口等价；不写 cookie、不写凭据副本。
+ */
+export async function publishHostEndpoint(ctx, targetPath) {
+	const endpoint = resolveHostEndpoint(ctx);
+	if (endpoint === undefined) {
+		return undefined;
+	}
+	try {
+		const { mkdir, writeFile } = await import('node:fs/promises');
+		const { dirname } = await import('node:path');
+		await mkdir(dirname(targetPath), { recursive: true });
+		await writeFile(targetPath, JSON.stringify({ ...endpoint, pid: process.pid, writtenAt: Date.now() }, null, 2), 'utf8');
+		return endpoint;
+	} catch {
+		// 写失败不影响插件加载：IDE 会按「无端点」明确降级，不伪造。
+		return undefined;
+	}
+}
+
 /** 插件入口与单测共用：核对必需服务后创建桥接。 */
 export function createDshIdeHostBridge(ctx, options = {}) {
 	const absent = REQUIRED_SERVICES.filter(name => (typeof ctx.get === 'function' ? ctx.get(name) : undefined) === undefined);

@@ -19,6 +19,8 @@ import {
 	SESSION_SWITCHED,
 	approvalOutcome,
 	createDshIdeHostBridge,
+	publishHostEndpoint,
+	resolveHostEndpoint,
 } from '../../host/ide-view-host.js';
 
 /** 最小假上下文：记录监听、支持 emit，并按名字返回服务。 */
@@ -275,4 +277,73 @@ test('waterfall keeps other requests independent when one is settled', async () 
 	await bridge.invoke('answerApproval', { requestId: 'wf-b', decision: 'approve' });
 	assert.equal(await second, 'allowed-once');
 	assert.equal(bridge.pending.size(), 0);
+});
+
+
+// ---------------------------------------------------------------------------
+// Host 端点自解析（第 7 章 §3.1 裁定：官方端点，不新增私有握手）
+//
+// 依据：webServer 暴露 port/host/protocol（webserver/src/index.ts:406-420）；
+//       connection.authenticatedUrl(baseUrl) 拼上进程内 launch token（rpc-host.ts:198）。
+// 与桌面端 apps/desktop/src/main.ts:531-532 取端点的方式同源。
+// ---------------------------------------------------------------------------
+
+function endpointCtx(webServer, connection) {
+	return fakeCtx({ webServer, connection });
+}
+
+test('resolveHostEndpoint derives origin from webServer and borrows authenticatedUrl', () => {
+	const ctx = endpointCtx(
+		{ port: 62680, host: '127.0.0.1', protocol: 'http:' },
+		{ authenticatedUrl: base => `${base}?token=abc` },
+	);
+	assert.deepEqual(resolveHostEndpoint(ctx), {
+		origin: 'http://127.0.0.1:62680',
+		port: 62680,
+		launchUrl: 'http://127.0.0.1:62680/?token=abc',
+	});
+});
+
+test('resolveHostEndpoint normalizes a wildcard bind host to loopback', () => {
+	const ctx = endpointCtx({ port: 1234, host: '0.0.0.0', protocol: 'http:' }, { authenticatedUrl: b => b });
+	assert.equal(resolveHostEndpoint(ctx).origin, 'http://127.0.0.1:1234');
+});
+
+test('resolveHostEndpoint returns undefined instead of guessing when services are absent', () => {
+	assert.equal(resolveHostEndpoint(fakeCtx({})), undefined);
+	assert.equal(resolveHostEndpoint(endpointCtx({ host: '127.0.0.1', protocol: 'http:' }, {})), undefined, 'a missing port must not be invented');
+});
+
+test('publishHostEndpoint writes origin and launch URL but no cookie', async () => {
+	const os = await import('node:os');
+	const fsp = await import('node:fs/promises');
+	const path = await import('node:path');
+	const dir = await fsp.mkdtemp(path.join(os.tmpdir(), 'dsh-endpoint-'));
+	const file = path.join(dir, 'runtime', 'host-endpoint.json');
+	const ctx = endpointCtx(
+		{ port: 5000, host: '127.0.0.1', protocol: 'http:' },
+		{ authenticatedUrl: base => `${base}?token=secret` },
+	);
+	const written = await publishHostEndpoint(ctx, file);
+	assert.equal(written.origin, 'http://127.0.0.1:5000');
+
+	const raw = await fsp.readFile(file, 'utf8');
+	const parsed = JSON.parse(raw);
+	assert.equal(parsed.origin, 'http://127.0.0.1:5000');
+	assert.equal(parsed.port, 5000);
+	assert.match(parsed.launchUrl, /token=secret/);
+	assert.equal(parsed.cookie, undefined, 'the endpoint file must never carry a cookie');
+	assert.equal(typeof parsed.pid, 'number');
+	await fsp.rm(dir, { recursive: true, force: true });
+});
+
+test('publishHostEndpoint is a no-op when the endpoint cannot be resolved', async () => {
+	const os = await import('node:os');
+	const fsp = await import('node:fs/promises');
+	const path = await import('node:path');
+	const dir = await fsp.mkdtemp(path.join(os.tmpdir(), 'dsh-endpoint-'));
+	const file = path.join(dir, 'host-endpoint.json');
+	assert.equal(await publishHostEndpoint(fakeCtx({}), file), undefined);
+	await assert.rejects(() => fsp.access(file), 'no file must be written when there is nothing to publish');
+	await fsp.rm(dir, { recursive: true, force: true });
 });
