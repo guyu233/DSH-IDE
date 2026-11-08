@@ -1079,7 +1079,7 @@ DSH-IDE = VS Code 外壳 + DSH 内核，二者共享同一 Electron 主进程内
 
 - 优先级固定：① DSH 桌面端 `resources/app.asar` 内 `@deepseek-ai/**`（官方鲸鱼 favicon、各插件自带 `icon.svg`/`locale`/样式）；② VS Code 源码 `src/**`（codicons、主题、`resources/**`）；③ 确无可用资源才自绘，自绘须写明理由。
 - 禁止手抄近似 LOGO / 近似资源路径；搬用须保留原许可证与版权头，记录 tree digest（格式见第 1 章 §6 与 `build/dsh/chat-render/PROVENANCE.md`）。
-- 已复用清单与来源凭据见第 1 章 §6、第 7 章 §4.1。
+- 已复用清单与来源凭据见第 1 章 §6、第 7 章 §4.1；运行时可复用范围、禁止复用项与体积边界见 §8.2.5。
 
 #### 8.2.2 AI 聊天侧栏渲染 DSH 原始消息流
 
@@ -1119,6 +1119,84 @@ DSH-IDE = VS Code 外壳 + DSH 内核，二者共享同一 Electron 主进程内
 - 功能边界：会话是 DSH 内核状态，IDE 侧不持有第二份会话表；会话列表来自 DSH 内核经 `dshIde` 通道下发的快照（契约 `listSessions` 已登记，P4 接线）。
 - 工作区对齐：IDE 只显示**当前 DSH-IDE 打开工作区**内的会话，与 DSH 桌面端在该工作区显示的会话**完全同步**——两侧读同一份内核会话集合，不做本地缓存或本地新建会话源。
 - 删除（直接删除，不入回收站）：DSH-IDE 必须提供删除会话能力，**无论 DSH 桌面端是否自带删除**；`deleteSession` 已加入契约真源（第 2 章 §4），调用方为 IDE 会话 UI，参数为 `{ sessionId }`，语义为**直接物理删除**、不进入任何回收站/软删除队列。删除后由内核回推快照，列表即时更新（fail-closed：删除失败则保留原列表，不静默丢弃）。
+
+#### 8.2.5 运行时复用桌面端资源与体积边界
+
+本节锁定「插件安装到 DSH 后，哪些桌面端文件可在运行时直接复用、哪些必须随插件打包、哪些禁止复用」。实测基线：DSH 桌面端 `0.2.2-rc.1` 安装版与 `dsh-ide@2.0.0` 安装目录（2026-11-09）。
+
+**（1）安装后可访问的桌面端目录**
+
+| 目录 | 内容 | 访问面 |
+| --- | --- | --- |
+| `%USERPROFILE%\.dsh\profiles\desktop\node_modules\dsh-ide\` | 插件包：`runtime/app`、`chat-render/`、`host/`、`client.js`、`index.js`、`locale/`、`icon.svg` | 插件自身可读写 |
+| `%USERPROFILE%\.dsh\profiles\desktop\` | profile 清单、`cordis.patch.yml`、`pnpm-lock.yaml`、`node_modules/` | 插件安装与加载 |
+| `<DSH 安装目录>\resources\app.asar\dsh\node_modules\@deepseek-ai\**` | 宿主包：`dsh-client-ui-chat`、`ui-theme`、`ui-primitives`、`client-locale`、`client-resources`、`ui-brand-official`、`dsh-web-frontend` 等 | 只读；Host 可 import，client 经 module table |
+| `<DSH 安装目录>\resources\app.asar.unpacked\` | 原生二进制回退 | 只读 |
+| `<DSH 安装目录>\resources\runtime\` | Node/pnpm/Python 运行时 | 只读 |
+| `%LOCALAPPDATA%\.dsh-ide\` | IDE 的 Electron、extensions、user-data | IDE 自有 |
+
+渲染进程只有两个 URL 面：宿主 dist 根与 `/plugins/<pkg>/assets/<path>`。后者仅对声明 `"./assets/*": "./lib/assets/*"` 的包生效，且仅支持 `svg/png/webp/jpg/jpeg`；CSS、`woff2`、JSON 不在白名单，渲染进程也没有文件系统通道。
+
+**（2）当前自打包资源（实测 `dsh-ide@2.0.0`）**
+
+| 项 | 大小（字节） | 与桌面端关系 | 处置 |
+| --- | --- | --- | --- |
+| `runtime/app` | 299,382,871（约 285 MiB） | 不重复：VS Code IDE 载荷；DSH 桌面端不含 VS Code | 保留；`appOnly` 已复用宿主 Electron/Node |
+| `chat-render/dist/dsh-chat.js` / `.css` | 408,062 / 61,448（合计 469,510） | **重复**：与 `runtime/app/out/.../chatRender/` 同一份 | 删除插件根副本，只留 `runtime/app/out/.../chatRender/` |
+| `chat-render/PROVENANCE.md` / `LICENSE-DSH` | 小 | 法律与来源凭据 | 保留 |
+| `icon.svg` / `locale/*.json` | 3,573 / 529 | 插件元数据；运行时按钮图标已用宿主 `/favicon.svg` | 保留（安装前元数据） |
+| `client.js` / `index.js` / `host/` / `common/` | 4,562 / 7,244 / 34,036 / 590 | 不重复 | 保留 |
+
+`runtime/app` 的构成（同一次实测）：`extensions` 115,846,593、`out` 74,990,508、`node_modules.asar` 72,146,952、`node_modules.asar.unpacked` 31,330,250、`node_modules` 4,858,615，其余为 `product.json` 等小文件；全部是 VS Code IDE 载荷，不是 DSH 资源副本。
+
+**（3）可在运行时直接复用的桌面端资源**
+
+| 资源 | 位置 | 复用方式 | 功能点 | 状态 |
+| --- | --- | --- | --- | --- |
+| Electron / Node 宿主 | DSH 安装目录 | 插件 `appOnly`，不自带 Electron | IDE 启动、终端 PTY、扩展宿主 | 已复用 |
+| `@deepseek-ai/cordis`、`schemastery`、`typert-protocol` | `app.asar/dsh/node_modules` | `peerDependencies` + Host import | 插件 Host 生命周期、Typert 远程派发 | 已复用 |
+| `react` / `react-dom` / `dsh-client-ui-slots` | 宿主平台单例 | `client.js` 的 `require('react')` + `inject: ['slots']` | DSH 会话头部按钮 | 已复用 |
+| 官方鲸鱼 favicon | 宿主 `/favicon.svg` | `client.js` 直接引用 | 头部按钮图标 | 已复用 |
+| `dsh-client-ui-chat` 的 APNG | `.../ui-chat/lib/assets/running-whale@2x-*.png` | 仅 DSH client 半身可 `require.asset('plugins/@deepseek-ai/dsh-client-ui-chat/assets/...')` | DSH 窗口内聊天气泡 | 可用；当前侧栏在 VS Code renderer，不适用 |
+| `dsh-client-ui-chat` 的 locale JSON | `.../ui-chat/locale/{en,zh}.json` | 构建期只读源；运行期仅 DSH client 可读 | 聊天文案 | 构建期已复用（`src/locale.ts` 逐字副本） |
+| `dsh-client-ui-theme` 字体 | `.../ui-theme/lib/styles/montserrat-*.woff2` | 仅 DSH client 可 import | DSH 品牌字体 | 不适用（侧栏使用 VS Code 主题字体） |
+
+**（4）禁止复用（耦合 / 路径 / 版本）**
+
+| 资源 | 原因 |
+| --- | --- |
+| `@deepseek-ai/dsh-client-ui-chat/lib/client.js` | DSH client 运行时专用：依赖 `window.__ModuleLoader__`、`__DSH_BOOT__`、11 个平台单例、cordis 注入行与宿主 origin；VS Code renderer 是 `vscode-file://` 独立窗口，无 module table / 文件系统 / `/plugins` URL，直接 import 会在 boot 阶段 throw |
+| `ui-chat` 的 CSS / `woff2` / JSON | 宿主静态服务只暴露 `/plugins/<pkg>/assets/*` 且仅 `svg/png/webp/jpg/jpeg`；CSS、`woff2`、JSON 不在白名单；renderer 无文件系统通道 |
+| `ui-theme` 的 CSS / `woff2` | 同上；且 DSH 主题 token 与 VS Code 主题变量冲突，直接加载会破坏原生外观 |
+| `ui-brand-official` / `dsh-brand` 资产 | 面向 DSH client 插槽与品牌，版本耦合，VS Code renderer 不可达 |
+| `ui-tool` 的 `ToolRow` | 插件明确保留 VS Code 原生工具渲染；复用需引入 DSH client 运行时并改变 UI |
+| DSH 会话 / 工作区 / LLM 控制器 | 必须经 `dshIde` 通道（I2/I3）；直接 import 会产生第二份协议或状态 |
+| `resources/runtime`（Python）与 `app.asar.unpacked` | DSH 专用 / ABI 耦合；IDE 不需要 |
+| `dsh-web-frontend/dist` 的 JS/CSS 壳 | DSH Web 外壳，不是组件库；加载会拉入整套 DSH boot |
+
+**（5）加载优先级（固定，不得新增第二条）**
+
+1. Host 进程：`@deepseek-ai/*` 一律 `peerDependencies` + 宿主 Cordis，不打包。
+2. DSH client 半身：`require` 宿主平台单例；图片用 `require.asset`（仅 `./assets/*` 包）；图标用 `/favicon.svg`；不打包 React/图标。
+3. VS Code renderer 侧栏：宿主资源不可达，sidecar 必须自包含；唯一允许的复用是构建期从 `ui-chat` 只读源复制，版本锁定 `UPSTREAM_VALIDATED_VERSION`，由 `regen-sources.mjs --check` 与 `PROVENANCE.md` sha256 守护。
+4. 禁止：在 renderer 中 `file://` 读 `app.asar`，或把宿主 `ui-chat/lib/client.js` 塞进 VS Code renderer；失败只会静默降级为原生渲染，属于回归。
+
+**（6）体积优化动作（按收益排序）**
+
+| 动作 | 预期收益 | 验收 |
+| --- | --- | --- |
+| 删除插件根 `chat-render/dist/` 重复副本 | 约 469 KB | 改 `build/lib/dsh/package.json` 的 `files` 与 `gulpfile.vscode.ts` 的 staging；跑 `packaging.test.mjs` + 真机开窗 |
+| sidecar JS/CSS 开启 minify | 预计 150–200 KB | 改 `build-render.mjs` 的 `minify`；视觉回归 + `projection-golden` |
+| APNG 从 CSS data URL 改为独立文件 | 约 7 KB | 用 `FileAccess.asBrowserUri` 重写 URL；动画回归 |
+| 复用宿主 Electron/Node | 已生效（`appOnly`） | 保持 |
+
+**（7）结论**
+
+- 插件体积的绝对大头是 `runtime/app`（299,382,871 字节，约 285 MiB，VS Code IDE 载荷），它不是 DSH 资源的重复打包；DSH 桌面端不含 VS Code，无法用桌面端文件替代。
+- 真正的 DSH 重复只有 sidecar（469,510 字节，且重复两份）与图标/语言元数据（约 4 KB）。允许的优化上限约 **0.6–0.7 MB**，不得以「复用」为名改动 `runtime/app` 或把 DSH client 运行时塞进 VS Code renderer。
+- 版本漂移：宿主 `ui-chat` 源升级时按第 5 章 §7 更新 `PROVENANCE.md` 与 `UPSTREAM_VALIDATED_VERSION`；不得直接引用新版 `lib/client.js`。
+
+> 证据：DSH 源码 `apps/desktop/src/paths.ts`（profile 目录）、`packages/boot/app-boot/src/profile.ts`（bundle 解析）、`packages/client/modules/src/index.ts`（`/plugins` 与 module table）、`packages/client/web/src/seed.ts`（平台单例）、`packages/host/frontend-static/src/index.ts`（静态服务白名单）、`packages/client/ui-chat/package.json`（`./assets/*` 与 `./client`）；安装目录、文件大小与本机实测一致（2026-11-09）。
 
 ### 8.3 VS Code 原生能力保障
 
