@@ -220,3 +220,59 @@ async function tick() {
 		await Promise.resolve();
 	}
 }
+
+// ---------------------------------------------------------------------------
+// waterfall 一致性核对（第 1 章 §4.3 / 第 3 章 P3）：广播 + 首个决议生效 + 重复决议 ALREADY_RESOLVED
+//
+// 两个 IDE 窗口 = 两个 DshIdeViewService + 两条通道；它们共用同一个 Host 半身桥接。
+// 这里直接用桥接 + transport.post 的广播行为模拟两窗口，验证决议只消费一次。
+// ---------------------------------------------------------------------------
+
+test('waterfall broadcast reaches both windows and the first decision wins', async () => {
+	const ctx = fakeCtx({ sessions: {}, sessionController: sessionControllerStub() });
+	const broadcast = [];
+	const bridge = new DshIdeHostBridge(ctx, {
+		transport: {
+			// 一次请求广播给所有窗口（第 1 章 §4.3）。
+			post: message => broadcast.push(message),
+		},
+	});
+	bridge.follow('s-1', () => undefined);
+
+	const handler = ctx.listeners.get('approval/request')[0];
+	const pending = handler({ requestId: 'wf-1', toolName: 'bash' }, () => 'rejected');
+
+	// 两个窗口都收到同一条请求。
+	assert.deepEqual(broadcast, [{ type: 'request', kind: 'approval', requestId: 'wf-1', request: { toolName: 'bash' } }]);
+
+	// 窗口 A 先决议：生效。
+	assert.deepEqual(await bridge.invoke('answerApproval', { requestId: 'wf-1', decision: 'approve' }), { accepted: true });
+	assert.equal(await pending, 'allowed-once', 'the first decision must be the one DSH sees');
+
+	// 窗口 B 后到：同一个 requestId 必须得到 ALREADY_RESOLVED，且不改变结果。
+	await assert.rejects(
+		() => bridge.invoke('answerApproval', { requestId: 'wf-1', decision: 'reject' }),
+		error => error.code === ALREADY_RESOLVED,
+	);
+	assert.equal(bridge.pending.size(), 0, 'a settled request must leave no pending entry');
+});
+
+test('waterfall keeps other requests independent when one is settled', async () => {
+	const ctx = fakeCtx({ sessions: {}, sessionController: sessionControllerStub() });
+	const bridge = new DshIdeHostBridge(ctx, { transport: { post: () => undefined } });
+	bridge.follow('s-1', () => undefined);
+	const handler = ctx.listeners.get('approval/request')[0];
+
+	const first = handler({ requestId: 'wf-a', toolName: 'bash' });
+	const second = handler({ requestId: 'wf-b', toolName: 'pwsh' });
+	await tick();
+	assert.equal(bridge.pending.size(), 2);
+
+	await bridge.invoke('answerApproval', { requestId: 'wf-a', decision: 'reject' });
+	assert.equal(await first, 'rejected');
+	assert.equal(bridge.pending.size(), 1, 'settling one request must not disturb another');
+
+	await bridge.invoke('answerApproval', { requestId: 'wf-b', decision: 'approve' });
+	assert.equal(await second, 'allowed-once');
+	assert.equal(bridge.pending.size(), 0);
+});
