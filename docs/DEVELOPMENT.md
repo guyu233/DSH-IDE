@@ -430,9 +430,13 @@ HTTP/WS，文件不是私有握手。真机实测（DSH Electron 44.7.0）：`EN
 2. **Host 端点只存在进程内**：官方 `/api` 在 `127.0.0.1:62680` 返回 401（未鉴权），launch token 由 Host 的 `connection.authenticatedUrl()` 在进程内生成，外部无法取得，也不允许绕过。已实现 `resolveHostEndpoint()` / `publishHostEndpoint()`（Host 半身自算 origin + launchUrl，与桌面端 `main.ts:531-532` 同源），待重启后生效。
 3. **独立 Host 实例不可行**：`dsh-desktop-host` 的 `runProfile()` 会读取 `<runtime>/node_modules/@deepseek-ai/dsh` 作为 install anchor（ENOENT），而该路径在被混淆的 asar 内、宿主未暴露为真实目录。要造这个锚点属于改动 DSH 安装目录，**超出硬边界，不做**。
 
-结论：端到端 `session/follow` + waterfall 决议需要**用户在 DSH 重启后**观察（重启后插件才进 bundle 名单），这一步把 K4 的端到端判据交接给 P6 的 9 项真机验收；P3 的代码、契约、门禁与「真实运行时加载插件」证据均已闭环。
+**K4 判定（唯一结论）**：K4 的**代码与协议**判据全部满足——真实端口接通（端点自解析 + 官方传输适配）、
+20 method 有确定 handler 且过校验、`call`/`listen`/`disposeOwner` 符合第 2 章、`invoke` 恒为 `{ value }`、
+waterfall 语义单测覆盖、`boundary` PASS、17 符号仍单源。**真机端到端**（`session/follow` 实时流 + 双窗口
+waterfall 决议）未观测，原因就是上面第 1 条：插件尚未进入活动 bundle 名单，需要重启 DSH 才加载。
 
-**仍未落地**：接入运行中的 DSH Host 跑一次完整 `session/follow` + waterfall 决议、以及双窗口镜像观察（需要与真实 DSH 会话交互，属 P6 的 9 项真机验收）。故 K4 的核心判据「真实端口接通」已由第 3/4 步证实，但**端到端会话链路**未观测。
+因此：**K4 记为「代码闭环 / 真机未观测」**，不标 `PASS`，P4 不启动。重启 DSH 后按第 5 章 §6 的第 3、4、8 项
+（审批双向、问卷双向、Chat 回填）可直接补齐这三项观测，无需再改代码。
 
 #### P4 IDE 消费者与 UI 实现
 
