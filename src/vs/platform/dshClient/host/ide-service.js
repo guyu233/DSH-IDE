@@ -19,6 +19,7 @@ import { dirname, join } from 'node:path';
 import { Service } from '@deepseek-ai/cordis';
 import { bindTypertRemote } from '@deepseek-ai/dsh-typert-protocol';
 import { materializeElectronHome } from './electron-home.js';
+import { IdeLaunchQueue } from './ide-launch-queue.js';
 
 const REMOTE_METHOD_DESCRIPTOR = '@deepseek-ai/dsh-typert-protocol/remote-methods';
 
@@ -28,10 +29,8 @@ export class IdeRemoteService extends Service {
     this.root = config.root || process.cwd();
     // 端点文件在插件目录下；回退到 root 是为了兼容旧布局，但正常永远走 pluginRoot。
     this.pluginRoot = config.pluginRoot || this.root;
-    /** 已报到的 IDE 进程（clientId → 开窗入口）。 */
-    this.ideClients = new Map();
-    /** IDE 尚未报到时暂存的开窗请求（报到后经 pollLaunch 取走）。 */
-    this.launchQueue = [];
+    /** IDE 客户端登记表（报到 / 暂存开窗请求 / 轮询取走）。 */
+    this.launchQueue = new IdeLaunchQueue();
     /** 最近一次拉起 IDE 进程的时间（防重复拉起）。 */
     this.spawnedAt = undefined;
     /** Electron 主页的物化进行中/已完成 Promise（并发首点只建一次）。 */
@@ -59,9 +58,8 @@ export class IdeRemoteService extends Service {
     }
 
     // 2) 已经有一个 IDE 进程报到了：它在自己的进程里开窗（R1：IDE 是插件载荷，不是外部应用）。
-    const ready = [...this.ideClients].find(client => client.alive);
-    if (ready !== undefined) {
-      ready.launch({ ...(workspace === undefined ? {} : { workspace }) });
+    const spec = { ...(workspace === undefined ? {} : { workspace }) };
+    if (this.launchQueue.dispatch(spec)) {
       return { ok: true, via: 'registered-ide' };
     }
 
@@ -78,7 +76,7 @@ export class IdeRemoteService extends Service {
       return { ok: false, message: spawned.message };
     }
     // 记住这个工作区请求：IDE 报到后会经 pollLaunch 取走它并开窗。
-    this.launchQueue.push({ ...(workspace === undefined ? {} : { workspace }) });
+    this.launchQueue.enqueue(spec);
     return { ok: true, via: 'spawned-ide' };
   }
 
@@ -165,66 +163,12 @@ export class IdeRemoteService extends Service {
    * @returns 注销函数（进程退出时调用）
    */
   registerIdeClient(clientId) {
-    if (typeof clientId !== 'string' || clientId === '') {
-      return { ok: false, message: 'clientId must be a non-empty string' };
-    }
-    const existing = this.ideClients.get(clientId);
-    if (existing !== undefined) {
-      existing.alive = true;
-      return { ok: true, alreadyRegistered: true };
-    }
-    /** @type {((spec: { workspace?: string }) => void) | undefined} */
-    let onLaunch;
-    const pending = [];
-    const client = {
-      alive: true,
-      launch(spec) {
-        if (onLaunch === undefined) {
-          pending.push(spec);
-          return;
-        }
-        onLaunch(spec);
-      },
-      /** IDE 侧每次轮询取走待处理的开窗请求（长轮询式，不建第二条通道）。 */
-      poll() {
-        const requests = pending.splice(0, pending.length);
-        return { requests };
-      },
-      /** IDE 侧提供实际开窗入口（在它的渲染进程里执行）。 */
-      setLaunchHandler(handler) {
-        onLaunch = handler;
-        while (pending.length > 0) {
-          const spec = pending.shift();
-          if (spec !== undefined) {
-            handler(spec);
-          }
-        }
-        return { ok: true };
-      },
-      dispose() {
-        this.alive = false;
-      },
-    };
-    this.ideClients.set(clientId, client);
-    return {
-      ok: true,
-      dispose: () => {
-        client.dispose();
-        this.ideClients.delete(clientId);
-      },
-    };
+    return this.launchQueue.register(clientId);
   }
 
   /** IDE 侧轮询待开窗请求（由 `registerIdeClient` 建立的登记项）。 */
   pollLaunch(clientId) {
-    const client = this.ideClients.get(clientId);
-    if (client === undefined) {
-      return { ok: false, requests: [] };
-    }
-    // 先取该客户端自己的待办，再补上「报到前排队」的首次开窗请求。
-    const own = client.poll();
-    const outOfBand = this.launchQueue.splice(0, this.launchQueue.length);
-    return { ok: true, requests: [...outOfBand, ...own.requests] };
+    return this.launchQueue.poll(clientId);
   }
 
   /** 读取已发布的 IDE 端点（由 host/ide-view-host.js 的 publishHostEndpoint 写入）。 */
