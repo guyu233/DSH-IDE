@@ -151,7 +151,9 @@ import ErrorTelemetry from '../../platform/telemetry/electron-main/errorTelemetr
 import { IProtocolMainService } from '../../platform/protocol/electron-main/protocol.js';
 import { createRemoteResourceRequestHandler } from '../../platform/protocol/electron-main/remoteResourceProtocol.js';
 import { DshIdeChannel, type DshIdeLauncher } from '../../platform/dshClient/electron-main/dshIdeChannel.js';
-import { DSH_IDE_SESSION_ENV } from '../../platform/dshClient/common/env.js';
+import { DSH_IDE_COOKIE_ENV, DSH_IDE_ENDPOINT_ENV, DSH_IDE_LAUNCH_URL_ENV, DSH_IDE_SESSION_ENV } from '../../platform/dshClient/common/env.js';
+import { DshIdeTransport, authenticateHost } from '../../platform/dshClient/transport/dshIdeTransport.js';
+import { DshIdeLaunchListener } from '../../platform/dshClient/transport/dshIdeLaunchListener.js';
 import { createDshIdeBackendFromEnv } from '../../platform/dshClient/electron-main/dshIdeBackendFactory.js';
 import { DshIdeViewService } from '../../platform/dshClient/electron-main/ide-view-service.js';
 import { DSH_IDE_CHANNEL } from '../../platform/dshClient/common/dshIdeProtocol.js';
@@ -1469,6 +1471,24 @@ export class CodeApplication extends Disposable {
 		};
 		const dshIdeChannel = new DshIdeChannel(dshIdeViewHost, dshIdeLauncher);
 		mainProcessElectronServer.registerChannel(DSH_IDE_CHANNEL, dshIdeChannel);
+
+		// P5 开窗接单：IDE 必须自己向 Host 报到，否则 DSH 主窗口的按钮无法跨进程调用本窗口。
+		// 只用官方 Typert Gateway 的两个方法（registerIdeClient / pollLaunch），不建私有管道。
+		// 鉴权是异步的，因此这里不预先判定「能不能接单」，而是把「如何拿到可用 caller」交给
+		// 延迟解析器：拿到之前接单器一直重试，拿到之后自动接单（不阻塞启动、不假装成功）。
+		{
+			const endpointOrigin = process.env[DSH_IDE_ENDPOINT_ENV];
+			if (typeof endpointOrigin === 'string' && endpointOrigin !== '') {
+				const caller = createLazyLaunchCaller(endpointOrigin);
+				const listener = new DshIdeLaunchListener(
+					caller,
+					`ide-${process.pid}`,
+					request => { void dshIdeLauncher.launch(request); },
+				);
+				listener.start();
+				disposables.add(listener);
+			}
+		}
 		disposables.add(dshIdeChannel);
 		// 窗口断开时清理该窗口（ctx = `window:<id>`）拥有的连接与订阅，不取消 DSH 会话。
 		disposables.add(mainProcessElectronServer.onDidRemoveConnection(connection => dshIdeChannel.disposeOwner(connection.ctx)));
@@ -1923,5 +1943,46 @@ function getPACScriptStats(content: string): { characterCount: number; lineCount
 		characterCount: content.length,
 		lineCount: content.length === 0 ? 0 : content.split(/\r\n|\r|\n/).length,
 		returnCount: content.match(/\breturn\b/g)?.length ?? 0,
+	};
+}
+
+/**
+ * 构造一个「延迟鉴权」的调用器给开窗接单用。
+ *
+ * `authenticateHost` 是异步的，而 `apply` 阶段不能 await；这里返回一个薄壳：
+ * 首次调用时才换取 cookie 并建立 `DshIdeTransport`，之前一律 reject（接单器会重试）。
+ * 拿不到鉴权就永远不可用——不伪造、不绕过。
+ */
+function createLazyLaunchCaller(origin: string): { call(namespace: string, method: string, args: Record<string, unknown>): Promise<unknown> } {
+	let transport: DshIdeTransport | undefined;
+	let pending: Promise<DshIdeTransport> | undefined;
+	const resolve = (): Promise<DshIdeTransport> => {
+		if (transport !== undefined) {
+			return Promise.resolve(transport);
+		}
+		if (pending !== undefined) {
+			return pending;
+		}
+		const launchUrl = process.env[DSH_IDE_LAUNCH_URL_ENV];
+		const cookie = process.env[DSH_IDE_COOKIE_ENV];
+		if (cookie !== undefined && cookie !== '') {
+			transport = new DshIdeTransport({ origin, cookie });
+			return Promise.resolve(transport);
+		}
+		if (launchUrl === undefined || launchUrl === '') {
+			return Promise.reject(new Error('DSH-IDE launch caller: neither cookie nor launch URL is available'));
+		}
+		pending = authenticateHost(origin, launchUrl).then(issued => {
+			process.env[DSH_IDE_COOKIE_ENV] = issued;
+			transport = new DshIdeTransport({ origin, cookie: issued });
+			return transport;
+		}).finally(() => { pending = undefined; });
+		return pending;
+	};
+	return {
+		call: async (namespace, method, args) => {
+			const ready = await resolve();
+			return ready.call(namespace, method, args);
+		},
 	};
 }

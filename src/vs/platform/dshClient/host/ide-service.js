@@ -26,6 +26,8 @@ export class IdeRemoteService extends Service {
     this.root = config.root || process.cwd();
     // 端点文件在插件目录下；回退到 root 是为了兼容旧布局，但正常永远走 pluginRoot。
     this.pluginRoot = config.pluginRoot || this.root;
+    /** 已报到的 IDE 进程（clientId → 开窗入口）。 */
+    this.ideClients = new Map();
     this.typertRemote = bindTypertRemote(this, 'ide', { namespace: 'ide' });
   }
 
@@ -43,19 +45,100 @@ export class IdeRemoteService extends Service {
    * @returns {{ ok: boolean, message?: string }}
    */
   launch(workspace) {
-    const endpoint = this.ideEndpoint();
-    if (endpoint === undefined) {
-      // 把「查了哪些路径」一并返回，便于用户/日志直接定位（不猜、不吞错）。
-      return {
-        ok: false,
-        message: `DSH-IDE endpoint is not published yet (looked in ${this.endpointCandidates().join(' , ')})`,
-      };
-    }
-    // 只在 Host 侧做参数校验；真正的开窗由 IDE 主进程完成。
+    // 1) 参数校验（会话/工作区由调用方给，Host 不猜）。
     if (workspace !== undefined && typeof workspace !== 'string') {
       return { ok: false, message: 'launch(workspace) must be a string when provided' };
     }
-    return { ok: true, endpoint: endpoint.origin };
+
+    // 2) 已经有一个 IDE 进程报到了：它在自己的进程里开窗（R1：IDE 是插件载荷，不是外部应用）。
+    const ready = [...this.ideClients].find(client => client.alive);
+    if (ready !== undefined) {
+      ready.launch({ ...(workspace === undefined ? {} : { workspace }) });
+      return { ok: true, via: 'registered-ide' };
+    }
+
+    // 3) 还没有 IDE 报到：端点文件在但没人接单，如实说清楚，不假装成功。
+    const endpoint = this.ideEndpoint();
+    if (endpoint === undefined) {
+      return {
+        ok: false,
+        message: `no IDE process has registered yet; endpoint file not found (looked in ${this.endpointCandidates().join(' , ')})`,
+      };
+    }
+    return {
+      ok: false,
+      message: `no IDE process has registered yet (endpoint ${endpoint.origin} published, but nothing is listening for launch requests)`,
+    };
+  }
+
+  /**
+   * IDE 进程报到：登记一个可开窗的客户端。
+   *
+   * 为什么需要它：`dshIde` 是 **IDE 自己的** IPC 通道，Host 在另一个进程，无法跨进程直接调用它。
+   * 因此由 IDE 启动时主动向 Host 报到（官方 Typert Gateway），Host 只保存一个回调；
+   * 按钮触发时经该回调让 IDE 自己开窗。这是唯一不引入私有管道的做法（第 7 章 §3.1 裁定）。
+   *
+   * @param clientId - IDE 侧生成的标识（用于注销）
+   * @returns 注销函数（进程退出时调用）
+   */
+  registerIdeClient(clientId) {
+    if (typeof clientId !== 'string' || clientId === '') {
+      return { ok: false, message: 'clientId must be a non-empty string' };
+    }
+    const existing = this.ideClients.get(clientId);
+    if (existing !== undefined) {
+      existing.alive = true;
+      return { ok: true, alreadyRegistered: true };
+    }
+    /** @type {((spec: { workspace?: string }) => void) | undefined} */
+    let onLaunch;
+    const pending = [];
+    const client = {
+      alive: true,
+      launch(spec) {
+        if (onLaunch === undefined) {
+          pending.push(spec);
+          return;
+        }
+        onLaunch(spec);
+      },
+      /** IDE 侧每次轮询取走待处理的开窗请求（长轮询式，不建第二条通道）。 */
+      poll() {
+        const requests = pending.splice(0, pending.length);
+        return { requests };
+      },
+      /** IDE 侧提供实际开窗入口（在它的渲染进程里执行）。 */
+      setLaunchHandler(handler) {
+        onLaunch = handler;
+        while (pending.length > 0) {
+          const spec = pending.shift();
+          if (spec !== undefined) {
+            handler(spec);
+          }
+        }
+        return { ok: true };
+      },
+      dispose() {
+        this.alive = false;
+      },
+    };
+    this.ideClients.set(clientId, client);
+    return {
+      ok: true,
+      dispose: () => {
+        client.dispose();
+        this.ideClients.delete(clientId);
+      },
+    };
+  }
+
+  /** IDE 侧轮询待开窗请求（由 `registerIdeClient` 建立的登记项）。 */
+  pollLaunch(clientId) {
+    const client = this.ideClients.get(clientId);
+    if (client === undefined) {
+      return { ok: false, requests: [] };
+    }
+    return { ok: true, ...client.poll() };
   }
 
   /** 读取已发布的 IDE 端点（由 host/ide-view-host.js 的 publishHostEndpoint 写入）。 */
@@ -132,6 +215,8 @@ Object.defineProperty(IdeRemoteService.prototype, REMOTE_METHOD_DESCRIPTOR, {
       { method: 'ping', invocation: { kind: 'direct' } },
       { method: 'inlineComplete', invocation: { kind: 'direct' } },
       { method: 'launch', invocation: { kind: 'direct' } },
+      { method: 'registerIdeClient', invocation: { kind: 'direct' } },
+      { method: 'pollLaunch', invocation: { kind: 'direct' } },
     ],
   },
 });
