@@ -47,13 +47,13 @@
 | 交付形态 | 单一 DSH bundle 插件 `dsh-ide@2.0.0`；原生 Electron 窗口复用宿主 Electron 44.7.0，插件包不带 Electron | §0 R1 / 第 8 章 §8.2.5 |
 | 阶段状态 | 不在此复制状态值，只保留入口 | 第 3 章 §6 |
 | 待办与完成标记 | 不在此复制条数，只保留入口 | 第 7 章 §3 |
-| 门禁 / 测试 | 3 `PASS` + 1 `PENDING`（`PENDING` 不计通过）；`test-dsh:all` 基线 172/172 | 第 5 章 §3–§4 |
-| 分发体积 | 现有 tgz 160,112,030 B（152.7 MiB），为删除 server-web 之前的产物；重打包未跑 | 第 8 章 §8.2.5 |
-| 承载现状 | 页面路线代码残留已清零；Electron 主页 6 项加固与 7 项单测已闭环 | 第 7 章 §3 |
+| 门禁 / 测试 | 3 `PASS` + 1 `PENDING`（`PENDING` 不计通过）；`test-dsh:all` 基线 180/180 | 第 5 章 §3–§4 |
+| 分发体积 | 现有 tgz 160,112,030 B（152.7 MiB），为删除 server-web 之前的产物；本轮已按新源码重建 staging，tgz 未重打 | 第 8 章 §8.2.5 |
+| 承载现状 | 原生窗口真机复核通过：标题「Welcome - DSH IDE」，欢迎页与 Chat 面板渲染；启动黑屏已修复 | 第 7 章 §3 / 第 5 章 §10.2 |
 | 终端载荷 | `runtime/app` 仍缺 `ptyHostMain` 与 `node-pty` | 第 8 章 §8.2.5 |
-| 最近一轮改动 | 复核未提交基线并跑门禁 / `test-dsh:all` / 完整 `tsc`；按 D34 拆分代码侧（`6546e5c9`）与文档侧两个提交 | 第 7 章 §7.7 |
-| 未验证项 | GUI 未复核；重打包与体积实测未跑；四门禁、`test-dsh:all` 172/172 与完整 `tsc --noEmit` 本轮已跑（变更文件 0 错误，基线见第 5 章 §10.2） | 第 5 章 §10.2 |
-| 最后更新 | 2026-11-09 / `6546e5c9` | 本表 |
+| 最近一轮改动 | D12 开窗队列单测；原生窗口黑屏修复（onboarding / 账号守卫 + 原生模块 ABI）；GUI 复核 | 第 7 章 §7.7 |
+| 未验证项 | Chat 面板 DTO 回填（K5 / D19）缺真实 Host 端点；tgz 重打包与体积实测、9 项真机验收、`.npmrc` ABI 统一未跑 | 第 5 章 §10.2 |
+| 最后更新 | 2026-11-09 / `b13c8210` | 本表 |
 
 ---
 
@@ -545,7 +545,7 @@ waterfall 语义单测覆盖、boundary PASS、17 符号单源、端到端实跑
 - **前置**：K6。
 - **活动（固定顺序，不并行、不调换）**：① 四条门禁 → ② `test-dsh:all` → ③ `tsc --noEmit` 本批文件 0 错误 → ④ 第 5 章 §6 的 9 项真机验收 → ⑤ 真实事件流 P95 校准 → ⑥ 先补齐 `desktopEntryPoints` 的 `ptyHostMain` 与 DSH `node-pty` prebuilds 复用，再核对 `.npmrc` 的 `target="43.7.7"` 与宿主 Electron 44.7.0：随包 5 个原生模块（node-pty、sqlite3、spdlog、watcher、windows-process-tree）全部走 NAPI，重编降级为 **ABI/NAPI 加载冒烟（仍必须实测）** → ⑦ IDE 终端冒烟 → ⑧ 第 5 章 §7 的上游核对（同时把 `contract` 改为启用失败断言） → ⑨ 把 第 5 章 §2 的四条门禁与 `test-dsh:all` 接入 CI 配置，并按第 7 章 §7.1 的 11 行清单逐文件把代码注释中的历史阶段标记改为 P 编号；`client.js:62` 与 `dshIdeChannel.ts:28` 是**运行时错误字符串**，单独记录、不与注释清理混同，改字符串后须同步核对 `packaging.test.mjs` 及通道相关测试断言，并跑 第 5 章 §2 的 `test-dsh:all` 确认基线不变；第 7 章 §7.3 的失效章节引用同步修复。P95 超标时按固定序列执行：下调 `MAX_ROWS` → 收紧 `preview` 折叠阈值 → 重新生成 golden，直至 rows 序列化后 P95 ≤ 512 KiB；这是阶段内的参数校准迭代，不是架构变更。
 - **产出**：门禁与测试实测记录、9 项真机验收记录、P95 校准后的常量与 golden、`ptyHostMain` 桌面入口与 `node-pty` 复用接线、NAPI/ABI 加载冒烟记录、终端冒烟记录、上游差异报告、CI 配置改动、历史阶段标记清理记录。
-- **出口判据 K7**：`protocol-single-source` / `boundary` / `projection-golden` 均 `PASS`；`contract` 启用失败断言后完成一次上游核对且 4 个注入点指纹一致，并按第 5 章 §9 记录状态；`test-dsh:all` 不低于 172/172；9 项真机验收全部通过；P95 ≤ 512 KiB；IDE 终端可开、PTY 数据流走原生 `node-pty`，且 NAPI/ABI 加载冒烟通过；CI 配置中可见同一组命令；第 7 章登记的历史阶段标记与失效章节引用零残留。
+- **出口判据 K7**：`protocol-single-source` / `boundary` / `projection-golden` 均 `PASS`；`contract` 启用失败断言后完成一次上游核对且 4 个注入点指纹一致，并按第 5 章 §9 记录状态；`test-dsh:all` 不低于 180/180；9 项真机验收全部通过；P95 ≤ 512 KiB；IDE 终端可开、PTY 数据流走原生 `node-pty`，且 NAPI/ABI 加载冒烟通过；CI 配置中可见同一组命令；第 7 章登记的历史阶段标记与失效章节引用零残留。
 - **当前态**：见第 3 章 §6 唯一状态表；门禁 / 终端载荷等实现差距见第 7 章 §3，实测记录见第 5 章 §10.2。
 
 #### P7 打包为 DSH 插件与交付
@@ -595,14 +595,14 @@ waterfall 语义单测覆盖、boundary PASS、17 符号单源、端到端实跑
 
 | 阶段 | 状态 | 依据（证据或命令） | 最后实测 |
 | --- | --- | --- | --- |
-| P0 | 已完成 | 工程基线、bundle 清单、patch、资源、官方打包任务齐备 | 2026-11-09 / `6546e5c9` |
-| P1 | 已完成 | K2 判据实测通过；`verify:dsh-ide-protocol-single-source` | 2026-11-09 / `6546e5c9` |
-| P2 | 已完成 | `translator.ts` / `ide-view-projector.ts` / golden / 单测；K3 判据实测通过 | 2026-11-09 / `6546e5c9` |
-| P3 | 已完成 | K4 判据：真实端口接通、20 method 确定、`call`/`listen`/`disposeOwner` 合规、`invoke` 恒 `{ value }`、waterfall 单测覆盖、`boundary` PASS；端到端实跑（独立真实 Host）listSessions=52 / listModels=3 / follow=329 records → 98 行投影 | 2026-11-09 / `6546e5c9` |
-| P4 | 进行中 | 消费者 + 快照流 + DTO→UI + DTO→Chat 内容 + 唯一 Chat Agent + `dshChatSeam` 均已落地；测试基线见第 5 章 §4；原生 IDE 窗口内 Chat 面板渲染观测记录缺失（第 5 章 §10.2） | 2026-11-09 / `6546e5c9` |
-| P5 | 进行中 | 开窗链路按 §1 第 3 条例外先行，承载裁定见 §3 P5；页面路线、Electron 主页加固与主页单测已闭环；终端载荷缺口与双窗口镜像未接线（第 7 章 §3） | 2026-11-09 / `6546e5c9` |
-| P6 | 未开始 | 门禁脚手架 3 `PASS` + 1 `PENDING`（第 5 章 §3）；真机验收、NAPI/ABI 加载冒烟、终端冒烟未跑 | 2026-11-09 / `6546e5c9` |
-| P7 | 未满足出口 | 打包链路可执行，前置 K7 未达成；当前 tgz 为删除 server-web 之前的产物（第 8 章 §8.2.5） | 2026-11-09 / `6546e5c9` |
+| P0 | 已完成 | 工程基线、bundle 清单、patch、资源、官方打包任务齐备 | 2026-11-09 / `b13c8210` |
+| P1 | 已完成 | K2 判据实测通过；`verify:dsh-ide-protocol-single-source` | 2026-11-09 / `b13c8210` |
+| P2 | 已完成 | `translator.ts` / `ide-view-projector.ts` / golden / 单测；K3 判据实测通过 | 2026-11-09 / `b13c8210` |
+| P3 | 已完成 | K4 判据：真实端口接通、20 method 确定、`call`/`listen`/`disposeOwner` 合规、`invoke` 恒 `{ value }`、waterfall 单测覆盖、`boundary` PASS；端到端实跑（独立真实 Host）listSessions=52 / listModels=3 / follow=329 records → 98 行投影 | 2026-11-09 / `b13c8210` |
+| P4 | 进行中 | 消费者 + 快照流 + DTO→UI + DTO→Chat 内容 + 唯一 Chat Agent + `dshChatSeam` 均已落地；测试基线见第 5 章 §4；原生 IDE 窗口已可渲染（D33 完成），Chat 面板 DTO 回填观测仍缺真实 Host 端点（D19） | 2026-11-09 / `b13c8210` |
+| P5 | 进行中 | 开窗链路按 §1 第 3 条例外先行；Electron 主页与原生窗口启动黑屏已修（onboarding / 账号守卫 + 原生模块 ABI 149）；终端载荷缺口与双窗口镜像未接线（第 7 章 §3） | 2026-11-09 / `b13c8210` |
+| P6 | 未开始 | 门禁脚手架 3 `PASS` + 1 `PENDING`（第 5 章 §3）；真机验收、NAPI/ABI 加载冒烟、终端冒烟未跑 | 2026-11-09 / `b13c8210` |
+| P7 | 未满足出口 | 打包链路可执行，前置 K7 未达成；当前 tgz 为删除 server-web 之前的产物（第 8 章 §8.2.5） | 2026-11-09 / `b13c8210` |
 
 「最后实测」是最后一次核对的日期与 commit，不是该阶段达成时间。阶段状态以本表为准；实现差距见第 7 章 §3，实测记录见第 5 章 §10.2。
 
@@ -811,7 +811,7 @@ B1–B5 是流程内的检查点，与开发路线的 K1–K8 不同，二者不
 | --- | --- | --- |
 | 编译 DSH 测试 | `npm run build-dsh-tests` | 退出 0，产出 `out/` |
 | mocha tdd 半场 | `npm run test-dsh` | `13 passing` |
-| 全量 DSH 测试 | `npm run test-dsh:all` | `13 passing` + `159/159`，合计 172/172 |
+| 全量 DSH 测试 | `npm run test-dsh:all` | `13 passing` + `167/167`，合计 180/180 |
 | 门禁 1 | `npm run verify:dsh-ide-protocol-single-source` | `STATUS: PASS` |
 | 门禁 2 | `npm run verify:dsh-ide-boundary` | `STATUS: PASS` |
 | 门禁 3 | `npm run verify:dsh-ide-projection-golden` | `STATUS: PASS` |
@@ -848,7 +848,7 @@ node --experimental-strip-types --test build/lib/test/dshBuildProvenance.test.ts
 
 ### 4. 测试基线与类型检查
 
-`test-dsh:all` = `npm run test-dsh` + `node --experimental-strip-types --test` 的 13 个 `build/lib/test` 文件 + 2 个插件侧 `.mjs`（`ideViewHost.test.mjs` / `electronHome.test.mjs`）。`build/package.json` 的默认 `test` 不覆盖这组文件，必须由 `test-dsh:all` 显式列出。
+`test-dsh:all` = `npm run test-dsh` + `node --experimental-strip-types --test` 的 13 个 `build/lib/test` 文件 + 3 个插件侧 `.mjs`（`ideViewHost.test.mjs` / `electronHome.test.mjs` / `ideLaunchQueue.test.mjs`）。`build/package.json` 的默认 `test` 不覆盖这组文件，必须由 `test-dsh:all` 显式列出。
 
 | 分组 | 文件 | 用例数 |
 | --- | --- | --- |
@@ -861,18 +861,19 @@ node --experimental-strip-types --test build/lib/test/dshBuildProvenance.test.ts
 | `dshIdeChannel.test.ts` | 通道分发（20 method）、三层过滤、`disposeOwner`、快照纪律、`state.view` 行级校验、`launch` 开窗命令、sessionId 传递与绑定、**follow 帧解包** | 28 |
 | `ideViewHost.test.mjs` | Host 半身：四类事件订阅与归属过滤、唯一 answerer 形态、waterfall 一致性、会话归属、method 映射、Host 端点自解析与发布（不含 cookie）、插件入口 inject 与延迟等待清单一致、**等端口就绪再发布** | 25 |
 | `electronHome.test.mjs` | Electron 主页物化：同卷硬链接 + 目录联接、排除卸载器/7zip/许可文本、版本标记重建、幂等、跨卷拒绝复制、非 Windows 明确失败、载荷缺失 | 7 |
+| `ideLaunchQueue.test.mjs` | Host 侧开窗客户端队列：clientId 校验、重复报到、在线投递、暂存与轮询取走、暂存请求交还、未知客户端不消耗 | 8 |
 | `dshIdeTransport.test.ts` | IDE 侧传输适配：鉴权交换、一元信封、remote.mux 流、waterfall 回投、method 映射与拒绝、**连接前不发送** | 14 |
 | `dshIdeConsumer.test.ts` | 消费者：校验、fail-closed（断号/倒退/channelId 变化）、16ms 合并、行级 diff | 10 |
 | `dshIdeUiProjection.test.ts` | 行展示文本：折叠用 preview、非折叠用 text、皆无返回 undefined | 4 |
 | `dshChatAgent.test.ts` | 唯一 Chat Agent：元数据、submit 转发、失败不伪造、**等快照增长后只回显新行**、超时明确说明、取消 | 7 |
 | `dshIdeToSeamChain.test.ts` | DTO 行 → 接缝的**串联**：五种 kind 都被接管、空行被过滤、折叠带 preview、isTrusted 策略 | 5 |
 | `dshIdeLaunchListener.test.ts` | IDE 侧开窗接单：报到一次不重复、失败重试、onLaunch 抛错不断循环、畸形载荷、dispose 停止 | 5 |
-| **合计** | — | **13 + 159 = 172** |
+| **合计** | — | **13 + 167 = 180** |
 
-- 当前唯一基线：**172/172**（mocha `13 passing` + node:test `159/159`），实测退出 0。
+- 当前唯一基线：**180/180**（mocha `13 passing` + node:test `167/167`），实测退出 0。
 - mocha 的 13 个用例来自 `packaging.test.mjs`（7 项）与 `dshChatSeamMap.test.js`（6 项）；第三个 glob `chatClient/*.test.mjs` 当前无匹配文件（既有现象，不减少测试项）。`client.test.mjs`（原零用例、仅 harness）与 `dshClientService.test.ts`（原 stale、不兼容）已在全面清理（2026-11-08）中删除，不计入基线。
 - 上述两文件（stale / 零用例）已在全面清理（2026-11-08）中删除，原登记见第 7 章 §3。
-- 上游 sanity 用例 `test/sanity/src/serverWeb.test.ts` 与 WSL web 用例已随 server-web 目标删除，不在 `test-dsh:all` 的 172/172 基线内，也不减少 DSH 测试项；删除登记见第 7 章 §7.6。
+- 上游 sanity 用例 `test/sanity/src/serverWeb.test.ts` 与 WSL web 用例已随 server-web 目标删除，不在当前 180/180 基线内，也不减少 DSH 测试项；删除登记见第 7 章 §7.6。
 - 类型检查判据：全仓既有 electron 类型解析错误集中在 `app.ts`，改动前后基线对比确认非 DSH 改动引入；**变更文件 0 错误**即为通过。
 - 穷举性验证（P2 出口）：临时新增 `IdeEventType` 变体 → `tsc` 必须报 `TS2322: not assignable to type 'never'` → 撤回 → `git diff --stat` 无残留 → `tsc` 复跑 0 错误。
 
@@ -990,16 +991,35 @@ node --experimental-strip-types --test build/lib/test/dshBuildProvenance.test.ts
 4. 要直接跑该 exe 的载荷只能改 DSH 安装目录，属硬边界越界，**不做**。
 5. `runtime/app` 是 appOnly 载荷（tgz 内 0 个 `.exe` / `.pak` / `.dat`）；物化 Electron 主页（硬链接 exe + 目录联接 + `resources/app` 指向载荷）后窗口标题 `DSH IDE`。上述四次实测证明的是「直接运行宿主 exe」不可行，**不是原生窗口不可行**，且该实测满足 §0 R1 的四条边界。
 
+**原生窗口启动黑屏（2026-11-09 定位并修复）**
+
+- 现象：硬链接主页能起进程、窗口标题已是「DSH IDE」，但渲染区全黑；控制台见
+  `Onboarding requires a default chat agent product configuration.` 与
+  `Cannot read properties of undefined (reading 'chatExtensionId')`。
+- 根因 1（原生模块 ABI）：`runtime/app` 缺 `windows-foreground-love` 的
+  `foreground_love.node`。该模块此前未按宿主 Electron 44.7.0（NODE_MODULE_VERSION=149）
+  编译，asar 解包规则（`**/*.node`）因此没有文件可解包；启动时
+  `claimInstance → windowsAllowSetForegroundWindow` 抛 MODULE_NOT_FOUND。修复：按
+  `target=44.7.0` 重编译后重建 staging。`.npmrc` 仍为 `43.7.7`，统一切 ABI 归 D23（P6）。
+- 根因 2（产品配置缺失）：`product.json` 无 Copilot 类 `defaultChatAgent`，但三处启动路径
+  按「一定存在」取值：onboarding 模块顶层 `assertDefined`、`DefaultAccountService` 构造、
+  扩展画廊 / 卸载路径。修复：缺配置时 onboarding 注册空实现、账号返回中性空配置、画廊与
+  卸载按普通扩展处理；配置存在时行为不变。
+- 修复后实测：同一 Electron 主页拉起重建后的 staging，窗口标题「Welcome - DSH IDE」，
+  欢迎页与 Chat 面板正常渲染；控制台仅剩非致命告警（GitHub 认证 provider 未注册、
+  GPU cache）。证据截图 `.build/d33-ide-rendered.png`（生成物，不入库）。
+- 结论：D33（原生窗口 GUI 复核）已完成；K5 仍需真实 Host 端点下由用户发消息观测 DTO 回填。
+
 **已废止的历史实测：server-web 页面承载**
 
 2026-11-09 曾用 `out/server-main.js` + `--without-connection-token --host 127.0.0.1 --port 0` 起官方 server 模式（首页 `GET` 返回 200 / 4459 B workbench HTML），Host 侧 `idePageUrl()` 返回 `http://localhost:62239`，client 半身在 `sidebar.right.pane.tab` 以 iframe 承载。该次实测把 `DSH_IDE_SERVER_ENTRY` 指向仓库开发态入口，打包产物中从未有该入口。构建目标与 staging 已删除（登记见第 7 章 §7.6），此形态不作为可选路径。
 
 **未完成项（按 AGENTS §6 如实登记）**
 
-- 硬链接 home 的窗口行为依据 2026-11-09 既有实机记录，本轮未重启 GUI 复核（D33 维持未完成）。
-- 删除 server-web 后的重打包与体积实测未跑（D29 / D30）；四条门禁 3 `PASS` + 1 `PENDING`、`test-dsh:all` 172/172 与完整 `tsc --noEmit`（src 934 / build 558 条既有基线错误，变更文件 0 错误）已在本轮 `6546e5c9` 复核。压缩后节省仍为按 gzip 比例的估算（见第 8 章 §8.2.5）。
-- 文档结构核验（`verify:docs-graph`）与断链检查结果写入本轮两提交信息；提交已按「代码侧 / 文档侧」拆分（D34 已完成），各自登记门禁实测与未完成项。
-- P5 收尾缺口（Electron 主页单测已闭环；开窗 GUI 复核、终端载荷、双窗口镜像）逐项登记见第 7 章 §3。
+- 硬链接 home 与原生窗口已在 2026-11-09 真机复核（D33 完成）；真实 Host 端点下的 Chat 面板 DTO 回填（D19）仍未观测。
+- 删除 server-web 后的重打包与体积实测未跑（D29 / D30）；四条门禁 3 `PASS` + 1 `PENDING`、`test-dsh:all` 180/180 与完整 `tsc --noEmit`（src 934 / build 558 条既有基线错误，变更文件 0 错误）已在本轮 `b13c8210` 复核。压缩后节省仍为按 gzip 比例的估算（见第 8 章 §8.2.5）。
+- 文档结构核验（`verify:docs-graph`）与断链检查结果写入本轮各提交信息；提交已按「代码侧 / 文档侧」拆分（D34 已完成），各自登记门禁实测与未完成项。
+- P5 收尾缺口（Electron 主页单测、开窗 GUI 复核已闭环；终端载荷、双窗口镜像）逐项登记见第 7 章 §3。
 
 ---
 
@@ -1131,7 +1151,7 @@ e:/DSH-IDE/                              git 仓库根 / 唯一代码树
 | D09 | 打包输出路径统一为 `root`（修复 `runtime/app` 为空、tgz 只有 157 KB） | P0 | 已完成 | 第 7 章 §3 历史登记 | 2026-11-09 |
 | D10 | 扩展类型依赖断链重定向并移除 42 个孤儿联接 | P0 | 已完成 | 第 7 章 §3 历史登记 | 2026-11-09 |
 | D11 | 每轮回写 §0.1 项目情况、本清单与 §7.7 更新记录，并跑 `verify:docs-graph` | 常设 | 已完成 | 第 5 章 §10、AGENTS §6；本轮已建立，每轮重复执行 | 2026-11-09 |
-| D12 | `ide-service.js` 的 launch / register / poll 单测（现靠 launch listener 与真机覆盖） | P5 | 未完成 | 第 7 章 §3 原登记、第 5 章 §4 | 2026-11-09 |
+| D12 | `ide-service.js` 的 launch / register / poll 单测（现靠 launch listener 与真机覆盖） | P5 | 已完成 | 队列抽为 `host/ide-launch-queue.js` + 8 项单测；`launch()` 在线客户端查找缺陷一并修复 | 2026-11-09 |
 | D13 | 20 个 method 功能接线：审批、问卷、权限预设、模型、effort、斜杠命令、resume / fork / rewind、goal / todo / usage / TPS / workingActivity 投影、`ping` / `inlineComplete`、账号、语音、删除会话 | P5 | 未完成 | 第 3 章 P5 活动、第 2 章 §4 | 2026-11-09 |
 | D14 | 双窗口镜像与 K6 出口判据（含关闭 IDE 窗口不取消 DSH 会话） | P5 | 未完成 | 第 3 章 P5 出口判据、第 1 章 §4 | 2026-11-09 |
 | D15 | 语音未就绪时入口明确不可用，且不启动本地识别后端 | P5 | 未完成 | 第 3 章 P5、第 5 章 §6 第 9 项 | 2026-11-09 |
@@ -1152,12 +1172,12 @@ e:/DSH-IDE/                              git 仓库根 / 唯一代码树
 | D30 | 重打包体积实测并写回体积表 | P7 | 未完成 | 第 8 章 §8.2.5（2）、第 7 章 §7.6 | 2026-11-09 |
 | D31 | `PROVENANCE.md` 版本 / commit / sha256 更新，`NOTICE.md` 与 `LICENSE` 原文核对 | P7 | 未完成 | 第 3 章 P7 活动、第 5 章 §8 | 2026-11-09 |
 | D32 | `src/vs/platform/dshClient/PROVENANCE.md` 删除前快照更新 | P7 | 未完成 | 第 7 章 §3 原登记、README §4 | 2026-11-09 |
-| D33 | 真机 GUI 复核硬链接主页的窗口行为 | P5 | 未完成 | 第 5 章 §10.2 未完成项 | 2026-11-09 |
+| D33 | 真机 GUI 复核硬链接主页的窗口行为 | P5 | 已完成 | 2026-11-09 实机：标题「Welcome - DSH IDE」，欢迎页与 Chat 面板渲染；黑屏根因与修复见第 5 章 §10.2 | 2026-11-09 |
 | D34 | 提交拆分为 docs-only 与代码侧两个提交，各自登记门禁实测 / 未完成项 | P7 | 已完成 | 代码侧 `6546e5c9` + 本文档侧提交；两提交信息分别登记门禁实测与未完成项 | 2026-11-09 |
 | D35 | `common/env.js` 两个常量的消费者逐项复核 | P5 | 待核对 | 第 7 章 §3 原登记 | — |
 | D36 | `translator.ts` / `ide-view-projector.ts` 三个常量的生产引用复核 | P3 / P6 | 待核对 | 第 7 章 §3 原登记 | — |
 
-统计（由 `verify:docs-graph` 输出）：13 已完成 / 21 未完成 / 2 待核对，共 36 项；每轮回写时按实际完成情况改「是否完成」与「最后核对」，并在 §7.7 增加一行。
+统计（由 `verify:docs-graph` 输出）：15 已完成 / 19 未完成 / 2 待核对，共 36 项；每轮回写时按实际完成情况改「是否完成」与「最后核对」，并在 §7.7 增加一行。
 
 **§3.1 架构裁定（2026-11-09，K4 前置）**
 
@@ -1320,6 +1340,7 @@ git grep -nE "dshEventMap\.ts|dshSessionUri\.ts|dshChatSessions\.ts|dshChatProvi
 | 3 | 2026-11-09 / `b81b829f` | P5 代码收尾：`client.js` 切 `launch`、`ide-service.js` 删页面方法、`electron-home.js` 6 项加固、7 项单测；基线 172/172 | D01–D04 标记已完成 | `docs-graph` PASS；四门禁 3 `PASS` + 1 `PENDING` |
 | 4 | 2026-11-09 / `b81b829f` | 本轮：建立 §0.1 当前项目情况、第 7 章 §3 唯一待办清单、本节更新记录；核验脚本加快照 / 待办 / 轮次一致性 | 待办清单 36 项（11 已完成 / 23 未完成 / 2 待核对）；D11 常设回写项登记 | `docs-graph` PASS（含快照与待办统计）；断链 0；`git diff --check` 退出 0 |
 | 5 | 2026-11-09 / `6546e5c9` | 复核未提交基线并全量复跑：四门禁 3 `PASS` + 1 `PENDING`、`test-dsh:all` 172/172、完整 `tsc` 变更文件 0 错误；修复 `gulpfile.reh.ts` 未使用参数（TS6133）；按 D34 拆出代码侧提交与本文档提交 | D25、D34 标记已完成；D12–D33 其余项维持未完成 | `docs-graph` PASS（8 阶段 / 13 已完成 / 21 未完成 / 2 待核对 / 5 轮）；断链 0；`git diff --check` 退出 0 |
+| 6 | 2026-11-09 / `b13c8210` | D12 开窗队列纯模块化 + 8 项单测（顺带修复在线客户端查找缺陷）；原生窗口黑屏修复（onboarding / 默认账号守卫 + `windows-foreground-love` 按 ABI 149 重编译）；真机复核窗口渲染 | D12、D33 标记已完成 | `docs-graph` PASS（8 阶段 / 15 已完成 / 19 未完成 / 2 待核对 / 6 轮）；断链 0；四门禁 3 `PASS` + 1 `PENDING`；`test-dsh:all` 180/180 |
 
 ---
 
