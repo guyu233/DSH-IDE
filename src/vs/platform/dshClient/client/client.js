@@ -39,11 +39,15 @@ window.__ModuleLoader__.load({
 				if (busy) { return; }
 				setBusy(true);
 				setError(null);
-				const workspace = props && typeof props.workspace === "string" ? props.workspace : undefined;
-				Promise.resolve(pluginCtx.remote.ide.launch(workspace))
+				// 打开 IDE 页面：先取 URL 再开新窗口（都在同一个用户手势里，避免被浏览器拦截）。
+				Promise.resolve(pluginCtx.remote.ide.idePageUrl())
 					.then(result => {
 						setBusy(false);
-						if (result && result.ok === true) { setError(null); return; }
+						if (result && result.ok === true && typeof result.url === "string") {
+							setError(null);
+							window.open(result.url, "dsh-ide-panel", "noopener");
+							return;
+						}
 						setError((result && result.message) || "未知错误");
 					})
 					.catch(err => {
@@ -60,8 +64,43 @@ window.__ModuleLoader__.load({
 			}, h("span", null, "DSH-IDE"), error ? h("span", { style: { color: "var(--vscode-errorForeground, #f48771)" } }, "\u26a0") : null);
 		}
 
+		/** 侧栏里的 IDE 页面：iframe 承载上游 workbench，URL 由 Host 半身按需拉起。 */
+		function DshIdePage() {
+			const [url, setUrl] = React.useState(null);
+			const [error, setError] = React.useState(null);
+			React.useEffect(() => {
+				let alive = true;
+				Promise.resolve(pluginCtx.remote.ide.idePageUrl())
+					.then(result => {
+						if (!alive) { return; }
+						if (result && result.ok === true && typeof result.url === "string") { setUrl(result.url); return; }
+						setError((result && result.message) || "未知错误");
+					})
+					.catch(err => { if (alive) { setError((err && err.message) || String(err)); } });
+				return () => { alive = false; };
+			}, []);
+			if (error !== null) {
+				return h("div", { className: "dsh-ide-page-error", style: { padding: "8px", fontSize: "12px", opacity: 0.8 } },
+					"DSH-IDE 页面不可用：" + error);
+			}
+			if (url === null) {
+				return h("div", { className: "dsh-ide-page-loading", style: { padding: "8px", fontSize: "12px", opacity: 0.8 } },
+					"DSH-IDE 正在启动…");
+			}
+			return h("iframe", {
+				className: "dsh-ide-page",
+				src: url,
+				title: "DSH-IDE",
+				style: { width: "100%", height: "100%", border: "0", display: "block" },
+			});
+		}
+
+		function DshIdePageTitle() {
+			return h("span", null, "DSH-IDE");
+		}
+
 		return {
-			// 需要 `remote` 才能调 Host 的 ide.launch（官方 Typert Gateway）。
+			// 需要 `remote` 才能调 Host 的 ide.* 方法（官方 Typert Gateway）。
 			inject: ["slots", "remote"],
 			apply(ctx) {
 				pluginCtx = ctx;
@@ -70,6 +109,19 @@ window.__ModuleLoader__.load({
 					id: "dsh-ide",
 					order: -9,
 				}, DshIdeButton));
+
+				// IDE 作为 DSH 应用内的一个页面：复用官方右侧栏 tab slot（与官方终端 tab 同机制）。
+				// 页面本身是上游 code-server 的 workbench，由 Host 半身在本机拉起（见 host/ide-service.js）。
+				ctx.slots.inject("sidebar.right.pane.tab", () => ctx.slots.register({
+					name: "sidebar.right.pane.tab",
+					key: "dsh-ide",
+					locale: "dsh-ide",
+				}, DshIdePage));
+				ctx.slots.inject("sidebar.right.pane.tab.title", () => ctx.slots.register({
+					name: "sidebar.right.pane.tab.title",
+					key: "dsh-ide",
+					locale: "dsh-ide",
+				}, DshIdePageTitle));
 			},
 		};
 	},

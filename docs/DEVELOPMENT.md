@@ -601,6 +601,16 @@ waterfall 语义单测覆盖、boundary PASS、17 符号单源、端到端实跑
      不自造窗口壳）。P5 据此把 IDE 承载从「原生 `BrowserWindow` + `IServerChannel`」改成
      「DSH 应用内的页面」，`dshIde` 通道语义随之收敛为页面内消费 DTO 的同进程/同机链路。
      具体切片与接线顺序在 P5 活动内落地，本行只记录实测结论，不代表已实现。
+  3. **页面服务已接通到 RPC（2026-11-09 实测）**：Host 半身新增 `ensureIdePage()` / `idePageUrl()`，
+     经官方 Typert Gateway 调用返回 `{"ok":true,"url":"http://localhost:62239"}`，该地址 `GET /` 返回
+     **200 / 4459 B**（workbench HTML）。client 半身已在官方 `sidebar.right.pane.tab` 注册 IDE 页面
+     （iframe 承载），并在标题 slot 注册「DSH-IDE」。
+     **注意**：本次实测把 `DSH_IDE_SERVER_ENTRY` 指向仓库开发态 `out/server-main.js`；
+     打包产物内**尚无**该入口。
+  4. **打包需新增 server-web 构建（体积待裁定）**：官方 `runEsbuildBundle(..., 'server-web')` 已产出
+     `out-vscode-reh-web-min`，**165 MB 原始 / 39.2 MB 压缩**；当前 `dist/dsh-ide-2.0.0.tgz` 为 114.1 MB，
+     叠加上限约 **153 MB**。第 7 章记录的体积口径是「压缩包 74,147,715 字节（<100 MB）」，
+     现状（114.1 MB）已超；再加 39.2 MB 会进一步偏离。**这是交付体积决策，需所有者裁定后才能改 staging。**
 
 #### P6 测试与验证
 
