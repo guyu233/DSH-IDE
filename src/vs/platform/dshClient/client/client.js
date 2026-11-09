@@ -36,12 +36,14 @@ window.__ModuleLoader__.load({
 		function DshIdeButton(props) {
 			const [busy, setBusy] = React.useState(false);
 			const [error, setError] = React.useState(null);
+			// 当前会话的工作区（与官方 open-in-app 同一来源：SessionSnapshot.cwd）。
+			// 会话由 DSH 决定，按钮只把「当前工作区」原样转给 Host（不变量 I4）。
+			const cwd = props.useSessions(state => state.byId[props.sessionId]?.cwd);
 			const onClick = React.useCallback(() => {
 				if (busy) { return; }
 				setBusy(true);
 				setError(null);
-				const workspace = props && typeof props.workspace === "string" ? props.workspace : undefined;
-				Promise.resolve(pluginCtx.remote.ide.launch(workspace))
+				Promise.resolve(pluginCtx.remote.ide.launch(typeof cwd === "string" && cwd !== "" ? cwd : undefined))
 					.then(result => {
 						setBusy(false);
 						if (result && result.ok === true) { setError(null); return; }
@@ -51,14 +53,15 @@ window.__ModuleLoader__.load({
 						setBusy(false);
 						setError((err && err.message) || String(err));
 					});
-			}, [busy, props, error]);
+			}, [busy, cwd]);
+			const label = error ? ("DSH-IDE 启动失败: " + error) : "在 DSH-IDE 中打开当前工作区";
 			return h(Button, {
 				variant: "ghost", size: "sm", className: "dsh-ide-open",
-				title: error ? ("DSH-IDE 启动失败: " + error) : "在 DSH-IDE 中打开（当前工作区）",
-				"aria-label": error ? ("DSH-IDE 启动失败: " + error) : "在 DSH-IDE 中打开",
+				title: label,
+				"aria-label": label,
 				disabled: busy, onClick,
-				icon: h(WhaleLogo, { size: 14 }),
-			}, h("span", null, "DSH-IDE"), error ? h("span", { style: { color: "var(--vscode-errorForeground, #f48771)" } }, "\u26a0") : null);
+				icon: h(WhaleLogo, { size: 16 }),
+			});
 		}
 
 		return {
@@ -69,7 +72,8 @@ window.__ModuleLoader__.load({
 				ctx.slots.inject("conversation.session.header.utilities", () => ctx.slots.register({
 					name: "conversation.session.header.utilities",
 					id: "dsh-ide",
-					order: -9,
+					// 紧邻「…」会话菜单（官方 `session-log-download`，order 0）：右侧第一个入口（order 1）。
+					order: 1,
 				}, DshIdeButton));
 			},
 		};

@@ -102,6 +102,7 @@ import { isFolderToOpen, isWorkspaceToOpen, IWindowOpenable } from '../../platfo
 import { getAllWindowsExcludingOffscreen, IWindowsMainService, OpenContext } from '../../platform/windows/electron-main/windows.js';
 import { ICodeWindow } from '../../platform/window/electron-main/window.js';
 import { WindowsMainService } from '../../platform/windows/electron-main/windowsMainService.js';
+import { findWindowOnWorkspaceOrFolder } from '../../platform/windows/electron-main/windowsFinder.js';
 import { ActiveWindowManager } from '../../platform/windows/node/windowTracker.js';
 import { hasWorkspaceFileExtension } from '../../platform/workspace/common/workspace.js';
 import { IWorkspacesService } from '../../platform/workspaces/common/workspaces.js';
@@ -1454,20 +1455,52 @@ export class CodeApplication extends Disposable {
 		const dshIdeLauncher: DshIdeLauncher = {
 			launch: async spec => {
 				try {
-					// 已有窗口时只聚焦，不再开第二个空窗口（用户点按钮的语义是「给我看 IDE」）。
+					// 窗口服务由 startup() 在协议处理器阶段注入；未就绪时如实失败，不假装开窗。
+					const windowsMainService = this.windowsMainService;
+					if (windowsMainService === undefined) {
+						return { ok: false, message: 'window service is not ready; retry after DSH-IDE finishes starting' };
+					}
+					// 会话由 DSH 决定（不变量 I4），IDE 不得自己猜：把开窗方给的 sessionId 经
+					// `userEnv` 交给窗口（窗口内读到的是合并后的 env）。
+					const userEnv = spec.sessionId === undefined ? undefined : { [DSH_IDE_SESSION_ENV]: spec.sessionId };
+
+					// 「用 DSH-IDE 打开当前工作区」：请求带工作区时按官方窗口 API 打开该文件夹。
+					if (spec.workspace !== undefined) {
+						const folderUri = URI.file(spec.workspace);
+						// 已有同工作区窗口：只聚焦，不重复开窗（与官方 open-in-app 语义一致）。
+						const existing = findWindowOnWorkspaceOrFolder(windowsMainService.getWindows(), folderUri);
+						if (existing !== undefined) {
+							existing.focus();
+							return { ok: true };
+						}
+						// 只有空窗口时复用它加载工作区；已有工作区窗口时不覆盖用户当前工作区，另开新窗。
+						const windows = windowsMainService.getWindows();
+						const onlyEmptyWindows = windows.length > 0 && windows.every(window => window.openedWorkspace === undefined);
+						await windowsMainService.open({
+							context: OpenContext.DESKTOP,
+							cli: this.environmentMainService.args,
+							...(userEnv === undefined ? {} : { userEnv }),
+							urisToOpen: [{ folderUri }],
+							forceNewWindow: !onlyEmptyWindows,
+							forceReuseWindow: onlyEmptyWindows,
+						});
+						return { ok: true };
+					}
+
+					// 不带工作区：已有窗口时只聚焦，否则开一个空窗口（用户点按钮的语义是「给我看 IDE」）。
+					// 走 `open({ forceEmpty })` 而不是 `openEmptyWindow`：只有前者接受 `userEnv`，
+					// 才能把 DSH 给的 sessionId 交给新窗口（`openEmptyWindow` 会丢弃 userEnv）。
 					if (windowsMainService.getWindowCount() > 0) {
 						windowsMainService.getWindows()[0]?.focus();
 						return { ok: true };
 					}
-					// 会话由 DSH 决定（不变量 I4），IDE 不得自己猜：把开窗方给的 sessionId 经
-					// `userEnv` 交给新窗口（`openEmptyWindow` 支持该字段，窗口内读到的是合并后的 env）。
-					await windowsMainService.openEmptyWindow(
-						{ context: OpenContext.DESKTOP },
-						{
-							...(spec.workspace === undefined ? {} : { forceNewWindow: true, forceReuseWindow: false }),
-							...(spec.sessionId === undefined ? {} : { userEnv: { [DSH_IDE_SESSION_ENV]: spec.sessionId } }),
-						},
-					);
+					await windowsMainService.open({
+						context: OpenContext.DESKTOP,
+						cli: this.environmentMainService.args,
+						forceEmpty: true,
+						forceNewWindow: true,
+						...(userEnv === undefined ? {} : { userEnv }),
+					});
 					return { ok: true };
 				} catch (error) {
 					return { ok: false, message: error instanceof Error ? error.message : String(error) };

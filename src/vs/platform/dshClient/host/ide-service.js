@@ -71,7 +71,7 @@ export class IdeRemoteService extends Service {
         message: `no IDE process has registered yet; endpoint file not found (looked in ${this.endpointCandidates().join(' , ')})`,
       };
     }
-    const spawned = await this.spawnIdeProcess(endpoint);
+    const spawned = await this.spawnIdeProcess(endpoint, workspace);
     if (spawned.ok !== true) {
       return { ok: false, message: spawned.message };
     }
@@ -89,7 +89,7 @@ export class IdeRemoteService extends Service {
    *
    * @returns {{ ok: boolean, message?: string }}
    */
-  async spawnIdeProcess(endpoint) {
+  async spawnIdeProcess(endpoint, workspace) {
     const appPath = join(this.pluginRoot, 'runtime', 'app');
     const entry = join(appPath, 'out', 'main.js');
     if (!existsSync(entry)) {
@@ -111,9 +111,10 @@ export class IdeRemoteService extends Service {
       delete env.ELECTRON_RUN_AS_NODE;
       env.DSH_IDE_ENDPOINT = endpoint.origin;
       env.DSH_IDE_LAUNCH_URL = endpoint.launchUrl;
-      // 不传载荷位置参数：主页的 `resources/app` 已经指向插件载荷，位置参数只会与
-      // 未来的「打开工作区」语义冲突（docs/DEVELOPMENT.md 第 7 章 §3 P5 收尾项）。
-      const child = spawn(home.exe, [], { detached: true, stdio: 'ignore', env, cwd: appPath });
+      // 不传载荷目录作为位置参数：主页的 `resources/app` 已经指向插件载荷。
+      // 位置参数只承载「要打开的工作区」，与 VS Code CLI 语义一致（首次点击即打开当前工作区）。
+      const args = typeof workspace === 'string' && workspace !== '' ? [workspace] : [];
+      const child = spawn(home.exe, args, { detached: true, stdio: 'ignore', env, cwd: appPath });
       child.unref();
       this.spawnedAt = now;
       return { ok: true };
