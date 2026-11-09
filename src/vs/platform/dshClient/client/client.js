@@ -3,12 +3,14 @@
  *
  * 在会话头部工具区（slot `conversation.session.header.utilities`，即右上角工具条）注册一个「DSH-IDE」按钮。
  * 私有 HTTP launch 链已移除：点击按钮显式报错（launch chain removed; pending DshIdeChannel.open），
- * 待 P5 接通 `dshIde` 通道开窗后改为经通道调用。图标使用 DSH 官方鲸鱼图形（取自 dsh-web-frontend/favicon.svg）。
+ * 待 P5 接通 `dshIde` 通道开窗后改为经通道调用。图标使用 DSH 官方鲸鱼图形（取自 dsh-web-frontend/favicon.svg）；
+ * 按钮复用宿主 `@deepseek-ai/dsh-client-ui-primitives` 的 `Button`（ghost/sm），不手写样式。
  */
 window.__ModuleLoader__.load({
 	id: "dsh-ide",
 	factory(require) {
 		const React = require("react");
+		const { Button } = require("@deepseek-ai/dsh-client-ui-primitives");
 		const h = React.createElement;
 
 		// DSH 官方鲸鱼 LOGO：**直接引用宿主的官方资源** `/favicon.svg`（E1 `apps/web/public/favicon.svg`，
@@ -32,20 +34,13 @@ window.__ModuleLoader__.load({
 				// 私有 HTTP launch 链已移除；开窗由 P5 经 `dshIde` 通道的 open 控制命令承担。
 				throw new Error('launch chain removed; pending DshIdeChannel.open');
 			}, [busy, props, error]);
-			return h("button", {
-				type: "button", className: "dsh-ide-open",
+			return h(Button, {
+				variant: "ghost", size: "sm", className: "dsh-ide-open",
 				title: error ? ("DSH-IDE 启动失败: " + error) : "在 DSH-IDE 中打开（当前工作区）",
 				"aria-label": error ? ("DSH-IDE 启动失败: " + error) : "在 DSH-IDE 中打开",
 				disabled: busy, onClick,
-				style: {
-					display: "inline-flex", alignItems: "center", gap: 6,
-					height: 24, padding: "0 10px", margin: "0 2px",
-					border: "0.5px solid var(--dsw-alias-border-l4, rgba(128,128,128,.35))",
-					borderRadius: "var(--dsw-radius-sm, 6px)",
-					background: "transparent", color: "inherit",
-					cursor: busy ? "default" : "pointer", fontSize: 11, lineHeight: "16px", whiteSpace: "nowrap",
-				},
-			}, h(WhaleLogo, { size: 14 }), h("span", null, "DSH-IDE"), error ? h("span", { style: { color: "var(--vscode-errorForeground, #f48771)" } }, "\u26a0") : null);
+				icon: h(WhaleLogo, { size: 14 }),
+			}, h("span", null, "DSH-IDE"), error ? h("span", { style: { color: "var(--vscode-errorForeground, #f48771)" } }, "\u26a0") : null);
 		}
 
 		return {

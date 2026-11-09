@@ -1200,6 +1200,7 @@ git grep -nE "dshEventMap\.ts|dshSessionUri\.ts|dshChatSessions\.ts|dshChatProvi
 | 删除的上游测试/CLI | `extensions/vscode-api-tests/`、`vscode-colorize-tests/`、`vscode-colorize-perf-tests/`；`cli/` 源码与 `target/`（保留 `cli/ThirdPartyNotices.txt`） |
 | 删除的根文件 | `README.vscode.md`、`AGENTS.vscode.md`、`.mcp.json`、`.lsifrc.json`、`.mention-bot`、`.mailmap`、`.git-blame-ignore-revs`、`cglicenses.json`、`.vscode-test.js` |
 | 保留 | `.eslint-plugin-local/`（lint 依赖）、`.vscode/`（`extensions/` 被构建引用）、`build/next/`（`build-dsh-tests` 依赖）、`build/dictation-runtime/`（`gulpfile.vscode.ts` 直接 import） |
+| 插件复用 | `client.js` 头部按钮改用宿主 `@deepseek-ai/dsh-client-ui-primitives` 的 `Button`（ghost/sm），去掉手写 `<button>` 与内联样式；`packaging.test.mjs` 7/7 通过 |
 | 体积口径 | 压缩包 74,147,715 字节（<100 MB）；解压安装 285 MiB；安全瘦身目标 200–210 MiB，详见 §8.2.5 |
 | 文档核验 | 定义依赖图 3 节点 / 3 边 / 0 环；术语表唯一；无断链 |
 
@@ -1227,7 +1228,7 @@ DSH-IDE = VS Code 外壳 + DSH 内核：全仓只有一个 Cordis 根 `dshCtx`�
 
 - 优先级固定：① DSH 桌面端 `resources/app.asar` 内 `@deepseek-ai/**`（官方鲸鱼 favicon、各插件自带 `icon.svg`/`locale`/样式）；② VS Code 源码 `src/**`（codicons、主题、`resources/**`）；③ 确无可用资源才自绘，自绘须写明理由。
 - 禁止手抄近似 LOGO / 近似资源路径；搬用须保留原许可证与版权头，记录 tree digest（格式见第 1 章 §6 与 `build/dsh/chat-render/PROVENANCE.md`）。
-- 已复用清单与来源凭据见第 1 章 §6、第 7 章 §4.1；运行时可复用范围、禁止复用项与体积边界见 §8.2.5。
+- 已复用清单与来源凭据见第 1 章 §6、第 7 章 §4.1；运行时可复用范围、禁止复用项与体积边界见 §8.2.5；插件侧任何新增功能/资源按 §8.2.6 的固定顺序（DSH 运行时 → DSH 源码 → 手写）决策。
 
 #### 8.2.2 AI 聊天侧栏渲染 DSH 原始消息流
 
@@ -1309,6 +1310,7 @@ DSH-IDE = VS Code 外壳 + DSH 内核：全仓只有一个 Cordis 根 `dshCtx`�
 | Electron / Node 宿主 | DSH 安装目录 | 插件 `appOnly`，不自带 Electron | IDE 启动、终端 PTY、扩展宿主 | 已复用 |
 | `@deepseek-ai/cordis`、`schemastery`、`typert-protocol` | `app.asar/dsh/node_modules` | `peerDependencies` + Host import | 插件 Host 生命周期、Typert 远程派发 | 已复用 |
 | `react` / `react-dom` / `dsh-client-ui-slots` | 宿主平台单例 | `client.js` 的 `require('react')` + `inject: ['slots']` | DSH 会话头部按钮 | 已复用 |
+| `dsh-client-ui-primitives` 的 `Button` | 宿主平台单例（`@deepseek-ai/dsh-client-ui-primitives`） | `client.js` 的 `require('@deepseek-ai/dsh-client-ui-primitives')` | 会话头部「DSH-IDE」按钮（官方 ghost/sm 样式） | 已复用（2026-11-09） |
 | 官方鲸鱼 favicon | 宿主 `/favicon.svg` | `client.js` 直接引用 | 头部按钮图标 | 已复用 |
 | `dsh-client-ui-chat` 的 APNG | `.../ui-chat/lib/assets/running-whale@2x-*.png` | 仅 DSH client 半身可 `require.asset('plugins/@deepseek-ai/dsh-client-ui-chat/assets/...')` | DSH 窗口内聊天气泡 | 可用；当前侧栏在 VS Code renderer，不适用 |
 | `dsh-client-ui-chat` 的 locale JSON | `.../ui-chat/locale/{en,zh}.json` | 构建期只读源；运行期仅 DSH client 可读 | 聊天文案 | 构建期已复用（`src/locale.ts` 逐字副本） |
@@ -1335,7 +1337,7 @@ DSH-IDE = VS Code 外壳 + DSH 内核：全仓只有一个 Cordis 根 `dshCtx`�
 **（5）加载优先级（固定，不得新增第二条）**
 
 1. Host 进程：`@deepseek-ai/*` 一律 `peerDependencies` + 宿主 Cordis，不打包。
-2. DSH client 半身：`require` 宿主平台单例；图片用 `require.asset`（仅 `./assets/*` 包）；图标用 `/favicon.svg`；不打包 React/图标。
+2. DSH client 半身：`require` 宿主平台单例（`react`、`dsh-client-ui-slots`、`dsh-client-ui-primitives` 等）；图片用 `require.asset`（仅 `./assets/*` 包）；图标用 `/favicon.svg`；不打包 React/图标/官方原子组件。
 3. VS Code renderer 侧栏：宿主资源不可达，sidecar 必须自包含；唯一允许的复用是构建期从 `ui-chat` 只读源复制，版本锁定 `UPSTREAM_VALIDATED_VERSION`，由 `regen-sources.mjs --check` 与 `PROVENANCE.md` sha256 守护。
 4. 禁止：在 renderer 中 `file://` 读 `app.asar`，或把宿主 `ui-chat/lib/client.js` 塞进 VS Code renderer；失败只会静默降级为原生渲染，属于回归。
 
@@ -1363,6 +1365,31 @@ DSH-IDE = VS Code 外壳 + DSH 内核：全仓只有一个 Cordis 根 `dshCtx`�
 - 版本漂移：宿主 `ui-chat` 源升级时按第 5 章 §7 更新 `PROVENANCE.md` 与 `UPSTREAM_VALIDATED_VERSION`；不得直接引用新版 `lib/client.js`。
 
 > 证据：DSH 源码 `apps/desktop/src/paths.ts`（profile 目录）、`packages/boot/app-boot/src/profile.ts`（bundle 解析）、`packages/client/modules/src/index.ts`（`/plugins` 与 module table）、`packages/client/web/src/seed.ts`（平台单例）、`packages/host/frontend-static/src/index.ts`（静态服务白名单）、`packages/client/ui-chat/package.json`（`./assets/*` 与 `./client`）；安装目录、文件大小与本机实测一致（2026-11-09）。
+
+#### 8.2.6 插件改动的复用优先级
+
+任何插件侧新增功能、UI、资源或构建产物，按以下**固定顺序**决策，不得跳级：
+
+1. **先看 DSH 桌面端运行时资源**：安装版 `app.asar` / `app.asar.unpacked` 内的 `@deepseek-ai/**`、宿主模块行、`require.asset` 可访问资产、`/favicon.svg`、平台单例（`react`、`dsh-client-ui-slots`、`dsh-client-ui-primitives`、`dsh-client-ui-dockkit` 等）。
+   - Host 进程：`peerDependencies` + 宿主 Cordis。
+   - DSH client 半身：`require` 平台单例 + `require.asset` + 宿主 URL。
+   - 能直接复用就改代码接上，不新造。
+2. **再看 DSH 源码**：运行时不可直接复用时，按源码颗粒度从 `E:/deepseek-harness-0.2.2-rc.1/packages/client/**` 复制最小文件集，保留许可证头与 `PROVENANCE.md`，版本锁定 `UPSTREAM_VALIDATED_VERSION`。
+3. **最后才手写**：以上都不可行时自写，并在提交信息写明「为何不能复用/参考」。
+
+**当前已接上的复用**（2026-11-09）：
+
+| 层 | 复用项 | 接入点 |
+| --- | --- | --- |
+| IDE 宿主 | Electron / Chromium / Node | 插件 `appOnly`，不自带 Electron |
+| Host 半身 | `@deepseek-ai/cordis`、`schemastery`、`typert-protocol` | `peerDependencies` + Host import |
+| DSH client 半身 | `react`、`dsh-client-ui-slots`、`dsh-client-ui-primitives`、`/favicon.svg` | `client.js` 的 `require` / `inject` / 宿主 URL |
+| DSH client 半身 | 官方 `Button`（ghost/sm） | `client.js` 头部按钮，2026-11-09 替换手写 `<button>` 与内联样式 |
+| VS Code renderer | `ui-chat` 20 个源文件 + CSS + APNG | 构建期 sidecar（`build/dsh/chat-render/`） |
+
+**边界**：VS Code renderer 不能直接 `require` 宿主模块行或读 `app.asar`，只能走构建期源码复用（见 §8.2.5 第（4）条）。`@vscode/ripgrep` / `node-pty` 的运行时复用依赖 P5 启动/路径传递，未接线前不得硬接；当前仍随插件打包。
+
+**手写例外**：sidecar `shims/primitives.tsx` 的 `Tooltip` 仅做原生 `title` 降级（上游 273 行 portal/placement 复合体未复制）；`UserMessageBubble` 按上游 14 行如实复刻。两者均已在 `build/dsh/chat-render/PROVENANCE.md` §4/§7 登记。
 
 ### 8.3 VS Code 原生能力保障
 
