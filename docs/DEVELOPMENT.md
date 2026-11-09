@@ -44,7 +44,7 @@
 
 | 编号 | 不变量 | 精确定义 |
 | --- | --- | --- |
-| I1 | 单根单宿主 | DSH 只有一个 Cordis 根 `dshCtx`，位于 **DSH Host 进程**（`apps/desktop/src/host-process.ts:212` spawn 的 `@deepseek-ai/dsh-desktop-host` 子进程，bundle 插件由其中 `runProfile()` 装载）。DSH 服务的注册与事件订阅都 attach 在它上面；IDE 进程不持有 `dshCtx`、不注册 DSH 服务、不产生第二个 Cordis 根，也不注入 VS Code 的 `IInstantiationService`。 |
+| I1 | 单根单宿主 | DSH 只有一个 Cordis 根 `dshCtx`，位于 **DSH Host 进程**（`apps/desktop/src/host-process.ts:212` spawn 的 `@deepseek-ai/dsh-desktop-host` 子进程；DSH-IDE 作为 DSH 的 bundle 插件，其 Host 半身由其中 `runProfile()` 装载）。DSH 服务的注册与事件订阅都 attach 在它上面；IDE 进程不持有 `dshCtx`、不注册 DSH 服务、不产生第二个 Cordis 根，也不注入 VS Code 的 `IInstantiationService`。 |
 | I2 | 唯一通道 | IDE 进程内只有一条 DSH↔IDE `IServerChannel`，token 恒为 `dshIde`，实现恒为 `DshIdeChannel`，注册点恒为 `src/vs/code/electron-main/app.ts`。在 IDE 进程之外，DSH Host 侧由插件 Host 半身（`index.js` + `host/ide-view-host.js`）承接官方客户端传输；两者是同一套官方协议的上下游，不构成第二条传输、第二个协议或第二套握手。 |
 | I3 | renderer 不 `require` 官方运行时包 | `src/vs/workbench/**` 禁止出现 `@deepseek-ai/*` 的值导入（含 `from`、`require` 与动态说明符字符串）。renderer 只消费 `dshIde` 通道上的 DTO。插件 Host 能力域（`src/vs/platform/dshClient/host/`）允许引用官方包，它不属于 renderer。 |
 | I4 | 插件当翻译官 | DSH 的官方事件只在插件侧被翻译为中立 `IdeEvent`，再投影为 DTO；IDE 侧不持有 `dshCtx`，不理解 DSH 内部模型，不复制会话状态。 |
@@ -68,6 +68,7 @@
 - IDE 窗口由插件侧开窗动作创建或唤起；DSH 主窗口保留会话头部按钮（slot `conversation.session.header.utilities`，id `dsh-ide`，`order: -9`）。
 - `dshCtx` 与 VS Code 的 `IInstantiationService` 是两套容器，服务归属必须可区分；禁止把 DSH 服务注册进 VS Code 容器或相反。
 - 两端不同进程：DSH Host 进程持有 `dshCtx`，IDE 进程只持有 `DshIdeChannel` 与 `DshIdeViewService`。跨进程只有官方客户端传输一条链路（裁定见第 7 章 §3.1）。
+- 注：DSH Host 进程与 IDE 进程**同属一个 DSH 应用**（DSH-IDE 即其拓展），并非两个独立应用；DSH-IDE 作为 DSH 插件天然运行于 DSH 之内，不存在把 Cordis 根跨边界塞入的动作（见第 7 章 §3.1）。
 
 #### 2.1 交付态与当前态对照
 
@@ -129,7 +130,7 @@ dshCtx 官方服务与事件
 
 ### 7. 明确不存在的能力
 
-以下内容在全仓均不成立，禁止在代码或文档中当作可用能力引用：第二条 `IServerChannel`、第二个 Cordis 根、**任何私有跨进程管道 / 私有握手**、旧 mux/信封连接层、`bootstrapDshClient()`、旧终端复刻（历史名 P5）、`DshIdeConsumer`（当前态）、renderer 侧的 `@deepseek-ai/*` 导入。IDE 与 DSH Host 之间唯一的跨进程链路是官方客户端传输（见第 7 章 §3.1 裁定），它不构成第二条协议。已移除文件的登记见第 2 章 §2。
+以下内容在全仓均不成立，禁止在代码或文档中当作可用能力引用：第二条 `IServerChannel`、第二个 Cordis 根、**任何私有跨进程管道 / 私有握手**、旧 mux/信封连接层、`bootstrapDshClient()`、旧终端复刻（历史名 P5）、`DshIdeConsumer`（当前态）、renderer 侧的 `@deepseek-ai/*` 导入。DSH 应用内（IDE 与 DSH Host 半身之间）唯一的跨进程链路是官方客户端传输（见第 7 章 §3.1 裁定），它不构成第二条协议。已移除文件的登记见第 2 章 §2。
 
 双向导航环全部是「指向唯一定义处」的导航链接，删除会破坏可追溯性，因此保留并显式分类；取舍规则见 [`README.md`](../README.md) §4.1，合并后的引用图说明见第 7 章 §7.5。本章不复制该定义。
 
@@ -1159,19 +1160,22 @@ e:/DSH-IDE/                              git 仓库根 / 唯一代码树
 
 | # | 事实（可复核） | 与手册的冲突 | 影响 |
 | --- | --- | --- | --- |
-| B1 | DSH `0.2.2-rc.1` 的插件**不在 Electron 主进程**加载：`apps/desktop/src/host-process.ts:212` 用 `spawn()` 起 `node_modules/@deepseek-ai/dsh-desktop-host/lib/index.js` 子进程，`apps/desktop-host/src/index.ts:29-31` 在该子进程内 `loadProfileDirectory()` + `runProfile()` 装载 bundle 插件 | 第 1 章 §1 不变量 I1 要求「DSH 主进程逻辑与 VS Code 主进程逻辑在同一个 Electron 主进程内共享唯一 Cordis 根 `dshCtx`」；实际上 DSH 的 Cordis 根在 **Node 子进程**，Electron 主进程（`apps/desktop/src/main.ts`）只做窗口与 IPC 外壳 | `DshIdeBackend` 与 IDE 主进程之间只能是**跨进程**通道；而第 1 章 §7 已把「跨进程私有管道」列为明确不存在的能力 |
+| B1 | DSH `0.2.2-rc.1` 的插件**不在 Electron 主进程**加载：`apps/desktop/src/host-process.ts:212` 用 `spawn()` 起 `node_modules/@deepseek-ai/dsh-desktop-host/lib/index.js` 子进程，`apps/desktop-host/src/index.ts:29-31` 在该子进程内 `loadProfileDirectory()` + `runProfile()` 装载 bundle 插件 | README §1（L0 项目定义）要求「DSH 主进程逻辑与 VS Code 主进程逻辑在同一个 Electron 主进程内共享唯一 Cordis 根 `dshCtx`」；实际上 DSH `0.2.2-rc.1` 的 Cordis 根在 **Node 子进程**（见本表事实列），Electron 主进程只做窗口与 IPC 外壳。第 1 章 §1 不变量 I1 已据此修正为「单根单宿主」，不再要求同进程 | `DshIdeBackend` 与 IDE 主进程之间只能是**跨进程**通道；而第 1 章 §7 已把「跨进程私有管道」列为明确不存在的能力 |
 | B2 | DSH Host 提供官方 HTTP/WS 端点（`runProfile({args: ['--no-open','--host','127.0.0.1','--port','0']})`），客户端经官方 `dsh-client-connection` 连接；`common/env.js` 的 `DSH_IDE_ENDPOINT` / `DSH_IDE_INTERACTIONS` 正是按这一形态设计 | 手册目前的通道设计（主进程 `IServerChannel` + 进程内 `IdeViewHost`）假设同进程；两者不能同时成立 | P3 的 `DshIdeChannel` / `DshIdeViewService` 可实现、可测，但 `DshIdeBackend` 的**真实**实现必须选定其一：① 在 Host 子进程里实现并以官方客户端传输连回；② 改交付形态让 IDE 与 Host 同进程 |
 
 处置纪律：本项**不改代码迁就文档，也不改文档迁就代码**。按 [`README.md`](../README.md) §4 的权威层级（代码与门禁 > 契约真源 > 手册职责章节 > 其它文档），代码事实优先。
 
-**裁定结论（2026-11-09，按上述层级）**：
+**裁定结论（2026-11-09，按上述层级；并据项目所有者对 DSH-IDE 定位的澄清修订）**：
 
-1. 不变量 I1 由「单进程单根」修正为「**单根单宿主**」（第 1 章 §1）：保留真正的约束——全仓只有一个 Cordis 根、IDE 侧不持有它、不产生第二个根、不复制 DSH 服务；不再要求两个运行时同进程。
-2. 第 1 章 §7 的禁止项收敛为：**禁止私有跨进程管道 / 私有握手**。IDE 与 DSH Host 之间**只允许官方客户端传输**（Host 自身在 `--host 127.0.0.1 --port 0` 上提供的官方 HTTP/WS 端点，客户端使用官方 `dsh-client-connection` 与由 `connection.authenticatedUrl()` 派生的鉴权）。这是同一套官方协议，不是第二条。
-3. `DshIdeBackend` 的唯一实现形态：在 IDE 侧做官方客户端传输适配（P5 落地），把官方事件翻译成中立 `IdeEvent` 后交给 `DshIdeViewService` 投影；适配层文件必须放在 `platform/dshClient/common` 与 `electron-main` 之外，以保持 `boundary` 门禁（这两目录零 `@deepseek-ai/*`）成立。
-4. 因此 P3 的 `DshIdeChannel` / `DshIdeViewService` 保持不变：二者只在 IDE 进程内工作，`IdeViewHost` 仍是通道层与 DSH 能力域之间的唯一接缝。
+1. **DSH-IDE 是 DSH 的 bundle 插件、对 DSH 应用的拓展，不是独立应用或独立进程**（项目所有者澄清）。它是把 VS Code 改造为 DSH 插件、给 DSH 增加 IDE 页面并保留部分 IDE 功能的结果；「一体」是天然前提，而非需跨边界合并的目标。
+2. 不变量 I1 维持「**单根单宿主**」：全仓只有一个 Cordis 根 `dshCtx`，由 DSH 持有并贯穿 DSH-IDE；IDE 侧不持有独立 `dshCtx`、不注册第二份 DSH 服务、不产生第二个 Cordis 根，也不向 VS Code 容器注入 DSH 服务。
+3. 第 1 章 §7 禁止项维持：**禁止私有跨进程管道 / 私有握手**。DSH 应用内部（DSH 主进程外壳与 DSH Host 半身之间）只经官方客户端传输（Host 在 `--host 127.0.0.1 --port 0` 提供的官方 HTTP/WS）。这是 DSH 自身协议，不是第二条。
+4. `DshIdeBackend` 实现形态：在 IDE 侧做官方客户端传输适配（P5 落地），把官方事件翻译成中立 `IdeEvent` 后交给 `DshIdeViewService` 投影；适配层文件必须放在 `platform/dshClient/common` 与 `electron-main` 之外，以保持 `boundary` 门禁。
+5. 因此 P3 的 `DshIdeChannel` / `DshIdeViewService` 保持不变：二者在 IDE 侧工作，`IdeViewHost` 仍是通道层与 DSH 能力域之间的唯一接缝。
 
-K4 仍**未达成**：裁定解除了设计歧义，但第 3 条的实现（官方客户端传输适配）属 **P3 活动**（K4 前置），尚未落地。写回 P5 会造成「K4 等 K5」的循环依赖，故明确归 P3。P4 不得启动。
+> **关于「同进程 / 单进程」的澄清**：DSH-IDE 作为 DSH 插件，运行在 DSH 应用之内——DSH 把 bundle 插件装载进其 Host 半身（B1 记录的 `spawn()` 子进程，承载 `dshCtx`），IDE 页面作为 DSH 应用的一个 UI 面呈现。二者同属一个 DSH 应用（非独立 app），其内部进程边界只走官方传输。故**不存在「把 Cordis 根强行塞进 DSH 桌面端 Electron 主进程」这类跨边界动作**：`dshCtx` 本就是 DSH 的，DSH-IDE 作为拓展直接复用。原 §3.1 曾把「IDE 与 Host 同进程」列为需改 DSH `apps/desktop` 的 B2② 选项并判定为越界不可行——该表述有误，已据澄清删除：DSH-IDE 从来就在 DSH 之内，无需越界。
+
+K4 仍**未达成**：裁定解除了设计歧义，但第 4 条实现（官方客户端传输适配）属 **P3 活动**（K4 前置），尚未落地。写回 P5 会造成「K4 等 K5」的循环依赖，故明确归 P3。P4 不得启动。
 | `DSH_IDE_API_VERSION` | 已对齐 `0.2.2-rc.1`（P3） | 已闭环 |
 | `IdeViewSnapshot` 与 `DshIdeSnapshot.state` | 已并入 `state.view`，`wireRevision` 升为 2，行级校验随真源落地（P3） | 已闭环 |
 | 错误码 | 五个码全部落地（`feature-unavailable` / `invalid-argument` / `ALREADY_RESOLVED` / `SESSION_SWITCHED` / `SNAPSHOT_STALE`）；`SNAPSHOT_STALE` 的消费点在 P4 | 已闭环（常量）/ P4（消费点） |
@@ -1303,7 +1307,7 @@ git grep -nE "dshEventMap\.ts|dshSessionUri\.ts|dshChatSessions\.ts|dshChatProvi
 
 ### 8.1 设计基调与总边界
 
-DSH-IDE = VS Code 外壳 + DSH 内核：全仓只有一个 Cordis 根 `dshCtx`，位于 DSH Host 进程；IDE 进程不持有它，只经唯一通道与本机官方客户端传输消费 DSH 下发的中立 DTO（见第 1 章 §1、第 7 章 §3.1）。IDE 窗口只经唯一一条 `IServerChannel`（token `dshIde`）消费 DSH 下发的 `DshIdeSnapshot`；会话、模型、审批、工具、权限、语音均由 DSH 决定，IDE 侧不持有这些状态的第二份定义（不变量 I1–I4，见第 1 章 §1）。
+DSH-IDE = 把 VS Code 改造为 DSH 的 bundle 插件，是对 DSH 应用的拓展（非独立应用）：给 DSH 增加 IDE 页面并保留部分 IDE 功能。全仓只有一个 Cordis 根 `dshCtx`，位于 DSH Host 进程；IDE 侧不持有它，只经唯一通道与本机官方客户端传输消费 DSH 下发的中立 DTO（见第 1 章 §1、第 7 章 §3.1）。IDE 窗口只经唯一一条 `IServerChannel`（token `dshIde`）消费 DSH 下发的 `DshIdeSnapshot`；会话、模型、审批、工具、权限、语音均由 DSH 决定，IDE 侧不持有这些状态的第二份定义（不变量 I1–I4，见第 1 章 §1）。
 
 由此划出三大功能域边界：
 

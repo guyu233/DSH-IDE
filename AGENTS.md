@@ -8,6 +8,7 @@
 2. 阶段编号统一使用 **P0–P7**，步骤编号统一使用 **T1–T9**。旧文档中的 `2.1` / `2.2a` / `2.5` / `S0` 等编号已废止，仅用于阅读历史提交；对照表见 [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md) 第 3 章 §5。
 3. 改动涉及契约时，先改契约真源 `src/vs/platform/dshClient/common/dshIdeProtocol.ts`，再改实现，再按 [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md) 第 5 章 §2 的命令执行 §3 的门禁；禁止让文档先于代码定义新形状。
 4. 发现文档与代码矛盾时，按 [`README.md`](README.md) §4 的权威层级修正文档，不改代码迁就文档。
+5. **身份前提（每一轮改动的默认假设）**：DSH-IDE 是 **DSH 应用内的 bundle 插件拓展**，不是独立应用，不产出独立 IDE 安装包，不新增第二个 Cordis 根、第二套会话或第二套协议。「一体」是**天然前提**而非待达成的合并目标：`dshCtx` 本就是 DSH 的、位于 DSH Host 进程，DSH-IDE 作为拓展直接复用；DSH 应用内部的进程边界（Host 半身 / IDE 窗口）只走官方客户端传输与唯一 `dshIde` 通道。**禁止**把它当作「两个 app 需要跨边界合并」来设计、评估或讨论——那会导出「必须改 DSH `apps/desktop`」之类的伪问题。
 
 ## 2. 资源复用优先
 
