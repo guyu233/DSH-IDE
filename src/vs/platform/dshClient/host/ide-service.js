@@ -13,6 +13,8 @@
 //   - ctx.llm 无 complete()，只有 stream(options{provider,model,messages,maxTokens?,...}) 返回 chunk 流；
 //     文本增量 chunk 形如 {type:'text-delta', text}（见 dsh-llm types）。此处按此实现，失败返回空串。
 
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { Service } from '@deepseek-ai/cordis';
 import { bindTypertRemote } from '@deepseek-ai/dsh-typert-protocol';
 
@@ -27,6 +29,36 @@ export class IdeRemoteService extends Service {
 
   ping() {
     return { ok: true, root: this.root, hostPid: process.pid };
+  }
+
+  /**
+   * 开窗（P5）：DSH 主窗口点「DSH-IDE」时调用。
+   *
+   * 为什么走这里：`client.js` 跑在 DSH Web 渲染进程，碰不到 IDE 主进程的 `dshIde` 通道；
+   * 它只能经官方 Typert Gateway 调 Host 服务。Host 侧再把请求转给已发布的 IDE 端点。
+   *
+   * 不做「假装成功」：没有可用端点时返回明确失败，由按钮显示错误。
+   * @returns {{ ok: boolean, message?: string }}
+   */
+  launch(workspace) {
+    const endpoint = this.ideEndpoint();
+    if (endpoint === undefined) {
+      return { ok: false, message: 'DSH-IDE endpoint is not published yet (is the IDE app running?)' };
+    }
+    // 只在 Host 侧做参数校验；真正的开窗由 IDE 主进程完成。
+    if (workspace !== undefined && typeof workspace !== 'string') {
+      return { ok: false, message: 'launch(workspace) must be a string when provided' };
+    }
+    return { ok: true, endpoint: endpoint.origin };
+  }
+
+  /** 读取已发布的 IDE 端点（由 host/ide-view-host.js 的 publishHostEndpoint 写入）。 */
+  ideEndpoint() {
+    try {
+      return JSON.parse(readFileSync(join(this.root, 'runtime', 'host-endpoint.json'), 'utf8'));
+    } catch {
+      return undefined;
+    }
   }
 
   /**
@@ -82,6 +114,7 @@ Object.defineProperty(IdeRemoteService.prototype, REMOTE_METHOD_DESCRIPTOR, {
     methods: [
       { method: 'ping', invocation: { kind: 'direct' } },
       { method: 'inlineComplete', invocation: { kind: 'direct' } },
+      { method: 'launch', invocation: { kind: 'direct' } },
     ],
   },
 });

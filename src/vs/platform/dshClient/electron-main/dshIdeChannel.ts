@@ -31,6 +31,22 @@ import {
 /** 通道控制命令：负责建立/释放一条连接，不属于 20 个 DTO method 白名单。 */
 export const DSH_IDE_CONTROL_OPEN = 'open';
 export const DSH_IDE_CONTROL_CLOSE = 'close';
+/**
+ * 开窗控制命令（P5）：由 DSH 主窗口的按钮触发，在本进程内打开/唤起 IDE 窗口。
+ *
+ * 只做「开窗」这一件事，不携带 token、不建第二条通道（第 4 章 T1 边界）。
+ */
+export const DSH_IDE_CONTROL_LAUNCH = 'launch';
+
+/**
+ * 开窗宿主：由 `app.ts` 注入（那里持有 `windowsMainService`）。
+ *
+ * 通道层不直接依赖 electron，保持 `App.ts` 之外的可测试性；实现由主进程提供。
+ */
+export interface DshIdeLauncher {
+	/** 打开或唤起 IDE 窗口；返回是否成功（失败不抛，由调用方给出确定提示）。 */
+	launch(spec: { workspace?: string; sessionId?: string }): Promise<{ ok: true } | { ok: false; message: string }>;
+}
 
 /** 快照事件名（`listen` 唯一允许的事件）。 */
 export const DSH_IDE_SNAPSHOT_EVENT = 'snapshot';
@@ -56,10 +72,12 @@ export class DshIdeChannel extends Disposable implements IServerChannel<string> 
 	private readonly _lastSentVersion = new Map<string, number>();
 
 	private readonly view: IdeViewHost;
+	private readonly launcher: DshIdeLauncher | undefined;
 
-	constructor(view: IdeViewHost) {
+	constructor(view: IdeViewHost, launcher?: DshIdeLauncher) {
 		super();
 		this.view = view;
+		this.launcher = launcher;
 	}
 
 	/**
@@ -86,7 +104,39 @@ export class DshIdeChannel extends Disposable implements IServerChannel<string> 
 			this.disposeOwner(ctx);
 			return { closed: true } as unknown as T;
 		}
+		if (command === DSH_IDE_CONTROL_LAUNCH) {
+			return this.launch(arg) as unknown as T;
+		}
 		return this.invoke<T>(ctx, command, arg);
+	}
+
+	/**
+	 * 开窗（P5）：委派给主进程注入的 launcher。
+	 * 未注入时明确拒绝（feature-unavailable），不伪造「已开窗」。
+	 */
+	private async launch(arg: unknown): Promise<{ ok: true } | { ok: false; message: string; code?: string }> {
+		if (this.launcher === undefined) {
+			return { ok: false, code: DSH_IDE_FEATURE_UNAVAILABLE, message: 'DSH-IDE launcher is not wired in this process' };
+		}
+		let spec: Record<string, unknown>;
+		try {
+			spec = exactRecord(arg ?? {}, ['workspace', 'sessionId'], 'DshIdeChannel.launch');
+		} catch (error) {
+			// 参数形状违规：按契约返回确定错误码，不让异常穿透通道（与 20 method 口径一致）。
+			return { ok: false, code: DSH_IDE_INVALID_ARGUMENT, message: error instanceof Error ? error.message : String(error) };
+		}
+		const workspace = spec['workspace'];
+		const sessionId = spec['sessionId'];
+		if (workspace !== undefined && (typeof workspace !== 'string' || workspace.trim() === '')) {
+			return { ok: false, code: DSH_IDE_INVALID_ARGUMENT, message: 'DshIdeChannel.launch.workspace must be a non-empty string' };
+		}
+		if (sessionId !== undefined && (typeof sessionId !== 'string' || sessionId.trim() === '')) {
+			return { ok: false, code: DSH_IDE_INVALID_ARGUMENT, message: 'DshIdeChannel.launch.sessionId must be a non-empty string' };
+		}
+		return this.launcher.launch({
+			...(typeof workspace === 'string' ? { workspace } : {}),
+			...(typeof sessionId === 'string' ? { sessionId } : {}),
+		});
 	}
 
 	/** 建立（或复用）一条连接：同一 ctx 重复 open 不产生第二个 channelId。 */

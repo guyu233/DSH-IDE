@@ -26,9 +26,11 @@ import {
 } from '../../../src/vs/platform/dshClient/common/dshIdeProtocol.ts';
 import {
 	DSH_IDE_CONTROL_CLOSE,
+	DSH_IDE_CONTROL_LAUNCH,
 	DSH_IDE_CONTROL_OPEN,
 	DSH_IDE_SNAPSHOT_EVENT,
 	DshIdeChannel,
+	type DshIdeLauncher,
 } from '../../../out/vs/platform/dshClient/electron-main/dshIdeChannel.js';
 import {
 	DshIdeViewService,
@@ -302,3 +304,60 @@ async function microtasks(): Promise<void> {
 		await Promise.resolve();
 	}
 }
+
+
+// ---------------------------------------------------------------------------
+// 开窗控制命令（P5，用户授权先于 K5 实施）
+// ---------------------------------------------------------------------------
+
+/** 假 launcher：记录调用并按预设返回。 */
+function fakeLauncher(result: { ok: true } | { ok: false; message: string }): DshIdeLauncher & { calls: unknown[] } {
+	const calls: unknown[] = [];
+	return {
+		calls,
+		launch: async spec => {
+			calls.push(spec);
+			return result;
+		},
+	};
+}
+
+test('launch control command delegates to the injected launcher', async () => {
+	const launcher = fakeLauncher({ ok: true });
+	const channel = new DshIdeChannel(new DshIdeViewService(fakeBackend()), launcher);
+	const result = await channel.call('ctx-a', DSH_IDE_CONTROL_LAUNCH, { workspace: 'E:\DSH-IDE', sessionId: 's-1' });
+	assert.deepEqual(result, { ok: true });
+	assert.deepEqual(launcher.calls, [{ workspace: 'E:\DSH-IDE', sessionId: 's-1' }]);
+});
+
+test('launch accepts an empty spec (open the current workspace)', async () => {
+	const launcher = fakeLauncher({ ok: true });
+	const channel = new DshIdeChannel(new DshIdeViewService(fakeBackend()), launcher);
+	await channel.call('ctx-a', DSH_IDE_CONTROL_LAUNCH, {});
+	assert.deepEqual(launcher.calls, [{}], 'no fields means the current workspace');
+});
+
+test('launch refuses without a launcher instead of pretending success', async () => {
+	const channel = new DshIdeChannel(new DshIdeViewService(fakeBackend()));
+	const result = await channel.call<{ ok: boolean; code?: string }>('ctx-a', DSH_IDE_CONTROL_LAUNCH, {});
+	assert.equal(result.ok, false);
+	assert.equal(result.code, DSH_IDE_FEATURE_UNAVAILABLE, 'an unwired launcher must be feature-unavailable');
+});
+
+test('launch rejects malformed specs and never reaches the launcher', async () => {
+	const launcher = fakeLauncher({ ok: true });
+	const channel = new DshIdeChannel(new DshIdeViewService(fakeBackend()), launcher);
+	for (const bad of [{ workspace: '' }, { sessionId: '   ' }, { workspace: 1 }, { __extra: 1 }]) {
+		const result = await channel.call<{ ok: boolean; code?: string }>('ctx-a', DSH_IDE_CONTROL_LAUNCH, bad);
+		assert.equal(result.ok, false, `${JSON.stringify(bad)} must be refused`);
+		assert.equal(result.code, DSH_IDE_INVALID_ARGUMENT);
+	}
+	assert.deepEqual(launcher.calls, [], 'invalid specs must not open a window');
+});
+
+test('launch surfaces launcher failure messages verbatim', async () => {
+	const launcher = fakeLauncher({ ok: false, message: 'spawn failed' });
+	const channel = new DshIdeChannel(new DshIdeViewService(fakeBackend()), launcher);
+	const result = await channel.call<{ ok: boolean; message?: string }>('ctx-a', DSH_IDE_CONTROL_LAUNCH, {});
+	assert.deepEqual(result, { ok: false, message: 'spawn failed' });
+});

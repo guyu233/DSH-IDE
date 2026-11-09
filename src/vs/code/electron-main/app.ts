@@ -150,7 +150,7 @@ import { ITerminalSandboxService, NullTerminalSandboxService } from '../../platf
 import ErrorTelemetry from '../../platform/telemetry/electron-main/errorTelemetry.js';
 import { IProtocolMainService } from '../../platform/protocol/electron-main/protocol.js';
 import { createRemoteResourceRequestHandler } from '../../platform/protocol/electron-main/remoteResourceProtocol.js';
-import { DshIdeChannel } from '../../platform/dshClient/electron-main/dshIdeChannel.js';
+import { DshIdeChannel, type DshIdeLauncher } from '../../platform/dshClient/electron-main/dshIdeChannel.js';
 import { createDshIdeBackendFromEnv } from '../../platform/dshClient/electron-main/dshIdeBackendFactory.js';
 import { DshIdeViewService } from '../../platform/dshClient/electron-main/ide-view-service.js';
 import { DSH_IDE_CHANNEL } from '../../platform/dshClient/common/dshIdeProtocol.js';
@@ -1446,7 +1446,19 @@ export class CodeApplication extends Disposable {
 		// 见第 2 章 §2.2.1）；未配置时退化为 `UnavailableDshIdeBackend`，所有调用以 feature-unavailable
 		// 明确拒绝，绝不伪造事件或快照。
 		const dshIdeViewHost = new DshIdeViewService(createDshIdeBackendFromEnv());
-		const dshIdeChannel = new DshIdeChannel(dshIdeViewHost);
+		// P5 开窗（用户授权先于 K5 实施，见第 3 章 §1 第 3 条例外）：按钮 → 本通道 `launch` 命令
+		// → 主进程开/唤起 IDE 窗口。只开窗，不携带 token、不建第二条通道。
+		const dshIdeLauncher: DshIdeLauncher = {
+			launch: async spec => {
+				try {
+					await windowsMainService.openEmptyWindow({ context: OpenContext.DESKTOP }, spec.workspace === undefined ? undefined : { forceNewWindow: true, forceReuseWindow: false });
+					return { ok: true };
+				} catch (error) {
+					return { ok: false, message: error instanceof Error ? error.message : String(error) };
+				}
+			},
+		};
+		const dshIdeChannel = new DshIdeChannel(dshIdeViewHost, dshIdeLauncher);
 		mainProcessElectronServer.registerChannel(DSH_IDE_CHANNEL, dshIdeChannel);
 		disposables.add(dshIdeChannel);
 		// 窗口断开时清理该窗口（ctx = `window:<id>`）拥有的连接与订阅，不取消 DSH 会话。

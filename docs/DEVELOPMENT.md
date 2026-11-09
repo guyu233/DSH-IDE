@@ -357,6 +357,13 @@ interface DshIdeBackend {
 1. **只有一条路线**：P0 → P1 → P2 → P3 → P4 → P5 → P6 → P7。没有并行阶段、可选阶段、回退路径、替代方案或条件分叉。
 2. **依赖唯一**：P0 无前置；P1 前置 K1；P2 前置 K2；P3 前置 K3；P4 前置 K4；P5 前置 K5；P6 前置 K6；P7 前置 K7。`K_n` 是 `P_{n-1}` 的出口判据全部满足的时刻（K1 属 P0，K8 属 P7）。
 3. **不可跳过**：任一出口判据未满足，禁止启动后继阶段，禁止先把后继阶段的产物落盘再补判据。
+
+   **唯一例外（2026-11-09 用户显式授权）**：P5 的「开窗接线」可在 K5 未达成时先行实施。理由：K5 的
+   最后一条判据是「Chat 面板显示 DTO 投影内容」的真机观测，而该观测**必须先有开窗**（用户从 DSH 主窗口
+   点「DSH-IDE」），开窗本身属 P5。形成「K5 等 P5、P5 等 K5」的循环。
+   授权记录：用户在本轮明确选择「授权我打破 §3.1 顺序：先做 P5 开窗，再回头看 K5」。
+   边界：**仅开窗链路**可先行（`client.js` 按钮 → 开窗 → 建立连接）；P5 的其余活动（20 method 功能接线、
+   双窗口镜像、语音、删除会话）仍必须等 K5 达成后才能开始。开窗完成后立即回到 K5 补齐真机观测。
 4. **阶段内返工**：出口判据未满足时停留在本阶段修复，并重新执行本阶段**全部**出口判据；这属于同一阶段的重复执行，不是新路线。返工记录写入提交信息。
 5. **编号统一**：全仓文档、提交信息与代码注释一律使用 P0–P7 / K1–K8。旧编号对照见 §5，仅供阅读历史提交。
 
@@ -531,7 +538,7 @@ waterfall 语义单测覆盖、boundary PASS、17 符号单源、端到端实跑
 - **前置**：K6。
 - **活动（固定顺序，不并行、不调换）**：① 四条门禁 → ② `test-dsh:all` → ③ `tsc --noEmit` 本批文件 0 错误 → ④ 第 5 章 §6 的 9 项真机验收 → ⑤ 真实事件流 P95 校准 → ⑥ `node-pty` 按宿主 Electron 44.7.0 的 `NODE_MODULE_VERSION` 重编 → ⑦ IDE 终端冒烟 → ⑧ 第 5 章 §7 的上游核对（同时把 `contract` 改为启用失败断言） → ⑨ 把 第 5 章 §2 的四条门禁与 `test-dsh:all` 接入 CI 配置，并按第 7 章 §7.1 的 11 行清单逐文件把代码注释中的历史阶段标记改为 P 编号；`client.js:62` 与 `dshIdeChannel.ts:28` 是**运行时错误字符串**，单独记录、不与注释清理混同，改字符串后须同步核对 `packaging.test.mjs` 及通道相关测试断言，并跑 第 5 章 §2 的 `test-dsh:all` 确认基线不变；第 7 章 §7.3 的失效章节引用同步修复。P95 超标时按固定序列执行：下调 `MAX_ROWS` → 收紧 `preview` 折叠阈值 → 重新生成 golden，直至 rows 序列化后 P95 ≤ 512 KiB；这是阶段内的参数校准迭代，不是架构变更。
 - **产出**：门禁与测试实测记录、9 项真机验收记录、P95 校准后的常量与 golden、ABI 重编产物、终端冒烟记录、上游差异报告、CI 配置改动、历史阶段标记清理记录。
-- **出口判据 K7**：`protocol-single-source` / `boundary` / `projection-golden` 均 `PASS`；`contract` 启用失败断言后完成一次上游核对且 4 个注入点指纹一致，并按第 5 章 §9 记录状态；`test-dsh:all` 不低于 147/147；9 项真机验收全部通过；P95 ≤ 512 KiB；IDE 终端可开且 PTY 数据流走原生 `node-pty`；CI 配置中可见同一组命令；第 7 章登记的历史阶段标记与失效章节引用零残留。
+- **出口判据 K7**：`protocol-single-source` / `boundary` / `projection-golden` 均 `PASS`；`contract` 启用失败断言后完成一次上游核对且 4 个注入点指纹一致，并按第 5 章 §9 记录状态；`test-dsh:all` 不低于 152/152；9 项真机验收全部通过；P95 ≤ 512 KiB；IDE 终端可开且 PTY 数据流走原生 `node-pty`；CI 配置中可见同一组命令；第 7 章登记的历史阶段标记与失效章节引用零残留。
 - **当前态**：未开始。门禁脚手架已就位（3 `PASS` + 1 `PENDING`，见第 5 章 §3），不构成 K7 达成。
 
 #### P7 打包为 DSH 插件与交付
@@ -808,7 +815,7 @@ B1–B5 是流程内的检查点，与开发路线的 K1–K8 不同，二者不
 | --- | --- | --- |
 | 编译 DSH 测试 | `npm run build-dsh-tests` | 退出 0，产出 `out/` |
 | mocha tdd 半场 | `npm run test-dsh` | `13 passing` |
-| 全量 DSH 测试 | `npm run test-dsh:all` | `13 passing` + `134/134`，合计 147/147 |
+| 全量 DSH 测试 | `npm run test-dsh:all` | `13 passing` + `139/139`，合计 152/152 |
 | 门禁 1 | `npm run verify:dsh-ide-protocol-single-source` | `STATUS: PASS` |
 | 门禁 2 | `npm run verify:dsh-ide-boundary` | `STATUS: PASS` |
 | 门禁 3 | `npm run verify:dsh-ide-projection-golden` | `STATUS: PASS` |
@@ -855,16 +862,16 @@ node --experimental-strip-types --test build/lib/test/dshBuildProvenance.test.ts
 | `ripgrep.test.ts` | 平台过滤 | 5 |
 | `dshIdeProtocol.test.ts` | 20 方法白名单、双向校验器、连续性 fail-closed | 19 |
 | `dshIdeProjection.test.ts` | golden 回放、事件分类、seq 幂等、稳定 id、600 行折叠、P95 脚手架、架构边界、**真实 DSH 线上事件（斜杠命名 + data 信封）翻译** | 18 |
-| `dshIdeChannel.test.ts` | 通道分发（20 method）、三层过滤、`disposeOwner`、快照纪律、`state.view` 行级校验 | 17 |
+| `dshIdeChannel.test.ts` | 通道分发（20 method）、三层过滤、`disposeOwner`、快照纪律、`state.view` 行级校验、**`launch` 开窗命令** | 22 |
 | `ideViewHost.test.mjs` | Host 半身：四类事件订阅与归属过滤、唯一 answerer 形态、waterfall 一致性、会话归属、method 映射、Host 端点自解析与发布（不含 cookie）、插件入口 inject 与延迟等待清单一致、**等端口就绪再发布** | 25 |
 | `dshIdeTransport.test.ts` | IDE 侧传输适配：鉴权交换、一元信封、remote.mux 流、waterfall 回投、method 映射与拒绝、**连接前不发送** | 14 |
 | `dshIdeConsumer.test.ts` | 消费者：校验、fail-closed（断号/倒退/channelId 变化）、16ms 合并、行级 diff | 10 |
 | `dshIdeUiProjection.test.ts` | 行展示文本：折叠用 preview、非折叠用 text、皆无返回 undefined | 4 |
 | `dshChatAgent.test.ts` | 唯一 Chat Agent：元数据必填项、submit 转发、失败不伪造、DTO 回显、取消 | 6 |
 | `dshIdeToSeamChain.test.ts` | DTO 行 → 接缝的**串联**：五种 kind 都被接管、空行被过滤、折叠带 preview、isTrusted 策略 | 5 |
-| **合计** | — | **13 + 134 = 147** |
+| **合计** | — | **13 + 139 = 152** |
 
-- 当前唯一基线：**147/147**（mocha `13 passing` + node:test `134/134`），实测退出 0。
+- 当前唯一基线：**152/152**（mocha `13 passing` + node:test `139/139`），实测退出 0。
 - mocha 的 13 个用例来自 `packaging.test.mjs`（7 项）与 `dshChatSeamMap.test.js`（6 项）；第三个 glob `chatClient/*.test.mjs` 当前无匹配文件（既有现象，不减少测试项）。`client.test.mjs`（原零用例、仅 harness）与 `dshClientService.test.ts`（原 stale、不兼容）已在全面清理（2026-11-08）中删除，不计入基线。
 - 上述两文件（stale / 零用例）已在全面清理（2026-11-08）中删除，原登记见第 7 章 §3。
 - 类型检查判据：全仓既有 electron 类型解析错误集中在 `app.ts`，改动前后基线对比确认非 DSH 改动引入；**变更文件 0 错误**即为通过。
