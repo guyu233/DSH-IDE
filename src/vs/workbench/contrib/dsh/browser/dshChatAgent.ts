@@ -88,14 +88,32 @@ export class DshChatAgent extends Disposable implements IChatAgentImplementation
 			if (token.isCancellationRequested) {
 				break;
 			}
-			const text = rowText(row);
-			if (text === undefined) {
+			const content = rowToChatContent(row);
+			if (content === undefined) {
 				continue;
 			}
-			progress([{ kind: 'markdownContent', content: new MarkdownString(text) }]);
+			progress([content]);
 		}
 		return {};
 	}
+}
+
+/**
+ * DTO 行 → Chat 渲染内容的**唯一**映射（Agent 与单测共用这一份实现）。
+ *
+ * 只用 `markdownContent`：它是 `dshChatSeam` 接管、又与原生渲染器兼容最好的 kind。
+ * 工具行不伪造 `toolInvocation`（第 8 章 §8.4：工具主体保留 VS Code 原生渲染）。
+ * 空行返回 undefined，调用方据此跳过（不产生空壳）。
+ */
+export function rowToChatContent(row: DshIdeRow): IChatProgress | undefined {
+	const text = rowText(row);
+	if (text === undefined) {
+		return undefined;
+	}
+	const markdown = new MarkdownString(text);
+	// 用户输入按纯文本处理（不放行 Markdown 与命令）；DSH 输出允许默认 Markdown，但不放行命令执行。
+	markdown.isTrusted = row.kind === 'user' ? false : { enabledCommands: [] };
+	return { kind: 'markdownContent', content: markdown };
 }
 
 /** 注册唯一的 DSH Chat Agent；返回可释放句柄。 */
