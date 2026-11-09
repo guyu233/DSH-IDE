@@ -490,14 +490,16 @@ waterfall 语义单测覆盖、boundary PASS、17 符号单源、端到端实跑
 - **活动**：实现 `DshIdeConsumer.accept()`（快照校验 → 连续性 fail-closed → 16ms 合并 → rows 按稳定 id diff）；把 DTO→`IChatProgress` 投影层与 Chat 侧栏分离；回填 DSH 内容；启用 `dshChatSeam.ts` 单接缝与 ui-chat sidecar；落地 `SNAPSHOT_STALE`。
 - **产出**：`DshIdeConsumer`、DTO→UI 投影层、Chat 侧栏 DSH 内容、单接缝启用、`SNAPSHOT_STALE` 常量、`boundary` 门禁新增的 UI 投影隔离与 `listen` 三层过滤断言。
 - **出口判据 K5**：Chat 面板显示来自 `dshIde` 的 DTO 投影内容；`version` 断号时 fail-closed 且不渲染错位状态；rows 按稳定 id 增量更新；`boundary` 门禁 `PASS`；`workbench/**` 仍零 `@deepseek-ai/*` 导入。
-- **当前态**：**部分完成**。已落地：`DshIdeConsumer`（校验 / fail-closed / 16ms 合并 / 行级 diff，10 项单测）、
+- **当前态**：**部分完成（代码闭环 / 端到端未观测）**。已落地：
+  `DshIdeConsumer`（校验 / fail-closed / 16ms 合并 / 行级 diff，10 项单测）、
   `DshIdeUiProjection`（行 → UI 部件，8 项）、`DshIdeChatContent`（行 → `IChatRendererContent`，8 项）、
-  `DshClientService` 真实通道调用、`dshChatSeam` 启用（唯一调用方，仅在收到真实 ready 行后打开）。
-  **未达成**：K5 要求「Chat 面板**显示**来自 `dshIde` 的 DTO 投影内容」——DSH-IDE 的 Chat 容器来自原生
-  `chat.view.contribution`，其内容由 `IChatResponseModel.acceptResponseProgress` 驱动，而该模型属于某个
-  **真实 Chat request**；DSH-IDE 目前不持有这样的 request（会话真源在 DSH Host）。把内容塞进模型需要一个
-  由 DSH 会话驱动的 Chat request，这条接线属 P5 的双窗口真机活动，本阶段不做假接口冒充。
-  因此 K5 未达成，P5 不启动。
+  `DshClientService` 真实通道调用、`dshChatSeam` 启用（唯一调用方，仅在收到真实 ready 行后打开）、
+  **`DshChatAgent`（唯一的 Chat Agent，6 项）**——这是 K5 的关键缺口：Chat 面板只在**真实 request**
+  的 response 里渲染 `IChatProgress`，而 request 必须由已注册的 Chat Agent 驱动；此前 DSH-IDE
+  没有任何 Chat Agent，所以面板必然空白（不是样式问题，是缺供给方）。
+  **未观测**：K5 要求「Chat 面板**显示**来自 `dshIde` 的 DTO 投影内容」，这需要真机上打开 Chat 面板、
+  发一条消息、看到 DTO 行渲染——属 9 项真机验收（第 5 章 §6 第 8 项）。代码链路已完整（Agent →
+  `submit` → 快照 → 消费者 → 投影 → 接缝），但没有渲染截图/观测记录，故 K5 不标达成。
 
 #### P5 功能实现与真机接线
 
@@ -512,7 +514,7 @@ waterfall 语义单测覆盖、boundary PASS、17 符号单源、端到端实跑
 - **前置**：K6。
 - **活动（固定顺序，不并行、不调换）**：① 四条门禁 → ② `test-dsh:all` → ③ `tsc --noEmit` 本批文件 0 错误 → ④ 第 5 章 §6 的 9 项真机验收 → ⑤ 真实事件流 P95 校准 → ⑥ `node-pty` 按宿主 Electron 44.7.0 的 `NODE_MODULE_VERSION` 重编 → ⑦ IDE 终端冒烟 → ⑧ 第 5 章 §7 的上游核对（同时把 `contract` 改为启用失败断言） → ⑨ 把 第 5 章 §2 的四条门禁与 `test-dsh:all` 接入 CI 配置，并按第 7 章 §7.1 的 11 行清单逐文件把代码注释中的历史阶段标记改为 P 编号；`client.js:62` 与 `dshIdeChannel.ts:28` 是**运行时错误字符串**，单独记录、不与注释清理混同，改字符串后须同步核对 `packaging.test.mjs` 及通道相关测试断言，并跑 第 5 章 §2 的 `test-dsh:all` 确认基线不变；第 7 章 §7.3 的失效章节引用同步修复。P95 超标时按固定序列执行：下调 `MAX_ROWS` → 收紧 `preview` 折叠阈值 → 重新生成 golden，直至 rows 序列化后 P95 ≤ 512 KiB；这是阶段内的参数校准迭代，不是架构变更。
 - **产出**：门禁与测试实测记录、9 项真机验收记录、P95 校准后的常量与 golden、ABI 重编产物、终端冒烟记录、上游差异报告、CI 配置改动、历史阶段标记清理记录。
-- **出口判据 K7**：`protocol-single-source` / `boundary` / `projection-golden` 均 `PASS`；`contract` 启用失败断言后完成一次上游核对且 4 个注入点指纹一致，并按第 5 章 §9 记录状态；`test-dsh:all` 不低于 148/148；9 项真机验收全部通过；P95 ≤ 512 KiB；IDE 终端可开且 PTY 数据流走原生 `node-pty`；CI 配置中可见同一组命令；第 7 章登记的历史阶段标记与失效章节引用零残留。
+- **出口判据 K7**：`protocol-single-source` / `boundary` / `projection-golden` 均 `PASS`；`contract` 启用失败断言后完成一次上游核对且 4 个注入点指纹一致，并按第 5 章 §9 记录状态；`test-dsh:all` 不低于 154/154；9 项真机验收全部通过；P95 ≤ 512 KiB；IDE 终端可开且 PTY 数据流走原生 `node-pty`；CI 配置中可见同一组命令；第 7 章登记的历史阶段标记与失效章节引用零残留。
 - **当前态**：未开始。门禁脚手架已就位（3 `PASS` + 1 `PENDING`，见第 5 章 §3），不构成 K7 达成。
 
 #### P7 打包为 DSH 插件与交付
@@ -564,7 +566,7 @@ waterfall 语义单测覆盖、boundary PASS、17 符号单源、端到端实跑
 | P1 | 已完成 | K2 判据实测通过 |
 | P2 | 已完成 | `translator.ts` / `ide-view-projector.ts` / golden / 11 项单测；K3 判据实测通过 |
 | P3 | 已完成 | K4 判据全部满足：真实端口接通、20 method 确定、`call`/`listen`/`disposeOwner` 合规、`invoke` 恒 `{ value }`、waterfall 单测覆盖、`boundary` PASS；端到端实跑（独立真实 Host）listSessions=52 / listModels=3 / follow=329 records → 98 行投影 |
-| P4 | 进行中 | 消费者 + 唯一快照流 + DTO→UI 投影 + DTO→Chat 内容适配均已落地；`dshChatSeam` 已启用（唯一调用方，仅在收到真实 ready 行后打开）。**Chat 面板实际渲染未验证**，K5 未达成 |
+| P4 | 代码闭环 / 端到端未观测 | 消费者 + 快照流 + DTO→UI + DTO→Chat 内容 + **唯一 Chat Agent** + `dshChatSeam` 启用全部落地（154/154）；Chat 面板实际渲染未观测，K5 不标达成 |
 | P5 | 未开始 | 按钮仍抛显式错误；双窗口镜像未接线 |
 | P6 | 未开始 | 门禁脚手架 3 `PASS` + 1 `PENDING`；真机验收、ABI 重编、终端冒烟未完成 |
 | P7 | 未满足出口 | 打包链路可执行，但前置 K7 未达成 |
@@ -789,7 +791,7 @@ B1–B5 是流程内的检查点，与开发路线的 K1–K8 不同，二者不
 | --- | --- | --- |
 | 编译 DSH 测试 | `npm run build-dsh-tests` | 退出 0，产出 `out/` |
 | mocha tdd 半场 | `npm run test-dsh` | `13 passing` |
-| 全量 DSH 测试 | `npm run test-dsh:all` | `13 passing` + `135/135`，合计 148/148 |
+| 全量 DSH 测试 | `npm run test-dsh:all` | `13 passing` + `141/141`，合计 154/154 |
 | 门禁 1 | `npm run verify:dsh-ide-protocol-single-source` | `STATUS: PASS` |
 | 门禁 2 | `npm run verify:dsh-ide-boundary` | `STATUS: PASS` |
 | 门禁 3 | `npm run verify:dsh-ide-projection-golden` | `STATUS: PASS` |
@@ -842,9 +844,10 @@ node --experimental-strip-types --test build/lib/test/dshBuildProvenance.test.ts
 | `dshIdeConsumer.test.ts` | 消费者：校验、fail-closed（断号/倒退/channelId 变化）、16ms 合并、行级 diff | 10 |
 | `dshIdeUiProjection.test.ts` | 行 → UI 部件：四种 kind 映射、折叠 preview、streaming 仅末行、复用判据 | 8 |
 | `dshIdeChatContent.test.ts` | 行 → Chat 渲染内容：只产 markdownContent、isTrusted 策略、跳过空行、行键含 revision | 8 |
-| **合计** | — | **13 + 135 = 148** |
+| `dshChatAgent.test.ts` | 唯一 Chat Agent：元数据必填项、submit 转发、失败不伪造、DTO 回显、取消 | 6 |
+| **合计** | — | **13 + 141 = 154** |
 
-- 当前唯一基线：**148/148**（mocha `13 passing` + node:test `135/135`），实测退出 0。
+- 当前唯一基线：**154/154**（mocha `13 passing` + node:test `141/141`），实测退出 0。
 - mocha 的 13 个用例来自 `packaging.test.mjs`（7 项）与 `dshChatSeamMap.test.js`（6 项）；第三个 glob `chatClient/*.test.mjs` 当前无匹配文件（既有现象，不减少测试项）。`client.test.mjs`（原零用例、仅 harness）与 `dshClientService.test.ts`（原 stale、不兼容）已在全面清理（2026-11-08）中删除，不计入基线。
 - 上述两文件（stale / 零用例）已在全面清理（2026-11-08）中删除，原登记见第 7 章 §3。
 - 类型检查判据：全仓既有 electron 类型解析错误集中在 `app.ts`，改动前后基线对比确认非 DSH 改动引入；**变更文件 0 错误**即为通过。

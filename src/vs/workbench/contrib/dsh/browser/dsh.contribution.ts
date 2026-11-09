@@ -18,6 +18,8 @@ import { registerDshInlineCompletions } from './inlineCompletion.js';
 import { DshIdeConsumer, type DshIdeConsumerState } from './dshIdeConsumer.js';
 import { rowsToChatContent } from './dshIdeChatContent.js';
 import { setDshChatRenderEnabled } from './dshChatSeam.js';
+import { registerDshChatAgent } from './dshChatAgent.js';
+import { IChatAgentService } from '../../chat/common/participants/chatAgents.js';
 import { Disposable } from '../../../../base/common/lifecycle.js';
 
 registerSingleton(IDshClientService, DshClientService, InstantiationType.Delayed);
@@ -34,6 +36,7 @@ class DshClientContribution extends Disposable implements IWorkbenchContribution
 		@IDshClientService client: IDshClientService,
 		@INotificationService private readonly notifications: INotificationService,
 		@ILanguageFeaturesService languageFeatures: ILanguageFeaturesService,
+		@IChatAgentService chatAgents: IChatAgentService,
 	) {
 		super();
 		// 行内补全（DSH 后端；未接线时优雅降级为无补全，不报错）。
@@ -43,6 +46,11 @@ class DshClientContribution extends Disposable implements IWorkbenchContribution
 		// 保证纯净 VS Code 窗口（无 DSH 快照）的渲染行为零变化（第 8 章 §8.3.2）。
 		// 历史上 `setDshChatRenderEnabled` 全仓无调用方，接缝恒休眠——这是 P4 要修的实质缺陷。
 		const consumer = this._register(new DshIdeConsumer());
+
+		// 唯一 Chat Agent：Chat 面板只在真实 request 的 response 里渲染内容，
+		// 没有 Agent 就没有 request，面板必然空白。用户消息交给 DSH，回显只来自 DTO 快照。
+		const agentRegistration = this._register(registerDshChatAgent(chatAgents, client, () => this._rows.map(row => row)));
+		void agentRegistration;
 		this._register(consumer.onDidFail((error: { readonly code: string }) => {
 			// 连续性失败必须让用户知道，不能静默丢弃帧（第 2 章 E4 / E7）。
 			this.notifications.warn(localize(
@@ -60,6 +68,7 @@ class DshClientContribution extends Disposable implements IWorkbenchContribution
 			// 这里只维护可读快照，不直接写 Chat 模型：DSH-IDE 的 Chat 容器没有 DSH 会话，
 			// 伪造一个 request 往模型里塞 progress 会让会话状态与 DSH 真源不一致（第 1 章 §4.5）。
 			this._lastState = state;
+			this._rows = state.rows;
 			this._chatContent = rowsToChatContent(state.rows);
 		}));
 		this._register(client.onDidSnapshot(snapshot => consumer.accept(snapshot)));
@@ -77,6 +86,7 @@ class DshClientContribution extends Disposable implements IWorkbenchContribution
 	}
 
 	private _lastState: DshIdeConsumerState | undefined;
+	private _rows: readonly import('../../../../platform/dshClient/common/dshIdeProtocol.js').DshIdeRow[] = [];
 	private _chatContent: readonly unknown[] = [];
 
 	/** 最近一次被接受的渲染状态。 */
