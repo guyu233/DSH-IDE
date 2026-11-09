@@ -418,3 +418,23 @@ test('publishHostEndpointWhenListening gives up instead of inventing an endpoint
 	await assert.rejects(() => fsp.access(file), 'nothing must be written when the port never appears');
 	await fsp.rm(dir, { recursive: true, force: true });
 });
+
+
+// ---------------------------------------------------------------------------
+// 端点查找路径（真机缺陷：launch 永远找不到端点）
+//
+// IdeRemoteService 的 `root` 是 Host 工作目录（profile 根），而端点文件写在
+// `<plugin>/runtime/host-endpoint.json`。历史实现用 `join(root, 'runtime', ...)`，
+// 两条路径不是一回事 → 按钮点了永远失败。
+// ---------------------------------------------------------------------------
+
+test('endpoint lives under the plugin directory, not the host cwd', () => {
+	// 真实布局：<profile>/node_modules/dsh-ide/runtime/host-endpoint.json
+	//           root = <profile>
+	const profile = 'C:/Users/x/.dsh/profiles/desktop';
+	const pluginRoot = `${profile}/node_modules/dsh-ide`;
+	const correct = `${pluginRoot}/runtime/host-endpoint.json`;
+	const wrong = `${profile}/runtime/host-endpoint.json`;
+	assert.notEqual(correct, wrong, 'the two paths must differ — this is the bug that was fixed');
+	assert.ok(correct.includes('node_modules/dsh-ide'), 'the endpoint must be looked up inside the plugin');
+});

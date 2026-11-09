@@ -24,6 +24,8 @@ export class IdeRemoteService extends Service {
   constructor(ctx, config = {}) {
     super(ctx, 'ide');
     this.root = config.root || process.cwd();
+    // 端点文件在插件目录下；回退到 root 是为了兼容旧布局，但正常永远走 pluginRoot。
+    this.pluginRoot = config.pluginRoot || this.root;
     this.typertRemote = bindTypertRemote(this, 'ide', { namespace: 'ide' });
   }
 
@@ -43,7 +45,11 @@ export class IdeRemoteService extends Service {
   launch(workspace) {
     const endpoint = this.ideEndpoint();
     if (endpoint === undefined) {
-      return { ok: false, message: 'DSH-IDE endpoint is not published yet (is the IDE app running?)' };
+      // 把「查了哪些路径」一并返回，便于用户/日志直接定位（不猜、不吞错）。
+      return {
+        ok: false,
+        message: `DSH-IDE endpoint is not published yet (looked in ${this.endpointCandidates().join(' , ')})`,
+      };
     }
     // 只在 Host 侧做参数校验；真正的开窗由 IDE 主进程完成。
     if (workspace !== undefined && typeof workspace !== 'string') {
@@ -53,12 +59,23 @@ export class IdeRemoteService extends Service {
   }
 
   /** 读取已发布的 IDE 端点（由 host/ide-view-host.js 的 publishHostEndpoint 写入）。 */
+  /** 端点文件的候选路径（第一个是正确位置，第二个仅为旧布局兼容）。 */
+  endpointCandidates() {
+    return [
+      join(this.pluginRoot, 'runtime', 'host-endpoint.json'),
+      join(this.root, 'runtime', 'host-endpoint.json'),
+    ];
+  }
+
   ideEndpoint() {
-    try {
-      return JSON.parse(readFileSync(join(this.root, 'runtime', 'host-endpoint.json'), 'utf8'));
-    } catch {
-      return undefined;
+    for (const file of this.endpointCandidates()) {
+      try {
+        return JSON.parse(readFileSync(file, 'utf8'));
+      } catch {
+        // 继续试下一个
+      }
     }
+    return undefined;
   }
 
   /**

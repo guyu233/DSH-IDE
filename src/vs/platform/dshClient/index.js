@@ -23,9 +23,13 @@ export const inject = ['sessions'];
 
 export function apply(ctx, config = {}) {
 	const root = (config && config.root) || process.cwd();
+	const pluginRoot = dirname(fileURLToPath(import.meta.url));
 
 	// 官方 @Remote IDE 扩展服务（命名空间 ide，经官方 Typert Gateway 暴露给客户端）。
-	ctx.plugin(IdeRemoteService, { root });
+	// `pluginRoot` 必须传**插件自身目录**：端点文件写在 `<plugin>/runtime/host-endpoint.json`，
+	// 而 `root`（= process.cwd() = profile 根）是另一条路径。历史实现把两者混用，
+	// 导致 launch() 永远找不到端点、按钮点了没反应（真机实测）。
+	ctx.plugin(IdeRemoteService, { root, pluginRoot });
 
 	// 端点自解析：由 Host 自己算出 IDE 可用的 origin + launch URL，并写入插件目录下的
 	// `runtime/host-endpoint.json`。IDE 进程由操作系统单独拉起，环境变量无法传递，
@@ -33,7 +37,6 @@ export function apply(ctx, config = {}) {
 	//
 	// 必须等 `webServer` 真正开始监听：`apply` 时 `webServer.port` 还是 undefined
 	// （端口由 listen 回填），立刻发布只会得到「无从发布」并静默跳过（真机实测踩过）。
-	const pluginRoot = dirname(fileURLToPath(import.meta.url));
 	const endpointFile = join(pluginRoot, 'runtime', 'host-endpoint.json');
 	ctx.inject(['webServer', 'connection'], endpointCtx => {
 		void publishHostEndpointWhenListening(endpointCtx, endpointFile).then(endpoint => {
