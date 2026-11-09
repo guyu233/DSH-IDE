@@ -32,7 +32,28 @@
 
 完整清单、禁止复用项、体积边界与手写例外见 §8.2.6；本规则编号 R0，后续每一轮插件改动都必须在本轮提交信息中引用 R0 并说明执行结果。
 
-**R1 身份定位（每一轮都必须以此为前提）**：DSH-IDE 是 **DeepSeekHarness（DSH）的插件**，整仓打包为单一 DSH bundle 插件 `dsh-ide@2.0.0`（产物 `dist/dsh-ide-2.0.0.tgz`），由 DSH 装载后在其应用进程 / 窗口之内运行；它**不是独立应用**，也**不产出独立的 IDE 安装包**。所有章节（架构、契约、集成、体积、交付）的描述都必须以此身份为前提：IDE 窗口只经唯一 `dshIde` 通道消费 DTO，会话 / 模型 / 工具 / 权限 / 审批等全部由 DSH 决定。完整交付形态见第 3 章开头与第 8 章 §8.3.1。
+**R1 身份定位（每一轮都必须以此为前提）**：DSH-IDE 是 **DeepSeekHarness（DSH）的插件**，整仓打包为单一 DSH bundle 插件 `dsh-ide@2.0.0`（产物 `dist/dsh-ide-2.0.0.tgz`），由 DSH 装载后作为 **DSH 应用内的窗口**运行：窗口进程由插件 Host 半身启动，复用 DSH 安装的 **Electron 44.7.0**，插件不自带 Electron、不产出独立安装包。会话、模型、工具、权限、审批全部由 DSH 决定，IDE 窗口只经唯一 `dshIde` 通道消费 DTO。「一体」指**一次交付、一个 Cordis 根、一条 `dshIde` 协议、一套会话**，**不指同一个 OS 进程**；它不是独立应用，也不需要改动 DSH `apps/desktop`。所有章节（架构、契约、集成、体积、交付）都以此身份为前提。
+
+判定「不是第二个 app」的四条可检验边界：① 无独立 IDE 安装包；② IDE 载荷属于插件、随插件分发（appOnly，包内 0 个 `.exe` / `.pak` / `.dat`）；③ 窗口进程由插件 Host 半身启动并持有；④ 只经官方客户端传输与唯一 `dshIde` 通道接 DSH。四条同时满足即符合 R1，**进程数不构成判据**。
+
+**R1 修订（2026-11-09，承载形态定稿）**：承载形态是**原生 Electron 窗口 + 复用 DSH 安装的 Electron**；不构建 server-web、不注册侧栏页面、不使用 iframe。用安装目录 exe 直拉载荷之所以失败，是因为 Electron 按自身所在目录解析 `resources`；物化 [`README.md`](../README.md) §2 定义的「Electron 主页」后（硬链接 exe + 目录联接 + `resources/app` 指向插件载荷），据 2026-11-09 实机记录窗口标题为 `DSH IDE`，且满足上述四条边界。`product.json` 的 `dataFolderName = ".dsh-ide-oss"` 与 DSH userData 隔离，单实例锁不冲突。复用省下的不是「再带一份 Electron 350 MB」，而是不再构建 / 打包 server-web 的 164.2 MiB。server-web 页面承载已是删除的历史实现，不构成可用能力、可选形态或回退路径；留痕见第 7 章 §7.6，工程细节与体积口径见第 3 章 P5、第 8 章 §8.2.5。完整交付形态见第 3 章开头与第 8 章 §8.3.1。
+
+### 0.1 当前项目情况（每轮更新）
+
+本表是**派生视图**，不定义任何状态：每行都指向唯一真源，数值以真源为准。**每轮改动（代码或文档）收尾必须回写本表、第 7 章 §3 唯一待办清单与第 7 章 §7.7 每轮更新记录**；三处日期 / commit 与快照数值由 `verify:docs-graph` 第 4 项校验一致。更新纪律见第 5 章 §10、[`AGENTS.md`](../AGENTS.md) §6。
+
+| 维度 | 当前情况 | 唯一真源 |
+| --- | --- | --- |
+| 交付形态 | 单一 DSH bundle 插件 `dsh-ide@2.0.0`；原生 Electron 窗口复用宿主 Electron 44.7.0，插件包不带 Electron | §0 R1 / 第 8 章 §8.2.5 |
+| 阶段状态 | 不在此复制状态值，只保留入口 | 第 3 章 §6 |
+| 待办与完成标记 | 不在此复制条数，只保留入口 | 第 7 章 §3 |
+| 门禁 / 测试 | 3 `PASS` + 1 `PENDING`（`PENDING` 不计通过）；`test-dsh:all` 基线 172/172 | 第 5 章 §3–§4 |
+| 分发体积 | 现有 tgz 160,112,030 B（152.7 MiB），为删除 server-web 之前的产物；重打包未跑 | 第 8 章 §8.2.5 |
+| 承载现状 | 页面路线代码残留已清零；Electron 主页 6 项加固与 7 项单测已闭环 | 第 7 章 §3 |
+| 终端载荷 | `runtime/app` 仍缺 `ptyHostMain` 与 `node-pty` | 第 8 章 §8.2.5 |
+| 最近一轮改动 | 复核未提交基线并跑门禁 / `test-dsh:all` / 完整 `tsc`；按 D34 拆分代码侧（`6546e5c9`）与文档侧两个提交 | 第 7 章 §7.7 |
+| 未验证项 | GUI 未复核；重打包与体积实测未跑；四门禁、`test-dsh:all` 172/172 与完整 `tsc --noEmit` 本轮已跑（变更文件 0 错误，基线见第 5 章 §10.2） | 第 5 章 §10.2 |
+| 最后更新 | 2026-11-09 / `6546e5c9` | 本表 |
 
 ---
 
@@ -66,23 +87,26 @@
 
 - 两个窗口**并存**，关闭任一窗口不影响另一个窗口的生命周期。
 - IDE 窗口由插件侧开窗动作创建或唤起；DSH 主窗口保留会话头部按钮（slot `conversation.session.header.utilities`，id `dsh-ide`，`order: -9`）。
+- IDE 窗口是**原生 Electron 窗口**：插件 Host 半身以 `ensureElectronHome()` 复用 DSH 宿主 Electron 44.7.0 的发行版（硬链接 / 目录联接 + `resources/app` 指向插件载荷），包内不带 Electron；userData 用 `dataFolderName = ".dsh-ide-oss"` 与 DSH 隔离。见 §0 R1 修订与第 8 章 §8.2.5。
 - `dshCtx` 与 VS Code 的 `IInstantiationService` 是两套容器，服务归属必须可区分；禁止把 DSH 服务注册进 VS Code 容器或相反。
 - 两端不同进程：DSH Host 进程持有 `dshCtx`，IDE 进程只持有 `DshIdeChannel` 与 `DshIdeViewService`。跨进程只有官方客户端传输一条链路（裁定见第 7 章 §3.1）。
 - 注：DSH Host 进程与 IDE 进程**同属一个 DSH 应用**（DSH-IDE 即其拓展），并非两个独立应用；DSH-IDE 作为 DSH 插件天然运行于 DSH 之内，不存在把 Cordis 根跨边界塞入的动作（见第 7 章 §3.1）。
 
-#### 2.1 交付态与当前态对照
+#### 2.1 部件与实现形状
 
-| 部件 | 交付态 | 当前态（代码实况） |
+本表只登记**实现形状**（组件结构、注册点、数据流），不登记阶段进度；阶段状态见第 3 章 §6，实现差距见第 7 章 §3。
+
+| 部件 | 交付态 | 实现形状 |
 | --- | --- | --- |
-| 插件入口 `index.js` | `apply(ctx)` 持有插件上下文，订阅官方事件并注册真实 `IdeViewHost` | `name='dsh-ide'`、`inject=[]`；`ctx.plugin(IdeRemoteService, { root })` + `createDshIdeHostBridge(ctx)`，后者订阅四类官方事件并注册唯一 answerer；传输端口待 P5 接线 |
-| 通道注册 `app.ts` | `registerChannel(DSH_IDE_CHANNEL, new DshIdeChannel(真实 IdeViewHost))` | 已注册 `new DshIdeChannel(new DshIdeViewService())`，并配对 `onDidRemoveConnection → disposeOwner(connection.ctx)`；`DshIdeViewService` 的后端端口当前为 `UnavailableDshIdeBackend` |
-| `DshIdeChannel` | `call` / `listen` / `disposeOwner` 全实现 | 已实现：`call` 分发控制命令与 20 method（入参/出参双向校验）；`listen('snapshot')` 三层过滤；`disposeOwner(ctx)` 返回清理的连接数；`dispose` 清理全部连接后 `view.close()` |
-| `IdeViewHost` | 持有插件宿主上下文、执行投影、处理 20 个方法 | `DshIdeViewService`：投影 + 快照版本计数（`starting` → `ready` + `state.view`）已实现；`DshIdeBackend` 端口仍为 `UnavailableDshIdeBackend`，`invoke` 一律以 `dsh-ide/feature-unavailable` 拒绝 |
-| IDE 消费者 | `DshIdeConsumer` 校验连续性并渲染 Chat | `DshIdeConsumer` 已实现并接入：`onDidSnapshot` → `accept()`（校验/fail-closed/16ms/行级 diff）；`DshClientService` 已改为真实通道调用；Chat 侧栏回填待接线 |
-| 按钮行为 | 打开 IDE 窗口 | 仍抛 `Error('launch chain removed; pending DshIdeChannel.open')`（P5 改为经 `dshIde` 通道开窗） |
-| Chat 面板 | 回填 DSH 投影内容 | `chat.view.contribution` 在 `workbench.common.main.ts:229` 无条件注册，容器仍在；DSH 内容为空；`dshChatSeam.ts` 接缝开关默认关闭 |
+| 插件入口 `index.js` | `apply(ctx)` 持有插件上下文，订阅官方事件并注册真实 `IdeViewHost` | `name='dsh-ide'`、`inject=[]`；`ctx.plugin(IdeRemoteService, { root, pluginRoot })` + `createDshIdeHostBridge(ctx)`；桥接订阅四类官方事件并注册唯一 answerer |
+| 通道注册 `app.ts` | `registerChannel(DSH_IDE_CHANNEL, new DshIdeChannel(真实 IdeViewHost))` | 注册 `DshIdeChannel(new DshIdeViewService())`，配对 `onDidRemoveConnection → disposeOwner(connection.ctx)` |
+| `DshIdeChannel` | `call` / `listen` / `disposeOwner` 全实现 | `call` 分发控制命令与 20 method（入参/出参双向校验）；`listen('snapshot')` 三层过滤；`disposeOwner(ctx)` 返回清理的连接数；`dispose` 清理全部连接后 `view.close()` |
+| `IdeViewHost` | 持有插件宿主上下文、执行投影、处理 20 个方法 | `DshIdeViewService` 负责投影与快照版本计数（`starting` → `ready` + `state.view`）；DSH 能力经 `DshIdeBackend` 端口注入 |
+| IDE 消费者 | `DshIdeConsumer` 校验连续性并渲染 Chat | `onDidSnapshot → accept()`（校验 / fail-closed / 16ms / 行级 diff）；`DshClientService` 走真实通道调用；`dshChatSeam.ts` 单接缝接 ui-chat sidecar |
+| 按钮行为 | 点「DSH-IDE」打开原生 IDE 窗口（`remote.ide.launch(workspace)`） | 头部按钮位于 slot `conversation.session.header.utilities`（id `dsh-ide`、`order: -9`），经 `ctx.remote.ide.*` 调 Host 服务；`IdeRemoteService` 提供 `launch` / `registerIdeClient` / `pollLaunch` 及 Electron 主页开窗入口 |
+| Chat 面板 | 回填 DSH 投影内容 | `chat.view.contribution` 注册容器；`DshChatAgent` 为唯一 Chat Agent；DTO→`IChatProgress` 经 ui-chat sidecar 呈现 |
 
-当前态残留的逐项登记见第 7 章 §3。
+实现形状与交付态之间的差距见第 7 章 §3；实测记录见第 5 章 §10.2。
 
 ### 3. 能力域与数据流分层
 
@@ -130,7 +154,7 @@ dshCtx 官方服务与事件
 
 ### 7. 明确不存在的能力
 
-以下内容在全仓均不成立，禁止在代码或文档中当作可用能力引用：第二条 `IServerChannel`、第二个 Cordis 根、**任何私有跨进程管道 / 私有握手**、旧 mux/信封连接层、`bootstrapDshClient()`、旧终端复刻（历史名 P5）、`DshIdeConsumer`（当前态）、renderer 侧的 `@deepseek-ai/*` 导入。DSH 应用内（IDE 与 DSH Host 半身之间）唯一的跨进程链路是官方客户端传输（见第 7 章 §3.1 裁定），它不构成第二条协议。已移除文件的登记见第 2 章 §2。
+以下内容在全仓均不成立，禁止在代码或文档中当作可用能力引用：第二条 `IServerChannel`、第二个 Cordis 根、**任何私有跨进程管道 / 私有握手**、旧 mux/信封连接层、`bootstrapDshClient()`、旧终端复刻（历史名 P5）、renderer 侧的 `@deepseek-ai/*` 导入。DSH 应用内（IDE 与 DSH Host 半身之间）唯一的跨进程链路是官方客户端传输（见第 7 章 §3.1 裁定），它不构成第二条协议。已删除的 server-web 页面承载（`ensureIdePage()` / `idePageUrl()` / iframe tab）同样不属于可用能力，代码残留按第 3 章 P5 收尾；页面承载不是可选形态或回退路径。已移除文件的登记见第 2 章 §2。
 
 双向导航环全部是「指向唯一定义处」的导航链接，删除会破坏可追溯性，因此保留并显式分类；取舍规则见 [`README.md`](../README.md) §4.1，合并后的引用图说明见第 7 章 §7.5。本章不复制该定义。
 
@@ -236,7 +260,7 @@ interface DshIdeBackend {
 
 参数一律为**命名参数对象**，不使用位置参数。`DshIdeMethodArgs` 与 `DSH_IDE_METHOD_KEYS` 在真源中同步维护；白名单外的 method 绝不静默 no-op。
 
-**两列口径**：「调用方」以代码实际调用点为准——20 个 method 在交付态统一走 第 4 章 T8a 的单条路径（renderer → `IChannel.call` → `DshIdeChannel.call` → `IdeViewHost.invoke`）；当前态 `DshIdeChannel.call()` 一律 reject，**尚无真实调用点**，表中 `T8a` 是交付态落点。「错误码」只列已落地常量 `FU = dsh-ide/feature-unavailable`、`IA = dsh-ide/invalid-argument`；§6 中三个仅存在于契约的码一律标 `C`（契约/未落地），不臆造新码。
+**两列口径**：「调用方」以交付态调用路径为准——20 个 method 统一走 第 4 章 T8a 的单条路径（renderer → `IChannel.call` → `DshIdeChannel.call` → `IdeViewHost.invoke`），表中 `T8a` 是该路径的落点；后端端口不可用时 `invoke` 按契约返回 `dsh-ide/feature-unavailable`（见 §7 E8），不改变落点。「错误码」只列 `FU = dsh-ide/feature-unavailable`、`IA = dsh-ide/invalid-argument`；§6 中三个仅存在于契约的码一律标 `C`（契约/未落地），不臆造新码。
 
 | # | method | 命名参数（精确形状） | 参数边界 | 交付态 DSH 落点 | 结果语义 | 调用方 | 错误码 |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -305,7 +329,7 @@ interface DshIdeBackend {
 | E5 | waterfall 重复决议 | `answerApproval` / `answerQuestion` 处理 | 不重复消费 | `ALREADY_RESOLVED` | 首个决议生效后请求即关闭 |
 | E6 | 会话归属失效 | `IdeViewHost.invoke` | 拒绝本次调用 | `SESSION_SWITCHED` | 以 `channelId` 与会话归属为准 |
 | E7 | 本地快照落后过多 | `DshIdeConsumer.accept()` | 拒绝增量合并 | `SNAPSHOT_STALE` | 下一次流程实例通过 `refreshSnapshot` 取全量 |
-| E8 | 连接层未接线 | `DshIdeChannel.call()`（未 open）/ `UnavailableDshIdeBackend.invoke` | 一律拒绝 | `dsh-ide/feature-unavailable` | 当前态的实际行为；不伪造事件、不伪造快照 |
+| E8 | 后端端口不可用（`UnavailableDshIdeBackend`） | `DshIdeChannel.call()`（未 open）/ `IdeViewHost.invoke` | 一律拒绝（契约行为） | `dsh-ide/feature-unavailable` | fail-closed：不伪造事件、不伪造快照；与真实端口是否接通无关 |
 | E9 | 折叠行全文不可得 | `IdeViewProjector.fetchRowDetail()` | 依次查本地 `fullText` → 本地 `row.text` → `deps.fetchRowDetail(rowId)` → 返回 `undefined` | `fetchRowDetail` 的 `value = null` | 不抛错、不返回截断文本冒充全文 |
 | E10 | 投影行数或字节数越界 | `foldOldest()` / P95 校验 | 折叠最老行；P95 参数按第 5 章 §5 的固定序列校准 | 快照仍合法 | `rows` 数组不裁剪；`MAX_ROWS = 600`、阈值 512 KiB |
 | E11 | 上游版本漂移 | `installedMeetsVersion()` / `upstreamDrift()` | 插件启动告警、CI 失败门禁 | drift 报告 | 以 `UPSTREAM_VALIDATED_VERSION = 0.2.2-rc.1` 为唯一基准 |
@@ -335,17 +359,19 @@ interface DshIdeBackend {
 
 禁止在 `dshIdeContract.ts`、UI 层或任何第二份 JS 文件里复制校验器或协议常量。
 
-### 10. 当前态实现对照
+### 10. 契约部件与实现形状
 
-| 契约部件 | 当前态 |
+阶段状态见第 3 章 §6，实现差距见第 7 章 §3；本节只登记契约符号与其实现形状，不记阶段进度。
+
+| 契约部件 | 实现形状 |
 | --- | --- |
-| 17 个协议符号、20 方法 schema、6 个校验函数 | 已落地（P1） |
-| `translator.ts` / `ide-view-projector.ts` / `IdeViewSnapshot` / golden fixture | 已落地（P2） |
-| 投影快照并入 `DshIdeSnapshot.state` | 已落地（P3，`wireRevision = 2`，`state.view` 由 `DshIdeViewService` 填充） |
-| `call()` 使用 `validateDshIdeInput` 并分发 20 方法 | 已落地（P3；未知 method 映射 `feature-unavailable`，形状违规映射 `invalid-argument`，输出过 `validateDshIdeInvokeOutput`） |
-| `listen('snapshot')` 推送真实快照 | 已落地（P3；三层过滤：事件名白名单 / 连接归属 / version 严格递增） |
-| `validateDshIdeSnapshot` / `assertSnapshotContinuity` 被消费者调用 | 未落地；消费者不存在（P4） |
-| `ALREADY_RESOLVED` / `SESSION_SWITCHED` / `SNAPSHOT_STALE` 常量 | 已落地（P3） |
+| 17 个协议符号、20 方法 schema、6 个校验函数 | `common/dshIdeProtocol.ts` 单一真源 |
+| `translator.ts` / `ide-view-projector.ts` / `IdeViewSnapshot` / golden fixture | 适配层与 `verify/golden/*.json` |
+| 投影快照并入 `DshIdeSnapshot.state` | `wireRevision = 2`，`state.view` 由 `DshIdeViewService` 填充 |
+| `call()` 校验与分发 | `validateDshIdeInput` → 20 方法分发；未知 method 映射 `feature-unavailable`，形状违规映射 `invalid-argument`，输出过 `validateDshIdeInvokeOutput` |
+| `listen('snapshot')` | 三层过滤：事件名白名单 / 连接归属 / version 严格递增 |
+| `validateDshIdeSnapshot` / `assertSnapshotContinuity` | 调用点为消费者 `DshIdeConsumer.accept()` |
+| `ALREADY_RESOLVED` / `SESSION_SWITCHED` / `SNAPSHOT_STALE` | 三个错误码常量（语义见 §7） |
 
 ---
 
@@ -407,7 +433,7 @@ P7 打包为 DSH 插件与交付
 - **活动**：建立唯一代码树（现为仓库根 `e:/DSH-IDE/`，已扁平化，不再有 `vscode-1.143.1/` 子目录）；安装上游依赖；设置 `product.json` 身份（`nameShort` / `nameLong` = `DSH IDE`，`applicationName` = `dsh-ide`，`urlProtocol` = `dsh-ide`；该身份只服务插件内嵌 app 的运行时，不产出独立安装包）；创建 bundle 清单与单行 patch；准备 `resources/dsh/` 真实资源；接入 VS Code 上游官方 gulp / esbuild 任务；准备只读参考目录与上游差异工具。
 - **产出**：`build/lib/dsh/package.json`（`dsh-ide@2.0.0`，`dsh.bundle.patch = "./cordis.patch.yml"`，`files` 白名单 11 项）、`build/lib/dsh/cordis.patch.yml`（唯一 `insert: dsh-ide` 行）、`resources/dsh/icon.svg` 与 `locale/{en,zh}.json`、`build/gulpfile.vscode.ts` 的 `dsh-ide-pack` 任务、`scripts/sync-upstream.mjs`。
 - **出口判据 K1**：依赖可安装且官方 gulp 能发现 `dsh-ide-pack`；上述清单、patch、资源文件齐备且内容符合本节；只读参考目录 `E:/dsh-TUI/`、`E:/deepseek-harness-0.2.2-rc.1/` 与已安装 DSH 的 `app.asar` 可读且不写入。
-- **当前态**：已完成。
+- **当前态**：见第 3 章 §6 唯一状态表。
 
 #### P1 契约定义与通道骨架
 
@@ -415,7 +441,7 @@ P7 打包为 DSH 插件与交付
 - **活动**：把 `dshIde/v1` 协议、校验器、20 方法 schema 与版本契约一次性冻结；建立 `DshIdeChannel` 骨架、`EmptyIdeViewHost` 占位与 `app.ts` 唯一注册；建立四条门禁脚手架与协议单测。
 - **产出**：`common/dshIdeProtocol.ts`（17 导出符号）、`common/dshIdeContract.ts`（5 导出 + 4 注入点，单向依赖）、`electron-main/dshIdeChannel.ts`、`electron-main/ide-view-service.ts`、`app.ts:1443-1449` 注册段、`build/lib/dsh/verify/dshIdeVerify.mjs`、`build/lib/test/dshIdeProtocol.test.ts`（19 项）、4 条 `verify:dsh-ide-*` 脚本。
 - **出口判据 K2**：17 个协议符号各只声明一次且依赖方向单向；20 项协议正/反例单测全通过；`protocol-single-source` 与 `boundary` 门禁 `PASS`；本阶段改动文件 `tsc --noEmit` 0 错误；全仓只有一处 `registerChannel(DSH_IDE_CHANNEL, …)`。
-- **当前态**：已完成。
+- **当前态**：见第 3 章 §6 唯一状态表。
 
 #### P2 适配层实现
 
@@ -423,7 +449,7 @@ P7 打包为 DSH 插件与交付
 - **活动**：搬用 DSH 事件翻译与增量投影模式，实现封闭事件联合、穷举分类、稳定行 id、行级 revision、seq 幂等、callId 合并、有界折叠与 golden 回放。
 - **产出**：`common/translator.ts`（`IdeEventType` 51 项、`dshEmits()` 28 项 emit、`never` 收口）、`common/ide-view-projector.ts`（`MAX_ROWS = 600` 等 4 个常量、`IdeViewSnapshot`）、`build/lib/dsh/verify/golden/basic-session.json`（15 条 mock 事件 + 4 行冻结快照 / `version = 7`）、`build/lib/test/dshIdeProjection.test.ts`（11 项）、`projection-golden` 门禁真实回放。
 - **出口判据 K3**：golden 子进程真实回放与冻结快照逐字节一致；`dshIdeProjection.test.ts` 11/11；穷举性验证（临时加事件变体触发 `TS2322` → 撤回后 `git diff --stat` 无残留 → tsc 复跑 0 错误）；两次投影间 row id 不变、仅变更行 `revision` 递增；适配层零 `@deepseek-ai/*` / electron / Cordis 引用。
-- **当前态**：已完成。
+- **当前态**：见第 3 章 §6 唯一状态表。
 
 #### P3 通道与宿主实现
 
@@ -432,7 +458,7 @@ P7 打包为 DSH 插件与交付
 - **产出**：真实 `IdeViewHost`（`DshIdeViewService` + `DshIdeBackend` 端口）、`DshIdeBackend` 的官方客户端传输适配（真实端口实现）、`DshIdeChannel` 完整实现（`call` / `listen` / `disposeOwner`）、3 个新增错误码常量、`wireRevision = 2` 的协议真源与快照校验（含 `state.view` 行级校验）、`build/lib/test/dshIdeChannel.test.ts`（17 项）、`host/ide-view-host.js` + 17 项单测。
 - **出口判据 K4**：`DshIdeBackend` 真实端口接通（官方客户端传输，不再返回 `feature-unavailable`）；20 个 method 均有确定 handler 且通过 `validateDshIdeInput`；`call` / `listen` / `disposeOwner` 行为符合 第 2 章 §4–§7；`invoke` 输出恒为 `{ value }`；waterfall 实测符合上述唯一形态；`boundary` 门禁 `PASS`；契约升级后 17 符号仍单源。
   - **「实测」的判定口径**（防止把单测当验收）：必须是**打包后的 tgz 装进真实 DSH profile、由真实 Host 进程加载插件、经官方端点跑通一次 `listSessions` + 一次 `session/follow`** 的实跑记录；仅单测或 mock 一律记 `PENDING`。实跑前置见第 5 章 §2 的打包命令与第 7 章 §3.1 裁定；若环境不具备（无可用 DSH Host），K4 保持未达成并在提交信息写明缺什么。
-- **当前态**：**完成（K4 达成，2026-11-09）**。已落地：通道分发与三层过滤、`DshIdeViewService` 快照纪律（首帧 `starting`、`channelId` 守恒、`version` 严格 +1、微任务批处理）、`state.view` 并入与行级校验、3 个错误码常量、`disposeOwner` 按 ctx 清理、`boundary` 起启用 `listen` 三层过滤与分发断言；`index.js` 创建 `DshIdeHostBridge`，在插件上下文上订阅 `session/event` / `agent/assistant-stream` / `approval/request` / `user-questions/request` 并注册唯一交互式 answerer（未见界面时 `next()` 委托），`host/ide-view-host.js` 17 项单测覆盖订阅、归属过滤、waterfall 一致性（广播 + 首个决议生效 + 重复 `ALREADY_RESOLVED`）、会话切换与 method 映射。已落地（续）：`transport/dshIdeTransport.ts` 实现官方客户端传输适配（鉴权交换 / 一元 RPC / `remote.mux` 流 / waterfall 回投，13 项单测），`electron-main/dshIdeBackendFactory.ts` 按 `DSH_IDE_ENDPOINT` + `DSH_IDE_COOKIE`/`DSH_IDE_LAUNCH_URL` 装配，`app.ts` 已接真实端口；`common/translator.ts` 补上真实 DSH 线上事件（斜杠命名 + `data` 信封）的翻译，投影层现可吃真机事件流（新增 7 项用例）。**真机实测（2026-11-09，已执行）**：
+- **当前态**：见第 3 章 §6 唯一状态表；下列为 P3 出口判据的实测记录（非阶段状态）。已落地：通道分发与三层过滤、`DshIdeViewService` 快照纪律（首帧 `starting`、`channelId` 守恒、`version` 严格 +1、微任务批处理）、`state.view` 并入与行级校验、3 个错误码常量、`disposeOwner` 按 ctx 清理、`boundary` 起启用 `listen` 三层过滤与分发断言；`index.js` 创建 `DshIdeHostBridge`，在插件上下文上订阅 `session/event` / `agent/assistant-stream` / `approval/request` / `user-questions/request` 并注册唯一交互式 answerer（未见界面时 `next()` 委托），`host/ide-view-host.js` 17 项单测覆盖订阅、归属过滤、waterfall 一致性（广播 + 首个决议生效 + 重复 `ALREADY_RESOLVED`）、会话切换与 method 映射。已落地（续）：`transport/dshIdeTransport.ts` 实现官方客户端传输适配（鉴权交换 / 一元 RPC / `remote.mux` 流 / waterfall 回投，13 项单测），`electron-main/dshIdeBackendFactory.ts` 按 `DSH_IDE_ENDPOINT` + `DSH_IDE_COOKIE`/`DSH_IDE_LAUNCH_URL` 装配，`app.ts` 已接真实端口；`common/translator.ts` 补上真实 DSH 线上事件（斜杠命名 + `data` 信封）的翻译，投影层现可吃真机事件流（新增 7 项用例）。**真机实测（2026-11-09，已执行）**：
 1. `gulp dsh-ide-pack` 产出 `dist/dsh-ide-2.0.0.tgz`（119,584,787 字节，2495 条目，含 `runtime/app` 491 MB）；
 2. 装进真实 DSH profile（`%USERPROFILE%\.dsh\profiles\desktop`，依赖由 `file:E:/vscode-dsh/...` 修正为 `file:E:/DSH-IDE/dist/...`），`pnpm install` 成功；
 3. 用 DSH 自带 Electron 44.7.0 的 Node 模式加载**已安装**插件的 `host/ide-view-host.js`：导出完整、`REQUIRED_SERVICES=[sessions,sessionController]`、`open` 生成合法 channelId、四类事件订阅齐备、`listSessions`/`listModels` 真实返回、`runCommand` 返回 `dsh-ide/feature-unavailable`；
@@ -465,7 +491,7 @@ HTTP/WS，文件不是私有握手。真机实测（DSH Electron 44.7.0）：`EN
 2. **Host 端点只存在进程内**：官方 `/api` 在 `127.0.0.1:62680` 返回 401（未鉴权），launch token 由 Host 的 `connection.authenticatedUrl()` 在进程内生成，外部无法取得，也不允许绕过。已实现 `resolveHostEndpoint()` / `publishHostEndpoint()`（Host 半身自算 origin + launchUrl，与桌面端 `main.ts:531-532` 同源），待重启后生效。
 3. **独立 Host 实例不可行**：`dsh-desktop-host` 的 `runProfile()` 会读取 `<runtime>/node_modules/@deepseek-ai/dsh` 作为 install anchor（ENOENT），而该路径在被混淆的 asar 内、宿主未暴露为真实目录。要造这个锚点属于改动 DSH 安装目录，**超出硬边界，不做**。
 
-**端到端实跑（2026-11-09 完成，K4 判据达成）**：用 `dsh-desktop-host` 启动一个**独立真实 Host**
+**端到端实跑（2026-11-09 实测记录）**：用 `dsh-desktop-host` 启动一个**独立真实 Host**
 （不改当前会话，不造安装目录锚点），插件经 `dsh.profile.bundles` 正常加载，实跑结果：
 
 | 步骤 | 实测 |
@@ -490,8 +516,8 @@ HTTP/WS，文件不是私有握手。真机实测（DSH Electron 44.7.0）：`EN
 waterfall 语义单测覆盖、`boundary` PASS、17 符号仍单源。**真机端到端**（`session/follow` 实时流 + 投影）已由上面的独立 Host 实跑观测；
 双窗口 waterfall 决议仍未在真机观察（需要两个 IDE 窗口同时挂到同一会话，属 P6 的 9 项真机验收）。
 
-因此：**K4 = 达成**（真实端口接通、20 method 确定、call/listen/disposeOwner 合规、invoke 恒 `{ value }`、
-waterfall 语义单测覆盖、boundary PASS、17 符号单源、端到端实跑有记录）。P4 的入口判据 K5 另有要求，
+因此：上述 K4 判据均有实测记录（真实端口接通、20 method 确定、call/listen/disposeOwner 合规、invoke 恒 `{ value }`、
+waterfall 语义单测覆盖、boundary PASS、17 符号单源、端到端实跑有记录）；阶段状态以第 3 章 §6 为准。P4 的入口判据 K5 另有要求，
 双窗口 waterfall 观测按第 5 章 §6 第 3/4 项在 P6 补齐。
 
 #### P4 IDE 消费者与 UI 实现
@@ -499,126 +525,28 @@ waterfall 语义单测覆盖、boundary PASS、17 符号单源、端到端实跑
 - **前置**：K4。
 - **活动**：实现 `DshIdeConsumer.accept()`（快照校验 → 连续性 fail-closed → 16ms 合并 → rows 按稳定 id diff）；把 DTO→`IChatProgress` 投影层与 Chat 侧栏分离；回填 DSH 内容；启用 `dshChatSeam.ts` 单接缝与 ui-chat sidecar；落地 `SNAPSHOT_STALE`。
 - **产出**：`DshIdeConsumer`、DTO→UI 投影层、Chat 侧栏 DSH 内容、单接缝启用、`SNAPSHOT_STALE` 常量、`boundary` 门禁新增的 UI 投影隔离与 `listen` 三层过滤断言。
-- **出口判据 K5**：Chat 面板显示来自 `dshIde` 的 DTO 投影内容；`version` 断号时 fail-closed 且不渲染错位状态；rows 按稳定 id 增量更新；`boundary` 门禁 `PASS`；`workbench/**` 仍零 `@deepseek-ai/*` 导入。
-- **当前态**：**部分完成（代码闭环 / 端到端未观测）**。已落地：
-  `DshIdeConsumer`（校验 / fail-closed / 16ms 合并 / 行级 diff，10 项单测）、
-  `DshIdeUiProjection`（行展示文本，4 项）、
-  `DshClientService` 真实通道调用、`dshChatSeam` 启用（唯一调用方，仅在收到真实 ready 行后打开）、
-  **`DshChatAgent`（唯一的 Chat Agent，6 项）**——这是 K5 的关键缺口：Chat 面板只在**真实 request**
-  的 response 里渲染 `IChatProgress`，而 request 必须由已注册的 Chat Agent 驱动；此前 DSH-IDE
-  没有任何 Chat Agent，所以面板必然空白（不是样式问题，是缺供给方）。
-  **未观测**：K5 要求「Chat 面板**显示**来自 `dshIde` 的 DTO 投影内容」，这需要真机上打开 Chat 面板、
-  发一条消息、看到 DTO 行渲染——属 9 项真机验收（第 5 章 §6 第 8 项）。代码链路已完整（Agent →
-  `submit` → 快照 → 消费者 → 投影 → 接缝），但没有渲染截图/观测记录，故 K5 不标达成。
-
-  **真机启动 IDE 窗口的实测结论（2026-11-09，四次尝试全部记录）**：
-  1. `ELECTRON_RUN_AS_NODE=1` 残留 → Electron 以 Node 模式跑 `out/main.js`，报
-     `SyntaxError: The requested module 'electron' does not provide an export named 'app'`。清掉该变量即可。
-  2. 传 `--user-data-dir` 前先清环境，否则与正在运行的 DSH 争用同一个 Electron 缓存目录，报
-     `Unable to move the cache: 拒绝访问 (0x5)`。
-  3. **关键阻塞**：Electron **打包版**始终优先加载 `<install>/resources/app.asar`，
-     命令行把 `runtime/app` 作为首个位置参数**不会**覆盖它——实测进程起来了，但窗口标题仍是
-     `DeepSeek-Harness`（跑的是 DSH 自己的应用），不是 `DSH IDE`。
-  4. 要让该 exe 跑我们的 IDE 载荷，只能改动安装目录（替换/重定向 `resources/app.asar` 或其
-     `resources` 布局）。这属于**修改用户的 DSH 安装目录**，越过硬边界，**不做**。
-  5. **补充事实（2026-11-09）**：`runtime/app` 是 **appOnly** 载荷，**不含 Electron 可执行文件**
-     （无 `*.exe`；省体积的设计）。因此「宿主 exe + 我们的 app 目录」这条路在原理上也不成立——
-     宿主 exe 恒定加载自己的 `app.asar`。结论：**当前交付形态无法以独立 Electron 进程启动原生 IDE 窗口**，
-     后续必须按「IDE 作为 DSH 应用内的页面/窗口」形态落地（见 §3.1），或改为随包携带 Electron。
-
-  因此 K5 的真机渲染观测需要**用户自己**从 DSH 主窗口点「DSH-IDE」按钮开窗（P5 的 `client.js`
-  开窗链路尚未接线，见第 3 章 P5），或由用户授权临时改动安装目录。两条都超出本阶段可自主执行的范围。
-
-  **按 R1 复核（2026-11-09）**：上述四次「用外部 exe 跑 IDE 载荷」的尝试方向本身偏离 §0 R1——
-  DSH-IDE 是 DSH 的**插件**、运行在 DSH 应用之内，不是独立应用，也不产出独立 IDE 安装包。
-  即便技术上能用外部 exe 起我们的 `runtime/app`，那也等于造了一个「独立 IDE」，**与 R1 冲突**。
-  正确路径只有一条：**由 DSH 装载插件，插件在自己的进程内开窗**（P5 的 `launch` 链路已按此实现）。
-  四次实测结论仍然有效（它们证明「外部起窗口」不可行也不该做），但不再作为 K5 的推荐路径。
-
-  结论：**K5 保持未达成**；P5 开窗链路已按用户授权先行实现（见第 3 章 §1 第 3 条例外），
-  等 DSH 重启加载新插件后由用户点按钮完成观测。
-
-  **代码层复核（2026-11-09，关键发现）**：K5 要求「Chat 面板显示来自 `dshIde` 的 DTO 投影内容」，
-  而 VS Code 的 Chat 面板**只在一次真实 request 的 response 里**渲染 `IChatProgress`
-  （`IChatResponseModel.acceptResponseProgress` 必须绑定某个 `ChatRequestModel`）。
-  入口只有 `IChatService.sendRequest()` ——**由用户输入触发**。已核实 `IChatSessionItemController`
-  只管会话列表（`refresh` / `newChatSessionItem` / `resolveChatSessionItem`），**没有**「向对话区
-  主动推内容」的 API。因此：
-
-  - 用户发一条消息 → `DshChatAgent.invoke` 运行 → 它把当前 DTO 行投影成 `markdownContent` 推出 → 面板可见；
-  - 用户不发消息 → 没有任何 request → 面板按设计就是空的，**这不是缺陷**。
-
-  也就是说 K5 的「Chat 面板显示 DTO 内容」**只能以「用户发消息」为前提观测**；不存在「后台自动灌内容」
-  的正当路径（任何绕过 `sendRequest` 直接改模型的写法都属于伪造会话状态，违反第 1 章 §4.5）。
-
-  **连接缺口（2026-11-09 已修）**：`DshClientService.openView({ view: 'chat' })` 原先**不带 `sessionId`**，
-  于是 `DshIdeViewService.open()` → `backend.follow(undefined, …)` 只订阅 `$events`，
-  **拿不到任何会话内容**（即使 Chat Agent / 消费者 / 投影 / 接缝全部就绪，面板也不会有行）。
-  修法：开窗方经 `openEmptyWindow` 的 `userEnv` 传 `DSH_IDE_SESSION`（`app.ts` 的 launcher），
-  IDE 侧在 `openView({ view:'chat', params:{ sessionId } })` 带上它。会话仍由 DSH 决定，
-  IDE 不自己猜（不变量 I4）。
-
-  **真机复核（2026-11-09，DSH 重启后实测）**：绑定成功但 `FRAMES=0` —— 又一个真缺陷：
-  `session/follow` 的帧是 `{ type:'snapshot', records:[{type:'event', event:{...}}] }`，
-  而 `IdeViewService.receive()` 把**整帧**喂给 translator，translator 只认单条事件 →
-  全部被「未知类型」丢弃，一帧都发不出。修法：新增 `unwrapFollowFrame()`，把
-  `snapshot.records`、`event`、`assistant-stream` 三种形状统一解包成单条事件再翻译；
-  并把 `DshIdeBackend.follow` 的契约明确为「回调收到**原始帧**」（解包由宿主实现负责，
-  不出现「一半帧、一半事件」的混合契约）。
-
-  修复后真机实测（`session-20be9600…`，323 条记录的会话）：
-  `FRAMES=1`、`READY=1`、**`ROWS=96`**（assistant 45 / tool 44 / user 5 / system 2）、
-  `version` 序列 `2` 严格递增。这是「真实 DSH 会话 → 投影行」首次端到端成功。
-
-  **按钮「点了打不开窗口」的两个真因（2026-11-09，用户报告后定位）**：
-  1. **端点查找路径错配**：端点写在 `<plugin>/runtime/host-endpoint.json`（`publishHostEndpoint` 用
-     `import.meta.url` 定位），而 `IdeRemoteService` 只拿 `root`（`process.cwd()` = profile 根）去
-     `join(root, 'runtime', ...)` —— 完全不同的路径，于是 `launch()` 永远返回「端点未发布」。
-     修法：`index.js` 把插件自身目录作为 `pluginRoot` 传给服务；`endpointCandidates()` 优先 pluginRoot、
-     回退 root；失败信息带上查过的路径，便于定位。
-  2. **`launch()` 从未真的开窗**：它只检查端点存在就返回 `ok:true`，属于「假装成功」；
-     而且 `DshIdeChannel` 的 `launch` 命令**全仓没有调用方**——整条开窗链是空的。
-     修法：新增 IDE 侧接单器 `DshIdeLaunchListener`（`transport/`）：IDE 启动后经官方 Typert Gateway
-     `ide.registerIdeClient(clientId)` 报到、`ide.pollLaunch(clientId)` 轮询开窗请求，取到后在本进程内
-     调真实开窗入口。Host 侧 `IdeRemoteService` 维护 `ideClients` 注册表并据此分发。
-     为什么这样：`dshIde` 是 **IDE 自己的** IPC 通道，Host 在另一个进程无法跨进程调用它；
-     由 IDE 主动报到是唯一不引入私有管道的做法（第 7 章 §3.1 裁定）。
+- **出口判据 K5**：在**原生 IDE 窗口内** Chat 面板显示来自 `dshIde` 的 DTO 投影内容（按 §0 R1 修订，观测位置由 DSH 页面改为原生窗口，观测方式与判据不变）；`version` 断号时 fail-closed 且不渲染错位状态；rows 按稳定 id 增量更新；`boundary` 门禁 `PASS`；`workbench/**` 仍零 `@deepseek-ai/*` 导入。
+- **当前态**：见第 3 章 §6 唯一状态表；真机实测沿革与遗留记录见第 5 章 §10.2，实现差距见第 7 章 §3。
 
 #### P5 功能实现与真机接线
 
 - **前置**：K5。
-- **活动**：`app.ts` 构造参数换为真实 `DshIdeBackend` 的 `DshIdeViewService`；`client.js` 按钮改为经 `dshIde` 通道开窗；一次性接上 20 个 method 对应的功能（审批、问卷、权限预设、模型、effort、斜杠命令、resume / fork / rewind、goal / todo / usage / TPS / workingActivity 投影、`ping` / `inlineComplete`、账号、语音、删除会话）；保持双窗口并存，DSH 主窗口按钮可用；语音未就绪时入口明确不可用。
-- **产出**：`app.ts` 真实接线、`client.js` 开窗、完整功能接线、双窗口镜像。
-- **出口判据 K6**：真机双窗口镜像同一会话；`approval/request` 与 `user-questions/request` 两边弹出且任一 resolve 即消费；按钮开窗成功；`ping` / `inlineComplete` 恢复；Chat 面板可见且 DSH 内容回填；关闭 IDE 窗口不取消 DSH 会话；语音不可用时不启动本地识别后端。
-- **当前态**：未开始。**承载形态已由实测收敛（2026-11-09）**：
-  1. **原生 IDE 窗口路径不可用**（已在 §3 记录）：`runtime/app` 是 appOnly 载荷、不含 Electron，
-     而宿主 exe 恒定加载自身 `resources/app.asar` → 无法以独立 Electron 进程启动 IDE，
-     硬拉只会再开一个 DSH。`DshIdeLauncher` 因此在缺 Electron 时如实失败。
-  2. **页面承载可行（已实测）**：用 `out/server-main.js` + `--without-connection-token --host 127.0.0.1 --port 0`
-     可启动 VS Code 官方 server 模式——日志输出 `Web UI available at http://localhost:<port>`、
-     `Extension host agent started`，对首页 `GET` 返回 **200 / 4459 B**（workbench HTML）。
-     这正是「给 DSH 应用加一个 IDE 页面」的官方承载方式（复用上游 server 与 web workbench，
-     不自造窗口壳）。P5 据此把 IDE 承载从「原生 `BrowserWindow` + `IServerChannel`」改成
-     「DSH 应用内的页面」，`dshIde` 通道语义随之收敛为页面内消费 DTO 的同进程/同机链路。
-     具体切片与接线顺序在 P5 活动内落地，本行只记录实测结论，不代表已实现。
-  3. **页面服务已接通到 RPC（2026-11-09 实测）**：Host 半身新增 `ensureIdePage()` / `idePageUrl()`，
-     经官方 Typert Gateway 调用返回 `{"ok":true,"url":"http://localhost:62239"}`，该地址 `GET /` 返回
-     **200 / 4459 B**（workbench HTML）。client 半身已在官方 `sidebar.right.pane.tab` 注册 IDE 页面
-     （iframe 承载），并在标题 slot 注册「DSH-IDE」。
-     **注意**：本次实测把 `DSH_IDE_SERVER_ENTRY` 指向仓库开发态 `out/server-main.js`；
-     打包产物内**尚无**该入口。
-  4. **打包需新增 server-web 构建（体积待裁定）**：官方 `runEsbuildBundle(..., 'server-web')` 已产出
-     `out-vscode-reh-web-min`，**165 MB 原始 / 39.2 MB 压缩**；当前 `dist/dsh-ide-2.0.0.tgz` 为 114.1 MB，
-     叠加上限约 **153 MB**。第 7 章记录的体积口径是「压缩包 74,147,715 字节（<100 MB）」，
-     现状（114.1 MB）已超；再加 39.2 MB 会进一步偏离。**这是交付体积决策，需所有者裁定后才能改 staging。**
+- **活动**：`app.ts` 构造参数换为真实 `DshIdeBackend` 的 `DshIdeViewService`；承载统一为「**原生窗口 + 复用宿主 Electron**」（§0 R1 修订），加固 `ensureElectronHome()`；`client.js` 按钮改为 `remote.ide.launch(workspace)` 打开原生窗口，删除 iframe 页面注册与 `idePageUrl()`；一次性接上 20 个 method 对应的功能（审批、问卷、权限预设、模型、effort、斜杠命令、resume / fork / rewind、goal / todo / usage / TPS / workingActivity 投影、`ping` / `inlineComplete`、账号、语音、删除会话）；保持双窗口并存，DSH 主窗口按钮可用；语音未就绪时入口明确不可用。
+- **产出**：`app.ts` 真实接线、`client.js` 开窗、Electron home 加固与单测、完整功能接线、双窗口镜像。
+- **出口判据 K6**：真机双窗口镜像同一会话；`approval/request` 与 `user-questions/request` 两边弹出且任一 resolve 即消费；按钮打开原生 IDE 窗口成功；`ping` / `inlineComplete` 恢复；原生 IDE 窗口内 Chat 面板可见且 DSH 内容回填；关闭 IDE 窗口不取消 DSH 会话；语音不可用时不启动本地识别后端。
+- **当前态**：见第 3 章 §6 唯一状态表；实现差距见第 7 章 §3，实测与遗留记录见第 5 章 §10.2。
+  **承载形态（2026-11-09 定稿，唯一裁定）**：**原生 Electron 窗口，复用 DSH 安装的 Electron**；
+  不构建 server-web、不注册侧栏页面、不使用 iframe。窗口进程由插件 Host 半身经
+  [`README.md`](../README.md) §2 定义的 Electron 主页启动，满足 §0 R1 的四条边界；工程细节与
+  体积口径见第 8 章 §8.2.5，页面路线的废止留痕见第 7 章 §7.6，**不作为可选路径**。
 
 #### P6 测试与验证
 
 - **前置**：K6。
-- **活动（固定顺序，不并行、不调换）**：① 四条门禁 → ② `test-dsh:all` → ③ `tsc --noEmit` 本批文件 0 错误 → ④ 第 5 章 §6 的 9 项真机验收 → ⑤ 真实事件流 P95 校准 → ⑥ `node-pty` 按宿主 Electron 44.7.0 的 `NODE_MODULE_VERSION` 重编 → ⑦ IDE 终端冒烟 → ⑧ 第 5 章 §7 的上游核对（同时把 `contract` 改为启用失败断言） → ⑨ 把 第 5 章 §2 的四条门禁与 `test-dsh:all` 接入 CI 配置，并按第 7 章 §7.1 的 11 行清单逐文件把代码注释中的历史阶段标记改为 P 编号；`client.js:62` 与 `dshIdeChannel.ts:28` 是**运行时错误字符串**，单独记录、不与注释清理混同，改字符串后须同步核对 `packaging.test.mjs` 及通道相关测试断言，并跑 第 5 章 §2 的 `test-dsh:all` 确认基线不变；第 7 章 §7.3 的失效章节引用同步修复。P95 超标时按固定序列执行：下调 `MAX_ROWS` → 收紧 `preview` 折叠阈值 → 重新生成 golden，直至 rows 序列化后 P95 ≤ 512 KiB；这是阶段内的参数校准迭代，不是架构变更。
-- **产出**：门禁与测试实测记录、9 项真机验收记录、P95 校准后的常量与 golden、ABI 重编产物、终端冒烟记录、上游差异报告、CI 配置改动、历史阶段标记清理记录。
-- **出口判据 K7**：`protocol-single-source` / `boundary` / `projection-golden` 均 `PASS`；`contract` 启用失败断言后完成一次上游核对且 4 个注入点指纹一致，并按第 5 章 §9 记录状态；`test-dsh:all` 不低于 165/165；9 项真机验收全部通过；P95 ≤ 512 KiB；IDE 终端可开且 PTY 数据流走原生 `node-pty`；CI 配置中可见同一组命令；第 7 章登记的历史阶段标记与失效章节引用零残留。
-- **当前态**：未开始。门禁脚手架已就位（3 `PASS` + 1 `PENDING`，见第 5 章 §3），不构成 K7 达成。
+- **活动（固定顺序，不并行、不调换）**：① 四条门禁 → ② `test-dsh:all` → ③ `tsc --noEmit` 本批文件 0 错误 → ④ 第 5 章 §6 的 9 项真机验收 → ⑤ 真实事件流 P95 校准 → ⑥ 先补齐 `desktopEntryPoints` 的 `ptyHostMain` 与 DSH `node-pty` prebuilds 复用，再核对 `.npmrc` 的 `target="43.7.7"` 与宿主 Electron 44.7.0：随包 5 个原生模块（node-pty、sqlite3、spdlog、watcher、windows-process-tree）全部走 NAPI，重编降级为 **ABI/NAPI 加载冒烟（仍必须实测）** → ⑦ IDE 终端冒烟 → ⑧ 第 5 章 §7 的上游核对（同时把 `contract` 改为启用失败断言） → ⑨ 把 第 5 章 §2 的四条门禁与 `test-dsh:all` 接入 CI 配置，并按第 7 章 §7.1 的 11 行清单逐文件把代码注释中的历史阶段标记改为 P 编号；`client.js:62` 与 `dshIdeChannel.ts:28` 是**运行时错误字符串**，单独记录、不与注释清理混同，改字符串后须同步核对 `packaging.test.mjs` 及通道相关测试断言，并跑 第 5 章 §2 的 `test-dsh:all` 确认基线不变；第 7 章 §7.3 的失效章节引用同步修复。P95 超标时按固定序列执行：下调 `MAX_ROWS` → 收紧 `preview` 折叠阈值 → 重新生成 golden，直至 rows 序列化后 P95 ≤ 512 KiB；这是阶段内的参数校准迭代，不是架构变更。
+- **产出**：门禁与测试实测记录、9 项真机验收记录、P95 校准后的常量与 golden、`ptyHostMain` 桌面入口与 `node-pty` 复用接线、NAPI/ABI 加载冒烟记录、终端冒烟记录、上游差异报告、CI 配置改动、历史阶段标记清理记录。
+- **出口判据 K7**：`protocol-single-source` / `boundary` / `projection-golden` 均 `PASS`；`contract` 启用失败断言后完成一次上游核对且 4 个注入点指纹一致，并按第 5 章 §9 记录状态；`test-dsh:all` 不低于 172/172；9 项真机验收全部通过；P95 ≤ 512 KiB；IDE 终端可开、PTY 数据流走原生 `node-pty`，且 NAPI/ABI 加载冒烟通过；CI 配置中可见同一组命令；第 7 章登记的历史阶段标记与失效章节引用零残留。
+- **当前态**：见第 3 章 §6 唯一状态表；门禁 / 终端载荷等实现差距见第 7 章 §3，实测记录见第 5 章 §10.2。
 
 #### P7 打包为 DSH 插件与交付
 
@@ -626,7 +554,7 @@ waterfall 语义单测覆盖、boundary PASS、17 符号单源、端到端实跑
 - **活动**：运行上游官方 `gulp dsh-ide-pack`（`build/gulpfile.vscode.ts:664`）把**整仓**打成**唯一交付物** `dist/dsh-ide-2.0.0.tgz`（即 DSH bundle 插件包，不是独立 IDE 安装包）；执行 stage 声明式自校验；更新 `build/dsh/chat-render/PROVENANCE.md` 的版本 / commit / sha256；核对 `NOTICE.md` 与 `LICENSE` 原文保留；按 [`AGENTS.md`](../AGENTS.md) §6 写提交信息并提交。
 - **产出**：`dist/dsh-ide-2.0.0.tgz`（唯一交付物；含 `runtime/app` appOnly 载荷、91 个内置扩展、sidecar 4 文件、`runtime/build-provenance.json`、bundle 清单白名单 11 项）、更新后的来源凭据、交付提交。
 - **出口判据 K8**：tgz 生成成功；stage 白名单 11 项逐项存在且 glob 项至少命中 1 个文件；PROVENANCE 逐文件 sha256 与源一致；提交信息含门禁实测与未完成项；`git status --short` 无临时产物。
-- **当前态**：打包链路已实测可执行并产出过 tgz，但 K7 未达成，故本阶段出口未满足，不标记为完成。
+- **当前态**：见第 3 章 §6 唯一状态表；打包产物与体积实测见第 8 章 §8.2.5，未完成项见第 5 章 §10.2。
 
 ### 4. 关键节点定义
 
@@ -640,7 +568,7 @@ waterfall 语义单测覆盖、boundary PASS、17 符号单源、端到端实跑
 | K4 | P3 | 通道贯通 | K3 | 20 方法全覆盖；waterfall 只存在一种 answerer 形态 |
 | K5 | P4 | 视图贯通 | K4 | 连续性 fail-closed；`workbench/**` 边界不破 |
 | K6 | P5 | 双窗口贯通 | K5 | 关闭 IDE 窗口不取消 DSH 会话 |
-| K7 | P6 | 验证通过 | K6 | 九项真机验收全通过；P95 ≤ 512 KiB；ABI 重编与终端冒烟闭环；CI 接入与第 7 章 第 7 章残留清理闭环 |
+| K7 | P6 | 验证通过 | K6 | 九项真机验收全通过；P95 ≤ 512 KiB；NAPI/ABI 加载冒烟与终端冒烟闭环；CI 接入与第 7 章 第 7 章残留清理闭环 |
 | K8 | P7 | 交付完成 | K7 | tgz 白名单自校验通过；许可证凭据齐备 |
 
 关键节点不可跳过、不可并行达成、不可由后继阶段倒补。任一关键节点未达成时，后续阶段的活动不得开始。
@@ -663,18 +591,20 @@ waterfall 语义单测覆盖、boundary PASS、17 符号单源、端到端实跑
 
 ### 6. 当前进度（唯一状态表）
 
-| 阶段 | 状态 | 依据 |
-| --- | --- | --- |
-| P0 | 已完成 | 工程基线、bundle 清单、patch、资源、官方打包任务齐备 |
-| P1 | 已完成 | K2 判据实测通过 |
-| P2 | 已完成 | `translator.ts` / `ide-view-projector.ts` / golden / 11 项单测；K3 判据实测通过 |
-| P3 | 已完成 | K4 判据全部满足：真实端口接通、20 method 确定、`call`/`listen`/`disposeOwner` 合规、`invoke` 恒 `{ value }`、waterfall 单测覆盖、`boundary` PASS；端到端实跑（独立真实 Host）listSessions=52 / listModels=3 / follow=329 records → 98 行投影 |
-| P4 | 代码闭环 / 端到端未观测 | 消费者 + 快照流 + DTO→UI + DTO→Chat 内容 + **唯一 Chat Agent** + `dshChatSeam` 启用全部落地（154/154）；Chat 面板实际渲染未观测，K5 不标达成 |
-| P5 | 未开始 | 按钮仍抛显式错误；双窗口镜像未接线 |
-| P6 | 未开始 | 门禁脚手架 3 `PASS` + 1 `PENDING`；真机验收、ABI 重编、终端冒烟未完成 |
-| P7 | 未满足出口 | 打包链路可执行，但前置 K7 未达成 |
+全仓阶段状态只由本表承载。状态枚举：`已完成` / `进行中` / `未开始` / `未满足出口`（门禁状态另见第 5 章 §9）；其它章节只写实现形状或实测记录并指向本节，改动状态须同步第 7 章 §3 的待办清单与 §0.1 项目情况。
 
-阶段状态以本表为准；代码资产与产物的版本控制状态见第 7 章 §3。
+| 阶段 | 状态 | 依据（证据或命令） | 最后实测 |
+| --- | --- | --- | --- |
+| P0 | 已完成 | 工程基线、bundle 清单、patch、资源、官方打包任务齐备 | 2026-11-09 / `6546e5c9` |
+| P1 | 已完成 | K2 判据实测通过；`verify:dsh-ide-protocol-single-source` | 2026-11-09 / `6546e5c9` |
+| P2 | 已完成 | `translator.ts` / `ide-view-projector.ts` / golden / 单测；K3 判据实测通过 | 2026-11-09 / `6546e5c9` |
+| P3 | 已完成 | K4 判据：真实端口接通、20 method 确定、`call`/`listen`/`disposeOwner` 合规、`invoke` 恒 `{ value }`、waterfall 单测覆盖、`boundary` PASS；端到端实跑（独立真实 Host）listSessions=52 / listModels=3 / follow=329 records → 98 行投影 | 2026-11-09 / `6546e5c9` |
+| P4 | 进行中 | 消费者 + 快照流 + DTO→UI + DTO→Chat 内容 + 唯一 Chat Agent + `dshChatSeam` 均已落地；测试基线见第 5 章 §4；原生 IDE 窗口内 Chat 面板渲染观测记录缺失（第 5 章 §10.2） | 2026-11-09 / `6546e5c9` |
+| P5 | 进行中 | 开窗链路按 §1 第 3 条例外先行，承载裁定见 §3 P5；页面路线、Electron 主页加固与主页单测已闭环；终端载荷缺口与双窗口镜像未接线（第 7 章 §3） | 2026-11-09 / `6546e5c9` |
+| P6 | 未开始 | 门禁脚手架 3 `PASS` + 1 `PENDING`（第 5 章 §3）；真机验收、NAPI/ABI 加载冒烟、终端冒烟未跑 | 2026-11-09 / `6546e5c9` |
+| P7 | 未满足出口 | 打包链路可执行，前置 K7 未达成；当前 tgz 为删除 server-web 之前的产物（第 8 章 §8.2.5） | 2026-11-09 / `6546e5c9` |
+
+「最后实测」是最后一次核对的日期与 commit，不是该阶段达成时间。阶段状态以本表为准；实现差距见第 7 章 §3，实测记录见第 5 章 §10.2。
 
 ---
 
@@ -860,20 +790,7 @@ B1–B5 是流程内的检查点，与开发路线的 K1–K8 不同，二者不
 
 ### 8. 当前态
 
-当前代码处于骨架期，业务流在 T1 即终止：
-
-| 步骤 | 当前行为 |
-| --- | --- |
-| T1 | `client.js` 抛 `Error('launch chain removed; pending DshIdeChannel.open')`，实例终止于 STF |
-| T2 | `DshIdeViewService.open()` 返回 `starting` 首帧；`subscribe` 已注册，后端端口接通后按批次推 `ready` + `state.view` |
-| T3 | `index.js` 已创建 `DshIdeHostBridge` 并订阅四类官方事件、注册唯一 answerer；但桥接与 IDE 主进程之间的传输端口尚未接线 |
-| T4 / T5 | `translator.ts` 与 `ide-view-projector.ts` 已落地（P2），但未被真实 `IdeViewHost` 调用 |
-| T6 | `DshIdeChannel.listen()` 返回 `Event.None`，无快照推送 |
-| T7 | `DshIdeConsumer` 不存在；`DshClientService` 骨架恒返回「重建中」；Chat 容器在、DSH 内容为空；`inlineComplete` / 语音 / 账号优雅降级 |
-| T8 | `DshIdeChannel.call()` 一律 reject `dsh-ide/feature-unavailable`，未调用 `validateDshIdeInput` |
-| T9 | `disposeOwner()` 返回 `0`，无资源清理 |
-
-上述行为是 P3–P5 之前的中间态，不是第二条流程；交付态以 §3–§5 为准。逐项残留登记见第 7 章 §3。
+业务流程章不承载代码状态：阶段状态见第 3 章 §6 唯一状态表，运行态观测记录见第 5 章 §10.2，实现差距见第 7 章 §3。
 
 ---
 
@@ -894,7 +811,7 @@ B1–B5 是流程内的检查点，与开发路线的 K1–K8 不同，二者不
 | --- | --- | --- |
 | 编译 DSH 测试 | `npm run build-dsh-tests` | 退出 0，产出 `out/` |
 | mocha tdd 半场 | `npm run test-dsh` | `13 passing` |
-| 全量 DSH 测试 | `npm run test-dsh:all` | `13 passing` + `152/152`，合计 165/165 |
+| 全量 DSH 测试 | `npm run test-dsh:all` | `13 passing` + `159/159`，合计 172/172 |
 | 门禁 1 | `npm run verify:dsh-ide-protocol-single-source` | `STATUS: PASS` |
 | 门禁 2 | `npm run verify:dsh-ide-boundary` | `STATUS: PASS` |
 | 门禁 3 | `npm run verify:dsh-ide-projection-golden` | `STATUS: PASS` |
@@ -931,7 +848,7 @@ node --experimental-strip-types --test build/lib/test/dshBuildProvenance.test.ts
 
 ### 4. 测试基线与类型检查
 
-`test-dsh:all` = `npm run test-dsh` + `node --experimental-strip-types --test` 的 7 个 `build/lib/test` 文件 + 1 个插件侧 `.mjs`（`src/vs/platform/dshClient/test/host/ideViewHost.test.mjs`）。`build/package.json` 的默认 `test` 不覆盖这组文件，必须由 `test-dsh:all` 显式列出。
+`test-dsh:all` = `npm run test-dsh` + `node --experimental-strip-types --test` 的 13 个 `build/lib/test` 文件 + 2 个插件侧 `.mjs`（`ideViewHost.test.mjs` / `electronHome.test.mjs`）。`build/package.json` 的默认 `test` 不覆盖这组文件，必须由 `test-dsh:all` 显式列出。
 
 | 分组 | 文件 | 用例数 |
 | --- | --- | --- |
@@ -943,17 +860,19 @@ node --experimental-strip-types --test build/lib/test/dshBuildProvenance.test.ts
 | `dshIdeProjection.test.ts` | golden 回放、事件分类、seq 幂等、稳定 id、600 行折叠、P95 脚手架、架构边界、**真实 DSH 线上事件（斜杠命名 + data 信封）翻译** | 18 |
 | `dshIdeChannel.test.ts` | 通道分发（20 method）、三层过滤、`disposeOwner`、快照纪律、`state.view` 行级校验、`launch` 开窗命令、sessionId 传递与绑定、**follow 帧解包** | 28 |
 | `ideViewHost.test.mjs` | Host 半身：四类事件订阅与归属过滤、唯一 answerer 形态、waterfall 一致性、会话归属、method 映射、Host 端点自解析与发布（不含 cookie）、插件入口 inject 与延迟等待清单一致、**等端口就绪再发布** | 25 |
+| `electronHome.test.mjs` | Electron 主页物化：同卷硬链接 + 目录联接、排除卸载器/7zip/许可文本、版本标记重建、幂等、跨卷拒绝复制、非 Windows 明确失败、载荷缺失 | 7 |
 | `dshIdeTransport.test.ts` | IDE 侧传输适配：鉴权交换、一元信封、remote.mux 流、waterfall 回投、method 映射与拒绝、**连接前不发送** | 14 |
 | `dshIdeConsumer.test.ts` | 消费者：校验、fail-closed（断号/倒退/channelId 变化）、16ms 合并、行级 diff | 10 |
 | `dshIdeUiProjection.test.ts` | 行展示文本：折叠用 preview、非折叠用 text、皆无返回 undefined | 4 |
 | `dshChatAgent.test.ts` | 唯一 Chat Agent：元数据、submit 转发、失败不伪造、**等快照增长后只回显新行**、超时明确说明、取消 | 7 |
 | `dshIdeToSeamChain.test.ts` | DTO 行 → 接缝的**串联**：五种 kind 都被接管、空行被过滤、折叠带 preview、isTrusted 策略 | 5 |
 | `dshIdeLaunchListener.test.ts` | IDE 侧开窗接单：报到一次不重复、失败重试、onLaunch 抛错不断循环、畸形载荷、dispose 停止 | 5 |
-| **合计** | — | **13 + 152 = 165** |
+| **合计** | — | **13 + 159 = 172** |
 
-- 当前唯一基线：**165/165**（mocha `13 passing` + node:test `152/152`），实测退出 0。
+- 当前唯一基线：**172/172**（mocha `13 passing` + node:test `159/159`），实测退出 0。
 - mocha 的 13 个用例来自 `packaging.test.mjs`（7 项）与 `dshChatSeamMap.test.js`（6 项）；第三个 glob `chatClient/*.test.mjs` 当前无匹配文件（既有现象，不减少测试项）。`client.test.mjs`（原零用例、仅 harness）与 `dshClientService.test.ts`（原 stale、不兼容）已在全面清理（2026-11-08）中删除，不计入基线。
 - 上述两文件（stale / 零用例）已在全面清理（2026-11-08）中删除，原登记见第 7 章 §3。
+- 上游 sanity 用例 `test/sanity/src/serverWeb.test.ts` 与 WSL web 用例已随 server-web 目标删除，不在 `test-dsh:all` 的 172/172 基线内，也不减少 DSH 测试项；删除登记见第 7 章 §7.6。
 - 类型检查判据：全仓既有 electron 类型解析错误集中在 `app.ts`，改动前后基线对比确认非 DSH 改动引入；**变更文件 0 错误**即为通过。
 - 穷举性验证（P2 出口）：临时新增 `IdeEventType` 变体 → `tsc` 必须报 `TS2322: not assignable to type 'never'` → 撤回 → `git diff --stat` 无残留 → `tsc` 复跑 0 错误。
 
@@ -963,7 +882,7 @@ node --experimental-strip-types --test build/lib/test/dshBuildProvenance.test.ts
 - 阈值：`ROWS_P95_BYTE_LIMIT = 512 * 1024`；相关常量 `MAX_ROWS = 600`、`RESULT_PREVIEW_LIMIT = 240`。
 - 固定序列：① 下调 `MAX_ROWS` → ② 收紧 `preview` 折叠阈值 → ③ 重新生成并更新 `golden/basic-session.json` → 重新测量，直至 P95 ≤ 512 KiB。
 - 边界：这三次调整统一标注为「参数校准，非架构变更」，不改 DTO 形状、不改通道形状；当前无真实样本时用 mock 样本搭建回放脚手架，不阻塞 P2。
-- 当前态：未执行（脚本内 `PENDING(2.5)`）。
+- 执行记录：未执行（脚本内 `PENDING(2.5)`）。
 
 ### 6. 真机验收（9 项，固定顺序）
 
@@ -972,9 +891,9 @@ node --experimental-strip-types --test build/lib/test/dshBuildProvenance.test.ts
 3. `approval/request` 两边弹出，任一窗口 resolve 即消费，重复决议返回 `ALREADY_RESOLVED`。
 4. `user-questions/request` 同上。
 5. 关闭 IDE 窗口不取消 DSH 侧会话、审批或生成。
-6. IDE 内终端可开，PTY 数据流走原生 `node-pty`；`node-pty` 按宿主 Electron 44.7.0 的 `NODE_MODULE_VERSION` 编译（`1.143.1` 是 VS Code 版本号，不是 ABI）。
+6. 原生 IDE 窗口内终端可开，PTY 数据流走原生 `node-pty`；`runtime/app/out` 须含 `ptyHostMain` 入口，5 个随包原生模块（node-pty、sqlite3、spdlog、watcher、windows-process-tree）在宿主 Electron 44.7.0 下的 NAPI/ABI 加载以冒烟实测为准（`.npmrc` 仍为 `target="43.7.7"`；`1.143.1` 是 VS Code 版本号，不是 ABI）。
 7. 上游升版后四条门禁状态符合 §9、4 个注入点 patch 可重放。
-8. AI Chat 面板可见且 DSH 内容回填。
+8. 原生 IDE 窗口内 AI Chat 面板可见且 DSH 内容回填（观测方式不变，位置随 §0 R1 修订）。
 9. 会话头部「DSH-IDE」按钮恢复开窗；`ping` / `inlineComplete` 恢复；语音服务未就绪时入口明确不可用且不启动本地识别后端。
 
 九项全部通过才满足 第 3 章 的 K7 前置部分。
@@ -996,6 +915,7 @@ node --experimental-strip-types --test build/lib/test/dshBuildProvenance.test.ts
 2. 包内含 `runtime/app` appOnly 载荷、91 个内置扩展、`chat-render/dist/dsh-chat.js` / `dsh-chat.css` / `PROVENANCE.md` / `LICENSE-DSH`、`runtime/build-provenance.json`。
 3. `PROVENANCE.md` 逐文件 sha256 与源一致；`NOTICE.md` 与 `LICENSE` 原文保留。
 4. 提交信息写清「做了什么 / 门禁实测 / 未完成项」；`git status --short` 无临时产物，显式 `git add <文件>`。
+5. 重打包产物不含 `runtime/ide-server` 与 `runtime/app/out/**/*.js.map`；`dsh-ide-pack` 当前绑定非 minified `out-vscode`，`stripSourceMapsInPackagingTasks = isCI`（本地为 false），落点见第 8 章 §8.2.5。实测 tgz 体积须写回第 8 章 §8.2.5 的体积表；未重打前不得标「<100 MB 达成」。
 
 ### 9. 门禁状态语义与验收口径
 
@@ -1035,16 +955,51 @@ node --experimental-strip-types --test build/lib/test/dshBuildProvenance.test.ts
 
 每阶段出口判据实测后，按「阶段 / 命令 / 结果 / 未完成项」四字段记录；未执行的命令如实标注「未跑」，禁止写「门禁全过」这类模糊表述。历史验证数值属历史记录，以 git history 与本章 §4 的当前基线为准，不在本章重复。
 
+**每轮回写（代码或文档改动都适用）**：收尾时必须更新 §0.1 当前项目情况、第 7 章 §3 唯一待办清单（逐项改「是否完成」与「最后核对」）、第 7 章 §7.7 每轮更新记录（新增一行，写明本轮改动、待办变化、快照与核验结果），并跑 `verify:docs-graph` 校验三处日期 / commit 与快照数值一致。提交信息须写明本轮待办变化与脚本输出的统计；[`AGENTS.md`](../AGENTS.md) §6 是同一条纪律。
+
 #### 10.1 文档结构核验（引用图与术语唯一）
 
-每次文档结构调整后，按 [`README.md`](../README.md) §4.1 的引用图规则执行三项核验，结果写入提交信息：
+每次文档结构调整后，按 [`README.md`](../README.md) §4.1 的引用图规则执行四项核验，结果写入提交信息：
 
 1. 抽取各文档头部 blockquote 段的跨文档链接构成**定义依赖图**，用传递闭包检查 `reach[i][i]`，环数必须为 **0**；同时核对 [`README.md`](../README.md) §4.1 的 Mermaid 图注**边数 / 节点数 = 脚本实测 `DEF_EDGES` / 节点数**（当前 3 / 3），不一致即判文档漂移。
-   核验脚本：`npm run verify:docs-graph`（`build/lib/dsh/verify/dshDocsGraph.mjs`，串联本节三项检查；`PASS` 退出 0，任一不符退出 1）。
+   核验脚本：`npm run verify:docs-graph`（`build/lib/dsh/verify/dshDocsGraph.mjs`，串联本节四项检查；`PASS` 退出 0，任一不符退出 1）。
 2. `git grep -nE '^## .*术语'` 必须只有 `README.md:## 2. 统一术语` 一处；L1–L5 不得出现术语表或术语重定义。
 3. 全仓 `唯一定义` / `唯一职责` 声明按主题去重，不得有两个文件声称定义同一主题。
+4. **状态单一性与每轮回写**：第 3 章 §6 表必须恰好 8 行 P0–P7，状态值限于 `已完成` / `进行中` / `未开始` / `未满足出口`；三份规格文档除该表外不得出现以 `| P<n> |` 开头的阶段状态行，`- **当前态**：` 行必须指向第 3 章 §6，也不得出现 `dshDocsGraph.mjs` 中 `STALE_STATUS_LITERALS` 列出的过期状态字面量；`README.md` §7 不得写阶段状态细节。另校验 §0.1 项目快照、第 7 章 §3 待办清单（`是否完成` 限于枚举、每行有依据与核对日期）、§7.7 更新记录三者齐全，且日期 / commit 与 §3.6「最后实测」一致、快照数值仍能在唯一真源中找到；`PASS` 输出待办统计（已完成 / 未完成 / 待核对）与轮次数。阶段状态违规输出「文件:行号 + 应指向第 3 章 §6」，三处一致性违规输出具体不一致字段，均退出 1。
 
 正文中的导航链接允许双向、不参与定义依赖图，但不得复制定义；定稿核验测得的双向导航对与分类结果登记在第 7 章 §7.5。
+
+#### 10.2 阶段实测沿革与遗留记录（P4 / P5）
+
+本节只保存**实测记录与遗留事实**，不是阶段状态；阶段状态见第 3 章 §6，实现差距见第 7 章 §3。记录按 §10 的四字段口径（阶段 / 命令 / 结果 / 未完成项）维护。
+
+**P4 / K5 视图观测**
+
+- 已落地：`DshIdeConsumer`（校验 / fail-closed / 16ms 合并 / 行级 diff，10 项单测）、`DshIdeUiProjection`（4 项）、`DshClientService` 真实通道调用、`dshChatSeam` 单接缝（仅在收到真实 ready 行后打开）、**唯一 Chat Agent `DshChatAgent`（6 项）**。
+- VS Code 的 Chat 面板只在一次真实 request 的 response 里渲染 `IChatProgress`（`IChatResponseModel.acceptResponseProgress` 必须绑定 `ChatRequestModel`）；入口只有 `IChatService.sendRequest()`，由用户输入触发，已核实 `IChatSessionItemController` 无「向对话区主动推内容」的 API。因此观测须在**原生 IDE 窗口内**由用户发一条消息；绕过 `sendRequest` 改模型属于伪造会话状态（第 1 章 §4.5）。**观测记录：尚无渲染截图 / 观测输出**（第 5 章 §6 第 8 项）。
+- 连接缺口（2026-11-09 已修）：`DshClientService.openView({ view: 'chat' })` 原不带 `sessionId`，`backend.follow(undefined, …)` 只订阅 `$events`，拿不到会话内容。修法：开窗方经 `openEmptyWindow` 的 `userEnv` 传 `DSH_IDE_SESSION`，IDE 侧在 `openView({ view:'chat', params:{ sessionId } })` 带上它；会话仍由 DSH 决定（不变量 I4）。
+- 真机复核：`FRAMES=0` 的真因是 `session/follow` 的帧为 `{ type:'snapshot', records:[{type:'event', event:{…}}] }`，而 `IdeViewService.receive()` 把整帧喂给 translator，translator 只认单条事件。修法：新增 `unwrapFollowFrame()` 统一解包 `snapshot.records` / `event` / `assistant-stream`，并把 `DshIdeBackend.follow` 契约明确为「回调收到**原始帧**」。
+- 修复后实测（`session-20be9600…`，323 条记录）：`FRAMES=1`、`READY=1`、**`ROWS=96`**（assistant 45 / tool 44 / user 5 / system 2），`version` 从 `2` 严格递增；这是「真实 DSH 会话 → 投影行」首次端到端成功。
+- 开窗按钮两个真因（2026-11-09）：① 端点写在 `<plugin>/runtime/host-endpoint.json`，而 `IdeRemoteService` 只用 `root`（profile 根）拼接 → `index.js` 传 `pluginRoot`，`endpointCandidates()` 优先插件目录、失败信息带上查过的路径；② `launch()` 只检查端点存在就返回 `ok:true`，`DshIdeChannel` 的 `launch` 命令全仓没有调用方 → 新增 `DshIdeLaunchListener`（`ide.registerIdeClient(clientId)` 报到 + `ide.pollLaunch(clientId)` 轮询），Host 侧 `ideClients` 注册表分发。`dshIde` 是 IDE 自己的 IPC 通道，Host 在另一进程无法跨进程调用它。
+
+**Electron 主页与承载实测（2026-11-09）**
+
+1. `ELECTRON_RUN_AS_NODE=1` 残留 → Electron 以 Node 模式跑 `out/main.js`，报 `SyntaxError: The requested module 'electron' does not provide an export named 'app'`；清掉该变量即可。
+2. 未清环境就传 `--user-data-dir` 会与运行中的 DSH 争用缓存，报 `Unable to move the cache: 拒绝访问 (0x5)`；`product.json` 的 `dataFolderName = ".dsh-ide-oss"` 已与 DSH 隔离。
+3. Electron **打包版**优先加载 `<install>/resources/app.asar`；把 `runtime/app` 作为首个位置参数不覆盖，窗口标题仍是 `DeepSeek-Harness`。
+4. 要直接跑该 exe 的载荷只能改 DSH 安装目录，属硬边界越界，**不做**。
+5. `runtime/app` 是 appOnly 载荷（tgz 内 0 个 `.exe` / `.pak` / `.dat`）；物化 Electron 主页（硬链接 exe + 目录联接 + `resources/app` 指向载荷）后窗口标题 `DSH IDE`。上述四次实测证明的是「直接运行宿主 exe」不可行，**不是原生窗口不可行**，且该实测满足 §0 R1 的四条边界。
+
+**已废止的历史实测：server-web 页面承载**
+
+2026-11-09 曾用 `out/server-main.js` + `--without-connection-token --host 127.0.0.1 --port 0` 起官方 server 模式（首页 `GET` 返回 200 / 4459 B workbench HTML），Host 侧 `idePageUrl()` 返回 `http://localhost:62239`，client 半身在 `sidebar.right.pane.tab` 以 iframe 承载。该次实测把 `DSH_IDE_SERVER_ENTRY` 指向仓库开发态入口，打包产物中从未有该入口。构建目标与 staging 已删除（登记见第 7 章 §7.6），此形态不作为可选路径。
+
+**未完成项（按 AGENTS §6 如实登记）**
+
+- 硬链接 home 的窗口行为依据 2026-11-09 既有实机记录，本轮未重启 GUI 复核（D33 维持未完成）。
+- 删除 server-web 后的重打包与体积实测未跑（D29 / D30）；四条门禁 3 `PASS` + 1 `PENDING`、`test-dsh:all` 172/172 与完整 `tsc --noEmit`（src 934 / build 558 条既有基线错误，变更文件 0 错误）已在本轮 `6546e5c9` 复核。压缩后节省仍为按 gzip 比例的估算（见第 8 章 §8.2.5）。
+- 文档结构核验（`verify:docs-graph`）与断链检查结果写入本轮两提交信息；提交已按「代码侧 / 文档侧」拆分（D34 已完成），各自登记门禁实测与未完成项。
+- P5 收尾缺口（Electron 主页单测已闭环；开窗 GUI 复核、终端载荷、双窗口镜像）逐项登记见第 7 章 §3。
 
 ---
 
@@ -1159,26 +1114,50 @@ e:/DSH-IDE/                              git 仓库根 / 唯一代码树
 
 同时立新骨架：`dshIdeProtocol.ts`、`dshIdeChannel.ts`、`ide-view-service.ts`、`dshClientService.ts` 重写为消费 `dshIde` 骨架，`app.ts` 改为唯一 `registerChannel(DSH_IDE_CHANNEL, …)`。
 
-### 3. 当前态残留登记
+### 3. 待办清单（唯一，含完成标记）
 
-下表是代码实况与交付态契约之间的差距。处置规则唯一：在「归属阶段」列对应的 P 阶段内按路线处理，不新增并行阶段。
+本表是全仓**唯一待办真源**：把要做的事逐项列出并标记是否完成，不按章节分散；阶段状态见第 3 章 §6，实测记录见第 5 章 §10.2。「是否完成」枚举：`已完成` / `未完成` / `待核对`；「最后核对」为 `—` 表示尚未复核，不计入已核对。**每轮改动收尾必须回写本表**（见第 5 章 §10、[`AGENTS.md`](../AGENTS.md) §6），处置只在「归属阶段」对应的 P 阶段内进行，不新增并行阶段。
 
-| 项 | 实况 | 归属阶段 |
-| --- | --- | --- |
-| `index.js` | 已注册 `IdeRemoteService` 并创建 Host 半身桥接（订阅四类官方事件 + 唯一 answerer）；传输端口与 IDE 主进程接线未完成 | P5 |
-| `common/env.js` | `DSH_IDE_ENDPOINT` / `DSH_IDE_INTERACTIONS` 两个常量在目录内无消费者 | P5 |
-| `common/legacy-account-endpoints.ts` | 账号端点仍由 `globalCompositeBar.ts` 引用，尚未归并入新协议 | P5 |
-| `client/client.js` | `postJson()`、`body`、`showError` 均为死代码；点击抛 `Error('launch chain removed; pending DshIdeChannel.open')` | P5 |
-| `common/dshClientService.ts` | 骨架：`getStatus()` 恒 `false`，`call()` / `connect()` 恒 `REBUILD_ERROR`，`openWritableStream()` 不发 channel command | P4 |
-| `src/vs/platform/dshClient/PROVENANCE.md` | 记录的文件大小、落地文件数量与 `test-dsh` 命令为删除前快照，已过期；须按 §4 规则更新 | P7 |
-| `dshChatSeam.ts` | `dshChatRenderEnabled` 默认 `false`；`setDshChatRenderEnabled` 全仓无调用方，接缝恒休眠 | P4 |
-| Chat 面板 | `chat.view.contribution` 无条件注册，容器仍在；DSH 内容为空，显示「连接层重建中」 | P4 |
-| `translator.ts` / `ide-view-projector.ts` | `IdeEvent.streaming`、`ARGS_PREVIEW_LIMIT`、`ROWS_P95_BYTE_LIMIT` 定义后未被生产代码使用（仅常量与测试引用） | P3 / P6 |
-| `DshIdeViewService` 后端端口 | Host 半身（`index.js` + `host/ide-view-host.js`）已订阅四类官方事件并注册唯一 answerer；与 IDE 主进程之间的传输端口仍未接线，端口实现仍是 `UnavailableDshIdeBackend` | P5 |
-| 打包输出路径 | 已修（2026-11-09）：仓库扁平化后 `buildRoot`/`packageTask`/`patchWin32DependenciesTask`/`generateNodeCompileCacheTask` 仍用 `path.dirname(root)`，产物与 staging 落到仓库外的 `E:\dist`，导致 `runtime/app` 为空、tgz 只有 157 KB。现统一改为 `root` | 已闭环 |
-| 扩展类型依赖断链 | 已修（2026-11-09）：767 个目录联接指向已迁移的 `E:\vscode-dsh\...`（含 11 个 `@types/node`、`extensions/node_modules` 全量），导致 `tsgo` 报 `Cannot find type definition file for 'node'`。已批量重定向到本仓库对应路径，移除 42 个无真实目标的孤儿联接 | 已闭环 |
-| 7 个 method 的官方落点 | `rewind` / `loadOlder` / `setEffort` / `setPermissionPreset` / `runCommand` / `listCommands` / `deleteSession` 在 DSH 公开接口中未核对到确切方法，当前一律返回 `feature-unavailable` 并写明缺口，不猜方法名、不伪造成功 | P5 |
-| `deleteSession` 语义缺口 | 第 8 章 §8.2.4 要求直接物理删除；DSH `sessions` 只有 `get` / `list`，会话由拥有它的 fiber 生命周期决定，无公开物理删除接口。当前明确拒绝，待 P5 与 DSH 侧确认删除能力归属后再实现，禁止用「关闭视图」冒充删除 | P5 |
+| 编号 | 待办 | 归属阶段 | 是否完成 | 依据 / 真源 | 最后核对 |
+| --- | --- | --- | --- | --- | --- |
+| D01 | 页面路线清零：按钮改 `remote.ide.launch(workspace)`，删 `sidebar.right.pane.tab` / `.title` 的 iframe 注册 | P5 | 已完成 | `client/client.js`；第 7 章 §7.6 | 2026-11-09 |
+| D02 | 删 `idePageUrl()` / `ensureIdePage()` 与 `@Remote` 描述符里的对应项 | P5 | 已完成 | `host/ide-service.js`；第 7 章 §7.6 | 2026-11-09 |
+| D03 | Electron 主页 6 项加固：跨卷拒绝复制、`.marker.json` 版本重建、构建 `Promise` 互斥、非 Windows 明确失败、无关文件排除、`spawn` 不传载荷位置参数 | P5 | 已完成 | `host/electron-home.js`；§0 R1 修订 | 2026-11-09 |
+| D04 | Electron 主页 7 项单测并纳入 `test-dsh:all` | P5 | 已完成 | `electronHome.test.mjs`、`package.json`；第 5 章 §4 | 2026-11-09 |
+| D05 | `index.js` Host 桥接与 IDE 侧官方传输端口接通 | P5 | 已完成 | 第 1 章 §2.1、第 3 章 §6 P3 依据 | 2026-11-09 |
+| D06 | `DshIdeViewService` 后端真实端口装配（替换 `UnavailableDshIdeBackend`） | P5 | 已完成 | `DshIdeBackendFactory`；第 2 章 §7 E8 | 2026-11-09 |
+| D07 | `dshClientService.ts` 改为真实通道调用 | P4 | 已完成 | 第 1 章 §2.1 | 2026-11-09 |
+| D08 | `dshChatSeam.ts` 单接缝启用（唯一调用方，仅真实 ready 行后打开） | P4 | 已完成 | 第 5 章 §10.2 | 2026-11-09 |
+| D09 | 打包输出路径统一为 `root`（修复 `runtime/app` 为空、tgz 只有 157 KB） | P0 | 已完成 | 第 7 章 §3 历史登记 | 2026-11-09 |
+| D10 | 扩展类型依赖断链重定向并移除 42 个孤儿联接 | P0 | 已完成 | 第 7 章 §3 历史登记 | 2026-11-09 |
+| D11 | 每轮回写 §0.1 项目情况、本清单与 §7.7 更新记录，并跑 `verify:docs-graph` | 常设 | 已完成 | 第 5 章 §10、AGENTS §6；本轮已建立，每轮重复执行 | 2026-11-09 |
+| D12 | `ide-service.js` 的 launch / register / poll 单测（现靠 launch listener 与真机覆盖） | P5 | 未完成 | 第 7 章 §3 原登记、第 5 章 §4 | 2026-11-09 |
+| D13 | 20 个 method 功能接线：审批、问卷、权限预设、模型、effort、斜杠命令、resume / fork / rewind、goal / todo / usage / TPS / workingActivity 投影、`ping` / `inlineComplete`、账号、语音、删除会话 | P5 | 未完成 | 第 3 章 P5 活动、第 2 章 §4 | 2026-11-09 |
+| D14 | 双窗口镜像与 K6 出口判据（含关闭 IDE 窗口不取消 DSH 会话） | P5 | 未完成 | 第 3 章 P5 出口判据、第 1 章 §4 | 2026-11-09 |
+| D15 | 语音未就绪时入口明确不可用，且不启动本地识别后端 | P5 | 未完成 | 第 3 章 P5、第 5 章 §6 第 9 项 | 2026-11-09 |
+| D16 | 7 个 method 的 DSH 官方落点核对（`rewind` / `loadOlder` / `setEffort` / `setPermissionPreset` / `runCommand` / `listCommands` / `deleteSession`） | P5 | 未完成 | 第 7 章 §3 原登记 | 2026-11-09 |
+| D17 | `deleteSession` 删除能力归属确认与实现（禁止用「关闭视图」冒充删除） | P5 | 未完成 | 第 8 章 §8.2.4 | 2026-11-09 |
+| D18 | `common/legacy-account-endpoints.ts` 归并入新协议 | P5 | 未完成 | 第 7 章 §3 原登记 | 2026-11-09 |
+| D19 | K5 真机观测：原生 IDE 窗口内 Chat 面板显示 DTO 投影内容 | P4 | 未完成 | 第 3 章 P4 出口判据、第 5 章 §6 第 8 项 / §10.2 | 2026-11-09 |
+| D20 | `ptyHostMain` 加入 `desktopEntryPoints`，复用 DSH `node-pty` 1.2.0-beta.15 prebuilds | P6 | 未完成 | 第 8 章 §8.2.5、第 3 章 P6 | 2026-11-09 |
+| D21 | 9 项真机验收（固定顺序） | P6 | 未完成 | 第 5 章 §6 | 2026-11-09 |
+| D22 | P95 校准 ≤ 512 KiB 并重生成 golden | P6 | 未完成 | 第 5 章 §5 | 2026-11-09 |
+| D23 | NAPI/ABI 加载冒烟（`.npmrc` 43.7.7 编译产物在宿主 Electron 44.7.0 下加载） | P6 | 未完成 | 第 3 章 P6 ⑥、第 5 章 §6 第 6 项 | 2026-11-09 |
+| D24 | IDE 终端冒烟（PTY 数据流走原生 `node-pty`） | P6 | 未完成 | 第 3 章 P6 ⑦ | 2026-11-09 |
+| D25 | 四条门禁 + `test-dsh:all` + 完整 `tsc --noEmit` 全量复跑 | P6 | 已完成 | 本轮：四门禁 3 `PASS` + 1 `PENDING`；`test-dsh:all` 172/172；完整 tsc 变更文件 0 错误（基线见第 5 章 §10.2） | 2026-11-09 |
+| D26 | 上游核对：`contract` 启用失败断言、4 个注入点指纹一致 | P6 | 未完成 | 第 5 章 §7 / §9.3 | 2026-11-09 |
+| D27 | CI 接入同一组门禁与 `test-dsh:all` 命令 | P6 | 未完成 | 第 5 章 §1、第 7 章 §7.4 | 2026-11-09 |
+| D28 | 历史阶段标记与失效章节引用清理 | P6 | 未完成 | 第 7 章 §7.1 / §7.3 | 2026-11-09 |
+| D29 | 重打包：无 server-web、剔 `*.js.map`、切 minified | P7 | 未完成 | 第 8 章 §8.2.5（6）、第 5 章 §8 第 5 项 | 2026-11-09 |
+| D30 | 重打包体积实测并写回体积表 | P7 | 未完成 | 第 8 章 §8.2.5（2）、第 7 章 §7.6 | 2026-11-09 |
+| D31 | `PROVENANCE.md` 版本 / commit / sha256 更新，`NOTICE.md` 与 `LICENSE` 原文核对 | P7 | 未完成 | 第 3 章 P7 活动、第 5 章 §8 | 2026-11-09 |
+| D32 | `src/vs/platform/dshClient/PROVENANCE.md` 删除前快照更新 | P7 | 未完成 | 第 7 章 §3 原登记、README §4 | 2026-11-09 |
+| D33 | 真机 GUI 复核硬链接主页的窗口行为 | P5 | 未完成 | 第 5 章 §10.2 未完成项 | 2026-11-09 |
+| D34 | 提交拆分为 docs-only 与代码侧两个提交，各自登记门禁实测 / 未完成项 | P7 | 已完成 | 代码侧 `6546e5c9` + 本文档侧提交；两提交信息分别登记门禁实测与未完成项 | 2026-11-09 |
+| D35 | `common/env.js` 两个常量的消费者逐项复核 | P5 | 待核对 | 第 7 章 §3 原登记 | — |
+| D36 | `translator.ts` / `ide-view-projector.ts` 三个常量的生产引用复核 | P3 / P6 | 待核对 | 第 7 章 §3 原登记 | — |
+
+统计（由 `verify:docs-graph` 输出）：13 已完成 / 21 未完成 / 2 待核对，共 36 项；每轮回写时按实际完成情况改「是否完成」与「最后核对」，并在 §7.7 增加一行。
 
 **§3.1 架构裁定（2026-11-09，K4 前置）**
 
@@ -1191,15 +1170,15 @@ e:/DSH-IDE/                              git 仓库根 / 唯一代码树
 
 **裁定结论（2026-11-09，按上述层级；并据项目所有者对 DSH-IDE 定位的澄清修订）**：
 
-1. **DSH-IDE 是 DSH 的 bundle 插件、对 DSH 应用的拓展，不是独立应用或独立进程**（项目所有者澄清）。它是把 VS Code 改造为 DSH 插件、给 DSH 增加 IDE 页面并保留部分 IDE 功能的结果；「一体」是天然前提，而非需跨边界合并的目标。
+1. **DSH-IDE 是 DSH 的 bundle 插件、对 DSH 应用的拓展，不是独立应用或独立进程**（项目所有者澄清）。它是把 VS Code 改造为 DSH 插件、给 DSH 增加**原生 IDE 窗口**（复用宿主 Electron，见 §0 R1 修订）并保留部分 IDE 功能的结果；「一体」是天然前提，而非需跨边界合并的目标。
 2. 不变量 I1 维持「**单根单宿主**」：全仓只有一个 Cordis 根 `dshCtx`，由 DSH 持有并贯穿 DSH-IDE；IDE 侧不持有独立 `dshCtx`、不注册第二份 DSH 服务、不产生第二个 Cordis 根，也不向 VS Code 容器注入 DSH 服务。
 3. 第 1 章 §7 禁止项维持：**禁止私有跨进程管道 / 私有握手**。DSH 应用内部（DSH 主进程外壳与 DSH Host 半身之间）只经官方客户端传输（Host 在 `--host 127.0.0.1 --port 0` 提供的官方 HTTP/WS）。这是 DSH 自身协议，不是第二条。
 4. `DshIdeBackend` 实现形态：在 IDE 侧做官方客户端传输适配（P5 落地），把官方事件翻译成中立 `IdeEvent` 后交给 `DshIdeViewService` 投影；适配层文件必须放在 `platform/dshClient/common` 与 `electron-main` 之外，以保持 `boundary` 门禁。
 5. 因此 P3 的 `DshIdeChannel` / `DshIdeViewService` 保持不变：二者在 IDE 侧工作，`IdeViewHost` 仍是通道层与 DSH 能力域之间的唯一接缝。
 
-> **关于「同进程 / 单进程」的澄清**：DSH-IDE 作为 DSH 插件，运行在 DSH 应用之内——DSH 把 bundle 插件装载进其 Host 半身（B1 记录的 `spawn()` 子进程，承载 `dshCtx`），IDE 页面作为 DSH 应用的一个 UI 面呈现。二者同属一个 DSH 应用（非独立 app），其内部进程边界只走官方传输。故**不存在「把 Cordis 根强行塞进 DSH 桌面端 Electron 主进程」这类跨边界动作**：`dshCtx` 本就是 DSH 的，DSH-IDE 作为拓展直接复用。原 §3.1 曾把「IDE 与 Host 同进程」列为需改 DSH `apps/desktop` 的 B2② 选项并判定为越界不可行——该表述有误，已据澄清删除：DSH-IDE 从来就在 DSH 之内，无需越界。
+> **关于「同进程 / 单进程」的澄清**：DSH-IDE 作为 DSH 插件，运行在 DSH 应用之内——DSH 把 bundle 插件装载进其 Host 半身（B1 记录的 `spawn()` 子进程，承载 `dshCtx`），原生 IDE 窗口作为 DSH 应用的一个窗口呈现（由插件复用宿主 Electron 拉起，见 §0 R1 修订）。二者同属一个 DSH 应用（非独立 app），其内部进程边界只走官方传输。故**不存在「把 Cordis 根强行塞进 DSH 桌面端 Electron 主进程」这类跨边界动作**：`dshCtx` 本就是 DSH 的，DSH-IDE 作为拓展直接复用。原 §3.1 曾把「IDE 与 Host 同进程」列为需改 DSH `apps/desktop` 的 B2② 选项并判定为越界不可行——该表述有误，已据澄清删除：DSH-IDE 从来就在 DSH 之内，无需越界。
 
-K4 仍**未达成**：裁定解除了设计歧义，但第 4 条实现（官方客户端传输适配）属 **P3 活动**（K4 前置），尚未落地。写回 P5 会造成「K4 等 K5」的循环依赖，故明确归 P3。P4 不得启动。
+**历史裁定记录（当时 K4 未达成；现状以第 3 章 §6 为准）**：裁定解除了设计歧义，第 4 条实现（官方客户端传输适配）当时归 **P3 活动**（K4 前置）；写回 P5 会造成「K4 等 K5」的循环依赖，故明确归 P3。该裁定不记当前状态，P3 的状态见第 3 章 §6。
 | `DSH_IDE_API_VERSION` | 已对齐 `0.2.2-rc.1`（P3） | 已闭环 |
 | `IdeViewSnapshot` 与 `DshIdeSnapshot.state` | 已并入 `state.view`，`wireRevision` 升为 2，行级校验随真源落地（P3） | 已闭环 |
 | 错误码 | 五个码全部落地（`feature-unavailable` / `invalid-argument` / `ALREADY_RESOLVED` / `SESSION_SWITCHED` / `SNAPSHOT_STALE`）；`SNAPSHOT_STALE` 的消费点在 P4 | 已闭环（常量）/ P4（消费点） |
@@ -1258,7 +1237,7 @@ git grep -nE "dshEventMap\.ts|dshSessionUri\.ts|dshChatSessions\.ts|dshChatProvi
 | 记录 | 数值 / 结论 |
 | --- | --- |
 | 历史数值与环境守卫 | 当前判据见第 5 章 §4；环境守卫固定执行方式见 §2.1；本表不再重复数值 |
-| ABI 口径 | `node-pty` 按宿主 Electron 44.7.0 的 `NODE_MODULE_VERSION` 编译；`1.143.1` 是 VS Code 版本号，不是 ABI |
+| ABI 口径（2026-11-09 核对） | 宿主 Electron 44.7.0（内嵌 Node 24.21.0、`modules = 149`）；`.npmrc` 仍为 `target="43.7.7"`，随包 5 个原生模块全部走 NAPI，故按第 3 章 P6 降级为 ABI/NAPI 加载冒烟实测；`1.143.1` 是 VS Code 版本号，不是 ABI |
 | 门禁实跑修正 | P1 实跑抓出并修正：`jsonValue` 与上游同名导出冲突（单源扫描限定 DSH-IDE 作用域）、2 个 `VSCODE_PATCH_POINTS` 路径不存在、依赖方向断言误判注释、遗留未使用的 `positiveInteger` |
 
 当前门禁与测试的实测状态以第 5 章 §3–§4 为唯一依据。
@@ -1322,8 +1301,25 @@ git grep -nE "dshEventMap\.ts|dshSessionUri\.ts|dshChatSessions\.ts|dshChatProvi
 | 删除的根文件 | `README.vscode.md`、`AGENTS.vscode.md`、`.mcp.json`、`.lsifrc.json`、`.mention-bot`、`.mailmap`、`.git-blame-ignore-revs`、`cglicenses.json`、`.vscode-test.js` |
 | 保留 | `.eslint-plugin-local/`（lint 依赖）、`.vscode/`（`extensions/` 被构建引用）、`build/next/`（`build-dsh-tests` 依赖）、`build/dictation-runtime/`（`gulpfile.vscode.ts` 直接 import） |
 | 插件复用 | `client.js` 头部按钮改用宿主 `@deepseek-ai/dsh-client-ui-primitives` 的 `Button`（ghost/sm），去掉手写 `<button>` 与内联样式；`packaging.test.mjs` 7/7 通过 |
-| 体积口径 | 压缩包 74,147,715 字节（<100 MB）；解压安装 285 MiB；安全瘦身目标 200–210 MiB，详见 §8.2.5 |
-| 文档核验 | 定义依赖图 3 节点 / 3 边 / 0 环；术语表唯一；无断链 |
+| 体积口径（实测，2026-11-09） | 现有 `dist/dsh-ide-2.0.0.tgz` = **160,112,030 B（152.7 MiB）**，是删除 server-web **之前**的产物：包内未压缩含 `runtime/ide-server` 164.2 MiB、`runtime/app/out/**/*.js.map` 132.6 MiB。历史登记的 74,147,715 B 实为「非 map 的 `out` 70.8 MiB」，不是整包口径，已废止；删除后重打包未跑，`<100 MB` 是待实测目标。详见第 8 章 §8.2.5 |
+| 删除的 server-web 构建与测试 | `dsh-ide-server-web` gulp 任务与 `runtime/ide-server` staging、`build/next` 的 server-web 目标、`build/gulpfile.reh.ts` / `build/lib/esbuild.ts` / `build/next/resources.ts` 的对应分支、上游 sanity `serverWeb.test.ts` 与 WSL web 用例（`test/sanity/src/main.ts`、`wsl.test.ts` 已同步）；`build/` 下已无 `server-web` 引用 |
+| 承载形态修订（R1） | 原生 Electron 窗口 + 复用宿主 Electron 44.7.0；R1 改为交付 / 身份边界（四条可检验边界），[`README.md`](../README.md) §2 新增「Electron 主页」术语；代码残留与收尾项见第 7 章 §3 |
+| 已废止：server-web 页面承载 | 2026-11-09 曾以 `out/server-main.js` + `--without-connection-token --host 127.0.0.1 --port 0` 起官方 server 模式（首页 `GET` 200 / 4459 B），经 `idePageUrl()` 在 `sidebar.right.pane.tab` 以 iframe 承载；`DSH_IDE_SERVER_ENTRY` 当时指向仓库开发态入口，打包产物从未含该入口。构建目标与 staging 已删除，历史实测留痕见第 5 章 §10.2，不构成可选路径 |
+| 状态单一性收敛 | 阶段状态只由第 3 章 §6 唯一状态表承载；其它章节改为实现形状 / 实测记录 / 差距登记并指回该表；`verify:docs-graph` 扩展第 4 项状态核验 |
+| 文档核验 | 定义依赖图 3 节点 / 3 边 / 0 环；术语表唯一；状态单一性 PASS；无断链 |
+| 每轮回写机制 | §0.1 当前项目情况、第 7 章 §3 唯一待办清单、§7.7 每轮更新记录三处联动；`verify:docs-graph` 校验日期 / commit 与快照数值一致 |
+
+#### 7.7 每轮更新记录（每轮新增一行）
+
+每轮改动（代码或文档）收尾在此新增一行，并同步 §0.1 当前项目情况与第 7 章 §3 待办清单；最后一行的「日期 / commit」必须与快照「最后更新」、第 3 章 §6「最后实测」一致，由 `verify:docs-graph` 第 4 项校验。历史记录里的「差距登记」是本清单的前身，不另立第二份清单。纪律见第 5 章 §10、[`AGENTS.md`](../AGENTS.md) §6。
+
+| 轮次 | 日期 / commit | 本轮改动 | 待办变化 | 快照与核验 |
+| --- | --- | --- | --- | --- |
+| 1 | 2026-11-09 / `b81b829f` | 删除 server-web；R1 承载裁定与体积表重测 | 建立差距登记：页面路线、主页加固、终端载荷、重打包未完成 | `docs-graph` PASS（3 节点 / 3 边 / 0 环）；断链 0 |
+| 2 | 2026-11-09 / `b81b829f` | 状态收敛到第 3 章 §6；核验脚本扩展状态单一性 | 差距登记加状态 / 核对日期列 | `docs-graph` PASS；负向测试注入漂移后 FAIL 退出 1 |
+| 3 | 2026-11-09 / `b81b829f` | P5 代码收尾：`client.js` 切 `launch`、`ide-service.js` 删页面方法、`electron-home.js` 6 项加固、7 项单测；基线 172/172 | D01–D04 标记已完成 | `docs-graph` PASS；四门禁 3 `PASS` + 1 `PENDING` |
+| 4 | 2026-11-09 / `b81b829f` | 本轮：建立 §0.1 当前项目情况、第 7 章 §3 唯一待办清单、本节更新记录；核验脚本加快照 / 待办 / 轮次一致性 | 待办清单 36 项（11 已完成 / 23 未完成 / 2 待核对）；D11 常设回写项登记 | `docs-graph` PASS（含快照与待办统计）；断链 0；`git diff --check` 退出 0 |
+| 5 | 2026-11-09 / `6546e5c9` | 复核未提交基线并全量复跑：四门禁 3 `PASS` + 1 `PENDING`、`test-dsh:all` 172/172、完整 `tsc` 变更文件 0 错误；修复 `gulpfile.reh.ts` 未使用参数（TS6133）；按 D34 拆出代码侧提交与本文档提交 | D25、D34 标记已完成；D12–D33 其余项维持未完成 | `docs-graph` PASS（8 阶段 / 13 已完成 / 21 未完成 / 2 待核对 / 5 轮）；断链 0；`git diff --check` 退出 0 |
 
 ---
 
@@ -1331,7 +1327,7 @@ git grep -nE "dshEventMap\.ts|dshSessionUri\.ts|dshChatSessions\.ts|dshChatProvi
 
 ### 8.1 设计基调与总边界
 
-DSH-IDE = 把 VS Code 改造为 DSH 的 bundle 插件，是对 DSH 应用的拓展（非独立应用）：给 DSH 增加 IDE 页面并保留部分 IDE 功能。全仓只有一个 Cordis 根 `dshCtx`，位于 DSH Host 进程；IDE 侧不持有它，只经唯一通道与本机官方客户端传输消费 DSH 下发的中立 DTO（见第 1 章 §1、第 7 章 §3.1）。IDE 窗口只经唯一一条 `IServerChannel`（token `dshIde`）消费 DSH 下发的 `DshIdeSnapshot`；会话、模型、审批、工具、权限、语音均由 DSH 决定，IDE 侧不持有这些状态的第二份定义（不变量 I1–I4，见第 1 章 §1）。
+DSH-IDE = 把 VS Code 改造为 DSH 的 bundle 插件，是对 DSH 应用的拓展（非独立应用）：给 DSH 增加**原生 IDE 窗口**（复用宿主 Electron，见 §0 R1 修订）并保留部分 IDE 功能。全仓只有一个 Cordis 根 `dshCtx`，位于 DSH Host 进程；IDE 侧不持有它，只经唯一通道与本机官方客户端传输消费 DSH 下发的中立 DTO（见第 1 章 §1、第 7 章 §3.1）。IDE 窗口只经唯一一条 `IServerChannel`（token `dshIde`）消费 DSH 下发的 `DshIdeSnapshot`；会话、模型、审批、工具、权限、语音均由 DSH 决定，IDE 侧不持有这些状态的第二份定义（不变量 I1–I4，见第 1 章 §1）。
 
 由此划出三大功能域边界：
 
@@ -1392,7 +1388,7 @@ DSH-IDE = 把 VS Code 改造为 DSH 的 bundle 插件，是对 DSH 应用的拓�
 
 #### 8.2.5 运行时复用桌面端资源与体积边界
 
-本节锁定「插件安装到 DSH 后，哪些桌面端文件可在运行时直接复用、哪些必须随插件打包、哪些禁止复用」。实测基线：DSH 桌面端 `0.2.2-rc.1` 安装版与 `dsh-ide@2.0.0` 安装目录（2026-11-09）。
+本节锁定「插件安装到 DSH 后，哪些桌面端文件可在运行时直接复用、哪些必须随插件打包、哪些禁止复用」。实测基线（2026-11-09 本机）：DSH 桌面端 `0.2.2-rc.1` 安装版、宿主 Electron 44.7.0（内嵌 Node 24.21.0、`process.versions.modules = 149`、NAPI 10）、`dist/dsh-ide-2.0.0.tgz` = 160,112,030 B。**现有 tgz 是删除 server-web 之前的产物**；代码侧删除已完成，重打包后的体积必须重新实测，本节所有「压缩后」数值在标注为估算时不得当作实测。
 
 **（1）安装后可访问的桌面端目录**
 
@@ -1401,34 +1397,37 @@ DSH-IDE = 把 VS Code 改造为 DSH 的 bundle 插件，是对 DSH 应用的拓�
 | `%USERPROFILE%\.dsh\profiles\desktop\node_modules\dsh-ide\` | 插件包：`runtime/app`、`chat-render/`、`host/`、`client.js`、`index.js`、`locale/`、`icon.svg` | 插件自身可读写 |
 | `%USERPROFILE%\.dsh\profiles\desktop\` | profile 清单、`cordis.patch.yml`、`pnpm-lock.yaml`、`node_modules/` | 插件安装与加载 |
 | `<DSH 安装目录>\resources\app.asar\dsh\node_modules\@deepseek-ai\**` | 宿主包：`dsh-client-ui-chat`、`ui-theme`、`ui-primitives`、`client-locale`、`client-resources`、`ui-brand-official`、`dsh-web-frontend` 等 | 只读；Host 可 import，client 经 module table |
-| `<DSH 安装目录>\resources\app.asar.unpacked\` | 原生二进制回退 | 只读 |
-| `<DSH 安装目录>\resources\runtime\` | Node/pnpm/Python 运行时 | 只读 |
-| `%LOCALAPPDATA%\.dsh-ide\` | IDE 的 Electron、extensions、user-data | IDE 自有 |
+| `<DSH 安装目录>`（安装根 `version` 文件） | Electron 44.7.0 发行版：exe 246 MB、locales 49 MB、`resources.pak` 12.4 MB、`icudtl.dat` 10.9 MB、`dxcompiler` 25.8 MB、`ffmpeg` 3.1 MB、`swiftshader` 5.5 MB 等，合计约 **350 MB**；内嵌 Node 24.21.0 | 只读；`ensureElectronHome()` 以硬链接 / 目录联接复用，不整份复制 |
+| `<DSH 安装目录>\resources\app.asar.unpacked\dsh\node_modules\**` | `@vscode/ripgrep` 的 `rg.exe`（5.18 MiB）、`node-pty` 1.2.0-beta.15 的 win32-x64 prebuilds | 只读；按（3）按文件复用 |
+| `<DSH 安装目录>\resources\runtime\` | 独立 Node（约 90 MB）、Python 3.12 + 包（约 160 MB）、pnpm 11.28（约 23 MB） | 只读；IDE 均不需要，不复制 |
+| `%LOCALAPPDATA%\.dsh-ide\` | Electron home（`runtime/electron-home`）、userData（`dataFolderName = ".dsh-ide-oss"`）、扩展 | IDE 自有；与 DSH userData 隔离，单实例锁不冲突 |
 
 渲染进程只有两个 URL 面：宿主 dist 根与 `/plugins/<pkg>/assets/<path>`。后者仅对声明 `"./assets/*": "./lib/assets/*"` 的包生效，且仅支持 `svg/png/webp/jpg/jpeg`；CSS、`woff2`、JSON 不在白名单，渲染进程也没有文件系统通道。
 
-**（2）当前自打包资源（实测 `dsh-ide@2.0.0`）**
+**（2）当前分发物（实测 `dist/dsh-ide-2.0.0.tgz`，2026-11-09）**
 
-| 项 | 大小（字节） | 与桌面端关系 | 处置 |
+| 项 | 未压缩（tar 清单实测） | 压缩后 | 处置 |
 | --- | --- | --- | --- |
-| `runtime/app` | 299,381,810（约 285 MiB） | 不重复：VS Code IDE 载荷；DSH 桌面端不含 VS Code | 保留；`appOnly` 已复用宿主 Electron/Node |
-| `dist/dsh-ide-2.0.0.tgz`（压缩包，tar.gz 同口径） | 74,147,715（约 70.7 MiB） | 压缩分发物；**< 100 MB** | 保持；与安装体积 285 MiB 区分 |
-| `chat-render/dist/dsh-chat.js` / `.css` | 408,062 / 61,448（合计 469,510） | **重复**：与 `runtime/app/out/.../chatRender/` 同一份 | 删除插件根副本，只留 `runtime/app/out/.../chatRender/` |
-| `chat-render/PROVENANCE.md` / `LICENSE-DSH` | 小 | 法律与来源凭据 | 保留 |
-| `icon.svg` / `locale/*.json` | 3,573 / 529 | 插件元数据；运行时按钮图标已用宿主 `/favicon.svg` | 保留（安装前元数据） |
-| `client.js` / `index.js` / `host/` / `common/` | 4,562 / 7,244 / 34,036 / 590 | 不重复 | 保留 |
+| `dist/dsh-ide-2.0.0.tgz` | 680,120,336 B（648.6 MiB，全包） | **160,112,030 B（152.7 MiB，实测）** | 删除 server-web **之前**的产物；重打包待实测 |
+| `runtime/app` | 483.9 MiB | 约 121 MB（按当前 gzip 比例估算） | 保留；包内 0 个 `.exe` / `.pak` / `.dat`，不含 Electron |
+| ├ `runtime/app/out` | 213,351,072 B（203.5 MiB）：`*.js.map` 139,087,696 B（132.6 MiB）+ 非 map 74,263,376 B（70.8 MiB） | — | 打包剔除 `*.js.map` |
+| ├ `runtime/app/extensions` | 164,131,446 B（156.5 MiB） | — | 91 个内置扩展保留，不做裁剪 |
+| ├ `runtime/app/node_modules.asar` | 96,895,848 B（92.4 MiB） | — | 保留 |
+| ├ `runtime/app/node_modules.asar.unpacked` | 27,852,556 B（26.6 MiB） | — | 保留；内含 `rg.exe` 可改复用 DSH |
+| └ `runtime/app/node_modules` 与其余文件 | 约 5.0 MiB | — | `product.json`、许可证、日期文件等 |
+| `runtime/ide-server`（server-web） | 172,169,911 B（164.2 MiB） | 约 39 MB（估算） | 构建目标与 staging 已删除；现有 tgz 仍含，重打包后应为 0 |
+| 插件根其余文件 | 约 0.7 MiB | — | `chat-render/`、凭据、入口、`icon.svg` / `locale/*.json` 保留 |
 
-`runtime/app` 的构成（同一次实测）：`extensions` 115,846,593、`out` 74,990,508、`node_modules.asar` 72,146,952、`node_modules.asar.unpacked` 31,330,250、`node_modules` 4,858,615，其余为 `product.json` 等小文件；全部是 VS Code IDE 载荷，不是 DSH 资源副本。
+其中 `extensions` 在更早一次安装目录实测里的大头为 `mermaid-markdown-features` 47,782,907、`markdown-language-features` 9,449,263、共享 `node_modules` 34,506,641（`typescript` 23,031,995 + `@esbuild` 11,365,750），其余约 24 MB；按 AGENTS §4，Mermaid/Markdown 及其运行依赖必须完整保留，扩展裁剪需产品决策，**不在 <100 MB 路径内**。
 
-其中 `extensions` 的大头：`mermaid-markdown-features` 47,782,907、`markdown-language-features` 9,449,263、共享 `node_modules` 34,506,641（`typescript` 23,031,995 + `@esbuild` 11,365,750），其余扩展合计约 24 MB。按 AGENTS §4，Mermaid/Markdown 及其运行依赖必须完整保留，前三项合计约 91.7 MB 是安装体积的硬下限。
-
-压缩包同口径（tar.gz）实测 74,147,715 字节（约 70.7 MiB），低于 100 MB；285 MiB 是解压安装体积。分发体积看压缩包，磁盘占用看安装体积，两者不可混用。
+**历史数值作废**：第 7 章 §7.6 与本节旧表的 74,147,715 B（约 70.7 MiB）、`runtime/app` 299,381,810 B（285 MiB）来自更早的安装目录实测；其中 74,147,715 B 实际对应的是「非 map 的 `out` 70.8 MiB」，**不是整包**。当前包因带 132.6 MiB map 与完整 extensions 才到 160,112,030 B。分发体积看 tgz、磁盘占用看未压缩，两者不可混用；server-web 删除后的压缩节省、剔 map 与 minified 收益均为**按当前 gzip 比例的估算**，必须以重打包实测为准（见（6）（7））。
 
 **（3）可在运行时直接复用的桌面端资源**
 
 | 资源 | 位置 | 复用方式 | 功能点 | 状态 |
 | --- | --- | --- | --- | --- |
-| Electron / Node 宿主 | DSH 安装目录 | 插件 `appOnly`，不自带 Electron | IDE 启动、终端 PTY、扩展宿主 | 已复用 |
+| Electron 44.7.0 / Chromium（约 350 MB） | DSH 安装根（`version` 文件） | `ensureElectronHome()`：硬链接 exe、目录联接其它目录、`resources/app` 指向插件载荷；不整份复制 | 原生 IDE 窗口 | **必须复用，已生效**；加固项见第 3 章 P5 |
+| 内嵌 Node 24.21.0（`modules = 149`、NAPI 10） | 同上 Electron 内 | 由宿主 Electron 提供，不复制独立 Node 运行时 | IDE 主进程 / 扩展宿主 | 已复用；独立 Node 90 MB、Python 160 MB、pnpm 23 MB 均不需要 |
 | `@deepseek-ai/cordis`、`schemastery`、`typert-protocol` | `app.asar/dsh/node_modules` | `peerDependencies` + Host import | 插件 Host 生命周期、Typert 远程派发 | 已复用 |
 | `react` / `react-dom` / `dsh-client-ui-slots` | 宿主平台单例 | `client.js` 的 `require('react')` + `inject: ['slots']` | DSH 会话头部按钮 | 已复用 |
 | `dsh-client-ui-primitives` 的 `Button` | 宿主平台单例（`@deepseek-ai/dsh-client-ui-primitives`） | `client.js` 的 `require('@deepseek-ai/dsh-client-ui-primitives')` | 会话头部「DSH-IDE」按钮（官方 ghost/sm 样式） | 已复用（2026-11-09） |
@@ -1436,11 +1435,15 @@ DSH-IDE = 把 VS Code 改造为 DSH 的 bundle 插件，是对 DSH 应用的拓�
 | `dsh-client-ui-chat` 的 APNG | `.../ui-chat/lib/assets/running-whale@2x-*.png` | 仅 DSH client 半身可 `require.asset('plugins/@deepseek-ai/dsh-client-ui-chat/assets/...')` | DSH 窗口内聊天气泡 | 可用；当前侧栏在 VS Code renderer，不适用 |
 | `dsh-client-ui-chat` 的 locale JSON | `.../ui-chat/locale/{en,zh}.json` | 构建期只读源；运行期仅 DSH client 可读 | 聊天文案 | 构建期已复用（`src/locale.ts` 逐字副本） |
 | `dsh-client-ui-theme` 字体 | `.../ui-theme/lib/styles/montserrat-*.woff2` | 仅 DSH client 可 import | DSH 品牌字体 | 不适用（侧栏使用 VS Code 主题字体） |
-| `@vscode/ripgrep` 的 `rg.exe` | `app.asar.unpacked/dsh/node_modules/@vscode/ripgrep-win32-x64/bin/rg.exe`（5,443,048） | 重定向 `@vscode/ripgrep` 的 `rgPath`（包名/路径与插件侧 `@vscode/ripgrep-universal` 不同） | 搜索 | 可复用；需路径与版本核对 |
-| `node-pty` 原生二进制 | `.../node-pty/prebuilds/win32-x64/*.node`（约 0.45 MB） | 重定向 `node-pty` 的原生加载路径 | 终端 PTY | 可复用；插件侧为 `build/Release`（约 2.4 MB），ABI 同为 Electron 44.7.0，需加载路径核对 |
-| 64 个共享 JS 包 | `app.asar/dsh/node_modules` | 去重/路径重定向 | 工具库（`zod`、`semver`、`ws`、`undici`、`@xterm/*` 等） | 需版本矩阵核对；收益小于风险 |
+| `@vscode/ripgrep` 1.18.0 的 `rg.exe` | `app.asar.unpacked/dsh/node_modules/@vscode/ripgrep-win32-x64/bin/rg.exe`（5,443,048 B ≈ 5.18 MiB） | 重定向 `rgPath`（插件侧包名为 `@vscode/ripgrep-universal`，路径不同） | 搜索 | **可复用**、与插件侧同版本；省 5.18 MiB |
+| `node-pty` 1.2.0-beta.15 prebuilds | `.../node-pty/prebuilds/win32-x64/*.node` | 重定向原生加载路径，首次运行解包到 `%LOCALAPPDATA%\.dsh-ide` | 终端 PTY | **可复用**、同版本且为 NAPI（node-addon-api），Electron 43→44 不挑 ABI；省约 2.4 MB |
+| `sqlite3` / `spdlog` / `watcher` / `windows-process-tree` | DSH 未提供 | — | VS Code 原生依赖 | 不能复用，继续随插件带；四者也都是 NAPI |
+| 64 个共享 JS 包 | `app.asar/dsh/node_modules` | 去重/路径重定向 | 工具库（`zod`、`semver`、`ws`、`undici`、`@xterm/*` 等） | 不建议：模块解析、版本与单例风险大于收益 |
+| VS Code 内置扩展（91 个 / 156.5 MiB） | 插件侧 | — | Mermaid / Markdown 等 | 不是 runtime，不属复用范围；按 AGENTS §4 完整保留 |
 
-已复用且无需改动：Electron/Chromium/Node（`runtime/app` 无 `electron.exe`、`resources.pak`、`icudtl.dat`）、Host 包（`runtime/app` 无 `@deepseek-ai`）、`/favicon.svg`、React/slots（见上表）。
+已复用且无需改动：Electron/Chromium/Node（tgz 里 `runtime/app` 无 `electron.exe`、`resources.pak`、`icudtl.dat`）、Host 包（`runtime/app` 无 `@deepseek-ai`）、`/favicon.svg`、React/slots（见上表）；承载只需插件自己的 `electron-home`，**不需要改动 DSH `apps/desktop`**（§0 R1 修订）。
+
+**终端载荷缺口（P6 终端冒烟前必须补齐）**：现有 tgz 的 `runtime/app` 中查不到 `node-pty`，也没有 `ptyHostMain`；`ptyHostMain.js` 只出现在已删除的 `runtime/ide-server`。`src/vs/platform/terminal/electron-main/electronPtyHostStarter.ts` 依赖 `vs/platform/terminal/node/ptyHostMain`，而它当前只在 `build/next/index.ts` 的 `serverEntryPoints`，不在 `desktopEntryPoints`。因此打包后的 IDE 打不开终端：先补 desktop entry，再复用上述 prebuilds，并在 Electron 44.7.0 下做终端冒烟（第 3 章 P6、第 5 章 §6 第 6 项）。`.npmrc` 仍是 `target="43.7.7"`，但随包 5 个原生模块全部走 NAPI，43.7.7 编出的二进制应可在 44.7.0 加载；这属于必须实测的冒烟，不是可直接判定通过的结论。
 
 **（4）禁止复用（耦合 / 路径 / 版本）**
 
@@ -1452,7 +1455,8 @@ DSH-IDE = 把 VS Code 改造为 DSH 的 bundle 插件，是对 DSH 应用的拓�
 | `ui-brand-official` / `dsh-brand` 资产 | 面向 DSH client 插槽与品牌，版本耦合，VS Code renderer 不可达 |
 | `ui-tool` 的 `ToolRow` | 插件明确保留 VS Code 原生工具渲染；复用需引入 DSH client 运行时并改变 UI |
 | DSH 会话 / 工作区 / LLM 控制器 | 必须经 `dshIde` 通道（I2/I3）；直接 import 会产生第二份协议或状态 |
-| `resources/runtime`（Python）与 `app.asar.unpacked` | DSH 专用 / ABI 耦合；IDE 不需要 |
+| `resources/runtime`（独立 Node / Python / pnpm）与整份 `app.asar.unpacked` | IDE 不需要独立 Node、Python 与 pnpm；`app.asar.unpacked` 只有 `rg.exe` 与 `node-pty` prebuilds 按（3）按文件复用，其余 DSH 专用 |
+| 第二份 Electron 发行版 / 修改 DSH `apps/desktop` | appOnly 载荷已复用宿主 Electron；另带一份或直接用安装目录 exe 起窗口都违反 §0 R1，也不省体积 |
 | `dsh-web-frontend/dist` 的 JS/CSS 壳 | DSH Web 外壳，不是组件库；加载会拉入整套 DSH boot |
 
 **（5）加载优先级（固定，不得新增第二条）**
@@ -1464,28 +1468,33 @@ DSH-IDE = 把 VS Code 改造为 DSH 的 bundle 插件，是对 DSH 应用的拓�
 
 **（6）体积优化动作（按收益排序）**
 
-| 动作 | 预期收益 | 验收 |
+按当前 tgz 的实测构成，回到 <100 MB 只需前四项（均**不裁剪内置扩展**）；收益为按当前 gzip 比例的估算，重打包后必须实测写回（2）的表。
+
+| 动作 | 预期收益 | 验收 / 落点 |
 | --- | --- | --- |
+| 删除 `runtime/ide-server`（server-web） | 压缩后约 **−39 MB** → 约 121 MB | 构建目标与 staging 已删；重打包确认包内无该目录 |
+| 打包剔除 `*.js.map`（`runtime/app/out` 132.6 MiB → 0） | 压缩后约 **−25~30 MB** → 约 91–96 MB | `build/gulpfile.vscode.ts:47` 的 `stripSourceMapsInPackagingTasks = isCI`（本地 false）；给它开 true，或给 `dsh-ide-pack` 增加 strip maps 的 staging 过滤（`:149-153`） |
+| `out` 改用 `out-vscode-min`（非 map 70.8 → 约 35–45 MiB） | 压缩后约 **−8~10 MB** → 约 81–86 MB | `dsh-ide-pack` 现只绑定非 minified `out-vscode`（`gulpfile.vscode.ts:666-667`）；改绑定后跑打包 + 真机开窗 + 视觉回归 |
+| 复用 DSH `rg.exe`（5.18 MiB）+ `node-pty` prebuilds（约 2.4 MB） | 压缩后约 **−2 MB** → 约 79–84 MB | 路径 / 版本 / NAPI 核对；搜索与终端回归 |
 | 删除插件根 `chat-render/dist/` 重复副本 | 约 469 KB | 改 `build/lib/dsh/package.json` 的 `files` 与 `gulpfile.vscode.ts` 的 staging；跑 `packaging.test.mjs` + 真机开窗 |
 | sidecar JS/CSS 开启 minify | 预计 150–200 KB | 改 `build-render.mjs` 的 `minify`；视觉回归 + `projection-golden` |
 | APNG 从 CSS data URL 改为独立文件 | 约 7 KB | 用 `FileAccess.asBrowserUri` 重写 URL；动画回归 |
-| `out` 改用 `out-vscode-min`（当前 `dsh-ide-pack` 绑定非压缩 `out-vscode`） | 预计 35–45 MB | 改 `dsh-ide-pack` 绑定 minified 构建；跑打包 + 真机开窗 + 视觉回归 |
 | 剔除 `playwright-core`（测试专用，`src`/扩展运行时零引用） | 12,718,734 字节 | `gulpfile.vscode.ts` 的 `dependenciesSrc`/`filter` 增加排除；跑 `test-dsh:all` + 真机 |
 | 剔除 `esbuild` / `@esbuild`（构建工具） | 约 22.8 MB（asar 11.5 MB + `extensions/node_modules` 11.4 MB） | 同上 + `build/lib/extensions.ts` 过滤；打包后确认无运行时引用 |
 | 剔除 `@types/*`（纯类型声明） | 约 23 KB | 同上；可忽略 |
-| 复用 DSH `@vscode/ripgrep` / `node-pty` | 约 7–8 MB | 路径/ABI/版本核对；搜索与终端回归 |
-| 裁剪非必需内置扩展（保留 Mermaid/Markdown + 共享依赖约 91.7 MB） | 最多约 24 MB | 产品决策；与「91 个内置扩展」交付口径冲突，需批准 |
-| 复用宿主 Electron/Node | 已生效（`appOnly`） | 保持 |
+| 裁剪非必需内置扩展 | 最多约 24 MB | 产品决策；与「91 个内置扩展」交付口径冲突，且不在 <100 MB 路径内 |
+| 复用宿主 Electron/Node | 已生效（appOnly，包内 0 个 Electron 文件） | 保持；加固项见第 3 章 P5 |
 
 **（7）结论**
 
-- **分发体积**：压缩包同口径（tar.gz）74,147,715 字节（约 70.7 MiB），已低于 100 MB；285 MiB 是解压安装体积。两者不可混用。
-- **安装体积**：`runtime/app` 299,381,810 字节，其中 `extensions` 115.8 MB（Mermaid/Markdown + 共享依赖约 91.7 MB 为 AGENTS §4 必须保留）、`out` 75 MB（当前非 minified）、`node_modules.asar` 72 MB + unpacked 31 MB（VS Code 运行依赖，DSH 无对应包）。
-- **DSH 资源复用上限**预计 8–10 MB（`@vscode/ripgrep` 5.4 MB、`node-pty` 约 1.8 MB、64 个共享 JS 包需实测），需路径/ABI/版本核对；不得为了复用把 DSH client 运行时塞进 VS Code renderer。
-- **安装体积下探**：先剔除构建/测试依赖（`playwright-core` 12.7 MB + `esbuild`/`@esbuild` 约 22.8 MB + `@types/*`），再加 `out-vscode-min`（35–45 MB）、sidecar 去重/minify（约 0.6 MB）、复用 DSH `ripgrep`/`node-pty`（约 7 MB），安装体积可到 **约 200–210 MiB**；再裁剪非必需扩展（最多约 24 MB）可到 **约 180–190 MiB**。仍无法到 <100 MiB：Mermaid/Markdown + 共享依赖约 91.7 MB、VS Code `out`/`node_modules` 是硬下限。扩展裁剪与「91 个内置扩展」交付口径冲突，需产品决策。
+- **分发体积（实测）**：当前 tgz 160,112,030 B（152.7 MiB），含已删除的 server-web 164.2 MiB 与 132.6 MiB sourcemap；历史 74,147,715 B 是「非 map 的 `out` 70.8 MiB」，不是整包，已废止。
+- **<100 MB 路径（不裁扩展）**：删 server-web（约 −39 MB）→ 剔 map（约 −25~30 MB）→ minified（约 −8~10 MB）→ 复用 `rg.exe` + `node-pty`（约 −2 MB），估算约 **79–84 MB**。以上按当前 gzip 比例估算、**尚未重打包实测**；重打后写回（2）的表与第 7 章 §7.6。
+- **安装体积**：当前 `runtime/app` 483.9 MiB（`extensions` 156.5 MiB、`out` 203.5 MiB、`node_modules.asar` 92.4 MiB、unpacked 26.6 MiB）；Mermaid/Markdown 及运行依赖按 AGENTS §4 完整保留，91 个内置扩展不裁剪也能让分发体积进 100 MB。
+- **runtime 复用审计结论**：Electron/Chromium/Node 必须复用且已生效——省下的不是「再带一份 Electron 的 350 MB」（插件包本来就没带），而是**不再构建 / 打包 server-web 的 164.2 MiB**；`rg.exe` 5.18 MiB 与 `node-pty` 约 2.4 MB 可复用；独立 Node / Python / pnpm 不需要；sqlite3 / spdlog / watcher / windows-process-tree DSH 未提供且均为 NAPI；64 个共享 JS 包不建议复用。不得为复用把 DSH client 运行时塞进 VS Code renderer。
+- **终端载荷**：`runtime/app` 缺 `ptyHostMain` 与 `node-pty`，按（3）与第 3 章 P6 补齐后再做 Electron 44.7.0 下的终端冒烟。
 - 版本漂移：宿主 `ui-chat` 源升级时按第 5 章 §7 更新 `PROVENANCE.md` 与 `UPSTREAM_VALIDATED_VERSION`；不得直接引用新版 `lib/client.js`。
 
-> 证据：DSH 源码 `apps/desktop/src/paths.ts`（profile 目录）、`packages/boot/app-boot/src/profile.ts`（bundle 解析）、`packages/client/modules/src/index.ts`（`/plugins` 与 module table）、`packages/client/web/src/seed.ts`（平台单例）、`packages/host/frontend-static/src/index.ts`（静态服务白名单）、`packages/client/ui-chat/package.json`（`./assets/*` 与 `./client`）；安装目录、文件大小与本机实测一致（2026-11-09）。
+> 证据：DSH 源码 `apps/desktop/src/paths.ts`（profile 目录）、`packages/boot/app-boot/src/profile.ts`（bundle 解析）、`packages/client/modules/src/index.ts`（`/plugins` 与 module table）、`packages/client/web/src/seed.ts`（平台单例）、`packages/host/frontend-static/src/index.ts`（静态服务白名单）、`packages/client/ui-chat/package.json`（`./assets/*` 与 `./client`）；另有 2026-11-09 本机实测：`dist/dsh-ide-2.0.0.tgz` 的 `tar -tvzf` 清单与文件长度、DSH 安装根 `version` 文件、`product.json` 的 `dataFolderName`、`.npmrc` 的 `target`、`build/next/index.ts` 的 entry points、`build/gulpfile.vscode.ts` 的 `stripSourceMapsInPackagingTasks` 与 `dsh-ide-pack` 绑定。
 
 #### 8.2.6 插件改动的复用优先级（R0，每轮必须遵循）
 
@@ -1504,13 +1513,13 @@ DSH-IDE = 把 VS Code 改造为 DSH 的 bundle 插件，是对 DSH 应用的拓�
 
 | 层 | 复用项 | 接入点 |
 | --- | --- | --- |
-| IDE 宿主 | Electron / Chromium / Node | 插件 `appOnly`，不自带 Electron |
+| IDE 宿主 | Electron 44.7.0 / Chromium / 内嵌 Node 24.21.0 | 插件 `appOnly`（0 个 Electron 文件），`ensureElectronHome()` 硬链接 / 目录联接复用 |
 | Host 半身 | `@deepseek-ai/cordis`、`schemastery`、`typert-protocol` | `peerDependencies` + Host import |
 | DSH client 半身 | `react`、`dsh-client-ui-slots`、`dsh-client-ui-primitives`、`/favicon.svg` | `client.js` 的 `require` / `inject` / 宿主 URL |
 | DSH client 半身 | 官方 `Button`（ghost/sm） | `client.js` 头部按钮，2026-11-09 替换手写 `<button>` 与内联样式 |
 | VS Code renderer | `ui-chat` 20 个源文件 + CSS + APNG | 构建期 sidecar（`build/dsh/chat-render/`） |
 
-**边界**：VS Code renderer 不能直接 `require` 宿主模块行或读 `app.asar`，只能走构建期源码复用（见 §8.2.5 第（4）条）。`@vscode/ripgrep` / `node-pty` 的运行时复用依赖 P5 启动/路径传递，未接线前不得硬接；当前仍随插件打包。
+**边界**：VS Code renderer 不能直接 `require` 宿主模块行或读 `app.asar`，只能走构建期源码复用（见 §8.2.5 第（4）条）。`rg.exe` 当前随插件带（`@vscode/ripgrep-universal`），`node-pty` 与 `ptyHostMain` 则不在 `runtime/app`（见 §8.2.5 第（3）条）；两项 DSH 复用依赖 P5/P6 的启动与路径传递，未接线前不得硬接，终端冒烟前必须补齐。
 
 **手写例外**：sidecar `shims/primitives.tsx` 的 `Tooltip` 仅做原生 `title` 降级（上游 273 行 portal/placement 复合体未复制）；`UserMessageBubble` 按上游 14 行如实复刻。两者均已在 `build/dsh/chat-render/PROVENANCE.md` §4/§7 登记。
 

@@ -21,7 +21,7 @@ DSH-IDE 是把整个 VS Code 桌面运行时改造成 DeepSeekHarness 插件的�
 | 时态 | 含义 | 使用位置 |
 | --- | --- | --- |
 | **交付态** | 目标形态，规范性描述，用「必须 / 定义」表述 | 开发手册各章正文 |
-| **当前态** | 截至本版文档的代码实况，用「当前 / 尚未 / 已落地」表述 | 开发手册各章的「当前态」表与第 5 章实测记录 |
+| **当前态** | 截至本版文档的代码实况 | 阶段状态只由开发手册第 3 章 §6 唯一状态表承载；实测记录见第 5 章，实现差距见第 7 章 §3 |
 
 禁止把当前态的骨架行为写成规范，也禁止把交付态契约写成已完成功能。
 
@@ -34,7 +34,8 @@ DSH-IDE 是把整个 VS Code 桌面运行时改造成 DeepSeekHarness 插件的�
 | 术语 | 定义 |
 | --- | --- |
 | DSH 主窗口 | DSH 桌面端 UI，持有会话头部「DSH-IDE」按钮 |
-| IDE 窗口 | 由 DSH-IDE 打开的 VS Code `BrowserWindow` 及其 renderer |
+| IDE 窗口 | 由插件 Host 半身经 Electron 主页启动的 VS Code `BrowserWindow` 及其 renderer；窗口进程与 DSH Host 半身不是同一个 OS 进程，仍属同一 DSH 应用 |
+| Electron 主页 | `<plugin>/runtime/electron-home`：插件 Host 半身把 DSH 安装的 Electron（硬链接可执行文件 + 目录联接资源目录）与插件 `runtime/app` 载荷物化到同一启动目录，供原生 IDE 窗口启动 |
 | `dshCtx` | DSH Host 进程内唯一的 Cordis 根，DSH 服务的注册与订阅都发生在它上面 |
 | 插件 | `build/lib/dsh/package.json` 定义的 `dsh-ide@2.0.0` bundle 插件，入口 `src/vs/platform/dshClient/index.js` |
 | 通道 | 唯一 `IServerChannel` 实现 `DshIdeChannel`，token `dshIde`，注册点 `src/vs/code/electron-main/app.ts` |
@@ -97,7 +98,7 @@ flowchart TD
 
 图中只画头部 blockquote 段的定义依赖边；导航 / 参见链接不在此图。§3 已有「层 → 文件 → 唯一职责」表，本图不重复职责说明。
 
-**删除 / 合并文档规则**：删除任何文档前，先全仓 `git grep` 该文件名（代码注释、CI、issue/PR 模板、其它文档相对链接），把引用改到迁移后的目标位置；再删文件；最后按 [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md) 第 5 章 §10.1 跑三项核验。顺序颠倒会留下断链，断链检查失败。
+**删除 / 合并文档规则**：删除任何文档前，先全仓 `git grep` 该文件名（代码注释、CI、issue/PR 模板、其它文档相对链接），把引用改到迁移后的目标位置；再删文件；最后按 [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md) 第 5 章 §10.1 跑四项核验。顺序颠倒会留下断链，断链检查失败。
 
 ## 5. 唯一开发路线（摘要）
 
@@ -117,10 +118,9 @@ P0 初始化 → P1 契约 → P2 适配层 → P3 通道与宿主 → P4 消费
 
 ## 7. 当前状态入口
 
-- 时态：**流程打通前**（P3 进行中）。`DshIdeChannel` 已实现按 method 分发、`listen('snapshot')` 三层过滤与 `disposeOwner`；`DshIdeViewService` 已按 `wireRevision = 2` 发布 `state.view` 投影快照；Host 侧真源订阅与 answerer 尚未接线，`DshIdeBackend` 仍为 `UnavailableDshIdeBackend`（所有调用明确 `feature-unavailable`），`client.js` 按钮仍抛显式错误，`DshIdeConsumer` 尚未实现。
-- 阶段进度（唯一表）：[`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md) 第 3 章 §6。
-- 门禁与测试实测（唯一表）：开发手册第 5 章 §3–§4。
-- 代码实况与残留登记：开发手册第 7 章 §3；全局扫描与引用图登记：第 7 章 §7。
+- 当前阶段与阶段进度（唯一状态表）：[`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md) 第 3 章 §6；本文不写阶段状态细节。
+- 门禁与测试实测、代码实况与残留登记、全局扫描与引用图：开发手册第 5 章 §3–§4、第 7 章 §3 / §7。
+- 当前项目情况、待办与完成标记、每轮更新记录：开发手册 §0.1、第 7 章 §3 / §7.7（每轮改动收尾回写）。
 
 ## 8. 硬边界
 

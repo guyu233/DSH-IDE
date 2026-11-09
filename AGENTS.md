@@ -46,7 +46,9 @@
 - 提交前核对 `git status --short` 的状态码（`M` 与 `A` 区分），显式 `git add <文件>`，不用 `-A`。
 - 门禁状态只允许 `PASS` / `PENDING` / `FAIL` 三种，语义与退出码见 [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md) 第 5 章 §9；`PENDING` 不计入通过，不得标成 `PASS`。
 - 代码注释中残留的旧阶段标记（如「阶段 2.x」）在对应 P 阶段实现时同步改成 P 编号；不得借注释引入旧编号路线。
-- 任何文档变更后必须跑 [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md) 第 5 章 §10.1 的引用图脚本（定义依赖图 0 环、术语定义唯一、`唯一定义` 声明不冲突），并把结果与断链检查结论写入提交信息。
+- 任何文档变更后必须跑 [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md) 第 5 章 §10.1 的引用图脚本（定义依赖图 0 环、术语定义唯一、`唯一定义` 声明不冲突、状态单一性），并把结果与断链检查结论写入提交信息。
+- 任何改变阶段状态或残留项的提交，必须同步 [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md) 第 3 章 §6 唯一状态表与第 7 章 §3 待办清单，并跑含状态核验的 `verify:docs-graph`；阶段状态不得写在其它章节。
+- 每轮改动（代码或文档）收尾必须回写 [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md) §0.1 当前项目情况、第 7 章 §3 唯一待办清单（逐项标 `已完成` / `未完成` / `待核对`）、第 7 章 §7.7 每轮更新记录，并跑 `verify:docs-graph`；提交信息写明本轮待办变化与脚本输出的待办统计。
 
 ## 7. 代码风格、注释与源码对齐
 
