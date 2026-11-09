@@ -19,7 +19,6 @@ import type { IdeEvent, IdeRowKind } from './translator.js';
 export const MAX_ROWS = 600;
 
 /** 参数 / 结果折叠 preview 上限，搬自 dsh-TUI `src/channel/transcript.ts:4,6`。 */
-export const ARGS_PREVIEW_LIMIT = 160;
 export const RESULT_PREVIEW_LIMIT = 240;
 
 /** P95 校准阈值（见 verification.md §3.2）：rows 序列化后字节数超过即校准参数。 */

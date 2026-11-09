@@ -26,6 +26,19 @@ window.__ModuleLoader__.load({
 		// 用 factory 级变量传递（单一赋值点，不会出现两个上下文）。
 		let pluginCtx;
 
+		// 开窗调用必须有上限：Host 半身未加载时官方 RPC 可能一直不返回（不是 reject），
+		// 按钮会永久停在 disabled。超时后按失败处理并复位，明确提示重启 DSH。
+		const LAUNCH_TIMEOUT_MS = 15000;
+		function withTimeout(promise, timeoutMs, message) {
+			return new Promise((resolve, reject) => {
+				const timer = setTimeout(() => reject(new Error(message)), timeoutMs);
+				Promise.resolve(promise).then(
+					value => { clearTimeout(timer); resolve(value); },
+					reason => { clearTimeout(timer); reject(reason); },
+				);
+			});
+		}
+
 		function DshIdeButton(props) {
 			const [busy, setBusy] = React.useState(false);
 			const [error, setError] = React.useState(null);
@@ -36,7 +49,11 @@ window.__ModuleLoader__.load({
 				if (busy) { return; }
 				setBusy(true);
 				setError(null);
-				Promise.resolve(pluginCtx.remote.ide.launch(typeof cwd === "string" && cwd !== "" ? cwd : undefined))
+				withTimeout(
+					pluginCtx.remote.ide.launch(typeof cwd === "string" && cwd !== "" ? cwd : undefined),
+					LAUNCH_TIMEOUT_MS,
+					"DSH Host 未响应（插件 Host 半身可能尚未加载）：请重启 DSH 后重试",
+				)
 					.then(result => {
 						setBusy(false);
 						if (result && result.ok === true) { setError(null); return; }
