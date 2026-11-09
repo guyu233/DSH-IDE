@@ -49,11 +49,11 @@
 | 待办与完成标记 | 不在此复制条数，只保留入口 | 第 7 章 §3 |
 | 门禁 / 测试 | 3 `PASS` + 1 `PENDING`（`PENDING` 不计通过）；`test-dsh:all` 基线 183/183 | 第 5 章 §3–§4 |
 | 分发体积 | 重打包实测 119,704,107 B（114.2 MiB）：已无 server-web；仍含 `*.js.map`、未 minified（D29 未完成） | 第 8 章 §8.2.5 |
-| 承载现状 | 原生窗口真机复核通过；鲸鱼入口已在当前 DSH 主窗口可见；客户端已按官方 `remote.$mount` 挂载 `ide` 命名空间（此前未挂载是按钮失效根因），Host 侧心跳与防抖已修；端到端点击待 DSH 重启（D37） | 第 7 章 §3 / 第 5 章 §10.2 |
+| 承载现状 | **端到端打通**：DSH 主窗口点鲸鱼按钮 → 原生 IDE 窗口打开当前工作区（实测标题「Welcome - DSH-IDE - DSH IDE」，仓库树 / git / Chat 面板正常）；再点走 `registered-ide` 聚焦已有窗口 | 第 7 章 §3 / 第 5 章 §10.2 |
 | 终端载荷 | `runtime/app` 仍缺 `ptyHostMain` 与 `node-pty` | 第 8 章 §8.2.5 |
-| 最近一轮改动 | 修好「点鲸鱼按钮打不开」三层根因：客户端按官方 `remote.$mount` 挂载 `ide` 命名空间、Host 心跳剔除死登记项、拉起防抖改看进程存活；开窗调用加 15s 超时 | 第 7 章 §7.7 |
-| 未验证项 | D37 端到端点击（Host 半身需重启 DSH）；K5 / D19 DTO 回填；9 项真机验收；minified / 剔 map 打包（D29） | 第 5 章 §10.2 |
-| 最后更新 | 2026-11-09 / `49707139` | 本表 |
+| 最近一轮改动 | D37 端到端点击真机通过（按钮 → 按当前工作区开原生 IDE 窗口 → 再点聚焦）；四门禁 / 全量测试复核 | 第 7 章 §7.7 |
+| 未验证项 | K5 / D19 Chat 面板 DTO 回填观测；9 项真机验收；minified / 剔 map 打包（D29） | 第 5 章 §10.2 |
+| 最后更新 | 2026-11-09 / `11aa0c0b` | 本表 |
 
 ---
 
@@ -595,14 +595,14 @@ waterfall 语义单测覆盖、boundary PASS、17 符号单源、端到端实跑
 
 | 阶段 | 状态 | 依据（证据或命令） | 最后实测 |
 | --- | --- | --- | --- |
-| P0 | 已完成 | 工程基线、bundle 清单、patch、资源、官方打包任务齐备 | 2026-11-09 / `49707139` |
-| P1 | 已完成 | K2 判据实测通过；`verify:dsh-ide-protocol-single-source` | 2026-11-09 / `49707139` |
-| P2 | 已完成 | `translator.ts` / `ide-view-projector.ts` / golden / 单测；K3 判据实测通过 | 2026-11-09 / `49707139` |
-| P3 | 已完成 | K4 判据：真实端口接通、20 method 确定、`call`/`listen`/`disposeOwner` 合规、`invoke` 恒 `{ value }`、waterfall 单测覆盖、`boundary` PASS；端到端实跑（独立真实 Host）listSessions=52 / listModels=3 / follow=329 records → 98 行投影 | 2026-11-09 / `49707139` |
-| P4 | 进行中 | 消费者 + 快照流 + DTO→UI + DTO→Chat 内容 + 唯一 Chat Agent + `dshChatSeam` 均已落地；测试基线见第 5 章 §4；原生 IDE 窗口已可渲染（D33 完成），Chat 面板 DTO 回填观测仍缺真实 Host 端点（D19） | 2026-11-09 / `49707139` |
-| P5 | 进行中 | 开窗链路按 §1 第 3 条例外先行；原生窗口与启动黑屏已修（D33 完成）；会话头部鲸鱼入口已安装并在当前 DSH 主窗口可见，点击行为待 Host 重启（D37）；终端载荷缺口与双窗口镜像未接线（第 7 章 §3） | 2026-11-09 / `49707139` |
-| P6 | 未开始 | 门禁脚手架 3 `PASS` + 1 `PENDING`（第 5 章 §3）；真机验收、NAPI/ABI 加载冒烟、终端冒烟未跑 | 2026-11-09 / `49707139` |
-| P7 | 未满足出口 | 打包链路可执行，前置 K7 未达成；重打包实测 119,704,107 B，已无 server-web，仍含 map、未 minified（第 8 章 §8.2.5） | 2026-11-09 / `49707139` |
+| P0 | 已完成 | 工程基线、bundle 清单、patch、资源、官方打包任务齐备 | 2026-11-09 / `11aa0c0b` |
+| P1 | 已完成 | K2 判据实测通过；`verify:dsh-ide-protocol-single-source` | 2026-11-09 / `11aa0c0b` |
+| P2 | 已完成 | `translator.ts` / `ide-view-projector.ts` / golden / 单测；K3 判据实测通过 | 2026-11-09 / `11aa0c0b` |
+| P3 | 已完成 | K4 判据：真实端口接通、20 method 确定、`call`/`listen`/`disposeOwner` 合规、`invoke` 恒 `{ value }`、waterfall 单测覆盖、`boundary` PASS；端到端实跑（独立真实 Host）listSessions=52 / listModels=3 / follow=329 records → 98 行投影 | 2026-11-09 / `11aa0c0b` |
+| P4 | 进行中 | 消费者 + 快照流 + DTO→UI + DTO→Chat 内容 + 唯一 Chat Agent + `dshChatSeam` 均已落地；测试基线见第 5 章 §4；原生 IDE 窗口已可渲染（D33 完成），Chat 面板 DTO 回填观测仍缺真实 Host 端点（D19） | 2026-11-09 / `11aa0c0b` |
+| P5 | 进行中 | 开窗链路端到端打通：DSH 主窗口鲸鱼按钮 → 按当前工作区开原生 IDE 窗口（D37 通过）；再点走 `registered-ide` 只聚焦不重复开窗；终端载荷缺口与双窗口镜像未接线（第 7 章 §3） | 2026-11-09 / `11aa0c0b` |
+| P6 | 未开始 | 门禁脚手架 3 `PASS` + 1 `PENDING`（第 5 章 §3）；真机验收、NAPI/ABI 加载冒烟、终端冒烟未跑 | 2026-11-09 / `11aa0c0b` |
+| P7 | 未满足出口 | 打包链路可执行，前置 K7 未达成；重打包实测 119,704,107 B，已无 server-web，仍含 map、未 minified（第 8 章 §8.2.5） | 2026-11-09 / `11aa0c0b` |
 
 「最后实测」是最后一次核对的日期与 commit，不是该阶段达成时间。阶段状态以本表为准；实现差距见第 7 章 §3，实测记录见第 5 章 §10.2。
 
@@ -1034,6 +1034,20 @@ node --experimental-strip-types --test build/lib/test/dshBuildProvenance.test.ts
   `via:'registered-ide'`；客户端热更新后按钮不再变灰，失败时会显示原因。
 - 未验证：端到端点击（Host 半身是进程内服务，热更新只覆盖客户端，需重启 DSH，D37）。
 
+**D37 端到端验证（2026-11-09，DSH 重启后）**
+
+- 环境：DSH 重启后 GUI 端口 49577 → 56386；`runtime/host-endpoint.json` 由新 Host 进程
+  （pid 24580）在 07:18 重写，说明 Host 半身随 DSH 加载成功，不再是 `absent`。
+- Host 侧直连复核：`GET /?token=…` 换 cookie 后 `POST /api/ide/ping` 返回
+  `{"ok":true,"root":"…\\profiles\\desktop","hostPid":24580}`。
+- 真机点击：DSH 主窗口会话头部鲸鱼按钮（order 1，紧邻「…」）→ 12s 内出现原生窗口
+  **「Welcome - DSH-IDE - DSH IDE」**，Explorer 直接打开 `E:\DSH-IDE`（仓库树、git master、
+  Chat 面板就位）。截图 `.build/d37-success.png`（生成物，不入库）。
+- 幂等复核：再次经 `POST /api/ide/launch` 请求同一工作区 → 返回 `via:'registered-ide'`，
+  窗口数仍为 1（只聚焦，不重复开窗）。
+- 结论：**D37 完成**；P5 的开窗链路（按钮 → Host → Electron 主页 → 原生窗口 → 按工作区加载）
+  端到端可用。K5 仍需在窗口内发消息观测 Chat 的 DTO 回填。
+
 **会话头部入口按钮（2026-11-09 真机安装）**
 
 - 诉求：DSH 主窗口会话头部「…」旁加入 DSH-IDE 入口，图标用 DSH 鲸鱼 LOGO，语义为
@@ -1223,9 +1237,9 @@ e:/DSH-IDE/                              git 仓库根 / 唯一代码树
 | D34 | 提交拆分为 docs-only 与代码侧两个提交，各自登记门禁实测 / 未完成项 | P7 | 已完成 | 代码侧 `6546e5c9` + 本文档侧提交；两提交信息分别登记门禁实测与未完成项 | 2026-11-09 |
 | D35 | `common/env.js` 两个常量的消费者逐项复核 | P5 | 已完成 | 复核 5 个常量：4 个有生产消费者，`DSH_IDE_INTERACTIONS_ENV` 零消费者已删（`2be24b46`） | 2026-11-09 |
 | D36 | `translator.ts` / `ide-view-projector.ts` 三个常量的生产引用复核 | P3 / P6 | 已完成 | 复核 4 个常量：`MAX_ROWS` / `RESULT_PREVIEW_LIMIT` 有生产引用，`ROWS_P95_BYTE_LIMIT` 供 P6 校准，`ARGS_PREVIEW_LIMIT` 零引用已删（`2be24b46`） | 2026-11-09 |
-| D37 | 会话头部入口按钮真机验证：安装插件 + 重启 DSH 后按钮在「…」旁可见、点击按当前工作区开窗 | P5 | 未完成 | 按钮已可见；客户端 `remote.$mount` 挂载与 Host 心跳/防抖已修（`49707139`）；端到端点击待 DSH 重启 | 2026-11-09 |
+| D37 | 会话头部入口按钮真机验证：安装插件 + 重启 DSH 后按钮在「…」旁可见、点击按当前工作区开窗 | P5 | 已完成 | 2026-11-09 真机：点击 → 原生窗口「Welcome - DSH-IDE - DSH IDE」打开当前工作区；再点走 `registered-ide` 只聚焦不重复开窗 | 2026-11-09 |
 
-统计（由 `verify:docs-graph` 输出）：18 已完成 / 17 未完成 / 0 待核对，共 37 项；每轮回写时按实际完成情况改「是否完成」与「最后核对」，并在 §7.7 增加一行。
+统计（由 `verify:docs-graph` 输出）：19 已完成 / 18 未完成 / 0 待核对，共 37 项；每轮回写时按实际完成情况改「是否完成」与「最后核对」，并在 §7.7 增加一行。
 
 **§3.1 架构裁定（2026-11-09，K4 前置）**
 
@@ -1392,6 +1406,7 @@ git grep -nE "dshEventMap\.ts|dshSessionUri\.ts|dshChatSessions\.ts|dshChatProvi
 | 7 | 2026-11-09 / `69a592d7` | 会话头部「DSH-IDE」入口：鲸鱼图标（宿主 `/favicon.svg`）、order 1 紧邻「…」；按当前工作区开窗（client `cwd` → Host spawn 参数 → IDE 窗口 API）；修复 launcher 两处潜在运行时缺陷；官方 `gulp dsh-ide-pack` 重打包 | 新增 D37（未完成）；D30 标记已完成 | `docs-graph` PASS（8 阶段 / 16 已完成 / 19 未完成 / 2 待核对 / 7 轮）；断链 0；四门禁 3 `PASS` + 1 `PENDING`；`test-dsh:all` 180/180 |
 | 8 | 2026-11-09 / `d7ece3bb` | 入口图标改用宿主 `FishLogo`（`currentColor`）；把 `dsh-ide@2.0.0` 安装进当前 profile，鲸鱼按钮在主窗口「…」右侧真机可见；官方 pack 重打包 | D37 保持未完成（Host 半身待重启）；D30 体积回写 119,701,131 B | `docs-graph` PASS（8 阶段 / 16 已完成 / 19 未完成 / 2 待核对 / 8 轮）；断链 0；四门禁 3 `PASS` + 1 `PENDING`；`test-dsh:all` 180/180 |
 | 9 | 2026-11-09 / `49707139` | 修「点鲸鱼按钮打不开」三层根因：客户端按官方 `remote.$mount` 挂载 `ide` 命名空间；Host 心跳剔除死登记项；拉起防抖改看进程存活；开窗调用加 15s 超时；单测 8→11 项 | D37 保持未完成（端到端待重启）；D35/D36 标记已完成 | `docs-graph` PASS（8 阶段 / 18 已完成 / 17 未完成 / 2 待核对 / 9 轮）；断链 0；四门禁 3 `PASS` + 1 `PENDING`；`test-dsh:all` 183/183 |
+| 10 | 2026-11-09 / `11aa0c0b` | DSH 重启后做 D37 端到端验证：点击鲸鱼按钮 → 原生窗口按当前工作区打开；再点走 `registered-ide` 只聚焦；Host 侧 `/api/ide/ping` + `/api/ide/launch` 直连复核 | D37 标记已完成（19 已完成 / 18 未完成） | `docs-graph` PASS（8 阶段 / 19 已完成 / 18 未完成 / 0 待核对 / 10 轮）；断链 0；四门禁 3 `PASS` + 1 `PENDING`；`test-dsh:all` 183/183 |
 
 ---
 
