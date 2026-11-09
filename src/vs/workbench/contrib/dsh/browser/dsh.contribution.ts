@@ -14,6 +14,8 @@ import { INotificationService } from '../../../../platform/notification/common/n
 import { IDshClientService, DshClientService } from '../../../../platform/dshClient/common/dshClientService.js';
 import { ILanguageFeaturesService } from '../../../../editor/common/services/languageFeatures.js';
 import { IWorkbenchContribution, registerWorkbenchContribution2, WorkbenchPhase } from '../../../common/contributions.js';
+import { DSH_IDE_SESSION_ENV } from '../../../../platform/dshClient/common/env.js';
+import { env } from '../../../../base/common/process.js';
 import { registerDshInlineCompletions } from './inlineCompletion.js';
 import { DshIdeConsumer, type DshIdeConsumerState } from './dshIdeConsumer.js';
 import { setDshChatRenderEnabled } from './dshChatSeam.js';
@@ -70,8 +72,10 @@ class DshClientContribution extends Disposable implements IWorkbenchContribution
 		}));
 		this._register(client.onDidSnapshot(snapshot => consumer.accept(snapshot)));
 
-		// 打开视图：失败时明确提示，不伪造「已连接」。
-		void client.openView({ view: 'chat' }).then(result => {
+		// 打开视图：必须带要跟随的会话 id，否则后端只订阅 `$events`（拿不到会话内容），
+		// Chat 面板永远没有行。会话由 DSH 决定，经开窗方的 `userEnv` 传进来，IDE 不自己猜。
+		const sessionId = env[DSH_IDE_SESSION_ENV];
+		void client.openView({ view: 'chat', params: sessionId === undefined || sessionId === '' ? {} : { sessionId } }).then(result => {
 			if (!result.ok) {
 				this.notifications.info(localize(
 					'dsh.connectionUnavailable',

@@ -361,3 +361,32 @@ test('launch surfaces launcher failure messages verbatim', async () => {
 	const result = await channel.call<{ ok: boolean; message?: string }>('ctx-a', DSH_IDE_CONTROL_LAUNCH, {});
 	assert.deepEqual(result, { ok: false, message: 'spawn failed' });
 });
+
+
+test('launch forwards the session id to the launcher so the window can follow it', async () => {
+	// 会话由 DSH 决定（不变量 I4）：开窗方必须把 sessionId 交给窗口，否则窗口只订阅 $events，
+	// 拿不到会话内容，Chat 面板永远没有行。
+	const launcher = fakeLauncher({ ok: true });
+	const channel = new DshIdeChannel(new DshIdeViewService(fakeBackend()), launcher);
+	await channel.call('ctx-a', DSH_IDE_CONTROL_LAUNCH, { sessionId: 'session-42' });
+	assert.deepEqual(launcher.calls, [{ sessionId: 'session-42' }], 'the session id must reach the launcher');
+});
+
+test('openView binds the session id it is given (and only then can follow a session)', async () => {
+	// 守护「传了 sessionId 才会绑定会话」：这是 Chat 面板能拿到内容的先决条件。
+	const backend = fakeBackend({
+		open: (spec: { params?: Record<string, unknown> }) => ({
+			channelId: 'ch-1',
+			sessionId: typeof spec.params?.['sessionId'] === 'string' ? spec.params['sessionId'] as string : undefined,
+		}),
+	});
+	const view = new DshIdeViewService(backend);
+	view.open({ view: 'chat', params: { sessionId: 'session-77' } });
+	assert.equal(view.boundSessionId, 'session-77');
+	view.close();
+
+	const bare = new DshIdeViewService(backend);
+	bare.open({ view: 'chat' });
+	assert.equal(bare.boundSessionId, undefined, 'omitting sessionId leaves the view unbound (only $events is followed)');
+	bare.close();
+});

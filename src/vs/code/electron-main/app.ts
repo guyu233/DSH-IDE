@@ -151,6 +151,7 @@ import ErrorTelemetry from '../../platform/telemetry/electron-main/errorTelemetr
 import { IProtocolMainService } from '../../platform/protocol/electron-main/protocol.js';
 import { createRemoteResourceRequestHandler } from '../../platform/protocol/electron-main/remoteResourceProtocol.js';
 import { DshIdeChannel, type DshIdeLauncher } from '../../platform/dshClient/electron-main/dshIdeChannel.js';
+import { DSH_IDE_SESSION_ENV } from '../../platform/dshClient/common/env.js';
 import { createDshIdeBackendFromEnv } from '../../platform/dshClient/electron-main/dshIdeBackendFactory.js';
 import { DshIdeViewService } from '../../platform/dshClient/electron-main/ide-view-service.js';
 import { DSH_IDE_CHANNEL } from '../../platform/dshClient/common/dshIdeProtocol.js';
@@ -1451,7 +1452,15 @@ export class CodeApplication extends Disposable {
 		const dshIdeLauncher: DshIdeLauncher = {
 			launch: async spec => {
 				try {
-					await windowsMainService.openEmptyWindow({ context: OpenContext.DESKTOP }, spec.workspace === undefined ? undefined : { forceNewWindow: true, forceReuseWindow: false });
+					// 会话由 DSH 决定（不变量 I4），IDE 不得自己猜：把开窗方给的 sessionId 经
+					// `userEnv` 交给新窗口（`openEmptyWindow` 支持该字段，窗口内读到的是合并后的 env）。
+					await windowsMainService.openEmptyWindow(
+						{ context: OpenContext.DESKTOP },
+						{
+							...(spec.workspace === undefined ? {} : { forceNewWindow: true, forceReuseWindow: false }),
+							...(spec.sessionId === undefined ? {} : { userEnv: { [DSH_IDE_SESSION_ENV]: spec.sessionId } }),
+						},
+					);
 					return { ok: true };
 				} catch (error) {
 					return { ok: false, message: error instanceof Error ? error.message : String(error) };

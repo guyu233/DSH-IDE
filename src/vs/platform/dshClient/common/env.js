@@ -6,3 +6,4 @@ export const DSH_IDE_ENDPOINT_ENV = 'DSH_IDE_ENDPOINT';   // Host Web origin，�
 export const DSH_IDE_INTERACTIONS_ENV = 'DSH_IDE_INTERACTIONS'; // 'none' | 'answer'
 export const DSH_IDE_COOKIE_ENV = 'DSH_IDE_COOKIE';       // 已换取的 host cookie（name=value）
 export const DSH_IDE_LAUNCH_URL_ENV = 'DSH_IDE_LAUNCH_URL'; // 官方 launch URL（origin/?token=…）
+export const DSH_IDE_SESSION_ENV = 'DSH_IDE_SESSION';     // 本窗口要跟随的 DSH 会话 id（由开窗方决定）
