@@ -501,6 +501,21 @@ waterfall 语义单测覆盖、boundary PASS、17 符号单源、端到端实跑
   发一条消息、看到 DTO 行渲染——属 9 项真机验收（第 5 章 §6 第 8 项）。代码链路已完整（Agent →
   `submit` → 快照 → 消费者 → 投影 → 接缝），但没有渲染截图/观测记录，故 K5 不标达成。
 
+  **真机启动 IDE 窗口的实测结论（2026-11-09，四次尝试全部记录）**：
+  1. `ELECTRON_RUN_AS_NODE=1` 残留 → Electron 以 Node 模式跑 `out/main.js`，报
+     `SyntaxError: The requested module 'electron' does not provide an export named 'app'`。清掉该变量即可。
+  2. 传 `--user-data-dir` 前先清环境，否则与正在运行的 DSH 争用同一个 Electron 缓存目录，报
+     `Unable to move the cache: 拒绝访问 (0x5)`。
+  3. **关键阻塞**：Electron **打包版**始终优先加载 `<install>/resources/app.asar`，
+     命令行把 `runtime/app` 作为首个位置参数**不会**覆盖它——实测进程起来了，但窗口标题仍是
+     `DeepSeek-Harness`（跑的是 DSH 自己的应用），不是 `DSH IDE`。
+  4. 要让该 exe 跑我们的 IDE 载荷，只能改动安装目录（替换/重定向 `resources/app.asar` 或其
+     `resources` 布局）。这属于**修改用户的 DSH 安装目录**，越过硬边界，**不做**。
+
+  因此 K5 的真机渲染观测需要**用户自己**从 DSH 主窗口点「DSH-IDE」按钮开窗（P5 的 `client.js`
+  开窗链路尚未接线，见第 3 章 P5），或由用户授权临时改动安装目录。两条都超出本阶段可自主执行的范围。
+  结论：**K5 保持未达成**，P5 不启动；代码侧证据（消费者 / 投影 / Agent / 接缝 / 串联测试）已完整。
+
 #### P5 功能实现与真机接线
 
 - **前置**：K5。
