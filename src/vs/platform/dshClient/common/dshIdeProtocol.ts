@@ -440,7 +440,14 @@ export interface DshIdeBackend {
 	/** 绑定会话并返回该视图的通道 id（一次打开一个，守恒）。 */
 	open(spec: DshIdeOpenSpec): { readonly channelId: string; readonly sessionId?: string };
 	/** 订阅会话真源（历史回放 + 实时流）；返回解绑句柄。 */
-	follow(sessionId: string | undefined, onEvent: (raw: unknown) => void): { dispose(): void };
+	/**
+	 * 订阅会话真源。
+	 *
+	 * 回调收到的是**传输层的原始帧**（`session/follow` 的 `snapshot` / `event` / `assistant-stream`），
+	 * 不是展开后的单条事件：解包由 `IdeViewHost` 实现负责（`unwrapFollowFrame`），
+	 * 这样端口两侧的职责边界只划一次，不出现「一半帧、一半事件」的混合契约。
+	 */
+	follow(sessionId: string | undefined, onFrame: (frame: unknown) => void): { dispose(): void };
 	/** 执行一个 DTO method（参数已过 `validateDshIdeInput`）。 */
 	invoke(method: DshIdeMethod, args: unknown): Promise<unknown>;
 	/** 释放传输资源；不取消 DSH 会话。 */

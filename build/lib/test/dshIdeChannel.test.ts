@@ -25,6 +25,9 @@ import {
 	type DshIdeSnapshot,
 } from '../../../src/vs/platform/dshClient/common/dshIdeProtocol.ts';
 import {
+	unwrapFollowFrame,
+} from '../../../out/vs/platform/dshClient/electron-main/ide-view-service.js';
+import {
 	DSH_IDE_CONTROL_CLOSE,
 	DSH_IDE_CONTROL_LAUNCH,
 	DSH_IDE_CONTROL_OPEN,
@@ -144,9 +147,9 @@ test('view service publishes ready snapshots with strictly increasing versions',
 	const frames: DshIdeSnapshot[] = [];
 	view.subscribe(snapshot => frames.push(snapshot));
 
-	backend.emit({ type: 'user.message', seq: 1, text: 'hello' });
+	backend.emit({ type: 'event', event: { type: 'user.message', seq: 1, text: 'hello' } });
 	await microtasks();
-	backend.emit({ type: 'custom', seq: 2, text: 'done' });
+	backend.emit({ type: 'event', event: { type: 'custom', seq: 2, text: 'done' } });
 	await microtasks();
 
 	assert.ok(frames.length >= 1, 'ready frames must be published');
@@ -173,9 +176,9 @@ test('view service batches multiple events into one published frame', async () =
 	const frames: DshIdeSnapshot[] = [];
 	view.subscribe(snapshot => frames.push(snapshot));
 
-	backend.emit({ type: 'user.message', seq: 1, text: 'a' });
-	backend.emit({ type: 'user.message', seq: 2, text: 'b' });
-	backend.emit({ type: 'user.message', seq: 3, text: 'c' });
+	backend.emit({ type: 'event', event: { type: 'user.message', seq: 1, text: 'a' } });
+	backend.emit({ type: 'event', event: { type: 'user.message', seq: 2, text: 'b' } });
+	backend.emit({ type: 'event', event: { type: 'user.message', seq: 3, text: 'c' } });
 	await microtasks();
 
 	assert.equal(frames.length, 1, 'a microtask batch publishes a single frame');
@@ -257,7 +260,7 @@ test('listen ignores non-snapshot event names', async () => {
 	const { channel, backend } = await openedChannel();
 	const seen: DshIdeSnapshot[] = [];
 	channel.listen<DshIdeSnapshot>('ctx-a', 'state')(snapshot => seen.push(snapshot));
-	backend.emit({ type: 'user.message', seq: 1, text: 'a' });
+	backend.emit({ type: 'event', event: { type: 'user.message', seq: 1, text: 'a' } });
 	await microtasks();
 	assert.equal(seen.length, 0, 'only the snapshot event name is forwarded');
 });
@@ -269,9 +272,9 @@ test('listen filters frames by owning connection and drops non-advancing version
 	channel.listen<DshIdeSnapshot>('ctx-a', DSH_IDE_SNAPSHOT_EVENT)(snapshot => mine.push(snapshot));
 	channel.listen<DshIdeSnapshot>('ctx-b', DSH_IDE_SNAPSHOT_EVENT)(snapshot => other.push(snapshot));
 
-	backend.emit({ type: 'user.message', seq: 1, text: 'a' });
+	backend.emit({ type: 'event', event: { type: 'user.message', seq: 1, text: 'a' } });
 	await microtasks();
-	backend.emit({ type: 'custom', seq: 2, text: 'b' });
+	backend.emit({ type: 'event', event: { type: 'custom', seq: 2, text: 'b' } });
 	await microtasks();
 
 	assert.ok(mine.length >= 2, 'owning connection receives published frames');
@@ -389,4 +392,49 @@ test('openView binds the session id it is given (and only then can follow a sess
 	bare.open({ view: 'chat' });
 	assert.equal(bare.boundSessionId, undefined, 'omitting sessionId leaves the view unbound (only $events is followed)');
 	bare.close();
+});
+
+
+// ---------------------------------------------------------------------------
+// session/follow 帧解包（真机缺陷修复的守护）
+//
+// 真机实测：`follow` 收到的是 `{ type:'snapshot', records:[{type:'event', event:{...}}] }`，
+// 直接整帧喂给 translator 会被「未知类型」全部丢弃 → 绑定成功但一帧都发不出（FRAMES=0）。
+// ---------------------------------------------------------------------------
+
+test('unwrapFollowFrame expands a snapshot into its session events', () => {
+	const frame = {
+		type: 'snapshot',
+		records: [
+			{ type: 'event', event: { type: 'user/message', seq: 1, data: { content: [{ type: 'text', text: 'hi' }] } } },
+			{ type: 'event', event: { type: 'assistant/message', seq: 2, data: { message: { content: [] } } } },
+		],
+	};
+	const events = unwrapFollowFrame(frame);
+	assert.equal(events.length, 2);
+	assert.deepEqual(events.map(e => (e as { type: string }).type), ['user/message', 'assistant/message']);
+});
+
+test('unwrapFollowFrame expands a single incremental event frame', () => {
+	const events = unwrapFollowFrame({ type: 'event', event: { type: 'tool/call', seq: 3, data: {} } });
+	assert.deepEqual(events.map(e => (e as { type: string }).type), ['tool/call']);
+});
+
+test('unwrapFollowFrame turns assistant-stream chunks into neutral deltas', () => {
+	const events = unwrapFollowFrame({ type: 'assistant-stream', frame: { type: 'chunk', chunk: { type: 'text-delta', text: 'abc' } } });
+	assert.deepEqual(events, [{ type: 'assistant.delta', text: 'abc' }]);
+});
+
+test('unwrapFollowFrame drops frames that carry no session content', () => {
+	for (const frame of [
+		{ type: 'waterfall', eventId: 'e1', event: 'approval/request' },
+		{ type: 'ready', clientId: 'c1' },
+		{ type: 'cancel', eventId: 'e1' },
+		{ type: 'snapshot' },
+		{},
+		null,
+		'not-a-frame',
+	]) {
+		assert.deepEqual(unwrapFollowFrame(frame), [], `frame ${JSON.stringify(frame)} must yield no events`);
+	}
 });

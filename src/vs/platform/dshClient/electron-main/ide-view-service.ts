@@ -115,8 +115,22 @@ export class DshIdeViewService extends Disposable implements IdeViewHost {
 		return { closed: true };
 	}
 
+	/**
+	 * 收一条原始帧。
+	 *
+	 * `session/follow` 的帧有两种形状（第 2 章 §2.2.1）：
+	 *   - `{ type:'snapshot', records:[{type:'event', event:{...}}, ...] }` —— 回放历史；
+	 *   - `{ type:'event', event:{...} }` —— 增量。
+	 * 两者都必须**解包到单条 SessionEvent** 再交给 translator；直接把整帧塞进去会被
+	 * 「未知类型」全部丢弃（真机实测：绑定成功但一帧都发不出）。
+	 */
 	private receive(raw: unknown): void {
-		this.pending.push(raw);
+		for (const event of unwrapFollowFrame(raw)) {
+			this.pending.push(event);
+		}
+		if (this.pending.length === 0) {
+			return;
+		}
 		if (this.flushScheduled) {
 			return;
 		}
@@ -169,4 +183,58 @@ export class DshIdeViewService extends Disposable implements IdeViewHost {
 	get boundSessionId(): string | undefined {
 		return this.sessionId;
 	}
+}
+
+/**
+ * 把 `session/follow` 的帧解包成一条或多条 `SessionEvent`。
+ *
+ * 不认识的形状返回空数组（丢弃，不猜）。`assistant-stream` 帧也在这里转成中立事件，
+ * 避免上游 send 前再分一次叉。
+ */
+export function unwrapFollowFrame(raw: unknown): readonly unknown[] {
+	if (typeof raw !== 'object' || raw === null) {
+		return [];
+	}
+	const frame = raw as Record<string, unknown>;
+	const type = frame['type'];
+	if (type === 'snapshot') {
+		const records = frame['records'];
+		if (!Array.isArray(records)) {
+			return [];
+		}
+		const events: unknown[] = [];
+		for (const record of records) {
+			if (typeof record !== 'object' || record === null) {
+				continue;
+			}
+			const entry = record as Record<string, unknown>;
+			// SessionEventEntry = { type:'event', event: SessionWireEvent }
+			const event = entry['type'] === 'event' ? entry['event'] : entry;
+			if (event !== undefined) {
+				events.push(event);
+			}
+		}
+		return events;
+	}
+	if (type === 'event') {
+		const event = frame['event'];
+		return event === undefined ? [] : [event];
+	}
+	if (type === 'assistant-stream') {
+		const inner = frame['frame'];
+		if (typeof inner !== 'object' || inner === null) {
+			return [];
+		}
+		const chunk = (inner as Record<string, unknown>)['chunk'];
+		if (typeof chunk === 'object' && chunk !== null) {
+			const text = (chunk as Record<string, unknown>)['text'];
+			if (typeof text === 'string') {
+				// 转成中立形状；seq 由 receive 侧的批处理索引兜底，不伪造会话 seq。
+				return [{ type: 'assistant.delta', text }];
+			}
+		}
+		return [];
+	}
+	// waterfall / ready / cancel 等不属于会话内容，交回调用方（当前视图不消费）。
+	return [];
 }
