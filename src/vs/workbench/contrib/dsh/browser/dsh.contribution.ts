@@ -16,7 +16,6 @@ import { ILanguageFeaturesService } from '../../../../editor/common/services/lan
 import { IWorkbenchContribution, registerWorkbenchContribution2, WorkbenchPhase } from '../../../common/contributions.js';
 import { registerDshInlineCompletions } from './inlineCompletion.js';
 import { DshIdeConsumer, type DshIdeConsumerState } from './dshIdeConsumer.js';
-import { rowsToChatContent } from './dshIdeChatContent.js';
 import { setDshChatRenderEnabled } from './dshChatSeam.js';
 import { registerDshChatAgent } from './dshChatAgent.js';
 import { IChatAgentService } from '../../chat/common/participants/chatAgents.js';
@@ -64,12 +63,10 @@ class DshClientContribution extends Disposable implements IWorkbenchContribution
 				// 有真实 DTO 投影内容时才启用接缝，避免空面板也走 DSH 渲染件。
 				setDshChatRenderEnabled(true);
 			}
-			// 行 → Chat 渲染内容（单接缝只认 markdownContent，映射集中在 dshIdeChatContent.ts）。
 			// 这里只维护可读快照，不直接写 Chat 模型：DSH-IDE 的 Chat 容器没有 DSH 会话，
 			// 伪造一个 request 往模型里塞 progress 会让会话状态与 DSH 真源不一致（第 1 章 §4.5）。
 			this._lastState = state;
 			this._rows = state.rows;
-			this._chatContent = rowsToChatContent(state.rows);
 		}));
 		this._register(client.onDidSnapshot(snapshot => consumer.accept(snapshot)));
 
@@ -87,17 +84,13 @@ class DshClientContribution extends Disposable implements IWorkbenchContribution
 
 	private _lastState: DshIdeConsumerState | undefined;
 	private _rows: readonly import('../../../../platform/dshClient/common/dshIdeProtocol.js').DshIdeRow[] = [];
-	private _chatContent: readonly unknown[] = [];
+
 
 	/** 最近一次被接受的渲染状态。 */
 	get lastState(): DshIdeConsumerState | undefined {
 		return this._lastState;
 	}
 
-	/** 最近一次投影出的 Chat 渲染内容（顺序 = 快照顺序，已跳过不可渲染行）。 */
-	get chatContent(): readonly unknown[] {
-		return this._chatContent;
-	}
 }
 
 registerWorkbenchContribution2('workbench.contrib.dshClient', DshClientContribution, WorkbenchPhase.AfterRestored);
