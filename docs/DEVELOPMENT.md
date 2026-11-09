@@ -590,7 +590,17 @@ waterfall 语义单测覆盖、boundary PASS、17 符号单源、端到端实跑
 - **活动**：`app.ts` 构造参数换为真实 `DshIdeBackend` 的 `DshIdeViewService`；`client.js` 按钮改为经 `dshIde` 通道开窗；一次性接上 20 个 method 对应的功能（审批、问卷、权限预设、模型、effort、斜杠命令、resume / fork / rewind、goal / todo / usage / TPS / workingActivity 投影、`ping` / `inlineComplete`、账号、语音、删除会话）；保持双窗口并存，DSH 主窗口按钮可用；语音未就绪时入口明确不可用。
 - **产出**：`app.ts` 真实接线、`client.js` 开窗、完整功能接线、双窗口镜像。
 - **出口判据 K6**：真机双窗口镜像同一会话；`approval/request` 与 `user-questions/request` 两边弹出且任一 resolve 即消费；按钮开窗成功；`ping` / `inlineComplete` 恢复；Chat 面板可见且 DSH 内容回填；关闭 IDE 窗口不取消 DSH 会话；语音不可用时不启动本地识别后端。
-- **当前态**：未开始。
+- **当前态**：未开始。**承载形态已由实测收敛（2026-11-09）**：
+  1. **原生 IDE 窗口路径不可用**（已在 §3 记录）：`runtime/app` 是 appOnly 载荷、不含 Electron，
+     而宿主 exe 恒定加载自身 `resources/app.asar` → 无法以独立 Electron 进程启动 IDE，
+     硬拉只会再开一个 DSH。`DshIdeLauncher` 因此在缺 Electron 时如实失败。
+  2. **页面承载可行（已实测）**：用 `out/server-main.js` + `--without-connection-token --host 127.0.0.1 --port 0`
+     可启动 VS Code 官方 server 模式——日志输出 `Web UI available at http://localhost:<port>`、
+     `Extension host agent started`，对首页 `GET` 返回 **200 / 4459 B**（workbench HTML）。
+     这正是「给 DSH 应用加一个 IDE 页面」的官方承载方式（复用上游 server 与 web workbench，
+     不自造窗口壳）。P5 据此把 IDE 承载从「原生 `BrowserWindow` + `IServerChannel`」改成
+     「DSH 应用内的页面」，`dshIde` 通道语义随之收敛为页面内消费 DTO 的同进程/同机链路。
+     具体切片与接线顺序在 P5 活动内落地，本行只记录实测结论，不代表已实现。
 
 #### P6 测试与验证
 
