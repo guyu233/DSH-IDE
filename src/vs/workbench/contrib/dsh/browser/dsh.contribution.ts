@@ -16,6 +16,8 @@ import { ILanguageFeaturesService } from '../../../../editor/common/services/lan
 import { IWorkbenchContribution, registerWorkbenchContribution2, WorkbenchPhase } from '../../../common/contributions.js';
 import { registerDshInlineCompletions } from './inlineCompletion.js';
 import { DshIdeConsumer, type DshIdeConsumerState } from './dshIdeConsumer.js';
+import { rowsToChatContent } from './dshIdeChatContent.js';
+import { setDshChatRenderEnabled } from './dshChatSeam.js';
 import { Disposable } from '../../../../base/common/lifecycle.js';
 
 registerSingleton(IDshClientService, DshClientService, InstantiationType.Delayed);
@@ -37,7 +39,9 @@ class DshClientContribution extends Disposable implements IWorkbenchContribution
 		// 行内补全（DSH 后端；未接线时优雅降级为无补全，不报错）。
 		registerDshInlineCompletions(languageFeatures, client);
 
-		// 消费链路：快照 → 消费者（校验 / fail-closed / 合并 / diff）。
+		// 启用单接缝：只有在收到第一份来自 dshIde 的 ready 快照后才打开，
+		// 保证纯净 VS Code 窗口（无 DSH 快照）的渲染行为零变化（第 8 章 §8.3.2）。
+		// 历史上 `setDshChatRenderEnabled` 全仓无调用方，接缝恒休眠——这是 P4 要修的实质缺陷。
 		const consumer = this._register(new DshIdeConsumer());
 		this._register(consumer.onDidFail((error: { readonly code: string }) => {
 			// 连续性失败必须让用户知道，不能静默丢弃帧（第 2 章 E4 / E7）。
@@ -48,8 +52,15 @@ class DshClientContribution extends Disposable implements IWorkbenchContribution
 			));
 		}));
 		this._register(consumer.onDidChangeRows(({ state }: { state: DshIdeConsumerState }) => {
-			// 渲染层由 Chat 侧栏读取（P4 后续接线）；这里保证状态是最新的。
+			if (state.phase === 'ready' && state.rows.length > 0) {
+				// 有真实 DTO 投影内容时才启用接缝，避免空面板也走 DSH 渲染件。
+				setDshChatRenderEnabled(true);
+			}
+			// 行 → Chat 渲染内容（单接缝只认 markdownContent，映射集中在 dshIdeChatContent.ts）。
+			// 这里只维护可读快照，不直接写 Chat 模型：DSH-IDE 的 Chat 容器没有 DSH 会话，
+			// 伪造一个 request 往模型里塞 progress 会让会话状态与 DSH 真源不一致（第 1 章 §4.5）。
 			this._lastState = state;
+			this._chatContent = rowsToChatContent(state.rows);
 		}));
 		this._register(client.onDidSnapshot(snapshot => consumer.accept(snapshot)));
 
@@ -66,11 +77,18 @@ class DshClientContribution extends Disposable implements IWorkbenchContribution
 	}
 
 	private _lastState: DshIdeConsumerState | undefined;
+	private _chatContent: readonly unknown[] = [];
 
-	/** 最近一次被接受的渲染状态（供 Chat 侧栏读取；P4 接线）。 */
+	/** 最近一次被接受的渲染状态。 */
 	get lastState(): DshIdeConsumerState | undefined {
 		return this._lastState;
+	}
+
+	/** 最近一次投影出的 Chat 渲染内容（顺序 = 快照顺序，已跳过不可渲染行）。 */
+	get chatContent(): readonly unknown[] {
+		return this._chatContent;
 	}
 }
 
 registerWorkbenchContribution2('workbench.contrib.dshClient', DshClientContribution, WorkbenchPhase.AfterRestored);
+
