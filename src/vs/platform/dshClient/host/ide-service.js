@@ -53,14 +53,20 @@ export class IdeRemoteService extends Service {
    * 不做「假装成功」：没有可用端点时返回明确失败，由按钮显示错误。
    * @returns {{ ok: boolean, message?: string }}
    */
-  async launch(workspace) {
+  async launch(workspace, sessionId) {
     // 1) 参数校验（会话/工作区由调用方给，Host 不猜）。
     if (workspace !== undefined && typeof workspace !== 'string') {
       return { ok: false, message: 'launch(workspace) must be a string when provided' };
     }
+    if (sessionId !== undefined && (typeof sessionId !== 'string' || sessionId.trim() === '')) {
+      return { ok: false, message: 'launch(sessionId) must be a non-empty string when provided' };
+    }
 
     // 2) 已经有一个 IDE 进程报到了：它在自己的进程里开窗（R1：IDE 是插件载荷，不是外部应用）。
-    const spec = { ...(workspace === undefined ? {} : { workspace }) };
+    const spec = {
+      ...(workspace === undefined ? {} : { workspace }),
+      ...(sessionId === undefined ? {} : { sessionId }),
+    };
     if (this.launchQueue.dispatch(spec)) {
       return { ok: true, via: 'registered-ide' };
     }
@@ -73,7 +79,7 @@ export class IdeRemoteService extends Service {
         message: `no IDE process has registered yet; endpoint file not found (looked in ${this.endpointCandidates().join(' , ')})`,
       };
     }
-    const spawned = await this.spawnIdeProcess(endpoint, workspace);
+    const spawned = await this.spawnIdeProcess(endpoint, workspace, sessionId);
     if (spawned.ok !== true) {
       return { ok: false, message: spawned.message };
     }
@@ -91,7 +97,7 @@ export class IdeRemoteService extends Service {
    *
    * @returns {{ ok: boolean, message?: string }}
    */
-  async spawnIdeProcess(endpoint, workspace) {
+  async spawnIdeProcess(endpoint, workspace, sessionId) {
     const appPath = join(this.pluginRoot, 'runtime', 'app');
     const entry = join(appPath, 'out', 'main.js');
     if (!existsSync(entry)) {
@@ -116,6 +122,12 @@ export class IdeRemoteService extends Service {
       delete env.ELECTRON_RUN_AS_NODE;
       env.DSH_IDE_ENDPOINT = endpoint.origin;
       env.DSH_IDE_LAUNCH_URL = endpoint.launchUrl;
+      // 会话由 DSH 决定（不变量 I4）：把开窗方给的 sessionId 交给子进程，IDE 侧据此
+      // `openView({ view:'chat', params:{ sessionId } })`；缺它时后端只订阅 `$events`，
+      // Chat 面板拿不到任何会话内容（K5 的缺口）。
+      if (sessionId !== undefined) {
+        env.DSH_IDE_SESSION = sessionId;
+      }
       // 不传载荷目录作为位置参数：主页的 `resources/app` 已经指向插件载荷。
       // 位置参数只承载「要打开的工作区」，与 VS Code CLI 语义一致（首次点击即打开当前工作区）。
       const args = typeof workspace === 'string' && workspace !== '' ? [workspace] : [];

@@ -48,7 +48,10 @@ window.__ModuleLoader__.load({
 		const IDE_REMOTE = Object.freeze({
 			package: "dsh-ide",
 			descriptors: Object.freeze([
-				directMethod("launch", [{ wire: "workspace", type: "WorkspacePath" }]),
+				directMethod("launch", [
+					{ wire: "workspace", type: "WorkspacePath" },
+					{ wire: "sessionId", type: "SessionId" },
+				]),
 				directMethod("registerIdeClient", [{ wire: "clientId", type: "ClientId" }]),
 				directMethod("pollLaunch", [{ wire: "clientId", type: "ClientId" }]),
 			]),
@@ -118,7 +121,12 @@ window.__ModuleLoader__.load({
 					return;
 				}
 				withTimeout(
-					ideNamespace.launch(typeof cwd === "string" && cwd !== "" ? cwd : undefined),
+					// 会话由 DSH 决定（不变量 I4）：把当前会话 id 一并交给 Host，新窗口据此订阅该会话。
+					// 不传 sessionId 时后端只订阅 `$events`，Chat 面板拿不到会话内容（K5 缺口）。
+					ideNamespace.launch(
+						typeof cwd === "string" && cwd !== "" ? cwd : undefined,
+						typeof props.sessionId === "string" && props.sessionId !== "" ? props.sessionId : undefined,
+					),
 					LAUNCH_TIMEOUT_MS,
 					"DSH Host 未响应：请重启 DSH 后重试",
 				)
@@ -142,7 +150,7 @@ window.__ModuleLoader__.load({
 						setBusy(false);
 						setError((err && err.message) || String(err));
 					});
-			}, [busy, cwd]);
+			}, [busy, cwd, props.sessionId]);
 			const label = error ? ("DSH-IDE 启动失败: " + error) : "在 DSH-IDE 中打开当前工作区";
 			return h(Button, {
 				variant: "ghost", size: "sm", className: "dsh-ide-open",
