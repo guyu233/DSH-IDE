@@ -99,35 +99,6 @@ const serverResourcePatterns = [
 	'vs/workbench/contrib/terminal/common/scripts/psreadline/netstd/*.dll',
 ];
 
-// Resources for server-web target (server + web UI)
-const serverWebResourcePatterns = [
-	...serverResourcePatterns,
-	...commonResourcePatterns,
-
-	// Web HTML
-	'vs/code/browser/workbench/workbench.html',
-	'vs/code/browser/workbench/workbench-dev.html',
-	'vs/code/browser/workbench/callback.html',
-	'vs/workbench/services/extensions/worker/webWorkerExtensionHostIframe.html',
-	'vs/workbench/contrib/webview/browser/pre/*.html',
-
-	// Webview pre scripts
-	'vs/workbench/contrib/webview/browser/pre/*.js',
-
-	// Media - audio
-	'vs/platform/accessibilitySignal/browser/media/*.mp3',
-	'vs/workbench/contrib/agentsVoice/browser/media/*.mp3',
-
-	// Media - images
-	'vs/workbench/contrib/welcomeGettingStarted/common/media/**/*.svg',
-	'vs/workbench/contrib/welcomeGettingStarted/common/media/**/*.png',
-	'vs/workbench/contrib/welcomeOnboarding/browser/media/*.svg',
-	'vs/workbench/contrib/extensions/browser/media/*.svg',
-	'vs/workbench/contrib/extensions/browser/media/*.png',
-	'vs/workbench/services/extensionManagement/common/media/*.svg',
-	'vs/workbench/services/extensionManagement/common/media/*.png',
-];
-
 // Resources for standalone web target (browser-only, no server)
 const webResourcePatterns = [
 	...commonResourcePatterns,
@@ -162,8 +133,6 @@ function getResourcePatternsForTarget(target: BuildTarget): string[] {
 			return desktopResourcePatterns;
 		case 'server':
 			return serverResourcePatterns;
-		case 'server-web':
-			return serverWebResourcePatterns;
 		case 'web':
 			return webResourcePatterns;
 		default:

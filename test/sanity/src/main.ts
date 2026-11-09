@@ -9,7 +9,6 @@ import { setup as setupCliTests } from './cli.test.js';
 import { TestContext } from './context.js';
 import { setup as setupDesktopTests } from './desktop.test.js';
 import { setup as setupServerTests } from './server.test.js';
-import { setup as setupServerWebTests } from './serverWeb.test.js';
 import { setup as setupWSLTests } from './wsl.test.js';
 import { setup as setupDevTunnelTests } from './devTunnel.test.js';
 
@@ -54,6 +53,5 @@ beforeEach(function () {
 setupCliTests(context);
 setupDesktopTests(context);
 setupServerTests(context);
-setupServerWebTests(context);
 setupWSLTests(context);
 setupDevTunnelTests(context);

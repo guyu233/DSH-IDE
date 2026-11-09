@@ -8,14 +8,13 @@ import * as path from 'path';
 
 const root = path.resolve(import.meta.dirname, '../..');
 
-export type BuildTarget = 'desktop' | 'server' | 'server-web' | 'web';
+export type BuildTarget = 'desktop' | 'server' | 'web';
 
 export function getBootstrapEntryPointsForTarget(target: BuildTarget): string[] {
 	switch (target) {
 		case 'desktop':
 			return ['main', 'mainImpl', 'cli', 'bootstrap-fork'];
 		case 'server':
-		case 'server-web':
 			return ['server-main', 'server-cli', 'bootstrap-fork'];
 		case 'web':
 			return [];

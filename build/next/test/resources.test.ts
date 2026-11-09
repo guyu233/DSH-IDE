@@ -19,8 +19,8 @@ import { applyIncrementalClientChanges, copyFile } from '../transpile.ts';
 const repoRoot = path.resolve(import.meta.dirname, '../../..');
 const preDirectory = 'vs/workbench/contrib/webview/browser/pre';
 const serviceWorkerPath = `${preDirectory}/service-worker.js`;
-const targets: BuildTarget[] = ['desktop', 'server', 'server-web', 'web'];
-const webviewTargets: BuildTarget[] = ['desktop', 'server-web', 'web'];
+const targets: BuildTarget[] = ['desktop', 'server', 'web'];
+const webviewTargets: BuildTarget[] = ['desktop', 'web'];
 const sourceMapBaseUrl = 'https://example.test/sourcemaps/commit/core';
 const script = `// This explanatory comment and the long local name should not be emitted in a minified production resource.
 function calculateAnswer(longParameterName) {
@@ -38,7 +38,6 @@ suite('production resources', () => {
 		assert.deepStrictEqual(inventory, [
 			{ target: 'desktop', javascript: [serviceWorkerPath] },
 			{ target: 'server', javascript: [] },
-			{ target: 'server-web', javascript: [serviceWorkerPath] },
 			{ target: 'web', javascript: [serviceWorkerPath] },
 		]);
 	});
@@ -229,7 +228,7 @@ export const url = import.meta.url;
 			if (mapKind === 'external') {
 				await writeFile(srcDir, `${preDirectory}/maps/input.map`, JSON.stringify(inputMap));
 			}
-			await copyResources(srcDir, outDir, 'server-web', true);
+			await copyResources(srcDir, outDir, 'web', true);
 			const output = await fs.promises.readFile(path.join(outDir, serviceWorkerPath), 'utf8');
 			const map: RawSourceMap = JSON.parse(await fs.promises.readFile(path.join(outDir, `${serviceWorkerPath}.map`), 'utf8'));
 			const consumer = new SourceMapConsumer(map);

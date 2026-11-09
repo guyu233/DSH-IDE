@@ -255,7 +255,7 @@ function fetchNodejs(assetName: string, checksumSha256: string | undefined): Nod
 	return fetchNodejsFromInternalFeed(nodejsArtifactFeed, assetName, version, checksumSha256);
 }
 
-function packageTask(type: string, platform: string, arch: string, sourceFolderName: string, destinationFolderName: string) {
+function packageTask(platform: string, arch: string, sourceFolderName: string, destinationFolderName: string) {
 	const destination = path.join(BUILD_ROOT, destinationFolderName);
 
 	return () => {
@@ -283,10 +283,6 @@ function packageTask(type: string, platform: string, arch: string, sourceFolderN
 		};
 		const localWorkspaceExtensions = glob.sync('extensions/*/package.json')
 			.filter((extensionPath) => {
-				if (type === 'reh-web') {
-					return true; // web: ship all extensions for now
-				}
-
 				// Skip shipping UI extensions because the client side will have them anyways
 				// and they'd just increase the download without being used
 				const manifest = JSON.parse(fs.readFileSync(path.join(REPO_ROOT, extensionPath)).toString());
@@ -359,14 +355,6 @@ function packageTask(type: string, platform: string, arch: string, sourceFolderN
 		const node = gulp.src(`${nodePath}/**`, { base: nodePath, dot: true });
 
 		let web: NodeJS.ReadWriteStream[] = [];
-		if (type === 'reh-web') {
-			web = [
-				'resources/server/favicon.ico',
-				'resources/server/code-192.png',
-				'resources/server/code-512.png',
-				'resources/server/manifest.json'
-			].map(resource => gulp.src(resource, { base: '.' }).pipe(rename(resource)));
-		}
 
 		const all = es.merge(
 			packageJsonStream,
@@ -426,7 +414,7 @@ function packageTask(type: string, platform: string, arch: string, sourceFolderN
 		}
 
 		result = inlineMeta(result, {
-			targetPaths: getBootstrapEntryPointsForTarget(type === 'reh' ? 'server' : 'server-web').map(entry => `${entry}.js`),
+			targetPaths: getBootstrapEntryPointsForTarget('server').map(entry => `${entry}.js`),
 			packageJsonFn: () => packageJsonContents,
 			productJsonFn: () => productJsonContents
 		});
@@ -506,8 +494,8 @@ function patchWin32DependenciesTask(destinationFolderName: string) {
 	};
 }
 
-['reh', 'reh-web'].forEach(type => {
-	const target = type === 'reh' ? 'server' : 'server-web';
+['reh'].forEach(type => {
+	const target = 'server';
 	const esbuildBundleTask = task.define(`esbuild-vscode-${type}`, () => runEsbuildBundle(`out-vscode-${type}`, false, true, target));
 	const esbuildBundleMinTask = task.define(`esbuild-vscode-${type}-min`, () => runEsbuildBundle(`out-vscode-${type}-min`, true, true, target, `https://main.vscode-cdn.net/sourcemaps/${commit}/core`));
 
@@ -524,7 +512,7 @@ function patchWin32DependenciesTask(destinationFolderName: string) {
 				compileNativeExtensionsBuildTask,
 				task.task(`node-${platform}-${arch}`) as task.Task,
 				util.rimraf(path.join(BUILD_ROOT, destinationFolderName)),
-				packageTask(type, platform, arch, sourceFolderName, destinationFolderName)
+				packageTask(platform, arch, sourceFolderName, destinationFolderName)
 			];
 
 			if (platform === 'win32') {

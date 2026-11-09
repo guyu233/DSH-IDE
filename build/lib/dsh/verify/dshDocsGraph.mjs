@@ -3,7 +3,7 @@
  *  Licensed under the MIT License.
  *--------------------------------------------------------------------------------------------*/
 
-// 文档结构核验（docs/DEVELOPMENT.md 第 5 章 §10.1 的三项检查）：
+// 文档结构核验（docs/DEVELOPMENT.md 第 5 章 §10.1 的四项检查）：
 //
 //   node build/lib/dsh/verify/dshDocsGraph.mjs
 //
@@ -12,6 +12,10 @@
 //    是导航）。要求 0 环，且实测边数与 README §4.1 的 Mermaid 图注一致（3 节点 3 边）。
 // 2. 术语表唯一：`^## .*术语` 只允许 README §2 一处。
 // 3. `唯一定义` / `唯一职责` 声明按主题去重：同一主题不得由两个文件声称定义。
+// 4. 状态单一性与每轮回写：第 3 章 §6 唯一状态表恰好 8 行 P0–P7、状态值限于枚举；三份文档
+//    除该表外不得出现阶段状态行或过期状态字面量；README §7 不得写阶段状态细节。另校验
+//    §0.1 项目快照、第 7 章 §3 待办清单、§7.7 每轮更新记录三者齐全，日期 / commit 与
+//    §3.6「最后实测」一致、快照数值仍能在真源中找到；PASS 输出待办统计与轮次数。
 //
 // 退出码：0 = 全部通过；1 = 任一断言失败。
 
@@ -95,6 +99,150 @@ function transitiveClosure(nodes, edges) {
 	return reach;
 }
 
+/** 唯一状态表的锚点、允许的状态枚举、禁止复现的过期状态字面量。 */
+const STATE_TABLE_HEADING = '### 6. 当前进度（唯一状态表）';
+const STATUS_VALUES = new Set(['已完成', '进行中', '未开始', '未满足出口']);
+const STALE_STATUS_LITERALS = [
+	'launch chain removed',
+	'P3 进行中',
+	'P5 未开始',
+	'消费者不存在',
+	'call() 一律 reject',
+	'页面承载可行',
+	'原生渲染承载',
+];
+const STATE_POINTER = '应指向第 3 章 §6';
+
+/** 每轮回写的三处锚点、待办完成状态枚举、快照中必须与真源同步的数值。 */
+const SNAPSHOT_HEADING = '### 0.1 当前项目情况（每轮更新）';
+const TODO_HEADING = '### 3. 待办清单（唯一，含完成标记）';
+const ROUND_LOG_HEADING = '#### 7.7 每轮更新记录（每轮新增一行）';
+const TODO_STATUS_VALUES = new Set(['已完成', '未完成', '待核对']);
+const SNAPSHOT_TOKENS = ['160,112,030', '172/172', '3 `PASS` + 1 `PENDING`'];
+
+/** 校验唯一状态表与每轮回写，并收集三份文档中出现的第二份阶段状态。 */
+function stateViolations() {
+	const lines = new Map(DOCS.map(file => [
+		file,
+		fs.readFileSync(path.join(repoRoot, file), 'utf8').split(/\r?\n/),
+	]));
+	const devFile = 'docs/DEVELOPMENT.md';
+	const devLines = lines.get(devFile);
+	const tableStart = devLines.findIndex(line => line.trim() === STATE_TABLE_HEADING);
+	assert.ok(tableStart >= 0, `missing state table heading: ${STATE_TABLE_HEADING}`);
+	let tableEnd = devLines.length;
+	for (let i = tableStart + 1; i < devLines.length; i++) {
+		if (/^---\s*$/.test(devLines[i]) || /^## /.test(devLines[i])) {
+			tableEnd = i;
+			break;
+		}
+	}
+	const section = devLines.slice(tableStart, tableEnd);
+	const rows = section.filter(line => /^\|\s*P[0-7]\s*\|/.test(line));
+	assert.equal(rows.length, 8, `state table must have exactly 8 P0-P7 rows, found ${rows.length}`);
+	for (const [index, row] of rows.entries()) {
+		const cells = row.split('|').map(cell => cell.trim());
+		assert.ok(cells.length >= 6, `state row must have 4 columns: ${row}`);
+		assert.equal(cells[1], `P${index}`, `state table row ${index + 1} must be P${index}`);
+		assert.ok(STATUS_VALUES.has(cells[2]), `invalid status "${cells[2]}" at ${devFile}:${tableStart + 1 + section.indexOf(row)}`);
+	}
+
+	const violations = [];
+	for (const file of DOCS) {
+		const fileLines = lines.get(file);
+		for (let i = 0; i < fileLines.length; i++) {
+			if (file === devFile && i >= tableStart && i < tableEnd) {
+				continue;
+			}
+			const line = fileLines[i];
+			const where = `${file}:${i + 1}`;
+			if (/^\|\s*P[0-7]\s*\|/.test(line)) {
+				violations.push(`${where}  ${line.trim()}  → ${STATE_POINTER}`);
+			}
+			if (line.startsWith('- **当前态**：') && !line.includes('第 3 章 §6')) {
+				violations.push(`${where}  阶段当前态必须是指针  → ${STATE_POINTER}`);
+			}
+			for (const literal of STALE_STATUS_LITERALS) {
+				if (line.includes(literal)) {
+					violations.push(`${where}  过期状态字面量 "${literal}"  → ${STATE_POINTER}`);
+				}
+			}
+		}
+	}
+
+	const readmeLines = lines.get('README.md');
+	const statusStart = readmeLines.findIndex(line => /^## 7\. 当前状态入口/.test(line));
+	assert.ok(statusStart >= 0, 'README §7 heading is missing');
+	let statusEnd = readmeLines.length;
+	for (let i = statusStart + 1; i < readmeLines.length; i++) {
+		if (/^## /.test(readmeLines[i])) {
+			statusEnd = i;
+			break;
+		}
+	}
+	for (let i = statusStart; i < statusEnd; i++) {
+		if (/P[0-7].*(进行中|未开始|已完成)/.test(readmeLines[i])) {
+			violations.push(`README.md:${i + 1}  §7 不得写阶段状态细节  → ${STATE_POINTER}`);
+		}
+	}
+	// 每轮回写：项目快照 / 唯一待办清单 / 更新记录三处齐全，且日期、commit 与数值一致。
+	const snapshotStart = devLines.findIndex(line => line.trim() === SNAPSHOT_HEADING);
+	const todoStart = devLines.findIndex(line => line.trim() === TODO_HEADING);
+	const roundsStart = devLines.findIndex(line => line.trim() === ROUND_LOG_HEADING);
+	assert.ok(snapshotStart >= 0 && todoStart >= 0 && roundsStart >= 0,
+		'每轮回写三处（§0.1 / 第 7 章 §3 / §7.7）必须齐全');
+	const sectionEnd = (all, start) => {
+		for (let i = start + 1; i < all.length; i++) {
+			if (/^---\s*$/.test(all[i]) || /^#{2,4} /.test(all[i])) {
+				return i;
+			}
+		}
+		return all.length;
+	};
+	const snapshotEnd = sectionEnd(devLines, snapshotStart);
+	const snapshotText = devLines.slice(snapshotStart, snapshotEnd).join('\n');
+	const elsewhere = devLines.filter((_, i) => i < snapshotStart || i >= snapshotEnd).join('\n');
+	for (const token of SNAPSHOT_TOKENS) {
+		if (snapshotText.includes(token)) {
+			assert.ok(elsewhere.includes(token), `快照数值 "${token}" 已不在唯一真源中，需回写 §0.1`);
+		}
+	}
+	const snapshotRow = devLines.slice(snapshotStart, snapshotEnd).find(line => /^\|\s*最后更新\s*\|/.test(line));
+	assert.ok(snapshotRow !== undefined, '§0.1 必须有「最后更新」行');
+	const snapshot = snapshotRow.split('|').map(cell => cell.trim())[2].replace(/`/g, '');
+	assert.match(snapshot, /^\d{4}-\d{2}-\d{2} \/ [0-9a-f]{7,40}$/, '§0.1「最后更新」必须是「日期 / commit」');
+	const snapshotDate = snapshot.split(' / ')[0];
+	for (const row of rows) {
+		const measured = row.split('|').map(cell => cell.trim())[4].replace(/`/g, '');
+		assert.equal(measured, snapshot, `第 3 章 §6 的「最后实测」必须与 §0.1「最后更新」一致：${row.slice(0, 40)}`);
+	}
+
+	const todoRows = devLines.slice(todoStart, sectionEnd(devLines, todoStart)).filter(line => /^\|\s*D\d+\s*\|/.test(line));
+	assert.ok(todoRows.length > 0, '第 7 章 §3 待办清单不能为空');
+	const todoStats = { done: 0, open: 0, verify: 0 };
+	for (const row of todoRows) {
+		const cells = row.split('|').map(cell => cell.trim());
+		assert.ok(cells.length >= 8, `待办行必须 6 列: ${row.slice(0, 60)}`);
+		assert.ok(TODO_STATUS_VALUES.has(cells[4]), `待办 ${cells[1]} 的「是否完成」值非法: ${cells[4]}`);
+		assert.ok(cells[5].length > 0, `待办 ${cells[1]} 必须写依据 / 真源`);
+		assert.ok(cells[6] === '—' || cells[6].startsWith(snapshotDate), `待办 ${cells[1]} 的「最后核对」需与快照日期一致`);
+		if (cells[4] === '已完成') {
+			todoStats.done++;
+		} else if (cells[4] === '未完成') {
+			todoStats.open++;
+		} else {
+			todoStats.verify++;
+		}
+	}
+
+	const roundRows = devLines.slice(roundsStart, sectionEnd(devLines, roundsStart)).filter(line => /^\|\s*\d+\s*\|/.test(line));
+	assert.ok(roundRows.length > 0, '§7.7 每轮更新记录不能为空');
+	const lastRound = roundRows[roundRows.length - 1].split('|').map(cell => cell.trim())[2].replace(/`/g, '');
+	assert.equal(lastRound, snapshot, '§7.7 最后一行的日期 / commit 必须与 §0.1「最后更新」一致');
+
+	return { violations, snapshot, todoStats, rounds: roundRows.length };
+}
+
 function main() {
 	const { edges, navigation } = definitionEdges();
 
@@ -139,7 +287,11 @@ function main() {
 		seen.set(subject, file);
 	}
 
-	console.log(`PASS  docs-graph: ${DOCS.length} nodes / ${edges.length} edges / 0 cycles; navigation links excluded (${navigation.length}); term table unique; ${claims.length} unique-owner claims deduped`);
+	// 4. 状态单一性与每轮回写：第 3 章 §6 是唯一状态真源，其它章节只允许指针。
+	const state = stateViolations();
+	assert.deepEqual(state.violations, [], `state single-source violations:\n${state.violations.join('\n')}`);
+
+	console.log(`PASS  docs-graph: ${DOCS.length} nodes / ${edges.length} edges / 0 cycles; navigation links excluded (${navigation.length}); term table unique; ${claims.length} unique-owner claims deduped; state single-source ok (8 phases); snapshot ${state.snapshot}; todos ${state.todoStats.done} done / ${state.todoStats.open} open / ${state.todoStats.verify} to-verify; ${state.rounds} rounds`);
 }
 
 try {

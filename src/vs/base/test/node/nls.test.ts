@@ -88,22 +88,22 @@ suite('NLS configuration', () => {
 		return { ...configuration.languagePack, messages };
 	}
 
-	test('switches between server and server-web tables at the same commit', async () => {
+	test('switches between server and web tables at the same commit', async () => {
 		const serverMetadata = await writeMetadata('server', [
 			['vs/workbench/api/common/extHostLogService', ['remote']]
 		], ['Remote']);
-		const serverWebMetadata = await writeMetadata('server-web', [
+		const webMetadata = await writeMetadata('web', [
 			['vs/base/test', ['first', 'missing']],
 			['vs/workbench/api/common/extHostLogService', ['remote']]
 		], ['First', 'Fallback', 'Remote']);
 
 		const server = await resolveMessages(serverMetadata);
-		const serverWeb = await resolveMessages(serverWebMetadata);
+		const web = await resolveMessages(webMetadata);
 		const serverAgain = await resolveMessages(serverMetadata);
 
 		assert.deepStrictEqual({
-			messages: [server.messages, serverWeb.messages, serverAgain.messages],
-			distinctTargetCaches: server.messagesFile !== serverWeb.messagesFile,
+			messages: [server.messages, web.messages, serverAgain.messages],
+			distinctTargetCaches: server.messagesFile !== web.messagesFile,
 			reusedServerCache: server.messagesFile === serverAgain.messagesFile
 		}, {
 			messages: [['Entfernt'], ['Erste', 'Fallback', 'Entfernt'], ['Entfernt']],

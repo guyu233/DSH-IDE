@@ -256,7 +256,6 @@ suite('API proposal registry tasks', () => {
 				'esbuild-out-build',
 				'esbuild-vscode-min',
 				'esbuild-vscode-reh-min',
-				'esbuild-vscode-reh-web-min',
 			],
 			files: before,
 		});

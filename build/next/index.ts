@@ -57,7 +57,7 @@ const options = {
 	force: process.argv.includes('--force'),
 	clientOnly: process.argv.includes('--client-only'),
 	out: getArgValue('--out'),
-	target: getArgValue('--target') ?? 'desktop', // 'desktop' | 'server' | 'server-web' | 'web'
+	target: getArgValue('--target') ?? 'desktop', // 'desktop' | 'server' | 'web'
 	sourceMapBaseUrl: getArgValue('--source-map-base-url'),
 };
 
@@ -111,7 +111,7 @@ const codeEntryPoints = [
 	'vs/code/electron-browser/workbench/workbench',
 ];
 
-// Additional web-only entry points (CDN build only, not in server-web)
+// Additional web-only entry points (only used by the 'web' CDN target)
 const webOnlyEntryPoints: string[] = [];
 
 const keyboardMapEntryPoints = [
@@ -143,13 +143,6 @@ function getEntryPointsForTarget(target: BuildTarget): string[] {
 			return [
 				...serverEntryPoints,
 			];
-		case 'server-web':
-			return [
-				...serverEntryPoints,
-				...workerEntryPoints,
-				'vs/code/browser/workbench/workbench', // Includes workbench.web.main.internal.
-				...keyboardMapEntryPoints,
-			];
 		case 'web':
 			return [
 				...workerEntryPoints,
@@ -174,10 +167,6 @@ function getCssBundleEntryPointsForTarget(target: BuildTarget): Set<string> {
 			]);
 		case 'server':
 			return new Set(); // Server has no UI
-		case 'server-web':
-			return new Set([
-				'vs/code/browser/workbench/workbench',
-			]);
 		case 'web':
 			return new Set([
 				'vs/workbench/workbench.web.main.internal',
@@ -361,10 +350,7 @@ function fileContentMapperPlugin(outDir: string, target: BuildTarget): esbuild.P
 				// Inject product configuration
 				if (contents.includes('/*BUILD->INSERT_PRODUCT_CONFIGURATION*/')) {
 					if (productConfigReplacement === undefined) {
-						// For server-web, remove webEndpointUrlTemplate
-						const productForTarget = target === 'server-web'
-							? { ...product, webEndpointUrlTemplate: undefined }
-							: product;
+						const productForTarget = product;
 						const productConfiguration = JSON.stringify({
 							...productForTarget,
 							version,
@@ -381,10 +367,9 @@ function fileContentMapperPlugin(outDir: string, target: BuildTarget): esbuild.P
 				// Inject built-in extensions list
 				if (contents.includes('/*BUILD->INSERT_BUILTIN_EXTENSIONS*/')) {
 					if (builtinExtensionsReplacement === undefined) {
-						if (target === 'web' || target === 'server-web') {
+						if (target === 'web') {
 							// Web target uses .build/web/extensions (from compileWebExtensionsBuildTask)
-							// while server-web uses .build/extensions.
-							const extensionsRoot = target === 'web' ? '.build/web/extensions' : '.build/extensions';
+							const extensionsRoot = '.build/web/extensions';
 							const builtinExtensions = JSON.stringify(scanBuiltinExtensions(extensionsRoot));
 							// Remove the outer brackets since the placeholder is inside an array literal
 							builtinExtensionsReplacement = builtinExtensions.substring(1, builtinExtensions.length - 1);
@@ -815,7 +800,7 @@ Options for 'bundle':
 	--nls              Process NLS (localization) strings
 	--mangle-privates  Convert native #private fields to regular properties
 	--out <dir>        Output directory (default: out-vscode)
-	--target <target>  Build target: desktop (default), server, server-web, web
+	--target <target>  Build target: desktop (default), server, web
 	--source-map-base-url <url>  Rewrite sourceMappingURL to CDN URL
 
 Examples:
@@ -830,7 +815,6 @@ Examples:
 	npx tsx build/next/index.ts bundle --minify --nls
 	npx tsx build/next/index.ts bundle --nls --out out-vscode-min
 	npx tsx build/next/index.ts bundle --minify --nls --target server --out out-vscode-reh-min
-	npx tsx build/next/index.ts bundle --minify --nls --target server-web --out out-vscode-reh-web-min
 `);
 }
 

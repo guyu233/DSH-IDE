@@ -21,18 +21,6 @@ export function setup(context: TestContext) {
 		await testServer(entryPoint);
 	});
 
-	context.test('wsl-server-web-arm64', ['windows', 'arm64', 'wsl', 'browser'], async () => {
-		const dir = await context.downloadAndUnpack('server-linux-arm64-web');
-		const entryPoint = context.getServerEntryPoint(dir, true);
-		await testServerWeb(entryPoint);
-	});
-
-	context.test('wsl-server-web-x64', ['windows', 'x64', 'wsl', 'browser'], async () => {
-		const dir = await context.downloadAndUnpack('server-linux-x64-web');
-		const entryPoint = context.getServerEntryPoint(dir, true);
-		await testServerWeb(entryPoint);
-	});
-
 	context.test('wsl-desktop-arm64', ['windows', 'arm64', 'wsl', 'desktop'], async () => {
 		const dir = await context.downloadAndUnpack('win32-arm64-archive');
 		context.validateAllAuthenticodeSignatures(dir);
@@ -85,58 +73,6 @@ export function setup(context: TestContext) {
 				const version = await response.text();
 				assert.strictEqual(version, context.options.commit, `Expected commit ${context.options.commit} but got ${version}`);
 
-				return true;
-			}
-		);
-	}
-
-	async function testServerWeb(entryPoint: string) {
-		if (context.options.downloadOnly) {
-			return;
-		}
-
-		const wslWorkspaceDir = context.createWslTempDir();
-		const wslExtensionsDir = context.createWslTempDir();
-		const token = context.getRandomToken();
-		const test = new WslUITest(context, undefined, wslWorkspaceDir, wslExtensionsDir);
-
-		const wslEntryPoint = context.toWslPath(entryPoint);
-
-		await context.runCliApp('WSL Server', 'wsl',
-			[
-				wslEntryPoint,
-				'--accept-server-license-terms',
-				'--connection-token', token,
-				'--host', '0.0.0.0',
-				'--port', context.getUniquePort(),
-				'--server-data-dir', context.createWslTempDir(),
-				'--extensions-dir', wslExtensionsDir,
-				'--user-data-dir', context.createWslTempDir(),
-			],
-			async (line) => {
-				const port = /Extension host agent listening on (\d+)/.exec(line)?.[1];
-				if (!port) {
-					return false;
-				}
-
-				const url = context.getWebServerUrl(port, token, wslWorkspaceDir).toString();
-				const browser = await context.launchBrowser();
-				try {
-					const page = await context.getPage(browser.newPage());
-
-					context.log(`Navigating to ${url}`);
-					await page.goto(url, { waitUntil: 'networkidle' });
-
-					context.log('Waiting for the workbench to load');
-					await page.waitForSelector('.monaco-workbench');
-
-					await test.run(page);
-				} finally {
-					context.log('Closing browser');
-					await browser.close();
-				}
-
-				test.validate();
 				return true;
 			}
 		);

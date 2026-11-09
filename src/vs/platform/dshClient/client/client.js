@@ -4,7 +4,8 @@
  * 在会话头部工具区（slot `conversation.session.header.utilities`，即右上角工具条）注册一个「DSH-IDE」按钮。
  *
  * 开窗路径（P5，用户授权先于 K5 实施）：按钮 → `ctx.remote.ide.launch(workspace)` →
- * Host 半身的 `IdeRemoteService.launch()` → 校验已发布的 IDE 端点 → IDE 主进程开窗。
+ * Host 半身的 `IdeRemoteService.launch()` → 已有 IDE 报到则转发开窗，否则物化 Electron 主页
+ * 并拉起插件载荷 → IDE 进程在自己的窗口里开窗。承载形态为原生窗口（不使用 iframe 页面）。
  * 为什么绕 Host：本文件跑在 DSH Web 渲染进程，碰不到 IDE 主进程的 `dshIde` 通道，
  * 只能经官方 Typert Gateway 调 Host 服务（R0：复用官方机制，不自造传输）。
  *
@@ -39,15 +40,11 @@ window.__ModuleLoader__.load({
 				if (busy) { return; }
 				setBusy(true);
 				setError(null);
-				// 打开 IDE 页面：先取 URL 再开新窗口（都在同一个用户手势里，避免被浏览器拦截）。
-				Promise.resolve(pluginCtx.remote.ide.idePageUrl())
+				const workspace = props && typeof props.workspace === "string" ? props.workspace : undefined;
+				Promise.resolve(pluginCtx.remote.ide.launch(workspace))
 					.then(result => {
 						setBusy(false);
-						if (result && result.ok === true && typeof result.url === "string") {
-							setError(null);
-							window.open(result.url, "dsh-ide-panel", "noopener");
-							return;
-						}
+						if (result && result.ok === true) { setError(null); return; }
 						setError((result && result.message) || "未知错误");
 					})
 					.catch(err => {
@@ -64,43 +61,8 @@ window.__ModuleLoader__.load({
 			}, h("span", null, "DSH-IDE"), error ? h("span", { style: { color: "var(--vscode-errorForeground, #f48771)" } }, "\u26a0") : null);
 		}
 
-		/** 侧栏里的 IDE 页面：iframe 承载上游 workbench，URL 由 Host 半身按需拉起。 */
-		function DshIdePage() {
-			const [url, setUrl] = React.useState(null);
-			const [error, setError] = React.useState(null);
-			React.useEffect(() => {
-				let alive = true;
-				Promise.resolve(pluginCtx.remote.ide.idePageUrl())
-					.then(result => {
-						if (!alive) { return; }
-						if (result && result.ok === true && typeof result.url === "string") { setUrl(result.url); return; }
-						setError((result && result.message) || "未知错误");
-					})
-					.catch(err => { if (alive) { setError((err && err.message) || String(err)); } });
-				return () => { alive = false; };
-			}, []);
-			if (error !== null) {
-				return h("div", { className: "dsh-ide-page-error", style: { padding: "8px", fontSize: "12px", opacity: 0.8 } },
-					"DSH-IDE 页面不可用：" + error);
-			}
-			if (url === null) {
-				return h("div", { className: "dsh-ide-page-loading", style: { padding: "8px", fontSize: "12px", opacity: 0.8 } },
-					"DSH-IDE 正在启动…");
-			}
-			return h("iframe", {
-				className: "dsh-ide-page",
-				src: url,
-				title: "DSH-IDE",
-				style: { width: "100%", height: "100%", border: "0", display: "block" },
-			});
-		}
-
-		function DshIdePageTitle() {
-			return h("span", null, "DSH-IDE");
-		}
-
 		return {
-			// 需要 `remote` 才能调 Host 的 ide.* 方法（官方 Typert Gateway）。
+			// 需要 `remote` 才能调 Host 的 ide.launch（官方 Typert Gateway）。
 			inject: ["slots", "remote"],
 			apply(ctx) {
 				pluginCtx = ctx;
@@ -109,19 +71,6 @@ window.__ModuleLoader__.load({
 					id: "dsh-ide",
 					order: -9,
 				}, DshIdeButton));
-
-				// IDE 作为 DSH 应用内的一个页面：复用官方右侧栏 tab slot（与官方终端 tab 同机制）。
-				// 页面本身是上游 code-server 的 workbench，由 Host 半身在本机拉起（见 host/ide-service.js）。
-				ctx.slots.inject("sidebar.right.pane.tab", () => ctx.slots.register({
-					name: "sidebar.right.pane.tab",
-					key: "dsh-ide",
-					locale: "dsh-ide",
-				}, DshIdePage));
-				ctx.slots.inject("sidebar.right.pane.tab.title", () => ctx.slots.register({
-					name: "sidebar.right.pane.tab.title",
-					key: "dsh-ide",
-					locale: "dsh-ide",
-				}, DshIdePageTitle));
 			},
 		};
 	},

@@ -103,7 +103,7 @@ suite('standalone preloads', () => {
 		}
 	}
 
-	for (const target of ['server', 'server-web', 'web'] as const) {
+	for (const target of ['server', 'web'] as const) {
 		test(`does not read or emit desktop preloads for ${target}`, async t => {
 			const root = await temporaryDirectory(t);
 			const outDir = path.join(root, 'out');

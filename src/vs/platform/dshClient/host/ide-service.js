@@ -15,9 +15,10 @@
 
 import { spawn } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { Service } from '@deepseek-ai/cordis';
 import { bindTypertRemote } from '@deepseek-ai/dsh-typert-protocol';
+import { materializeElectronHome } from './electron-home.js';
 
 const REMOTE_METHOD_DESCRIPTOR = '@deepseek-ai/dsh-typert-protocol/remote-methods';
 
@@ -33,11 +34,8 @@ export class IdeRemoteService extends Service {
     this.launchQueue = [];
     /** 最近一次拉起 IDE 进程的时间（防重复拉起）。 */
     this.spawnedAt = undefined;
-    /** IDE 页面服务（server 模式）的 URL 与子进程。 */
-    this.idePage = undefined;
-    this.idePageStarting = undefined;
-    this.idePageError = undefined;
-    this.ideServerChild = undefined;
+    /** Electron 主页的物化进行中/已完成 Promise（并发首点只建一次）。 */
+    this.electronHomeBuild = undefined;
     this.typertRemote = bindTypertRemote(this, 'ide', { namespace: 'ide' });
   }
 
@@ -54,7 +52,7 @@ export class IdeRemoteService extends Service {
    * 不做「假装成功」：没有可用端点时返回明确失败，由按钮显示错误。
    * @returns {{ ok: boolean, message?: string }}
    */
-  launch(workspace) {
+  async launch(workspace) {
     // 1) 参数校验（会话/工作区由调用方给，Host 不猜）。
     if (workspace !== undefined && typeof workspace !== 'string') {
       return { ok: false, message: 'launch(workspace) must be a string when provided' };
@@ -75,7 +73,7 @@ export class IdeRemoteService extends Service {
         message: `no IDE process has registered yet; endpoint file not found (looked in ${this.endpointCandidates().join(' , ')})`,
       };
     }
-    const spawned = this.spawnIdeProcess(endpoint);
+    const spawned = await this.spawnIdeProcess(endpoint);
     if (spawned.ok !== true) {
       return { ok: false, message: spawned.message };
     }
@@ -93,35 +91,31 @@ export class IdeRemoteService extends Service {
    *
    * @returns {{ ok: boolean, message?: string }}
    */
-  spawnIdeProcess(endpoint) {
+  async spawnIdeProcess(endpoint) {
     const appPath = join(this.pluginRoot, 'runtime', 'app');
     const entry = join(appPath, 'out', 'main.js');
     if (!existsSync(entry)) {
       return { ok: false, message: `IDE payload is missing: ${entry}` };
-    }
-    // 载荷是 appOnly（不含 Electron）。用宿主的 Electron 可执行文件去跑它**不会**生效：
-    // 打包版 Electron 恒定优先加载 `<install>/resources/app.asar`，位置参数被忽略
-    // （2026-11-09 实测：进程起来了但窗口标题仍是 DeepSeek Harness）。
-    // 因此没有自带 Electron 时只能如实失败，绝不误拉起第二个 DSH。
-    const hasOwnElectron = existsSync(join(appPath, 'DSH-IDE.exe')) || existsSync(join(appPath, 'electron.exe'));
-    if (!hasOwnElectron) {
-      return {
-        ok: false,
-        message: 'IDE payload is appOnly (no bundled Electron); a native IDE window cannot be started this way',
-      };
     }
     // 防抖：刚拉起过就不再重复拉起（IDE 启动需要几秒）。
     const now = Date.now();
     if (this.spawnedAt !== undefined && now - this.spawnedAt < 60000) {
       return { ok: true };
     }
+    const home = await this.ensureElectronHome(appPath);
+    if (home.ok !== true) {
+      return { ok: false, message: home.message };
+    }
     try {
-      // `process.execPath` 是本 Host 子进程所用的 Electron 可执行文件；去掉 RUN_AS_NODE 才是 GUI 模式。
+      // `process.execPath` 所属目录就是 DSH 自带的 Electron 发行版；`home.exe` 是它的硬链接副本，
+      // **位于我们自己的 `resources/app` 旁边**，因此它会加载我们的载荷（实测窗口标题 = DSH IDE）。
       const env = { ...process.env };
       delete env.ELECTRON_RUN_AS_NODE;
       env.DSH_IDE_ENDPOINT = endpoint.origin;
       env.DSH_IDE_LAUNCH_URL = endpoint.launchUrl;
-      const child = spawn(process.execPath, [appPath], { detached: true, stdio: 'ignore', env });
+      // 不传载荷位置参数：主页的 `resources/app` 已经指向插件载荷，位置参数只会与
+      // 未来的「打开工作区」语义冲突（docs/DEVELOPMENT.md 第 7 章 §3 P5 收尾项）。
+      const child = spawn(home.exe, [], { detached: true, stdio: 'ignore', env, cwd: appPath });
       child.unref();
       this.spawnedAt = now;
       return { ok: true };
@@ -131,108 +125,33 @@ export class IdeRemoteService extends Service {
   }
 
   /**
-   * 启动 IDE 页面服务（S2）。
+   * 物化/复用「Electron 主页」（实现与纪律见 host/electron-home.js）。
    *
-   * 复用上游 VS Code **官方 server 模式**（`out/server-main.js`）：它既提供 web workbench 页面，
-   * 又跑真实扩展宿主，正是「给 DSH 应用加一个 IDE 页面」的官方承载方式（2026-11-09 实测：
-   * `Web UI available at http://…` + `Extension host agent started`，首页 200）。
-   *
-   * 数据目录固定在插件自有路径，不污染用户的 `~/.vscode-server`。
-   * 幂等：重复调用返回同一个 URL；启动失败返回 undefined 并记录原因。
-   *
-   * @returns {Promise<string|undefined>} workbench 的 origin（失败为 undefined）
+   * 并发首点只建一次：整个构建 memo 成 Promise，失败后清空以便下次重试。
+   * @param {string} appPath 插件载荷 `runtime/app`
+   * @returns {Promise<{ ok: boolean, exe?: string, message?: string }>}
    */
-  async ensureIdePage() {
-    if (this.idePage !== undefined) {
-      return this.idePage.url;
+  ensureElectronHome(appPath) {
+    if (this.electronHomeBuild !== undefined) {
+      return this.electronHomeBuild;
     }
-    if (this.idePageStarting !== undefined) {
-      return this.idePageStarting;
-    }
-    this.idePageStarting = this.startIdePageServer().finally(() => {
-      this.idePageStarting = undefined;
+    this.electronHomeBuild = Promise.resolve(materializeElectronHome({
+      pluginRoot: this.pluginRoot,
+      installRoot: dirname(process.execPath),
+      exePath: process.execPath,
+      appPath,
+      electronVersion: process.versions.electron ?? 'unknown',
+    })).catch(error => ({
+      ok: false,
+      message: `failed to materialize Electron home: ${error instanceof Error ? error.message : String(error)}`,
+    })).then(result => {
+      if (result.ok !== true) {
+        // 失败不缓存：DSH 升级或卷变更后下一次点击可重试。
+        this.electronHomeBuild = undefined;
+      }
+      return result;
     });
-    return this.idePageStarting;
-  }
-
-  /** 真正拉起 server，并从 stdout 解析出 URL。 */
-  startIdePageServer() {
-    const entry = process.env.DSH_IDE_SERVER_ENTRY || join(this.pluginRoot, 'runtime', 'app', 'out', 'server-main.js');
-    if (!existsSync(entry)) {
-      this.idePageError = `IDE page entry is missing: ${entry}`;
-      return Promise.resolve(undefined);
-    }
-    const dataDir = join(this.pluginRoot, 'runtime', 'ide-data');
-    const args = [
-      entry,
-      '--without-connection-token',
-      '--host', '127.0.0.1',
-      '--port', '0',
-      '--extensions-dir', join(dataDir, 'extensions'),
-      '--user-data-dir', join(dataDir, 'user-data'),
-    ];
-    return new Promise(resolve => {
-      let settled = false;
-      const finish = url => {
-        if (settled) {
-          return;
-        }
-        settled = true;
-        resolve(url);
-      };
-      const env = { ...process.env, ELECTRON_RUN_AS_NODE: '1' };
-      const child = spawn(process.execPath, args, { env, stdio: ['ignore', 'pipe', 'pipe'] });
-      this.ideServerChild = child;
-      let buffer = '';
-      let stderrBuffer = '';
-      const onData = chunk => {
-        buffer += String(chunk);
-        const match = /Web UI available at (https?:\/\/[^\s]+)/.exec(buffer);
-        if (match !== null && this.idePage === undefined) {
-          this.idePage = { url: match[1].replace(/\/$/, ''), pid: child.pid };
-          console.log(`[dsh-ide] IDE page available: ${this.idePage.url}`);
-          finish(this.idePage.url);
-        }
-      };
-      child.stdout.on('data', onData);
-      child.stderr.on('data', chunk => {
-        stderrBuffer += String(chunk);
-        onData(chunk);
-      });
-      child.on('exit', code => {
-        this.idePage = undefined;
-        this.ideServerChild = undefined;
-        if (!settled) {
-          this.idePageError = `IDE page server exited with code ${code}: ${stderrBuffer.slice(-400)}`;
-          console.warn(`[dsh-ide] ${this.idePageError}`);
-          finish(undefined);
-        }
-      });
-      // 上限：server 首次启动要装默认扩展，给足 90s。
-      setTimeout(() => {
-        if (!settled) {
-          this.idePageError = 'IDE page server did not report a URL within 90s';
-          console.warn(`[dsh-ide] ${this.idePageError}`);
-          finish(undefined);
-        }
-      }, 90000).unref?.();
-      // 空跑兜底：child 已退出时 Promise 已由 exit 处理。
-      void child;
-    });
-  }
-
-  /**
-   * IDE 页面地址（供 client 半身拿来实现页面入口）。
-   *
-   * 不做「假装成功」：拿不到就返回明确原因，由按钮/入口显示错误。
-   * @returns {Promise<{ ok: boolean, url?: string, message?: string }>}
-   */
-  async idePageUrl() {
-    const url = await this.ensureIdePage();
-    if (url === undefined) {
-      return { ok: false, message: this.idePageError ?? 'IDE page server is not available' };
-    }
-    return { ok: true, url };
+    return this.electronHomeBuild;
   }
 
   /**
@@ -384,7 +303,6 @@ Object.defineProperty(IdeRemoteService.prototype, REMOTE_METHOD_DESCRIPTOR, {
       { method: 'launch', invocation: { kind: 'direct' } },
       { method: 'registerIdeClient', invocation: { kind: 'direct' } },
       { method: 'pollLaunch', invocation: { kind: 'direct' } },
-      { method: 'idePageUrl', invocation: { kind: 'direct' } },
     ],
   },
 });
