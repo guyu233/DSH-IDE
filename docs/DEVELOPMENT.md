@@ -32,6 +32,8 @@
 
 完整清单、禁止复用项、体积边界与手写例外见 §8.2.6；本规则编号 R0，后续每一轮插件改动都必须在本轮提交信息中引用 R0 并说明执行结果。
 
+**R1 身份定位（每一轮都必须以此为前提）**：DSH-IDE 是 **DeepSeekHarness（DSH）的插件**，整仓打包为单一 DSH bundle 插件 `dsh-ide@2.0.0`（产物 `dist/dsh-ide-2.0.0.tgz`），由 DSH 装载后在其应用进程 / 窗口之内运行；它**不是独立应用**，也**不产出独立的 IDE 安装包**。所有章节（架构、契约、集成、体积、交付）的描述都必须以此身份为前提：IDE 窗口只经唯一 `dshIde` 通道消费 DTO，会话 / 模型 / 工具 / 权限 / 审批等全部由 DSH 决定。完整交付形态见第 3 章开头与第 8 章 §8.3.1。
+
 ---
 
 ## 第 1 章 架构与不变量
@@ -901,7 +903,7 @@ node --experimental-strip-types --test build/lib/test/dshBuildProvenance.test.ts
 
 ### 8. 交付验收（单一 DSH 插件包）
 
-上游官方任务 `gulp dsh-ide-pack`（定义于 `build/gulpfile.vscode.ts:664`）在 `e:/vscode-dsh/dist/` 把整仓打成 `dsh-ide-2.0.0.tgz`，这是**唯一交付物**（DSH bundle 插件包；包内 `runtime/app` 是插件载荷，不是独立安装包）。验收项：
+上游官方任务 `gulp dsh-ide-pack`（定义于 `build/gulpfile.vscode.ts:664`）在仓库根 `e:/DSH-IDE/dist/` 把整仓打成 `dsh-ide-2.0.0.tgz`，这是**唯一交付物**（DSH bundle 插件包；包内 `runtime/app` 是插件载荷，不是独立安装包）。验收项：
 
 1. stage 声明式自校验通过：`build/lib/dsh/package.json` 的 `files` 白名单 11 项逐项存在，glob 项（`locale/*.json`、`chat-render/dist/`）至少命中 1 个文件。
 2. 包内含 `runtime/app` appOnly 载荷、91 个内置扩展、`chat-render/dist/dsh-chat.js` / `dsh-chat.css` / `PROVENANCE.md` / `LICENSE-DSH`、`runtime/build-provenance.json`。
