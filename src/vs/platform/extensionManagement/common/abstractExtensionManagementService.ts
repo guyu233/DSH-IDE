@@ -992,7 +992,8 @@ export abstract class AbstractExtensionManagementService extends CommontExtensio
 		if (checked.indexOf(extension) !== -1) {
 			return [];
 		}
-		if (areSameExtensions(extension.identifier, { id: this.productService.defaultChatAgent.extensionId })) {
+		const defaultChatAgent = this.productService.defaultChatAgent;
+		if (defaultChatAgent && areSameExtensions(extension.identifier, { id: defaultChatAgent.extensionId })) {
 			return [];
 		}
 		checked.push(extension);

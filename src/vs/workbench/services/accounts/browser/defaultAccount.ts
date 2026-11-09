@@ -92,7 +92,30 @@ interface IMcpRegistryResponse {
 	readonly mcp_registries: ReadonlyArray<IMcpRegistryProvider>;
 }
 
-function toDefaultAccountConfig(defaultChatAgent: IDefaultChatAgent): IDefaultAccountConfig {
+/**
+ * DSH-IDE 未配置 Copilot 类 `defaultChatAgent` 时的中性账号配置。
+ *
+ * 账号与登录由 DSH 决定，DSH-IDE 不注册 GitHub / Microsoft 默认账号 provider；
+ * 这里返回空配置而不是抛错，保证服务构造不阻断工作台启动（不伪造可用账号）。
+ */
+const EMPTY_DEFAULT_ACCOUNT_CONFIG: IDefaultAccountConfig = {
+	preferredExtensions: [],
+	authenticationProvider: {
+		default: { id: '', name: '' },
+		enterprise: { id: '', name: '' },
+		enterpriseProviderConfig: '',
+		scopes: [],
+	},
+	tokenEntitlementUrl: '',
+	entitlementUrl: '',
+	mcpRegistryDataUrl: '',
+	managedSettingsUrl: '',
+};
+
+function toDefaultAccountConfig(defaultChatAgent: IDefaultChatAgent | undefined): IDefaultAccountConfig {
+	if (!defaultChatAgent) {
+		return EMPTY_DEFAULT_ACCOUNT_CONFIG;
+	}
 	return {
 		preferredExtensions: [
 			defaultChatAgent.chatExtensionId,
