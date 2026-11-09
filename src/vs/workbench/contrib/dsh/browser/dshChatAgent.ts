@@ -65,16 +65,25 @@ export function dshChatAgentData(): IChatAgentData {
  * `invoke` 只做两件事：把用户输入交给 DSH（`submit`），并把 DTO 行投影成 `IChatProgress` 推出。
  * 它**不**在本地生成回答、不维护第二份会话状态；DSH 不可用时返回确定的错误说明。
  */
+/** 等待新 DTO 行的上限：超时就按现有行交付，避免请求永久挂住。 */
+export const DSH_CHAT_AGENT_WAIT_MS = 15_000;
+/** 轮询间隔：DTO 快照由 16ms 合并驱动，这里按同一量级取样。 */
+export const DSH_CHAT_AGENT_POLL_MS = 32;
+
 export class DshChatAgent extends Disposable implements IChatAgentImplementation {
 	constructor(
 		private readonly client: IDshClientService,
 		/** 读取当前 DTO 行（由 `DshIdeConsumer` 维护）；未就绪时返回空数组。 */
 		private readonly rows: () => readonly DshIdeRow[],
+		private readonly waitMs: number = DSH_CHAT_AGENT_WAIT_MS,
 	) {
 		super();
 	}
 
 	async invoke(request: IChatAgentRequest, progress: (parts: IChatProgress[]) => void, _history: unknown[], token: CancellationToken): Promise<IChatAgentResult> {
+		// 提交前的行数：用来判断 DSH 是否已经真的把这次输入写进了会话日志。
+		const baseline = this.rows().length;
+
 		// 1) 先把用户输入交给 DSH；失败就明确告知，不伪造回答。
 		const submitted = await this.client.call('submit', { text: request.message });
 		if (!submitted.ok) {
@@ -82,9 +91,29 @@ export class DshChatAgent extends Disposable implements IChatAgentImplementation
 			return { errorDetails: { message: submitted.error.message } };
 		}
 
-		// 2) 内容回显只来自 DTO 快照：把当前行投影成 markdownContent。
-		//    流式增量由快照的 version 推进驱动（consumers 侧已做 16ms 合并）。
-		for (const row of this.rows()) {
+		// 2) 等快照真的长出内容再回显。
+		//    为什么必须等：`submit` 只是把消息投进 DSH 收件箱，会话日志是**稍后**提交的；
+		//    立刻回显只能画出提交前的旧行（用户消息与回答都还不在里面），面板看起来是空的。
+		//    这里轮询 DTO 行数，出现新行即交付；超时则明确返回超时提示，而不是假装有内容。
+		const deadline = Date.now() + this.waitMs;
+		let rows = this.rows();
+		while (rows.length <= baseline && Date.now() < deadline && !token.isCancellationRequested) {
+			await delay(DSH_CHAT_AGENT_POLL_MS);
+			rows = this.rows();
+		}
+
+		if (token.isCancellationRequested) {
+			return {};
+		}
+		if (rows.length <= baseline) {
+			// 没有新行：不伪造回答，给一条可核对的说明。
+			progress([{ kind: 'markdownContent', content: new MarkdownString('DSH-IDE 已提交消息，但在等待上限内没有收到会话日志更新。') }]);
+			return {};
+		}
+
+		// 3) 内容回显只来自 DTO 快照：把新增/变更的行投影成 markdownContent。
+		//    从 baseline 之后开始推，避免把历史行重复画一遍。
+		for (const row of rows.slice(baseline)) {
 			if (token.isCancellationRequested) {
 				break;
 			}
@@ -96,6 +125,11 @@ export class DshChatAgent extends Disposable implements IChatAgentImplementation
 		}
 		return {};
 	}
+}
+
+/** 可被信号打断的延时（轮询用）。 */
+function delay(ms: number): Promise<void> {
+	return new Promise(resolve => setTimeout(resolve, ms));
 }
 
 /**

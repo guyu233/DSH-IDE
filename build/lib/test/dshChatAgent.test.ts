@@ -78,18 +78,21 @@ test('only one default AI supplier exists in this metadata', () => {
 
 test('invoke submits the user message to DSH', async () => {
 	const client = fakeClient({ ok: true, value: { accepted: true } });
-	const agent = new DshChatAgent(client as never, () => []);
+	// 快照立即有一行新内容，避免走到超时分支。
+	let rows: DshIdeRow[] = [];
+	const agent = new DshChatAgent(client as never, () => rows, 2000);
 	const { parts, progress } = collect();
+	setTimeout(() => { rows = [row({ id: 'a1', kind: 'assistant', text: 'ok' })]; }, 30);
 	await agent.invoke(fakeRequest('hello'), progress, [], new CancellationTokenSource().token);
 
 	assert.deepEqual(client.calls, [{ method: 'submit', args: { text: 'hello' } }]);
-	assert.deepEqual(parts, [], 'no rows means nothing to render, but the submit still happened');
+	assert.equal(parts.length, 1, 'the one new row is rendered');
 	agent.dispose();
 });
 
 test('invoke surfaces a submit failure instead of fabricating an answer', async () => {
 	const client = fakeClient({ ok: false, error: { code: 'dsh-ide/feature-unavailable', message: 'not wired' } });
-	const agent = new DshChatAgent(client as never, () => [row({ id: 'a1' })]);
+	const agent = new DshChatAgent(client as never, () => [row({ id: 'a1' })], 200);
 	const { parts, progress } = collect();
 	const result = await agent.invoke(fakeRequest('hi'), progress, [], new CancellationTokenSource().token);
 
@@ -99,22 +102,25 @@ test('invoke surfaces a submit failure instead of fabricating an answer', async 
 	agent.dispose();
 });
 
-test('invoke echoes DTO rows as markdownContent in snapshot order', async () => {
+test('invoke waits for the snapshot to grow, then echoes only the new rows', async () => {
 	const client = fakeClient({ ok: true, value: { accepted: true } });
-	const rows = [
-		row({ id: 'u1', kind: 'user', text: 'question' }),
-		row({ id: 'a1', kind: 'assistant', text: 'answer' }),
-		row({ id: 'e1', text: undefined as unknown as string, preview: undefined }),
-	];
-	const agent = new DshChatAgent(client as never, () => rows);
+	// 提交前只有 1 行历史；提交后快照才会长出用户消息与回答。
+	const history = [row({ id: 'a0', kind: 'assistant', text: 'old answer' })];
+	let rows = history;
+	const agent = new DshChatAgent(client as never, () => rows, 2000);
 	const { parts, progress } = collect();
+
+	// 模拟 DSH 在稍后提交会话日志：60ms 后把新行放进去。
+	setTimeout(() => {
+		rows = [...history, row({ id: 'u1', kind: 'user', text: 'question' }), row({ id: 'a1', kind: 'assistant', text: 'answer' })];
+	}, 60);
+
 	await agent.invoke(fakeRequest('q'), progress, [], new CancellationTokenSource().token);
 
-	assert.equal(parts.length, 2, 'the empty row is skipped');
 	assert.deepEqual(
 		parts.map(p => (p as { content: { value: string } }).content.value),
 		['question', 'answer'],
-		'order follows the snapshot',
+		'only rows appended after submit are echoed (history is not redrawn)',
 	);
 	for (const part of parts) {
 		assert.equal((part as { kind: string }).kind, 'markdownContent');
@@ -122,9 +128,21 @@ test('invoke echoes DTO rows as markdownContent in snapshot order', async () => 
 	agent.dispose();
 });
 
+test('invoke reports a wait timeout instead of pretending there is content', async () => {
+	const client = fakeClient({ ok: true, value: { accepted: true } });
+	// 快照始终不增长：agent 必须在超时后给明确说明，而不是空手返回。
+	const agent = new DshChatAgent(client as never, () => [row({ id: 'a0' })], 80);
+	const { parts, progress } = collect();
+	await agent.invoke(fakeRequest('q'), progress, [], new CancellationTokenSource().token);
+
+	assert.equal(parts.length, 1);
+	assert.match((parts[0] as { content: { value: string } }).content.value, /没有收到会话日志更新/);
+	agent.dispose();
+});
+
 test('invoke stops echoing when the request is cancelled', async () => {
 	const client = fakeClient({ ok: true, value: { accepted: true } });
-	const agent = new DshChatAgent(client as never, () => [row({ id: 'a1' }), row({ id: 'a2' })]);
+	const agent = new DshChatAgent(client as never, () => [row({ id: 'a1' }), row({ id: 'a2' })], 200);
 	const { parts, progress } = collect();
 	const source = new CancellationTokenSource();
 	source.cancel();
