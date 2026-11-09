@@ -11,7 +11,7 @@
 
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { IdeLaunchQueue } from '../../host/ide-launch-queue.js';
+import { IDE_CLIENT_POLL_TIMEOUT_MS, IdeLaunchQueue } from '../../host/ide-launch-queue.js';
 
 test('register 拒绝空 / 非字符串 clientId', () => {
 	const queue = new IdeLaunchQueue();
@@ -99,4 +99,45 @@ test('未知 clientId 的 poll 如实失败且不消耗暂存请求', () => {
 	assert.deepEqual(queue.poll('missing'), { ok: false, requests: [] });
 	assert.deepEqual(queue.poll('missing'), { ok: false, requests: [] });
 	assert.equal(queue.pending.length, 1, '未知客户端不能把别人的请求取走');
+});
+
+test('心跳超时的登记项被 dispatch 跳过并清理（IDE 崩溃后不能假装投递成功）', () => {
+	let now = 1_000;
+	const queue = new IdeLaunchQueue(() => now);
+	queue.register('ide-dead');
+	const seen = [];
+	queue.clients.get('ide-dead').setLaunchHandler(spec => seen.push(spec));
+
+	// 超过心跳阈值没有任何 poll：视为进程已退出。
+	now += IDE_CLIENT_POLL_TIMEOUT_MS + 1;
+	assert.equal(queue.dispatch({ workspace: '/w' }), false);
+	assert.deepEqual(seen, [], '离线客户端不得收到请求');
+	assert.equal(queue.clients.size, 0, '超时登记项必须被清理');
+});
+
+test('poll 刷新心跳，活跃客户端始终可投递', () => {
+	let now = 1_000;
+	const queue = new IdeLaunchQueue(() => now);
+	queue.register('ide-live');
+	const seen = [];
+	queue.clients.get('ide-live').setLaunchHandler(spec => seen.push(spec));
+
+	for (let i = 0; i < 3; i++) {
+		now += IDE_CLIENT_POLL_TIMEOUT_MS - 1_000;
+		assert.deepEqual(queue.poll('ide-live'), { ok: true, requests: [] });
+	}
+	now += IDE_CLIENT_POLL_TIMEOUT_MS - 1_000;
+	assert.equal(queue.dispatch({ workspace: '/w' }), true);
+	assert.deepEqual(seen, [{ workspace: '/w' }]);
+});
+
+test('重复报到刷新心跳，避免刚重启的 IDE 被误判离线', () => {
+	let now = 1_000;
+	const queue = new IdeLaunchQueue(() => now);
+	queue.register('ide-1');
+	now += IDE_CLIENT_POLL_TIMEOUT_MS + 1;
+	const again = queue.register('ide-1');
+	assert.equal(again.ok, true);
+	assert.equal(again.alreadyRegistered, true);
+	assert.equal(queue.dispatch({ workspace: '/w' }), true);
 });

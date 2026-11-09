@@ -33,6 +33,8 @@ export class IdeRemoteService extends Service {
     this.launchQueue = new IdeLaunchQueue();
     /** 最近一次拉起 IDE 进程的时间（防重复拉起）。 */
     this.spawnedAt = undefined;
+    /** 最近一次拉起的 IDE 子进程句柄；防抖据此判断进程是否仍存活。 */
+    this.ideChild = undefined;
     /** Electron 主页的物化进行中/已完成 Promise（并发首点只建一次）。 */
     this.electronHomeBuild = undefined;
     this.typertRemote = bindTypertRemote(this, 'ide', { namespace: 'ide' });
@@ -95,9 +97,12 @@ export class IdeRemoteService extends Service {
     if (!existsSync(entry)) {
       return { ok: false, message: `IDE payload is missing: ${entry}` };
     }
-    // 防抖：刚拉起过就不再重复拉起（IDE 启动需要几秒）。
+    // 防抖：刚拉起过且该进程仍在运行就不再重复拉起（IDE 启动需要几秒）。
+    // 进程已退出时不能沿用防抖——否则「IDE 被关掉后再点按钮」会静默返回成功却什么都不做。
     const now = Date.now();
-    if (this.spawnedAt !== undefined && now - this.spawnedAt < 60000) {
+    const lastChild = this.ideChild;
+    const lastAlive = lastChild !== undefined && lastChild.exitCode === null && lastChild.signalCode === null;
+    if (lastAlive && this.spawnedAt !== undefined && now - this.spawnedAt < 60000) {
       return { ok: true };
     }
     const home = await this.ensureElectronHome(appPath);
@@ -116,6 +121,8 @@ export class IdeRemoteService extends Service {
       const args = typeof workspace === 'string' && workspace !== '' ? [workspace] : [];
       const child = spawn(home.exe, args, { detached: true, stdio: 'ignore', env, cwd: appPath });
       child.unref();
+      // 保留子进程句柄：防抖必须看进程是否还活着（exitCode 非空 = 已退出）。
+      this.ideChild = child;
       this.spawnedAt = now;
       return { ok: true };
     } catch (error) {
