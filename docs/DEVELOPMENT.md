@@ -546,6 +546,12 @@ waterfall 语义单测覆盖、boundary PASS、17 符号单源、端到端实跑
   也就是说 K5 的「Chat 面板显示 DTO 内容」**只能以「用户发消息」为前提观测**；不存在「后台自动灌内容」
   的正当路径（任何绕过 `sendRequest` 直接改模型的写法都属于伪造会话状态，违反第 1 章 §4.5）。
 
+  **已定位但尚未修的连接缺口（2026-11-09）**：`DshClientService.openView({ view: 'chat' })` 目前**不带
+  `sessionId`**，因此 `DshIdeViewService.open()` → `backend.follow(undefined, …)` 只会订阅 `$events`，
+  **拿不到任何会话内容**，Chat 面板即使调用链全通也不会有行。这是下一轮必须先修的点：
+  开窗方必须把「跟随哪个会话」交给 IDE 窗口（`openView` 的 `params.sessionId`），
+  而 IDE 侧不得自己猜会话——会话由 DSH 决定（不变量 I4）。
+
 #### P5 功能实现与真机接线
 
 - **前置**：K5。
