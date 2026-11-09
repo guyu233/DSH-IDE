@@ -167,7 +167,32 @@ function boundary() {
 	assert.match(channel, /validateDshIdeInput/, 'call must validate inputs with the protocol validator');
 	assert.match(channel, /validateDshIdeInvokeOutput/, 'call must validate the { value } output contract');
 
-	console.log(`PASS  boundary: workbench/** zero @deepseek-ai/* imports (${workbenchTs.length} files); channel zero Cordis ctx; ${pluginSources.length} plugin sources zero electron/@deepseek-ai/*/Cordis refs; listen three-layer filter + dispatch enforced`);
+	// UI 投影层隔离（P4/K5 启用）：DTO → 渲染内容的映射必须只依赖平台 DTO 与 VS Code 既有模块，
+	// 既不能 import DSH 包（上面已扫），也不能反向依赖主进程/通道层（否则工作台层被拖进 IPC 细节）。
+	const uiProjectionFiles = [
+		'workbench/contrib/dsh/browser/dshIdeConsumer.ts',
+		'workbench/contrib/dsh/browser/dshIdeUiProjection.ts',
+		'workbench/contrib/dsh/browser/dshChatAgent.ts',
+	];
+	for (const file of uiProjectionFiles) {
+		const text = read(file);
+		assert.doesNotMatch(text, /from\s+['"][^'"]*\/electron-main\//,
+			`${file} must not depend on the electron-main layer`);
+		assert.doesNotMatch(text, /from\s+['"]@deepseek-ai\//,
+			`${file} must not import DSH runtime packages`);
+	}
+	// 消费者必须是唯一做快照校验的地方：通道层不得重复实现（单一实现纪律，第 2 章 §9）。
+	assert.match(read(uiProjectionFiles[0]), /validateDshIdeSnapshot/,
+		'DshIdeConsumer must validate snapshots (it is the single validation point)');
+	const channelForValidation = read('platform/dshClient/electron-main/dshIdeChannel.ts');
+	assert.doesNotMatch(channelForValidation, /validateDshIdeSnapshot/,
+		'the channel must not duplicate snapshot validation — that belongs to the consumer');
+	// Chat Agent 必须是唯一注册的默认 Agent（不存在第二个 AI 供给方）。
+	const agentSource = read(uiProjectionFiles[2]);
+	assert.match(agentSource, /isDefault:\s*true/, 'the DSH chat agent must be the default participant');
+	assert.match(agentSource, /registerDynamicAgent/, 'the agent must be registered through the official API');
+
+	console.log(`PASS  boundary: workbench/** zero @deepseek-ai/* imports (${workbenchTs.length} files); channel zero Cordis ctx; ${pluginSources.length} plugin sources zero electron/@deepseek-ai/*/Cordis refs; listen three-layer filter + dispatch enforced; UI projection layer isolated (${uiProjectionFiles.length} files)`);
 }
 
 // ---------------------------------------------------------------------------
