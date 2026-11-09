@@ -6,7 +6,7 @@
 
 ## 阅读约定
 
-- 本手册共 8 章。章内 `§N` 一律指**该章**的第 N 节；跨章引用显式写「第 M 章 §N」。
+- 本手册共 8 章，另有 **§0 每轮必须遵循的规则（R0）**。章内 `§N` 一律指**该章**的第 N 节；跨章引用显式写「第 M 章 §N」。
 - 各章开头的「本章职责」只对该章有效；全仓权威层级以 [`README.md`](../README.md) §4 为准。
 - 交付态 / 当前态与时态锚点见 [`README.md`](../README.md) §1.1。
 
@@ -20,6 +20,17 @@
 | 第 6 章 | 仓库结构索引 | `repo-layout.md`（已并入本文） |
 | 第 7 章 | 代码资产登记 | `cleanup-inventory.md`（已并入本文） |
 | 第 8 章 | 插件功能设计 | （新增章节） |
+| §0 | 每轮必须遵循的规则（R0） | — |
+
+### 0. 每轮必须遵循的规则
+
+**R0 复用优先级（每一轮插件改动都必须执行，不得跳级）**：插件侧任何新增功能、UI、资源或构建产物，按以下顺序决策：
+
+1. **先查 DSH 桌面端运行时资源**：`app.asar` / `app.asar.unpacked` 内的 `@deepseek-ai/**`、宿主模块行、`require.asset` 可访问资产、`/favicon.svg`、平台单例（`react`、`dsh-client-ui-slots`、`dsh-client-ui-primitives`、`dsh-client-ui-dockkit` 等）。Host 进程走 `peerDependencies` + 宿主 Cordis；DSH client 半身走 `require` 平台单例 + `require.asset` + 宿主 URL。能直接复用就改代码接上，不新造。
+2. **再看 DSH 源码**：运行时不可直接复用时，按源码颗粒度从 `E:/deepseek-harness-0.2.2-rc.1/packages/client/**` 复制最小文件集，保留许可证头与 `PROVENANCE.md`，版本锁定 `UPSTREAM_VALIDATED_VERSION`。
+3. **最后才手写**：以上都不可行时自写，并在提交信息写明「为何不能复用/参考」。
+
+完整清单、禁止复用项、体积边界与手写例外见 §8.2.6；本规则编号 R0，后续每一轮插件改动都必须在本轮提交信息中引用 R0 并说明执行结果。
 
 ---
 
@@ -1366,7 +1377,9 @@ DSH-IDE = VS Code 外壳 + DSH 内核：全仓只有一个 Cordis 根 `dshCtx`�
 
 > 证据：DSH 源码 `apps/desktop/src/paths.ts`（profile 目录）、`packages/boot/app-boot/src/profile.ts`（bundle 解析）、`packages/client/modules/src/index.ts`（`/plugins` 与 module table）、`packages/client/web/src/seed.ts`（平台单例）、`packages/host/frontend-static/src/index.ts`（静态服务白名单）、`packages/client/ui-chat/package.json`（`./assets/*` 与 `./client`）；安装目录、文件大小与本机实测一致（2026-11-09）。
 
-#### 8.2.6 插件改动的复用优先级
+#### 8.2.6 插件改动的复用优先级（R0，每轮必须遵循）
+
+**本规则编号 R0，每一轮插件改动都必须执行；摘要见 §0。**
 
 任何插件侧新增功能、UI、资源或构建产物，按以下**固定顺序**决策，不得跳级：
 
