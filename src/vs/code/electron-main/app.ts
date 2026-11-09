@@ -1454,6 +1454,11 @@ export class CodeApplication extends Disposable {
 		const dshIdeLauncher: DshIdeLauncher = {
 			launch: async spec => {
 				try {
+					// 已有窗口时只聚焦，不再开第二个空窗口（用户点按钮的语义是「给我看 IDE」）。
+					if (windowsMainService.getWindowCount() > 0) {
+						windowsMainService.getWindows()[0]?.focus();
+						return { ok: true };
+					}
 					// 会话由 DSH 决定（不变量 I4），IDE 不得自己猜：把开窗方给的 sessionId 经
 					// `userEnv` 交给新窗口（`openEmptyWindow` 支持该字段，窗口内读到的是合并后的 env）。
 					await windowsMainService.openEmptyWindow(

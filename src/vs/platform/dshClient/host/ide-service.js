@@ -13,7 +13,8 @@
 //   - ctx.llm 无 complete()，只有 stream(options{provider,model,messages,maxTokens?,...}) 返回 chunk 流；
 //     文本增量 chunk 形如 {type:'text-delta', text}（见 dsh-llm types）。此处按此实现，失败返回空串。
 
-import { readFileSync } from 'node:fs';
+import { spawn } from 'node:child_process';
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { Service } from '@deepseek-ai/cordis';
 import { bindTypertRemote } from '@deepseek-ai/dsh-typert-protocol';
@@ -28,6 +29,10 @@ export class IdeRemoteService extends Service {
     this.pluginRoot = config.pluginRoot || this.root;
     /** 已报到的 IDE 进程（clientId → 开窗入口）。 */
     this.ideClients = new Map();
+    /** IDE 尚未报到时暂存的开窗请求（报到后经 pollLaunch 取走）。 */
+    this.launchQueue = [];
+    /** 最近一次拉起 IDE 进程的时间（防重复拉起）。 */
+    this.spawnedAt = undefined;
     this.typertRemote = bindTypertRemote(this, 'ide', { namespace: 'ide' });
   }
 
@@ -57,7 +62,7 @@ export class IdeRemoteService extends Service {
       return { ok: true, via: 'registered-ide' };
     }
 
-    // 3) 还没有 IDE 报到：端点文件在但没人接单，如实说清楚，不假装成功。
+    // 3) 还没有 IDE 报到：这是**首次点击**，由 Host 拉起 IDE 进程（插件载荷，不是独立应用）。
     const endpoint = this.ideEndpoint();
     if (endpoint === undefined) {
       return {
@@ -65,10 +70,59 @@ export class IdeRemoteService extends Service {
         message: `no IDE process has registered yet; endpoint file not found (looked in ${this.endpointCandidates().join(' , ')})`,
       };
     }
-    return {
-      ok: false,
-      message: `no IDE process has registered yet (endpoint ${endpoint.origin} published, but nothing is listening for launch requests)`,
-    };
+    const spawned = this.spawnIdeProcess(endpoint);
+    if (spawned.ok !== true) {
+      return { ok: false, message: spawned.message };
+    }
+    // 记住这个工作区请求：IDE 报到后会经 pollLaunch 取走它并开窗。
+    this.launchQueue.push({ ...(workspace === undefined ? {} : { workspace }) });
+    return { ok: true, via: 'spawned-ide' };
+  }
+
+  /**
+   * 拉起 IDE 进程（首次点击）。
+   *
+   * 为什么由 Host 拉起：`client.js` 在 DSH Web 渲染进程，只能调 Host 服务；而 IDE 窗口是
+   * 插件载荷 `runtime/app`（不是独立安装包），由插件自己的 Host 半身启动最直接，
+   * 也不需要任何私有握手——启动参数只带官方端点三件套，数据仍走官方客户端传输。
+   *
+   * @returns {{ ok: boolean, message?: string }}
+   */
+  spawnIdeProcess(endpoint) {
+    const appPath = join(this.pluginRoot, 'runtime', 'app');
+    const entry = join(appPath, 'out', 'main.js');
+    if (!existsSync(entry)) {
+      return { ok: false, message: `IDE payload is missing: ${entry}` };
+    }
+    // 载荷是 appOnly（不含 Electron）。用宿主的 Electron 可执行文件去跑它**不会**生效：
+    // 打包版 Electron 恒定优先加载 `<install>/resources/app.asar`，位置参数被忽略
+    // （2026-11-09 实测：进程起来了但窗口标题仍是 DeepSeek Harness）。
+    // 因此没有自带 Electron 时只能如实失败，绝不误拉起第二个 DSH。
+    const hasOwnElectron = existsSync(join(appPath, 'DSH-IDE.exe')) || existsSync(join(appPath, 'electron.exe'));
+    if (!hasOwnElectron) {
+      return {
+        ok: false,
+        message: 'IDE payload is appOnly (no bundled Electron); a native IDE window cannot be started this way',
+      };
+    }
+    // 防抖：刚拉起过就不再重复拉起（IDE 启动需要几秒）。
+    const now = Date.now();
+    if (this.spawnedAt !== undefined && now - this.spawnedAt < 60000) {
+      return { ok: true };
+    }
+    try {
+      // `process.execPath` 是本 Host 子进程所用的 Electron 可执行文件；去掉 RUN_AS_NODE 才是 GUI 模式。
+      const env = { ...process.env };
+      delete env.ELECTRON_RUN_AS_NODE;
+      env.DSH_IDE_ENDPOINT = endpoint.origin;
+      env.DSH_IDE_LAUNCH_URL = endpoint.launchUrl;
+      const child = spawn(process.execPath, [appPath], { detached: true, stdio: 'ignore', env });
+      child.unref();
+      this.spawnedAt = now;
+      return { ok: true };
+    } catch (error) {
+      return { ok: false, message: `failed to spawn IDE process: ${error instanceof Error ? error.message : String(error)}` };
+    }
   }
 
   /**
@@ -138,7 +192,10 @@ export class IdeRemoteService extends Service {
     if (client === undefined) {
       return { ok: false, requests: [] };
     }
-    return { ok: true, ...client.poll() };
+    // 先取该客户端自己的待办，再补上「报到前排队」的首次开窗请求。
+    const own = client.poll();
+    const outOfBand = this.launchQueue.splice(0, this.launchQueue.length);
+    return { ok: true, requests: [...outOfBand, ...own.requests] };
   }
 
   /** 读取已发布的 IDE 端点（由 host/ide-view-host.js 的 publishHostEndpoint 写入）。 */

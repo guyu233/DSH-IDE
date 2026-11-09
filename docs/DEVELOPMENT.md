@@ -521,6 +521,10 @@ waterfall 语义单测覆盖、boundary PASS、17 符号单源、端到端实跑
      `DeepSeek-Harness`（跑的是 DSH 自己的应用），不是 `DSH IDE`。
   4. 要让该 exe 跑我们的 IDE 载荷，只能改动安装目录（替换/重定向 `resources/app.asar` 或其
      `resources` 布局）。这属于**修改用户的 DSH 安装目录**，越过硬边界，**不做**。
+  5. **补充事实（2026-11-09）**：`runtime/app` 是 **appOnly** 载荷，**不含 Electron 可执行文件**
+     （无 `*.exe`；省体积的设计）。因此「宿主 exe + 我们的 app 目录」这条路在原理上也不成立——
+     宿主 exe 恒定加载自己的 `app.asar`。结论：**当前交付形态无法以独立 Electron 进程启动原生 IDE 窗口**，
+     后续必须按「IDE 作为 DSH 应用内的页面/窗口」形态落地（见 §3.1），或改为随包携带 Electron。
 
   因此 K5 的真机渲染观测需要**用户自己**从 DSH 主窗口点「DSH-IDE」按钮开窗（P5 的 `client.js`
   开窗链路尚未接线，见第 3 章 P5），或由用户授权临时改动安装目录。两条都超出本阶段可自主执行的范围。
