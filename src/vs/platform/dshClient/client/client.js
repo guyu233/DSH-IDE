@@ -9,25 +9,18 @@
  * 为什么绕 Host：本文件跑在 DSH Web 渲染进程，碰不到 IDE 主进程的 `dshIde` 通道，
  * 只能经官方 Typert Gateway 调 Host 服务（R0：复用官方机制，不自造传输）。
  *
- * 图标使用 DSH 官方鲸鱼图形（取自 dsh-web-frontend/favicon.svg）；按钮复用宿主
- * `@deepseek-ai/dsh-client-ui-primitives` 的 `Button`（ghost/sm），不手写样式。
+ * 图标复用宿主官方鲸鱼组件 `FishLogo`（`@deepseek-ai/dsh-client-ui-primitives`，`currentColor`
+ * 自适应主题）；按钮复用同一包的 `Button`（ghost/sm），不手写样式。
  */
 window.__ModuleLoader__.load({
 	id: "dsh-ide",
 	factory(require) {
 		const React = require("react");
-		const { Button } = require("@deepseek-ai/dsh-client-ui-primitives");
+		const { Button, FishLogo } = require("@deepseek-ai/dsh-client-ui-primitives");
 		const h = React.createElement;
 
-		// DSH 官方鲸鱼 LOGO：**直接引用宿主的官方资源** `/favicon.svg`（E1 `apps/web/public/favicon.svg`，
-		// Host 以 `/favicon.svg` 提供，实测 200 + `image/svg+xml`）。不再内联 path 数据（T11-02），
-		// 图标只有一处来源，随宿主升级自动更新（R-06 资源复用）。
-		function WhaleLogo({ size = 16 }) {
-			return h("img", {
-				src: "/favicon.svg", alt: "", width: size, height: size, "aria-hidden": true,
-				style: { display: "block", flex: "none", objectFit: "contain" },
-			});
-		}
+		// 图标复用宿主官方鲸鱼图形组件 `FishLogo`（`fill="currentColor"`，随主题前景色自适应；
+		// 资源与品牌由宿主维护，不在插件内复制 path 数据）。注释见文件头的 R0 说明。
 
 		// 插件上下文：`DshIdeButton` 在 factory 作用域定义，`ctx` 只在 apply() 里可见，
 		// 用 factory 级变量传递（单一赋值点，不会出现两个上下文）。
@@ -60,7 +53,7 @@ window.__ModuleLoader__.load({
 				title: label,
 				"aria-label": label,
 				disabled: busy, onClick,
-				icon: h(WhaleLogo, { size: 16 }),
+				icon: h(FishLogo, { size: 16 }),
 			});
 		}
 
