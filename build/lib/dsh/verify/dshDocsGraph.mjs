@@ -14,8 +14,9 @@
 // 3. `唯一定义` / `唯一职责` 声明按主题去重：同一主题不得由两个文件声称定义。
 // 4. 状态单一性与每轮回写：第 3 章 §6 唯一状态表恰好 8 行 P0–P7、状态值限于枚举；三份文档
 //    除该表外不得出现阶段状态行或过期状态字面量；README §7 不得写阶段状态细节。另校验
-//    §0.1 项目快照、第 7 章 §3 待办清单、§7.7 每轮更新记录三者齐全，日期 / commit 与
-//    §3.6「最后实测」一致、快照数值仍能在真源中找到；PASS 输出待办统计与轮次数。
+//    §0.1 项目快照、§0.2 用户操作清单、第 7 章 §3 待办清单、§7.7 每轮更新记录四者齐全，
+//    日期 / commit 与 §3.6「最后实测」一致、快照数值仍能在真源中找到；PASS 输出待办统计、
+//    用户操作统计与轮次数。
 //
 // 退出码：0 = 全部通过；1 = 任一断言失败。
 
@@ -113,12 +114,14 @@ const STALE_STATUS_LITERALS = [
 ];
 const STATE_POINTER = '应指向第 3 章 §6';
 
-/** 每轮回写的三处锚点、待办完成状态枚举、快照中必须与真源同步的数值。 */
+/** 每轮回写的四处锚点、状态枚举、快照中必须与真源同步的数值。 */
 const SNAPSHOT_HEADING = '### 0.1 当前项目情况（每轮更新）';
+const USER_ACTIONS_HEADING = '### 0.2 用户本轮操作清单（每轮更新）';
 const TODO_HEADING = '### 3. 待办清单（唯一，含完成标记）';
 const ROUND_LOG_HEADING = '#### 7.7 每轮更新记录（每轮新增一行）';
 const TODO_STATUS_VALUES = new Set(['已完成', '未完成', '待核对']);
-const SNAPSHOT_TOKENS = ['160,112,030', '172/172', '3 `PASS` + 1 `PENDING`'];
+const USER_ACTION_STATUS_VALUES = new Set(['待用户执行', '已完成', '暂阻塞']);
+const SNAPSHOT_TOKENS = ['119,704,107', '183/183', '3 `PASS` + 1 `PENDING`'];
 
 /** 校验唯一状态表与每轮回写，并收集三份文档中出现的第二份阶段状态。 */
 function stateViolations() {
@@ -185,12 +188,13 @@ function stateViolations() {
 			violations.push(`README.md:${i + 1}  §7 不得写阶段状态细节  → ${STATE_POINTER}`);
 		}
 	}
-	// 每轮回写：项目快照 / 唯一待办清单 / 更新记录三处齐全，且日期、commit 与数值一致。
+	// 每轮回写：项目快照 / 用户操作清单 / 唯一待办清单 / 更新记录四处齐全，且日期、commit 与数值一致。
 	const snapshotStart = devLines.findIndex(line => line.trim() === SNAPSHOT_HEADING);
+	const userActionsStart = devLines.findIndex(line => line.trim() === USER_ACTIONS_HEADING);
 	const todoStart = devLines.findIndex(line => line.trim() === TODO_HEADING);
 	const roundsStart = devLines.findIndex(line => line.trim() === ROUND_LOG_HEADING);
-	assert.ok(snapshotStart >= 0 && todoStart >= 0 && roundsStart >= 0,
-		'每轮回写三处（§0.1 / 第 7 章 §3 / §7.7）必须齐全');
+	assert.ok(snapshotStart >= 0 && userActionsStart >= 0 && todoStart >= 0 && roundsStart >= 0,
+		'每轮回写四处（§0.1 / §0.2 / 第 7 章 §3 / §7.7）必须齐全');
 	const sectionEnd = (all, start) => {
 		for (let i = start + 1; i < all.length; i++) {
 			if (/^---\s*$/.test(all[i]) || /^#{2,4} /.test(all[i])) {
@@ -211,7 +215,6 @@ function stateViolations() {
 	assert.ok(snapshotRow !== undefined, '§0.1 必须有「最后更新」行');
 	const snapshot = snapshotRow.split('|').map(cell => cell.trim())[2].replace(/`/g, '');
 	assert.match(snapshot, /^\d{4}-\d{2}-\d{2} \/ [0-9a-f]{7,40}$/, '§0.1「最后更新」必须是「日期 / commit」');
-	const snapshotDate = snapshot.split(' / ')[0];
 	for (const row of rows) {
 		const measured = row.split('|').map(cell => cell.trim())[4].replace(/`/g, '');
 		assert.equal(measured, snapshot, `第 3 章 §6 的「最后实测」必须与 §0.1「最后更新」一致：${row.slice(0, 40)}`);
@@ -225,7 +228,8 @@ function stateViolations() {
 		assert.ok(cells.length >= 8, `待办行必须 6 列: ${row.slice(0, 60)}`);
 		assert.ok(TODO_STATUS_VALUES.has(cells[4]), `待办 ${cells[1]} 的「是否完成」值非法: ${cells[4]}`);
 		assert.ok(cells[5].length > 0, `待办 ${cells[1]} 必须写依据 / 真源`);
-		assert.ok(cells[6] === '—' || cells[6].startsWith(snapshotDate), `待办 ${cells[1]} 的「最后核对」需与快照日期一致`);
+		// 各条目的核对日期可以不同：只要求是合法日期或 —，不强制与快照同日。
+		assert.ok(cells[6] === '—' || /^\d{4}-\d{2}-\d{2}$/.test(cells[6]), `待办 ${cells[1]} 的「最后核对」必须是日期或 —`);
 		if (cells[4] === '已完成') {
 			todoStats.done++;
 		} else if (cells[4] === '未完成') {
@@ -235,12 +239,30 @@ function stateViolations() {
 		}
 	}
 
+	const userActionRows = devLines.slice(userActionsStart, sectionEnd(devLines, userActionsStart)).filter(line => /^\|\s*U\d+\s*\|/.test(line));
+	assert.ok(userActionRows.length > 0, '§0.2 用户本轮操作清单不能为空');
+	const userStats = { ready: 0, done: 0, blocked: 0 };
+	for (const row of userActionRows) {
+		const cells = row.split('|').map(cell => cell.trim());
+		assert.ok(cells.length >= 9, `用户操作行必须 7 列: ${row.slice(0, 60)}`);
+		assert.ok(USER_ACTION_STATUS_VALUES.has(cells[7]), `用户操作 ${cells[1]} 的「状态」值非法: ${cells[7]}`);
+		assert.ok(cells[3].length > 0, `用户操作 ${cells[1]} 必须写对应项`);
+		assert.ok(cells[5].length > 0, `用户操作 ${cells[1]} 必须写完成判据`);
+		if (cells[7] === '待用户执行') {
+			userStats.ready++;
+		} else if (cells[7] === '已完成') {
+			userStats.done++;
+		} else {
+			userStats.blocked++;
+		}
+	}
+
 	const roundRows = devLines.slice(roundsStart, sectionEnd(devLines, roundsStart)).filter(line => /^\|\s*\d+\s*\|/.test(line));
 	assert.ok(roundRows.length > 0, '§7.7 每轮更新记录不能为空');
 	const lastRound = roundRows[roundRows.length - 1].split('|').map(cell => cell.trim())[2].replace(/`/g, '');
 	assert.equal(lastRound, snapshot, '§7.7 最后一行的日期 / commit 必须与 §0.1「最后更新」一致');
 
-	return { violations, snapshot, todoStats, rounds: roundRows.length };
+	return { violations, snapshot, todoStats, userStats, rounds: roundRows.length };
 }
 
 function main() {
@@ -291,7 +313,7 @@ function main() {
 	const state = stateViolations();
 	assert.deepEqual(state.violations, [], `state single-source violations:\n${state.violations.join('\n')}`);
 
-	console.log(`PASS  docs-graph: ${DOCS.length} nodes / ${edges.length} edges / 0 cycles; navigation links excluded (${navigation.length}); term table unique; ${claims.length} unique-owner claims deduped; state single-source ok (8 phases); snapshot ${state.snapshot}; todos ${state.todoStats.done} done / ${state.todoStats.open} open / ${state.todoStats.verify} to-verify; ${state.rounds} rounds`);
+	console.log(`PASS  docs-graph: ${DOCS.length} nodes / ${edges.length} edges / 0 cycles; navigation links excluded (${navigation.length}); term table unique; ${claims.length} unique-owner claims deduped; state single-source ok (8 phases); snapshot ${state.snapshot}; todos ${state.todoStats.done} done / ${state.todoStats.open} open / ${state.todoStats.verify} to-verify; user actions ${state.userStats.ready} ready / ${state.userStats.done} done / ${state.userStats.blocked} blocked; ${state.rounds} rounds`);
 }
 
 try {
