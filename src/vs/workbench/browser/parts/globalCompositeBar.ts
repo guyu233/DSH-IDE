@@ -69,7 +69,6 @@ export class GlobalCompositeBar extends Disposable {
 
 	readonly element: HTMLElement;
 
-	private readonly globalActivityAction = this._register(new Action(GLOBAL_ACTIVITY_ID));
 	private readonly accountAction = this._register(new Action(ACCOUNTS_ACTIVITY_ID));
 	private readonly globalActivityActionBar: ActionBar;
 
@@ -122,11 +121,13 @@ export class GlobalCompositeBar extends Disposable {
 			preventLoopNavigation: true
 		}));
 
+		// 齿轮（Manage）按 DSH-IDE 交付要求不再渲染（第 9 轮用户指定）：
+		// 它的菜单能力没有丢失——`MenuId.GlobalActivity` 整份并在账号右键菜单里，
+		// 见 AccountsActivityActionViewItem.resolveContextMenuActions。
+		// 账号按钮的显示/隐藏仍走 storage 偏好（`accountsVisibilityPreference`）。
 		if (this.accountsVisibilityPreference) {
 			this.globalActivityActionBar.push(this.accountAction, { index: GlobalCompositeBar.ACCOUNTS_ACTION_INDEX });
 		}
-
-		this.globalActivityActionBar.push(this.globalActivityAction);
 
 		this.registerListeners();
 	}
@@ -157,7 +158,9 @@ export class GlobalCompositeBar extends Disposable {
 	}
 
 	private toggleAccountsActivity() {
-		const accountsVisible = this.globalActivityActionBar.length() === 2;
+		// 齿轮已不再 push 进 action bar，所以「账号可见」不能再按固定总数 2 判定，
+		// 改为按当前条数（齿轮移除后为 0 或 1）判断，否则开关会永久错位。
+		const accountsVisible = this.globalActivityActionBar.length() > 0;
 		if (accountsVisible === this.accountsVisibilityPreference) {
 			return;
 		}
@@ -307,8 +310,8 @@ export class AccountsActivityActionViewItem extends AbstractGlobalActivityAction
 		@ILifecycleService private readonly lifecycleService: ILifecycleService,
 		@IHoverService hoverService: IHoverService,
 		@IContextMenuService contextMenuService: IContextMenuService,
-		@IMenuService menuService: IMenuService,
-		@IContextKeyService contextKeyService: IContextKeyService,
+		@IMenuService private readonly accountMenuService: IMenuService,
+		@IContextKeyService private readonly accountContextKeyService: IContextKeyService,
 		@IConfigurationService configurationService: IConfigurationService,
 		@IKeybindingService keybindingService: IKeybindingService,
 		@ILogService private readonly logService: ILogService,
@@ -324,7 +327,7 @@ export class AccountsActivityActionViewItem extends AbstractGlobalActivityAction
 			name: localize('accounts', "Accounts"),
 			classNames: ThemeIcon.asClassNameArray(GlobalCompositeBar.ACCOUNTS_ICON)
 		});
-		super(MenuId.AccountsContext, action, options, contextMenuActionsProvider, contextMenuAlignmentOptions, themeService, hoverService, menuService, contextMenuService, contextKeyService, configurationService, keybindingService, activityService);
+		super(MenuId.AccountsContext, action, options, contextMenuActionsProvider, contextMenuAlignmentOptions, themeService, hoverService, accountMenuService, contextMenuService, accountContextKeyService, configurationService, keybindingService, activityService);
 		this._register(action);
 		this.registerListeners();
 		this.initialize();
@@ -544,9 +547,22 @@ export class AccountsActivityActionViewItem extends AbstractGlobalActivityAction
 		const accountActions = await this.buildAccountActions(disposables);
 		const actions = await super.resolveContextMenuActions(disposables);
 		this.fillContextMenuActions(actions);
-		// 账号动作在前（用户最常找），随后加分隔线再接「设置 / 隐藏账号 / Manage」。
-		// 「设置」按用户要求从齿轮 Manage 菜单搬到这里，紧贴账号信息之下。
-		return [...accountActions, this.settingsAction(), new Separator(), ...actions];
+		// 账号动作在前（用户最常找）；其后接「设置」，再接从齿轮 Manage 菜单并过来的整份
+		// `MenuId.GlobalActivity` 项（扩展 / 主题 / 同步 / 配置文件等），最后是常规的隐藏账号项。
+		// 齿轮按钮已不再渲染，所以这里是这些入口的唯一去处——不能只留下「设置」一项。
+		const manageActions = await this.buildManageMenuActions(disposables);
+		return [...accountActions, this.settingsAction(), new Separator(), ...manageActions, new Separator(), ...actions];
+	}
+
+	/**
+	 * 取齿轮 Manage 菜单（`MenuId.GlobalActivity`）的全部动作，供账号右键菜单承载。
+	 * 齿轮按钮不再渲染后，这些入口（扩展、主题、同步、配置文件、更新等）必须仍有归宿。
+	 */
+	private async buildManageMenuActions(disposables: DisposableStore): Promise<IAction[]> {
+		const menu = disposables.add(this.accountMenuService.createMenu(MenuId.GlobalActivity, this.accountContextKeyService));
+		// 与齿轮菜单同一渲染口径：主分组在前，次级动作在后。
+		const { primary, secondary } = getActionBarActions(menu.getActions({ renderShortTitle: true }));
+		return [...primary, ...secondary];
 	}
 
 	/**
