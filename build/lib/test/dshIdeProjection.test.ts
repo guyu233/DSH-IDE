@@ -192,6 +192,133 @@ test('assistant deltas merge by callId into one row with incremental revision', 
 });
 
 // ---------------------------------------------------------------------------
+// 瞬时流帧（agent/assistant-stream）：没有会话 seq，幂等与合并按 attempt 身份
+//
+// 真机形状见 E:/deepseek-harness-0.2.2-rc.1：`SessionFollowFrame` 的 assistant-stream 分支
+// 携带 `{ type, attemptId, revision, ... }`，正文 chunk 形如 `{ type:'text-delta', text }`。
+// 这三条守护的是「同一段回答既不重复、也不只剩首帧」——两者都曾在实现里真实发生。
+// ---------------------------------------------------------------------------
+
+const streamStart = (attemptId: string, revision = 1) => ({ type: 'assistant.attempt.start', attemptId, streamRevision: revision, turn: 1, step: 1 });
+const streamDelta = (attemptId: string, revision: number, text: string) => ({ type: 'assistant.delta', attemptId, streamRevision: revision, turn: 1, step: 1, text });
+const streamEnd = (attemptId: string, revision: number, outcome?: 'committed' | 'abandoned') => ({ type: 'assistant.attempt.end', attemptId, streamRevision: revision, turn: 1, step: 1, ...(outcome !== undefined ? { outcome } : {}) });
+
+test('streaming deltas across separate batches keep accumulating on one attempt row', () => {
+	const projector = createIdeViewProjector();
+	projector.apply(translateDshEvent(streamStart('a1'), 0)!);
+	projector.apply(translateDshEvent(streamDelta('a1', 2, 'AAA'), 0)!);
+	projector.apply(translateDshEvent(streamDelta('a1', 3, 'BBB'), 0)!);
+	const rows = projector.snapshot().rows;
+	assert.equal(rows.length, 1, 'one attempt must project to exactly one row');
+	assert.equal(rows[0].id, 'attempt:a1');
+	assert.equal(rows[0].text, 'AAABBB');
+
+	// 下一批（换一次 flush）：revision 继续递增，文本必须继续累积而不是被当成重放丢掉。
+	projector.apply(translateDshEvent(streamDelta('a1', 4, 'CCC'), 0)!);
+	assert.equal(projector.snapshot().rows[0].text, 'AAABBBCCC', 'a later batch must not be swallowed as a replay');
+});
+
+test('a replayed stream chunk with a non-advancing revision is dropped', () => {
+	const projector = createIdeViewProjector();
+	projector.apply(translateDshEvent(streamStart('a1'), 0)!);
+	projector.apply(translateDshEvent(streamDelta('a1', 2, 'AAA'), 0)!);
+	projector.apply(translateDshEvent(streamDelta('a1', 3, 'BBB'), 0)!);
+	const before = projector.snapshot();
+
+	// 重连会重放同一批帧：revision 未前进的一律丢弃。
+	projector.apply(translateDshEvent(streamDelta('a1', 3, 'BBB'), 0)!);
+	projector.apply(translateDshEvent(streamDelta('a1', 2, 'AAA'), 0)!);
+	assert.deepEqual(projector.snapshot(), before);
+});
+
+test('the durable assistant message settles the streaming row instead of appending a second copy', () => {
+	const projector = createIdeViewProjector();
+	projector.apply(translateDshEvent(streamStart('a1'), 0)!);
+	projector.apply(translateDshEvent(streamDelta('a1', 2, 'AAA'), 0)!);
+	projector.apply(translateDshEvent(streamDelta('a1', 3, 'BBB'), 0)!);
+
+	// 结算事件带该步骤的完整文本（上游语义：settlement owns the text）。
+	const settled = translateDshEvent({
+		type: 'assistant/message', seq: 7, time: 9,
+		data: { turn: 1, step: 1, message: { content: [{ type: 'text', text: 'AAABBB' }] }, stream: [] },
+	}, 0)!;
+	projector.apply(settled);
+
+	const rows = projector.snapshot().rows;
+	assert.equal(rows.length, 1, 'the settlement must land on the streaming row, not create a second one');
+	assert.equal(rows[0].text, 'AAABBB', 'the whole answer must appear exactly once');
+	assert.ok(rows[0].revision > 1, 'the settlement bumps the row revision');
+});
+
+test('a settled attempt stops accepting deltas; the next attempt gets its own row', () => {
+	const projector = createIdeViewProjector();
+	projector.apply(translateDshEvent(streamStart('a1'), 0)!);
+	projector.apply(translateDshEvent(streamDelta('a1', 2, 'first'), 0)!);
+	projector.apply(translateDshEvent(streamEnd('a1', 3), 0)!);
+
+	projector.apply(translateDshEvent(streamStart('a2', 1), 0)!);
+	projector.apply(translateDshEvent(streamDelta('a2', 2, 'second'), 0)!);
+
+	const rows = projector.snapshot().rows;
+	assert.deepEqual(rows.map(r => r.id), ['attempt:a1', 'attempt:a2']);
+	assert.deepEqual(rows.map(r => r.text), ['first', 'second']);
+});
+
+test('a delta whose start frame was missed opens its own attempt row instead of joining the previous one', () => {
+	const projector = createIdeViewProjector();
+	projector.apply(translateDshEvent(streamStart('a1'), 0)!);
+	projector.apply(translateDshEvent(streamDelta('a1', 2, 'first'), 0)!);
+
+	// 重连可能漏掉新 attempt 的 start：增量必须另起一行，绝不接进上一个 attempt。
+	projector.apply(translateDshEvent(streamDelta('a2', 2, 'second'), 0)!);
+
+	const rows = projector.snapshot().rows;
+	assert.deepEqual(rows.map(r => r.id), ['attempt:a1', 'attempt:a2']);
+	assert.deepEqual(rows.map(r => r.text), ['first', 'second']);
+});
+
+test('an abandoned attempt discards its provisional row and late deltas cannot revive it', () => {
+	const projector = createIdeViewProjector();
+	projector.apply(translateDshEvent(streamStart('a1'), 0)!);
+	projector.apply(translateDshEvent(streamDelta('a1', 2, 'half'), 0)!);
+	// 流错误 / 取消 / 结算为 assistant/attempt：这次尝试没有可见消息。
+	projector.apply(translateDshEvent(streamEnd('a1', 3, 'abandoned'), 0)!);
+
+	assert.deepEqual(projector.snapshot().rows, [], 'an abandoned attempt must not leave a partial answer row');
+
+	// 迟到的 chunk（重连重放）不得把刚丢弃的行复活成半截回答。
+	projector.apply(translateDshEvent(streamDelta('a1', 4, 'late'), 0)!);
+	assert.deepEqual(projector.snapshot().rows, []);
+
+	// 重试的新 attempt 正常成行，且不会与失败尝试的文字拼接。
+	projector.apply(translateDshEvent(streamStart('a2', 1), 0)!);
+	projector.apply(translateDshEvent(streamDelta('a2', 2, 'whole answer'), 0)!);
+	projector.apply(translateDshEvent(streamEnd('a2', 3, 'committed'), 0)!);
+	const rows = projector.snapshot().rows;
+	assert.deepEqual(rows.map(r => r.id), ['attempt:a2']);
+	assert.equal(rows[0].text, 'whole answer');
+});
+
+test('a durable assistant/attempt settlement also discards the abandoned step row', () => {
+	const projector = createIdeViewProjector();
+	projector.apply(translateDshEvent(streamStart('a1'), 0)!);
+	projector.apply(translateDshEvent(streamDelta('a1', 2, 'half'), 0)!);
+
+	// 上游 `assistant/attempt`（失败尝试不产生可见消息）只带 turn/step，不带 attemptId：
+	// 连接在瞬时 end 之前断开时，重连后只会有这一条 durable 事件。
+	projector.apply(translateDshEvent({
+		type: 'assistant/attempt', seq: 9, time: 10,
+		data: { turn: 1, step: 1, stream: [] },
+	}, 0)!);
+
+	assert.deepEqual(projector.snapshot().rows, [], 'a failed attempt settled durably must not leave a partial row');
+
+	// 迟到的流帧不得把它复活。
+	projector.apply(translateDshEvent(streamDelta('a1', 5, 'late'), 0)!);
+	assert.deepEqual(projector.snapshot().rows, []);
+});
+
+// ---------------------------------------------------------------------------
 // 有界窗口 / 折叠 preview / 回 Host 取全文
 // ---------------------------------------------------------------------------
 

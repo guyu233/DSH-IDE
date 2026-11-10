@@ -96,6 +96,14 @@ export function createIdeViewProjector(deps: IdeViewProjectorDeps = {}): IdeView
 	const byId = new Map<string, MutableRow>();
 	const fullText = new Map<string, string>();
 	const seenSeq = new Set<number>();
+	/** attemptId → 已处理的最大流帧 revision；瞬时帧的重放按它丢弃。 */
+	const streamRevisions = new Map<string, number>();
+	/** attemptId → 正在流式输出的行；`end` / 结算事件到达时解除绑定。 */
+	const streamingByAttempt = new Map<string, MutableRow>();
+	/** 已被结局判定为不可见（失败 / 取消）的 attempt；迟到的增量不得把它们复活。 */
+	const discardedAttempts = new Set<string>();
+	/** attemptId → 该 attempt 的 (turn, step)；durable 的失败结算只有 turn/step，靠它收敛残留行。 */
+	const attemptSteps = new Map<string, { readonly turn: number; readonly step: number }>();
 	let version = 0;
 	let streaming: MutableRow | undefined;
 
@@ -144,27 +152,121 @@ export function createIdeViewProjector(deps: IdeViewProjectorDeps = {}): IdeView
 		}
 	}
 
-	function apply(event: IdeEvent): void {
-		if (seenSeq.has(event.seq)) {
+	/** 为某个 attempt 开出（或取回）它的流式占位行；重连漏收 `start` 时由增量补建。 */
+	function openAttemptRow(attemptId: string, event: IdeEvent): MutableRow {
+		const existing = streamingByAttempt.get(attemptId);
+		if (existing !== undefined) {
+			return existing;
+		}
+		const row: MutableRow = { id: `attempt:${attemptId}`, revision: 1, kind: 'assistant', text: '', folded: false };
+		append(event, row);
+		streamingByAttempt.set(attemptId, row);
+		if (event.turn !== undefined && event.step !== undefined) {
+			attemptSteps.set(attemptId, { turn: event.turn, step: event.step });
+		}
+		streaming = row;
+		return row;
+	}
+
+	/**
+	 * 按 (turn, step) 收敛残留的临时行。
+	 *
+	 * durable 的 `assistant/attempt` 结算**不带** `attemptId`（上游形状只有 turn/step/stream），
+	 * 它表示这次尝试没有可见消息。若连接在瞬时 `end` 帧之前断开，重连后只会收到这条 durable
+	 * 事件，失败尝试的半截文本就会留在投影里；这里按 (turn, step) 把对应 attempt 一并丢弃。
+	 */
+	function discardAttemptsOfStep(turn: number, step: number): void {
+		for (const [attemptId, position] of attemptSteps) {
+			if (position.turn !== turn || position.step !== step) {
+				continue;
+			}
+			discardedAttempts.add(attemptId);
+			discardAttemptRow(attemptId);
+			attemptSteps.delete(attemptId);
+		}
+	}
+
+	/** 丢弃某个 attempt 留下的临时行：失败 / 取消的尝试不该在投影里留下半截文本。 */
+	function discardAttemptRow(attemptId: string): void {
+		const row = streamingByAttempt.get(attemptId);
+		streamingByAttempt.delete(attemptId);
+		if (row === undefined) {
 			return;
 		}
-		seenSeq.add(event.seq);
+		const index = rows.indexOf(row);
+		if (index !== -1) {
+			rows.splice(index, 1);
+		}
+		if (byId.get(row.id) === row) {
+			byId.delete(row.id);
+		}
+		fullText.delete(row.id);
+		if (streaming === row) {
+			streaming = undefined;
+		}
+		version += 1;
+	}
+
+	function apply(event: IdeEvent): void {
+		// 幂等分两套（口径见 translator.ts 的 `attemptId` / `streamRevision` 注释）：
+		//   - durable 日志事件按会话 `seq`；
+		//   - 瞬时流帧没有 `seq`（不进日志），按同一 attempt 的 revision 单调丢弃重放。
+		// 混用会让不同批次里都从 0 起编号的瞬时帧互相吞掉——实测正是如此（同一段回答只剩首帧）。
+		if (event.attemptId !== undefined && event.streamRevision !== undefined) {
+			const seen = streamRevisions.get(event.attemptId);
+			if (seen !== undefined && event.streamRevision <= seen) {
+				return;
+			}
+			streamRevisions.set(event.attemptId, event.streamRevision);
+		} else {
+			if (seenSeq.has(event.seq)) {
+				return;
+			}
+			seenSeq.add(event.seq);
+		}
 
 		const text = event.text ?? '';
 		switch (event.type) {
 			case 'user.message':
 				append(event, { id: `row:${event.seq}`, revision: 1, kind: 'user', text, folded: false, seq: event.seq });
 				break;
-			case 'assistant.delta':
 			case 'assistant.attempt.start':
-			case 'assistant.message': {
-				const existing = event.callId !== undefined ? byCallId.get(event.callId) : streaming;
+				// 带 attemptId 的瞬时帧：立刻开出该 attempt 的占位行，后续增量稳定合并到同一 id。
+				// 老形状（dsh-TUI mock，无 attemptId）保持原行为：只记日志。
+				if (event.attemptId !== undefined) {
+					openAttemptRow(event.attemptId, event);
+				}
+				break;
+			case 'assistant.delta': {
+				// 已判为不可见的 attempt 不再接受增量：否则迟到的 chunk 会把刚丢弃的行复活成半截回答。
+				if (event.attemptId !== undefined && discardedAttempts.has(event.attemptId)) {
+					return;
+				}
+				// 带 attemptId 的增量只认**本 attempt** 的行：重连时可能漏掉 `start`，
+				// 此时另起一行，绝不把新 attempt 的文字接进上一 attempt 的行里。
+				const existing = event.attemptId !== undefined
+					? (streamingByAttempt.get(event.attemptId) ?? openAttemptRow(event.attemptId, event))
+					: ((event.callId !== undefined ? byCallId.get(event.callId) : undefined) ?? streaming);
 				if (existing !== undefined && !existing.folded) {
 					existing.text = (existing.text ?? '') + text;
 					touch(existing);
 				} else {
 					append(event, { id: `row:${event.seq}`, revision: 1, kind: 'assistant', text, folded: false, seq: event.seq, ...(event.callId !== undefined ? { callId: event.callId } : {}) });
 				}
+				break;
+			}
+			case 'assistant.message': {
+				// 结算事件携带该步骤的完整文本：落到正在流式的那一行时**替换**而不是追加，
+				// 否则同一段回答会出现两遍（流式增量 + 结算全文）。与上游
+				// `assistant/message` 的「settlement owns the text」同一口径。
+				const target = (event.attemptId !== undefined ? streamingByAttempt.get(event.attemptId) : undefined) ?? streaming;
+				if (target !== undefined && !target.folded) {
+					target.text = text;
+					touch(target);
+				} else {
+					append(event, { id: `row:${event.seq}`, revision: 1, kind: 'assistant', text, folded: false, seq: event.seq, ...(event.callId !== undefined ? { callId: event.callId } : {}) });
+				}
+				streaming = undefined;
 				break;
 			}
 			case 'tool.call': {
@@ -192,6 +294,23 @@ export function createIdeViewProjector(deps: IdeViewProjectorDeps = {}): IdeView
 			case 'turn.end':
 			case 'step.end':
 			case 'assistant.attempt.end':
+				// 该 attempt 结算：占位行不再接受增量，否则下一个 attempt 会接在旧行后面继续拼接。
+				// 结局为不可见（失败 / 取消 / 结算为 `assistant/attempt`）时还要**丢弃**临时行：
+				// 上游语义是「这次尝试没有可见消息」，留下半截文本会让重试后的回答看起来被截断。
+				if (event.attemptId !== undefined) {
+					if (event.type === 'assistant.attempt.end' && event.outcome === 'abandoned') {
+						// 先丢弃再解绑：`discardAttemptRow` 自己会清掉绑定，顺序反了就找不到行。
+						discardedAttempts.add(event.attemptId);
+						discardAttemptRow(event.attemptId);
+					} else {
+						// 已结算的 attempt 只解绑，行保留（正文由 durable 结算接管）。
+						streamingByAttempt.delete(event.attemptId);
+					}
+				} else if (event.type === 'assistant.attempt.end' && event.turn !== undefined && event.step !== undefined) {
+					// durable `assistant/attempt`：这次尝试同样没有可见消息（失败 / 取消），
+					// 但事件不带 attemptId，只能按 (turn, step) 收敛它留下的临时行。
+					discardAttemptsOfStep(event.turn, event.step);
+				}
 				streaming = undefined;
 				break;
 			default:

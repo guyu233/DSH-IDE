@@ -421,8 +421,56 @@ test('unwrapFollowFrame expands a single incremental event frame', () => {
 });
 
 test('unwrapFollowFrame turns assistant-stream chunks into neutral deltas', () => {
-	const events = unwrapFollowFrame({ type: 'assistant-stream', frame: { type: 'chunk', chunk: { type: 'text-delta', text: 'abc' } } });
-	assert.deepEqual(events, [{ type: 'assistant.delta', text: 'abc' }]);
+	// 线上形状（packages/llm/assistant-stream）：chunk 帧带 attempt 身份与 attempt 内 revision。
+	// 两者必须一路带到中立事件里：瞬时帧没有会话 seq，幂等与合并只能靠它们。
+	const events = unwrapFollowFrame({
+		type: 'assistant-stream',
+		frame: { type: 'chunk', attemptId: 'a1', revision: 3, index: 1, time: 20, chunk: { type: 'text-delta', index: 0, text: 'abc' } },
+	});
+	assert.deepEqual(events, [{ type: 'assistant.delta', attemptId: 'a1', streamRevision: 3, text: 'abc' }]);
+});
+
+test('unwrapFollowFrame keeps attempt identity on stream start and end frames', () => {
+	assert.deepEqual(
+		unwrapFollowFrame({ type: 'assistant-stream', frame: { type: 'start', attemptId: 'a1', revision: 1, turn: 2, step: 3 } }),
+		[{ type: 'assistant.attempt.start', attemptId: 'a1', streamRevision: 1, turn: 2, step: 3 }],
+	);
+	assert.deepEqual(
+		unwrapFollowFrame({ type: 'assistant-stream', frame: { type: 'end', attemptId: 'a1', revision: 5, index: 3, outcome: { kind: 'committed', eventType: 'assistant/message', seq: 7 } } }),
+		[{ type: 'assistant.attempt.end', attemptId: 'a1', streamRevision: 5, outcome: 'committed' }],
+	);
+});
+
+test('unwrapFollowFrame marks an end frame as abandoned unless a visible message settled it', () => {
+	// 上游 end.outcome：`abandoned` 或结算为 `assistant/attempt` 都表示这次尝试没有可见消息；
+	// 投影器要靠这个结局丢弃临时行，否则失败尝试会留下半截回答。
+	assert.deepEqual(
+		unwrapFollowFrame({ type: 'assistant-stream', frame: { type: 'end', attemptId: 'a1', revision: 5, index: 3, outcome: { kind: 'abandoned' } } }),
+		[{ type: 'assistant.attempt.end', attemptId: 'a1', streamRevision: 5, outcome: 'abandoned' }],
+	);
+	assert.deepEqual(
+		unwrapFollowFrame({ type: 'assistant-stream', frame: { type: 'end', attemptId: 'a2', revision: 9, index: 1, outcome: { kind: 'committed', eventType: 'assistant/attempt', seq: 8 } } }),
+		[{ type: 'assistant.attempt.end', attemptId: 'a2', streamRevision: 9, outcome: 'abandoned' }],
+	);
+	// 结局缺失时按「已结算」处理：不凭空丢弃可能有正文的行。
+	assert.deepEqual(
+		unwrapFollowFrame({ type: 'assistant-stream', frame: { type: 'end', attemptId: 'a3', revision: 2, index: 0 } }),
+		[{ type: 'assistant.attempt.end', attemptId: 'a3', streamRevision: 2, outcome: 'committed' }],
+	);
+});
+
+test('unwrapFollowFrame drops stream frames without attempt identity instead of guessing one', () => {
+	// 没有 attemptId / revision 就无法做幂等与归并；伪造一个身份会让重放双写。
+	assert.deepEqual(unwrapFollowFrame({ type: 'assistant-stream', frame: { type: 'chunk', chunk: { type: 'text-delta', text: 'abc' } } }), []);
+	assert.deepEqual(unwrapFollowFrame({ type: 'assistant-stream', frame: { type: 'start' } }), []);
+});
+
+test('unwrapFollowFrame drops non-text stream chunks so reasoning never mixes into the answer row', () => {
+	assert.equal(unwrapFollowFrame({ type: 'assistant-stream', frame: { type: 'chunk', attemptId: 'a1', revision: 1, chunk: { type: 'text-delta', text: 'x' } } }).length, 1);
+	assert.deepEqual(
+		unwrapFollowFrame({ type: 'assistant-stream', frame: { type: 'chunk', attemptId: 'a1', revision: 2, chunk: { type: 'reasoning-delta', text: 'thinking' } } }),
+		[],
+	);
 });
 
 test('unwrapFollowFrame drops frames that carry no session content', () => {

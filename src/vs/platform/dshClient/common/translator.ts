@@ -40,7 +40,14 @@ export type IdeEventType =
 	| 'model.changed' | 'effort.changed' | 'mode.changed' | 'commands.changed'
 	| 'notice' | 'rate-limit';
 
-/** 中立事件：投影器唯一可见的形状。所有字段可选但显式 undefined 一律省略。 */
+/**
+ * 中立事件：投影器唯一可见的形状。所有字段可选但显式 undefined 一律省略。
+ *
+ * `attemptId` / `streamRevision` 只出现在**瞬时流帧**（`agent/assistant-stream`）翻译出的事件上：
+ * 瞬时帧没有会话 `seq`（它不进日志），因此幂等必须按「同一 attempt 的 revision 单调」判定，
+ * 不能借用会话序号。两个字段同时缺省即表示这是**durable 日志事件**，按 `seq` 幂等。
+ * 这与 dsh-TUI 的 `AgentEvent`（`attemptId` + `revision`）同一口径，不是新约定。
+ */
 export interface IdeEvent {
 	readonly type: IdeEventType;
 	readonly seq: number;
@@ -51,6 +58,19 @@ export interface IdeEvent {
 	readonly title?: string;
 	readonly kind?: IdeRowKind;
 	readonly streaming?: boolean;
+	/** 瞬时流帧所属的 attempt；缺席＝durable 事件。 */
+	readonly attemptId?: string;
+	/** 瞬时流帧的 attempt 内 revision；用来丢弃重连重放的同一条 chunk。 */
+	readonly streamRevision?: number;
+	/**
+	 * 只有 `assistant.attempt.end` 带：该 attempt 的结局。
+	 *
+	 * `abandoned` 表示这次尝试没有落成可见消息（流错误、重试、取消，或结算为
+	 * `assistant/attempt`），投影器必须丢弃它留下的临时行；`committed` 表示已有
+	 * durable 结算（`assistant/message` 或 `assistant/attempt`）接着到达。
+	 * 与 dsh-TUI `assistant.attempt.end` 的 `outcome` 同一口径。
+	 */
+	readonly outcome?: 'committed' | 'abandoned';
 }
 
 /** translator 只接受纯对象（结构窄化，不引用 DSH 包类型），逐字段白名单拷贝。 */
@@ -224,6 +244,13 @@ export function translateDshEvent(raw: unknown, fallbackSeq: number): IdeEvent |
 		?? (data !== undefined ? nonEmptyString(data['callId']) ?? nonEmptyString((isRecord(data['message']) && isRecord(data['message']['source']) ? data['message']['source']['callId'] : undefined)) : undefined);
 	const turn = safeInteger(raw['turn']) ?? (data !== undefined ? safeInteger(data['turn']) : undefined);
 	const step = safeInteger(raw['step']) ?? (data !== undefined ? safeInteger(data['step']) : undefined);
+	// 瞬时流帧的两个身份字段只在**已由 unwrapFollowFrame 归一**的中立形状上出现：
+	// 线上帧本身没有 `seq`（不进日志），幂等只能按 attempt + revision 判定。
+	const attemptId = nonEmptyString(raw['attemptId']);
+	const streamRevision = safeInteger(raw['streamRevision']);
+	// 结局只认两个上游字面量；其它取值一律不带该字段（不猜）。
+	const rawOutcome = raw['outcome'];
+	const outcome = rawOutcome === 'committed' || rawOutcome === 'abandoned' ? rawOutcome : undefined;
 
 	const event: IdeEvent = {
 		type,
@@ -234,6 +261,9 @@ export function translateDshEvent(raw: unknown, fallbackSeq: number): IdeEvent |
 		...textField(type, raw, data),
 		...titleField(type, raw, data),
 		...(rowKindOf(type) !== undefined ? { kind: rowKindOf(type)! } : {}),
+		...(attemptId !== undefined ? { attemptId } : {}),
+		...(streamRevision !== undefined ? { streamRevision } : {}),
+		...(outcome !== undefined ? { outcome } : {}),
 	};
 	return event;
 }

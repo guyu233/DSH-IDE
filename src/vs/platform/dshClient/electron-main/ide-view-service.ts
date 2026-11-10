@@ -186,10 +186,20 @@ export class DshIdeViewService extends Disposable implements IdeViewHost {
 }
 
 /**
- * 把 `session/follow` 的帧解包成一条或多条 `SessionEvent`。
+ * 把 `session/follow` 的帧解包成一条或多条可交给 translator 的事件。
  *
- * 不认识的形状返回空数组（丢弃，不猜）。`assistant-stream` 帧也在这里转成中立事件，
- * 避免上游 send 前再分一次叉。
+ * 不认识的形状返回空数组（丢弃，不猜）。
+ *
+ * 瞬时流帧（`assistant-stream`）在这里就**归一成 translator 认的中立形状**，而不是只把文本
+ * 拽出来：线上帧没有会话 `seq`（它不进日志），也带着 attempt 身份与 revision。丢掉这两项会让
+ * 「每个批次重新编号」的增量互相吞掉、并让流式文本与结算文本重复出现——实测两者都发生过。
+ *
+ * 依据 `E:/deepseek-harness-0.2.2-rc.1`：`SessionFollowFrame` 的 `assistant-stream` 分支为
+ * `{ type:'assistant-stream', frame: AssistantStreamFrame }`，
+ * `AssistantStreamFrame` = `{ type:'start', attemptId, revision, turn, step }`
+ * | `{ type:'chunk', attemptId, revision, index, time, chunk }`
+ * | `{ type:'end', attemptId, revision, index, outcome }`
+ * （`packages/api/session-controller/src/types.ts`、`packages/llm/assistant-stream`）。
  */
 export function unwrapFollowFrame(raw: unknown): readonly unknown[] {
 	if (typeof raw !== 'object' || raw === null) {
@@ -225,15 +235,43 @@ export function unwrapFollowFrame(raw: unknown): readonly unknown[] {
 		if (typeof inner !== 'object' || inner === null) {
 			return [];
 		}
-		const chunk = (inner as Record<string, unknown>)['chunk'];
-		if (typeof chunk === 'object' && chunk !== null) {
-			const text = (chunk as Record<string, unknown>)['text'];
-			if (typeof text === 'string') {
-				// 转成中立形状；seq 由 receive 侧的批处理索引兜底，不伪造会话 seq。
-				return [{ type: 'assistant.delta', text }];
-			}
+		const streamFrame = inner as Record<string, unknown>;
+		const attemptId = streamFrame['attemptId'];
+		const revision = streamFrame['revision'];
+		if (typeof attemptId !== 'string' || attemptId === '' || typeof revision !== 'number' || !Number.isSafeInteger(revision)) {
+			// 没有 attempt 身份就无法做幂等与归并：明确丢弃，不猜一个伪造的身份。
+			return [];
 		}
-		return [];
+		const identity = { attemptId, streamRevision: revision };
+		const turn = typeof streamFrame['turn'] === 'number' ? streamFrame['turn'] : undefined;
+		const step = typeof streamFrame['step'] === 'number' ? streamFrame['step'] : undefined;
+		if (streamFrame['type'] === 'start') {
+			return [{ type: 'assistant.attempt.start', ...identity, ...(turn === undefined ? {} : { turn }), ...(step === undefined ? {} : { step }) }];
+		}
+		if (streamFrame['type'] === 'end') {
+			// 结局必须带出去：失败 / 取消 / 结算为 `assistant/attempt` 的尝试没有可见消息，
+			// 它的临时行必须由投影器丢弃（与 dsh-TUI `translateFrame` 的 discarded 判定一致）。
+			const rawOutcome = streamFrame['outcome'];
+			const discarded = typeof rawOutcome === 'object' && rawOutcome !== null
+				&& ((rawOutcome as Record<string, unknown>)['kind'] === 'abandoned'
+					|| (rawOutcome as Record<string, unknown>)['eventType'] === 'assistant/attempt');
+			return [{ type: 'assistant.attempt.end', ...identity, ...(turn === undefined ? {} : { turn }), ...(step === undefined ? {} : { step }), outcome: discarded ? 'abandoned' : 'committed' }];
+		}
+		const chunk = streamFrame['chunk'];
+		if (typeof chunk !== 'object' || chunk === null) {
+			return [];
+		}
+		const text = (chunk as Record<string, unknown>)['text'];
+		if (typeof text !== 'string') {
+			return [];
+		}
+		// `chunk.type` 只区分 text-delta 与 reasoning 增量；当前投影器只呈现正文，
+		// 非文本增量明确丢弃（不把思考文本混进回答行）。
+		const chunkType = (chunk as Record<string, unknown>)['type'];
+		if (chunkType !== undefined && chunkType !== 'text-delta') {
+			return [];
+		}
+		return [{ type: 'assistant.delta', ...identity, ...(turn === undefined ? {} : { turn }), ...(step === undefined ? {} : { step }), text }];
 	}
 	// waterfall / ready / cancel 等不属于会话内容，交回调用方（当前视图不消费）。
 	return [];
