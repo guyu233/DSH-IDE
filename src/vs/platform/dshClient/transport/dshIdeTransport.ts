@@ -429,6 +429,12 @@ export class DshIdeTransportBackend implements DshIdeBackend {
 			}
 			case 'fetchRowDetail':
 				return null;
+			case 'accountGetState':
+				// 官方 `account/getState`：无参，返回 `AccountView`（status/links/attempt）。
+				return this.transport.call('account', 'getState', {});
+			case 'accountGetProfile':
+				// 官方 `account/getProfile(client)`：形参名是 `client`（不是 request）。
+				return this.transport.call('account', 'getProfile', { client: record['client'] });
 			case 'refreshSnapshot':
 				return { accepted: true };
 			case 'deleteSession':

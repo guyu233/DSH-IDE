@@ -4,4 +4,3 @@
  *--------------------------------------------------------------------------------------------*/
 
 export { EDIT_TELEMETRY_SETTING_ID } from '../../../../platform/telemetry/common/editArcTelemetry.js';
-export const AI_STATS_SETTING_ID = 'editor.aiStats.enabled';

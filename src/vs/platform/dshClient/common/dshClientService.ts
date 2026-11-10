@@ -90,6 +90,8 @@ export class DshClientService extends Disposable implements IDshStreamClient {
 	declare readonly _serviceBrand: undefined;
 
 	private readonly channel: IChannel;
+	/** 连接态：任一 `open` 成功或收到快照帧即为已连接（账号头像据此判断能否读账号）。 */
+	private _connected = false;
 	private readonly _onDidChangeState = this._register(new Emitter<{ connected: boolean }>());
 	private readonly _onDidStreamFrame = this._register(new Emitter<IDshStreamFrame>());
 	private readonly _onDidSnapshot = this._register(new Emitter<DshIdeSnapshot>());
@@ -99,23 +101,38 @@ export class DshClientService extends Disposable implements IDshStreamClient {
 		this.channel = mainProcessService.getChannel(DSH_IDE_CHANNEL);
 		// 快照流只在视图打开后由宿主推送；先注册监听，避免漏帧。
 		// 这里**不做**结构/连续性校验：那是 DshIdeConsumer.accept() 的唯一职责。
-		this._register(this.channel.listen<DshIdeSnapshot>('snapshot')(snapshot => this._onDidSnapshot.fire(snapshot)));
+		this._register(this.channel.listen<DshIdeSnapshot>('snapshot')(snapshot => {
+			this.markConnected();
+			this._onDidSnapshot.fire(snapshot);
+		}));
 	}
 
 	readonly onDidSnapshot: Event<DshIdeSnapshot> = this._onDidSnapshot.event;
 
 	async getStatus(): Promise<{ connected: boolean; endpoint?: string }> {
-		// 状态由快照流体现（未收到 ready 帧即视为未连接），这里不伪造 endpoint。
-		return { connected: false };
+		// 连接态 = 已经有过一次成功的 `open`（宿主回了首帧快照）。
+		// 不再硬编码 false：那会让账号头像永远落在「不可用」分支（真机现象）。
+		// 这里不伪造 endpoint：端点由 Host 自解析后写文件，渲染器不持有它。
+		return { connected: this._connected };
 	}
 
 	async openView(spec: { view: string; params?: Record<string, unknown> }): Promise<DshClientCallResult<DshIdeSnapshot>> {
 		try {
 			const snapshot = await this.channel.call<DshIdeSnapshot>('open', spec);
+			this.markConnected();
 			return { ok: true, value: snapshot };
 		} catch (error) {
 			return { ok: false, error: toRemoteError(error, DSH_IDE_INVALID_ARGUMENT) };
 		}
+	}
+
+	/** 置为已连接并广播；仅在状态真正翻转时发事件，避免轮询刷出重复帧。 */
+	private markConnected(): void {
+		if (this._connected) {
+			return;
+		}
+		this._connected = true;
+		this._onDidChangeState.fire({ connected: true });
 	}
 
 	async closeView(): Promise<void> {

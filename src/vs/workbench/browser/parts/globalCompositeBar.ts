@@ -46,8 +46,9 @@ import { KeyCode } from '../../../base/common/keyCodes.js';
 import { ACTIVITY_BAR_BADGE_BACKGROUND, ACTIVITY_BAR_BADGE_FOREGROUND } from '../../common/theme.js';
 import { IBaseActionViewItemOptions } from '../../../base/browser/ui/actionbar/actionViewItems.js';
 import { IDshClientService } from '../../../platform/dshClient/common/dshClientService.js';
-import { DSH_ACCOUNT_GET_STATE_ENDPOINT, DSH_ACCOUNT_GET_PROFILE_ENDPOINT, dshAccountClientMetadata } from '../../../platform/dshClient/common/legacy-account-endpoints.js';
+import { dshAccountClientMetadata } from '../../../platform/dshClient/common/legacy-account-endpoints.js';
 import { IOpenerService } from '../../../platform/opener/common/opener.js';
+import { ICommandService } from '../../../platform/commands/common/commands.js';
 
 
 import { WORKBENCH_MENU_MOTION_CLASS, workbenchMenuCloseAnimation } from '../actions/menuMotion.js';
@@ -316,6 +317,7 @@ export class AccountsActivityActionViewItem extends AbstractGlobalActivityAction
 		@IRequestService requestService: IRequestService, // 保留参数位序（Simple* 子类 super(...) 依赖它）
 		@IDshClientService private readonly dshClientService: IDshClientService,
 		@IOpenerService private readonly openerService: IOpenerService,
+		@ICommandService private readonly commandService: ICommandService,
 	) {
 		const action = instantiationService.createInstance(CompositeBarAction, {
 			id: ACCOUNTS_ACTIVITY_ID,
@@ -391,7 +393,7 @@ export class AccountsActivityActionViewItem extends AbstractGlobalActivityAction
 				this.updateAvatar();
 				return;
 			}
-			const res = await this.dshClientService.call<{ status?: string }>(DSH_ACCOUNT_GET_STATE_ENDPOINT);
+			const res = await this.dshClientService.call<{ status?: string }>('accountGetState', { client: dshAccountClientMetadata(this.dshLocale()) });
 			if (!res.ok) {
 				this.dshAccount = { signedIn: false, unavailable: true, name: '', contact: '', avatarUrl: '' };
 				this.updateAvatar();
@@ -407,7 +409,7 @@ export class AccountsActivityActionViewItem extends AbstractGlobalActivityAction
 				// 官方 `getProfile` 返回 `{ status:'ready', value: AccountProfile }`（E1
 				// `deepseek-account/src/types.ts` AccountDetails），必须剥一层 `.value`。
 				const profile = await this.dshClientService.call<{ status?: string; value?: { name?: string | null; contact?: string | null; avatarUrl?: string | null } }>(
-					DSH_ACCOUNT_GET_PROFILE_ENDPOINT, { client: meta });
+					'accountGetProfile', { client: meta });
 				const p = profile.ok && profile.value?.status === 'ready' ? profile.value.value : undefined;
 				if (p) {
 					name = typeof p.name === 'string' ? p.name : '';
@@ -427,7 +429,7 @@ export class AccountsActivityActionViewItem extends AbstractGlobalActivityAction
 		// 官方登录是「浏览器授权」流程（`account/startSignIn` → 打开 authorizeUrl → 回调）。
 		// 完整实现见后续轮次；此处给出明确可用入口（打开官方 usage 页），避免死路。
 		try {
-			const res = await this.dshClientService.call<{ links?: { usageUrl?: string } }>(DSH_ACCOUNT_GET_STATE_ENDPOINT);
+			const res = await this.dshClientService.call<{ links?: { usageUrl?: string } }>('accountGetState', { client: dshAccountClientMetadata(this.dshLocale()) });
 			const usage = res.ok ? res.value?.links?.usageUrl : undefined;
 			if (usage) { await this.openerService.open(URI.parse(usage)); }
 		} catch (error) {
@@ -542,10 +544,23 @@ export class AccountsActivityActionViewItem extends AbstractGlobalActivityAction
 		const accountActions = await this.buildAccountActions(disposables);
 		const actions = await super.resolveContextMenuActions(disposables);
 		this.fillContextMenuActions(actions);
-		// 账号动作在前（用户最常找），随后加分隔线再接「隐藏账号 / Manage」。
-		return accountActions.length
-			? [...accountActions, new Separator(), ...actions]
-			: actions;
+		// 账号动作在前（用户最常找），随后加分隔线再接「设置 / 隐藏账号 / Manage」。
+		// 「设置」按用户要求从齿轮 Manage 菜单搬到这里，紧贴账号信息之下。
+		return [...accountActions, this.settingsAction(), new Separator(), ...actions];
+	}
+
+	/**
+	 * 「设置」入口：与齿轮 Manage 菜单里的 `workbench.action.openSettings` 同一命令，
+	 * 不复制设置界面，只把入口放到账号菜单里（用户指定位置）。
+	 */
+	private settingsAction(): IAction {
+		// 与同文件的 `hideAccounts` / `toggle.hideAccounts` 一致：`toAction` 的结果不登记 disposable，
+		// 它不持有需要释放的资源（`IAction` 本身没有 dispose）。
+		return toAction({
+			id: 'dsh.account.openSettings',
+			label: localize('dshOpenSettings', "设置"),
+			run: () => { void this.commandService.executeCommand('workbench.action.openSettings'); },
+		});
 	}
 }
 
@@ -648,6 +663,7 @@ export class SimpleAccountActivityActionViewItem extends AccountsActivityActionV
 		@IRequestService requestService: IRequestService,
 		@IDshClientService dshClientService: IDshClientService,
 		@IOpenerService openerService: IOpenerService,
+		@ICommandService commandService: ICommandService,
 	) {
 		super(() => simpleActivityContextMenuActions(storageService, true),
 			{
@@ -658,7 +674,7 @@ export class SimpleAccountActivityActionViewItem extends AccountsActivityActionV
 				}),
 				hoverOptions,
 				compact: true,
-			}, () => undefined, actions => actions, themeService, lifecycleService, hoverService, contextMenuService, menuService, contextKeyService, configurationService, keybindingService, logService, activityService, instantiationService, requestService, dshClientService, openerService);
+			}, () => undefined, actions => actions, themeService, lifecycleService, hoverService, contextMenuService, menuService, contextKeyService, configurationService, keybindingService, logService, activityService, instantiationService, requestService, dshClientService, openerService, commandService);
 	}
 }
 

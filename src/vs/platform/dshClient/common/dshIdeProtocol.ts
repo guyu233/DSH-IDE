@@ -129,6 +129,27 @@ export interface DshIdeMethodArgs {
 	fetchRowDetail: { rowId: string };
 	/** 主动刷新快照。 */
 	refreshSnapshot: Record<string, never>;
+	/** 读取 DeepSeek 账号投影（登录态）；`client` 为官方 `AccountClientMetadata` 三元组。 */
+	accountGetState: { client: IDshAccountClientMetadataArgs };
+	/** 读取账号资料（显示名 / 联系方式 / 头像 URL）；仅在 `accountGetState` 为已登录时调用。 */
+	accountGetProfile: { client: IDshAccountClientMetadataArgs };
+}
+
+/**
+ * 官方 `AccountClientMetadata`（账号接口的调用方身份）。
+ *
+ * 依据 DSH `deepseekAccount` 服务（`cordis_inspect_query` Service.listService 实测）与
+ * `packages/credentials/deepseek-account-platform`：Host 用它派生 Platform 请求头
+ * （`x-client-version` / `x-client-locale` / `x-client-timezone-offset`）。
+ * 三字段**都必填**，且不含任何密钥——账号凭据只存在于 Host，IDE 侧永远拿不到。
+ */
+export interface IDshAccountClientMetadataArgs {
+	/** 客户端版本号，映射到 `x-client-version`。 */
+	readonly version: string;
+	/** 语言/地区，映射到 `x-client-locale`（如 `zh-CN`）。 */
+	readonly locale: string;
+	/** 相对 UTC 的时区偏移秒数，映射到 `x-client-timezone-offset`。 */
+	readonly timezoneOffsetSeconds: number;
 }
 
 /** 方法白名单（由 DshIdeMethodArgs 键派生，单一真源）。 */
@@ -156,6 +177,8 @@ const DSH_IDE_METHOD_KEYS: Record<DshIdeMethod, readonly string[]> = {
 	listCommands: ['workspace'],
 	fetchRowDetail: ['rowId'],
 	refreshSnapshot: [],
+	accountGetState: ['client'],
+	accountGetProfile: ['client'],
 };
 
 // ---------------------------------------------------------------------------
@@ -238,6 +261,21 @@ function optionalString(value: unknown, label: string): void {
 	}
 }
 
+/**
+ * 校验官方 `AccountClientMetadata`：三个非空/有限数字段，且不额外放宽。
+ * 账号凭据不在此结构里（只在 Host），这里只描述「调用方身份」。
+ */
+function accountClientMetadata(value: unknown, label: string): void {
+	const record = exactRecord(value, ['version', 'locale', 'timezoneOffsetSeconds'], label);
+	for (const key of ['version', 'locale'] as const) {
+		nonEmptyString(record[key], `${label}.${key}`);
+	}
+	const offset = record['timezoneOffsetSeconds'];
+	if (typeof offset !== 'number' || !Number.isFinite(offset)) {
+		throw new TypeError(`${label}.timezoneOffsetSeconds must be a finite number`);
+	}
+}
+
 // ---------------------------------------------------------------------------
 // 双向校验器
 // ---------------------------------------------------------------------------
@@ -316,6 +354,11 @@ export function validateDshIdeInput<K extends DshIdeMethod>(command: K, args: un
 			break;
 		case 'fetchRowDetail':
 			nonEmptyString(record['rowId'], 'DshIdeInput.fetchRowDetail.rowId');
+			break;
+		case 'accountGetState':
+		case 'accountGetProfile':
+			// 官方 `AccountClientMetadata` 四字段必填；缺一个就会让 Host 派生出错误的请求身份。
+			accountClientMetadata(record['client'], `DshIdeInput.${command}.client`);
 			break;
 		case 'interrupt':
 		case 'listSessions':
@@ -465,5 +508,6 @@ export interface IdeViewHost {
 	close(): { closed: true };
 }
 
-// 注：旧「账号」端点常量（DSH_ACCOUNT_*_ENDPOINT / dshAccountClientMetadata）已迁至
-// `legacy-account-endpoints.ts`，不属于本中立 DTO 协议，待 P5 归并或移除。
+// 注：账号能力的**端点名**已是本协议的正式 method（`accountGetState` / `accountGetProfile`）。
+// 仅「调用方身份」元数据（官方 `AccountClientMetadata` 四字段的来源）仍放在
+// `legacy-account-endpoints.ts`，因为它描述的是 Platform 客户端凭据，不是 DTO 形状。

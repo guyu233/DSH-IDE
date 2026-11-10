@@ -13,8 +13,7 @@ import { ITelemetryService, TelemetryLevel, telemetryLevelEnabled } from '../../
 import { AnnotatedDocuments } from './helpers/annotatedDocuments.js';
 import { EditTrackingFeature } from './telemetry/editSourceTrackingFeature.js';
 import { VSCodeWorkspace } from './helpers/vscodeObservableWorkspace.js';
-import { AiStatsFeature } from './editStats/aiStatsFeature.js';
-import { AI_STATS_SETTING_ID, EDIT_TELEMETRY_SETTING_ID } from './settingIds.js';
+import { EDIT_TELEMETRY_SETTING_ID } from './settingIds.js';
 import { IChatEntitlementService } from '../../../services/chat/common/chatEntitlementService.js';
 import { AiContributionFeature } from './aiContributionFeature.js';
 
@@ -39,16 +38,8 @@ export class EditTelemetryContribution extends Disposable {
 			r.store.add(instantiationService.createInstance(EditTrackingFeature, workspace.read(r), annotatedDocuments.read(r)));
 		}));
 
-		const aiStatsEnabled = observableConfigValue(AI_STATS_SETTING_ID, true, configurationService);
-		this._register(autorun(r => {
-			const enabled = aiStatsEnabled.read(r);
-			const aiDisabled = chatEntitlementService.sentimentObs.read(r).hidden;
-			if (!enabled || aiDisabled) {
-				return;
-			}
-
-			r.store.add(instantiationService.createInstance(AiStatsFeature, annotatedDocuments.read(r)));
-		}));
+		// AI 用量统计（右下角额度 UI）已按 DSH-IDE 要求整块移除：IDE 内不显示任何额度/用量。
+		// 移除范围＝状态栏入口 + 悬浮面板 + 图表；此处不再实例化 AiStatsFeature。
 
 		// Register no-op fallbacks so that extensions can always call these
 		// commands even when AiContributionFeature is not active.

@@ -197,7 +197,7 @@ test('unavailable backend never fabricates snapshots or events', () => {
 });
 
 // ---------------------------------------------------------------------------
-// 通道：20 method 全覆盖 + 未知 method + 入参违规
+// 通道：22 method 全覆盖 + 未知 method + 入参违规
 // ---------------------------------------------------------------------------
 
 const VALID: Record<DshIdeMethod, unknown> = {
@@ -221,6 +221,8 @@ const VALID: Record<DshIdeMethod, unknown> = {
 	listCommands: { workspace: 'w1' },
 	fetchRowDetail: { rowId: 'row:1' },
 	refreshSnapshot: {},
+	accountGetState: { client: { version: '2.0.0', locale: 'zh-CN', timezoneOffsetSeconds: 28800 } },
+	accountGetProfile: { client: { version: '2.0.0', locale: 'zh-CN', timezoneOffsetSeconds: 28800 } },
 };
 
 async function openedChannel(backend = fakeBackend()) {

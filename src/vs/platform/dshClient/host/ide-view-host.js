@@ -253,13 +253,16 @@ function describeRequest(kind, request) {
 }
 
 /**
- * 20 个 DTO method → 官方服务调用（唯一分发点，入参已过 validateDshIdeInput）。
+ * 22 个 DTO method → 官方服务调用（唯一分发点，入参已过 validateDshIdeInput）。
  *
  * 结果语义（第 2 章 §4）：动作类 `{ accepted: true }`；列表类数组；详情类 `string | null`。
  * 尚未核对到官方公开接口的能力以 feature-unavailable 明确拒绝并写明缺口，不猜方法名。
  */
 function createMethodHandlers(bridge) {
 	const controller = () => service(bridge.ctx, 'sessionController');
+	// 账号域是独立服务：官方服务名是 `deepseekAccount`（`accountController` 只是 Remote 包装类，
+	// 不是注册进 ctx 的服务名；用错会把调用打到一个不存在的服务上）。
+	const account = () => service(bridge.ctx, 'deepseekAccount');
 	const sessionIdOf = args => args.sessionId ?? bridge.sessionId;
 	const requireSession = () => {
 		if (bridge.sessionId === undefined) {
@@ -366,6 +369,14 @@ function createMethodHandlers(bridge) {
 		async refreshSnapshot() {
 			bridge.emitToUi({ type: 'refresh' });
 			return { accepted: true };
+		},
+		async accountGetState() {
+			// 官方 `accountController.getState()`：无参，返回 AccountView（status/links/attempt）。
+			return account().getState();
+		},
+		async accountGetProfile(args) {
+			// 官方 `accountController.getProfile(client)`：Host 依据 client 派生 Platform 请求头。
+			return account().getProfile(args.client);
 		},
 		async deleteSession(args) {
 			bridge.assertOwnership(args.sessionId);

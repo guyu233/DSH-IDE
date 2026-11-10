@@ -47,12 +47,14 @@ const VALID_ARGS: Record<DshIdeMethod, unknown> = {
 	fetchRowDetail: { rowId: 'row1' },
 	refreshSnapshot: {},
 	deleteSession: { sessionId: 's1' },
+	accountGetState: { client: { version: '2.0.0', locale: 'zh-CN', timezoneOffsetSeconds: 28800 } },
+	accountGetProfile: { client: { version: '2.0.0', locale: 'zh-CN', timezoneOffsetSeconds: 28800 } },
 };
 
 const ALL_METHODS = Object.keys(VALID_ARGS) as DshIdeMethod[];
 
-test('method whitelist has the 20 phase-2.3 methods', () => {
-	assert.equal(ALL_METHODS.length, 20);
+test('method whitelist has the 22 methods (20 session + 2 account)', () => {
+	assert.equal(ALL_METHODS.length, 22);
 	assert.equal(new Set(ALL_METHODS).size, ALL_METHODS.length);
 });
 
