@@ -1,8 +1,86 @@
 # DSH-IDE
 
+[![Release](https://img.shields.io/badge/release-v2.0.0-1f6feb?style=flat-square)](CHANGELOG.md)
+[![License](https://img.shields.io/badge/license-MIT-blue?style=flat-square)](LICENSE)
+[![DSH](https://img.shields.io/badge/DSH-bundle%20plugin-8b5cf6?style=flat-square)](https://github.com/deepseek-ai)
+[![VS Code](https://img.shields.io/badge/VS%20Code-1.143.1-007acc?style=flat-square)](NOTICE.md)
+
+> **把 VS Code 装进 DeepSeek-Harness：一个应用、一个工作区、一套 AI 状态。**
+
 > 本文是仓库总纲：定义项目、统一术语、权威层级、文档索引与状态入口。全部规格内容由 `docs/DEVELOPMENT.md` 唯一承载，本文不重复其内容。
 
-## 1. 项目定义
+---
+
+## 1. 项目概述
+
+### 1.1 这个插件是什么
+
+DSH-IDE 不是「又一个 AI 编辑器」，而是把 **整个 VS Code 桌面运行时改造成 DeepSeek-Harness 的一个 bundle 插件**。
+
+装上它之后：
+
+- **左侧是完整的原生 IDE** —— 编辑、终端、Git、调试、扩展市场、远程开发，全部是 VS Code 1.143.1 的真实能力，不是重新实现的仿制品。
+- **AI 就在同一个工作区里** —— DSH 作为唯一 AI 内核驱动侧栏；它能读你正在改的文件、调用真实工具、走审批流程、并行多会话。
+- **没有第二套状态** —— 不存在「IDE 一套会话、AI 一套会话」，也没有第二个协议、第二个 Cordis 根。
+
+一句话：**DSH 负责思考，VS Code 负责编辑，两者共用同一个工作区和同一份会话真源。**
+
+#### 它解决了什么问题
+
+| 常见痛点 | DSH-IDE 的做法 |
+| --- | --- |
+| AI 编辑器与本地工作区割裂，AI 看不到真实上下文 | AI 直接运行在 DSH Host 里，通过官方通道读取同一工作区与会话 |
+| 「AI 版编辑器」往往是重做的简化编辑器，缺终端/调试/扩展 | 直接复用完整 VS Code 运行时，能力不打折 |
+| 桌面 AI 应用和编辑器是两个程序，状态两头对不上 | 插件跑在 DSH 应用内，IDE 窗口是 DSH 的一个窗口，天然一体 |
+| 各家 AI 插件协议各不相同，难以审计 | 只有一条 `IServerChannel`（token `dshIde`）+ 中立 DTO，边界可验证 |
+
+#### 关键特性
+
+- **原生 IDE 体验**：完整编辑器、集成终端、Git、调试器、扩展市场、远程连接
+- **AI 侧栏由 DSH 驱动**：会话、模型选择、工具调用、权限审批、问卷交互全部归 DSH
+- **单一通道**：IDE ↔ DSH 只走 `dshIde` 通道，双向校验、版本连续、fail-closed
+- **统一外观**：账号入口读取 DSH 登录态并显示头像与昵称；界面收敛为一处账号入口与一处设置入口
+- **可回滚的构建**：唯一交付物是 `dist/dsh-ide-2.0.0.tgz`，由官方脚本 `gulp dsh-ide-pack` 产出
+
+#### 架构一览
+
+```mermaid
+flowchart LR
+  subgraph DSH["DSH 应用"]
+    HOST["DSH Host 进程<br/>dshCtx（唯一 Cordis 根）"]
+    UI["DSH 主窗口<br/>会话头部「DSH-IDE」按钮"]
+  end
+  subgraph IDE["IDE 窗口（DSH 的一个窗口）"]
+    R["renderer<br/>编辑器 / 终端 / Git"]
+    C["DshIdeConsumer<br/>校验 · 合并 · 渲染"]
+  end
+  HOST -- "唯一通道 dshIde" --> C
+  C --> R
+  UI -- "点击开窗" --> IDE
+  R -- "invoke(method, args)" --> HOST
+```
+
+AI 能力全部留在 DSH 一侧；IDE 侧只消费中立 DTO，不持有 `dshCtx`、不复制会话状态。
+
+#### 安装
+
+DSH-IDE 以 **DSH bundle 插件**形式交付，不提供独立安装包。
+
+```bash
+# 1. 构建（仓库根执行；产出 dist/dsh-ide-2.0.0.tgz）
+npm install
+npx gulp dsh-ide-pack
+
+# 2. 在 DSH 中安装该插件包，然后重启 DSH
+```
+
+安装后，在 DSH 主窗口会话头部点击「DSH-IDE」按钮即可打开原生 IDE 窗口。
+
+> 构建详情、依赖与原生模块 ABI 要求见 [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md) 第 8 章；版本变更见 [`CHANGELOG.md`](CHANGELOG.md)。
+
+---
+
+### 1.2 项目定义
 
 **为什么做**：DSH（DeepSeek Harness）是本地 AI 内核，具备会话、模型、工具、审批、语音能力，但缺少成熟的桌面编辑器外壳；普通 AI 编辑器又把 AI 与工作区割裂成两套状态。DSH-IDE 把两者合成**一个 DSH 应用**、一个工作区、一套状态（IDE 是 DSH 应用内的拓展，不是另一个 app）。
 
@@ -16,7 +94,7 @@ DSH-IDE 是把整个 VS Code 桌面运行时改造成 DeepSeekHarness 插件的�
 
 **法律文件维护规则（旁注，文件本身不改）**：`NOTICE.md` 声明了 VS Code（MIT，原文见 `LICENSE.txt`）与 DSH 两处上游来源、商标归属及许可范围；`LICENSE` 是本仓库 MIT 许可文本。二者**不得重写、不得删改原文**；仅当新增第三方依赖或素材时，才允许在 `NOTICE.md` 末尾**追加**条目，原有内容一字不动。定稿时未新增任何依赖或素材，`NOTICE.md` 保持原文。全量法律/许可文件清单与定稿核验见 [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md) 第 7 章 §4。
 
-### 1.1 两种时态（全仓统一用法）
+### 1.3 两种时态（全仓统一用法）
 
 | 时态 | 含义 | 使用位置 |
 | --- | --- | --- |
