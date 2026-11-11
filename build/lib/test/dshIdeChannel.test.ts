@@ -208,7 +208,7 @@ const VALID: Record<DshIdeMethod, unknown> = {
 	newSession: { workspace: 'w1', options: { preset: 'standard' } },
 	fork: { sessionId: 's-1', point: 'p1' },
 	rewind: { sessionId: 's-1', to: 'p0' },
-	loadOlder: { sessionId: 's-1', before: 'm1' },
+	loadOlder: { sessionId: 's-1', beforeSeq: 7 },
 	answerApproval: { requestId: 'r1', decision: 'approve' },
 	answerQuestion: { requestId: 'r1', answer: 'yes' },
 	cancelRequest: { requestId: 'r1' },
@@ -233,7 +233,7 @@ async function openedChannel(backend = fakeBackend()) {
 	return { view, channel, backend, first };
 }
 
-test('channel dispatches all 22 DTO methods through validateDshIdeInput', async () => {
+test('channel dispatches all 24 DTO methods through validateDshIdeInput', async () => {
 	const { channel, backend } = await openedChannel();
 	for (const method of ALL_METHODS) {
 		const output = await channel.call<{ value: unknown }>('ctx-a', method, VALID[method]);

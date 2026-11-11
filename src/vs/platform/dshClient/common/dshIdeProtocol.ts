@@ -132,8 +132,15 @@ export interface DshIdeMethodArgs {
 	fork: { sessionId: string; point?: string };
 	/** 回退到某点。 */
 	rewind: { sessionId: string; to: string };
-	/** 加载更早的历史。 */
-	loadOlder: { sessionId: string; before?: string };
+	/**
+	 * 向前读取一页历史（官方 `session/page`，只读）。
+	 *
+	 * 形状对齐官方 `SessionPageRequest{address, beforeSeq?, maxMessages?}`
+	 * （`api/session-controller/src/types.ts:469-478`）：`beforeSeq` 是**数值**游标
+	 * （不是旧的字符串 `before`），`maxMessages` 限定本页条数。省略 `beforeSeq`
+	 * 时官方按观察到的日志末端取页。
+	 */
+	loadOlder: { sessionId: string; beforeSeq?: number; maxMessages?: number };
 	/** 决议审批请求。 */
 	answerApproval: { requestId: string; decision: 'approve' | 'reject'; reason?: string };
 	/** 决议问卷请求。 */
@@ -220,7 +227,7 @@ const DSH_IDE_METHOD_KEYS: Record<DshIdeMethod, readonly string[]> = {
 	newSession: ['workspace', 'options'],
 	fork: ['sessionId', 'point'],
 	rewind: ['sessionId', 'to'],
-	loadOlder: ['sessionId', 'before'],
+	loadOlder: ['sessionId', 'beforeSeq', 'maxMessages'],
 	answerApproval: ['requestId', 'decision', 'reason'],
 	answerQuestion: ['requestId', 'answer'],
 	cancelRequest: ['requestId'],
@@ -320,6 +327,26 @@ function optionalString(value: unknown, label: string): void {
 	}
 }
 
+/** 可选的绝对值整数（官方游标类字段：`SessionSeq` 等）。 */
+function optionalNonNegativeInteger(value: unknown, label: string): void {
+	if (value === undefined) {
+		return;
+	}
+	if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0) {
+		throw new TypeError(`${label} must be a non-negative safe integer`);
+	}
+}
+
+/** 可选的正整数（官方分页预算类字段：`maxMessages` 等）。 */
+function optionalPositiveInteger(value: unknown, label: string): void {
+	if (value === undefined) {
+		return;
+	}
+	if (typeof value !== 'number' || !Number.isSafeInteger(value) || value <= 0) {
+		throw new TypeError(`${label} must be a positive safe integer`);
+	}
+}
+
 /**
  * 斜杠命令名 / 命令参数的中立约束（第 34 轮契约决定，§8.10.10 前置① ② ⑤）。
  * 官方 `parseCommand` 要求 `^/([a-z][a-z0-9_-]*)(\s|$)`（`interaction/commands/src/index.ts:125-131`）；
@@ -385,7 +412,8 @@ export function validateDshIdeInput<K extends DshIdeMethod>(command: K, args: un
 			break;
 		case 'loadOlder':
 			nonEmptyString(record['sessionId'], 'DshIdeInput.loadOlder.sessionId');
-			optionalString(record['before'], 'DshIdeInput.loadOlder.before');
+			optionalNonNegativeInteger(record['beforeSeq'], 'DshIdeInput.loadOlder.beforeSeq');
+			optionalPositiveInteger(record['maxMessages'], 'DshIdeInput.loadOlder.maxMessages');
 			break;
 		case 'answerApproval':
 			nonEmptyString(record['requestId'], 'DshIdeInput.answerApproval.requestId');

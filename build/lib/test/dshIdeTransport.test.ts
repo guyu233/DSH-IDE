@@ -351,7 +351,7 @@ test('backend maps submit/interrupt/setModel to verified session endpoints', asy
 
 test('backend refuses unverified capabilities with feature-unavailable', async () => {
 	const { backend, transport, requests } = backendWithHost(OK);
-	const refusing: DshIdeMethod[] = ['rewind', 'loadOlder'];
+	const refusing: DshIdeMethod[] = ['rewind'];
 	for (const method of refusing) {
 		await assert.rejects(
 			() => backend.invoke(method, {}),
@@ -1001,5 +1001,24 @@ test('backend archiveSession propagates the official active-session refusal', as
 	));
 	await assert.rejects(() => backend.invoke('archiveSession', { sessionId: 's-1' }),
 		(error: DshIdeTransportError) => /session-active|session is active/.test(`${error.code} ${error.message}`));
+	transport.dispose();
+});
+
+// ---------------------------------------------------------------------------
+// D13（第 21 轮）：loadOlder → 官方 session/page（只读分页）。
+// 动作类只回 { accepted: true }；分页内容仍只经 listen('snapshot') 到达。
+// ---------------------------------------------------------------------------
+
+test('backend maps loadOlder to session/page with the official request shape', async () => {
+	const { backend, transport, requests } = backendWithHost(OK);
+	assert.deepEqual(await backend.invoke('loadOlder', { beforeSeq: 7, maxMessages: 20 }), { accepted: true });
+	assert.equal(requests.length, 1);
+	assert.equal(requests[0]!.url.split('/api/')[1], 'session/page');
+	const body = requests[0]!.body as { payload: { args: Record<string, unknown> } };
+	assert.deepEqual(body.payload.args, { request: { address: { kind: 'session', sessionId: 's-1' }, beforeSeq: 7, maxMessages: 20 } });
+	// 省略可选字段时不传该键。
+	await backend.invoke('loadOlder', {});
+	const second = requests[1]!.body as { payload: { args: Record<string, unknown> } };
+	assert.deepEqual(second.payload.args, { request: { address: { kind: 'session', sessionId: 's-1' } } });
 	transport.dispose();
 });

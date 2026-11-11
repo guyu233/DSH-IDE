@@ -17,7 +17,8 @@
 //   deleteSession + setEffort 标为已接线；第 32 轮据第 31 轮核实的 commands
 //   wire 形状把 listCommands 接线，故本表为 3 个已接线 / 4 个继续 fail-closed；
 //   第 33 轮把契约前置固化于 §8.10.10，第 34 轮按契约先行接线两者，故本表为
-//   5 个已接线 / 2 个继续 fail-closed（仅 rewind 无独立 remote、loadOlder 形状不符）。
+//   5 个已接线 / 2 个继续 fail-closed；第 21 轮把 loadOlder 按官方 session/page
+//   形状对齐后接线，故本表为 6 个已接线 / 1 个继续 fail-closed（仅 rewind）。
 // 形状一律以契约真源 dshIdeProtocol.ts 与 DSH 源码为准，不凭记忆臆造。
 
 import assert from 'node:assert/strict';
@@ -53,7 +54,7 @@ const FINDINGS: readonly EndpointFinding[] = [
 		method: 'loadOlder',
 		landing: 'session/page',
 		evidence: 'session-controller/src/index.ts:528 @Remote(page)；types.ts:469 SessionPageRequest{address,throughSeq?,beforeSeq?,maxMessages?,turnWindow?}；ui-trajectory/src/client/index.ts:102-104 session.loadOlder()',
-		note: '落点存在但契约 {before?:string} 与官方 beforeSeq:number 不是同一形状，且官方经 client session 对象封装。映射未验证前保持 fail-closed。',
+		note: '已完成（代码侧，第 21 轮）：契约 loadOlder 已按官方 SessionPageRequest 对齐为 {sessionId, beforeSeq?:number, maxMessages?:number}；Host 调 sessionController.page()、transport 调 session/page args {request}；按 §2 §4 动作类口径返回 {accepted:true}，分页内容仍只经 listen(snapshot) 到达。',
 	},
 	{
 		method: 'setEffort',
@@ -87,9 +88,9 @@ const FINDINGS: readonly EndpointFinding[] = [
 	},
 ];
 
-/** 已完成（代码侧）的 method：deleteSession（第 21 轮）、setEffort（第 26 轮）、listCommands（第 32 轮）、runCommand / setPermissionPreset（第 34 轮）。 */
-const WIRED = ['deleteSession', 'setEffort', 'listCommands', 'runCommand', 'setPermissionPreset'];
-/** 尚不允许接线的 2 个 method：rewind 无独立 remote、loadOlder 形状不符，保持 fail-closed。 */
+/** 已完成（代码侧）：deleteSession、setEffort、listCommands、runCommand / setPermissionPreset、loadOlder（第 21 轮）。 */
+const WIRED = ['deleteSession', 'setEffort', 'listCommands', 'runCommand', 'setPermissionPreset', 'loadOlder'];
+/** 尚不允许接线的 1 个 method：rewind 无独立 remote，保持 fail-closed。 */
 const UNVERIFIED = FINDINGS.filter(f => !WIRED.includes(f.method)).map(f => f.method);
 
 // ---------------------------------------------------------------------------
@@ -145,9 +146,9 @@ test('D16 findings are complete: 7 methods, each with evidence and a conclusion'
 		assert.ok(f.evidence.length > 20, `${f.method} must carry source evidence`);
 		assert.ok(f.note.length > 10, `${f.method} must carry a conclusion / D13 prerequisite`);
 	}
-	// deleteSession / setEffort / listCommands / runCommand / setPermissionPreset 已完成；其余 2 个保持未核对形状。
-	assert.equal(FINDINGS.filter(f => f.note.startsWith('已完成')).length, 5);
-	assert.equal(UNVERIFIED.length, 2);
+	// deleteSession / setEffort / listCommands / runCommand / setPermissionPreset / loadOlder 已完成；仅 rewind 保持 fail-closed。
+	assert.equal(FINDINGS.filter(f => f.note.startsWith('已完成')).length, 6);
+	assert.equal(UNVERIFIED.length, 1);
 });
 
 // ---------------------------------------------------------------------------
@@ -156,17 +157,17 @@ test('D16 findings are complete: 7 methods, each with evidence and a conclusion'
 // 这里钉住「形状结论进 §8.10.9、listCommands 已接线、其余不抢跑」。
 // ---------------------------------------------------------------------------
 
-test('D16 round-34 commands family: 5 wired, only rewind/loadOlder still fail-closed', () => {
+test('D16 round-21 commands family: 6 wired, only rewind still fail-closed', () => {
 	const dev = read('docs/DEVELOPMENT.md');
 	// 第 31 轮的 wire 形状结论仍是接线的唯一依据（agentId = sessionId 等）。
 	assert.match(dev, /形状已核对（第 31 轮）/, '§8.10.9 must record the round-31 wire-shape conclusion');
 	assert.match(dev, /agentId:\s*sessionId/, '§8.10.9 must name the agentId=sessionId wire identity');
 	assert.match(dev, /lookups\.register\('agent'/, '§8.10.9 must cite the agent lookup declaration');
 	assert.match(dev, /已完成（代码侧，第 34 轮）/, '§8.10.9 must record the round-34 wiring of both writers');
-	// 执行纪律：接线后只剩 2 个 fail-closed。
-	assert.match(dev, /其余 2 个\s*method 在完成接线前必须保持 fail-closed/, 'discipline must keep the 2 methods fail-closed');
-	assert.equal(UNVERIFIED.length, 2, 'only rewind/loadOlder stay fail-closed');
-	for (const method of ['rewind', 'loadOlder']) {
+	// 执行纪律：接线后只剩 1 个 fail-closed（仅 rewind）。
+	assert.match(dev, /其余 1 个[\s\S]{0,20}?method 在完成接线前必须/, 'discipline must keep the remaining method fail-closed');
+	assert.equal(UNVERIFIED.length, 1, 'only rewind stays fail-closed');
+	for (const method of ['rewind']) {
 		const re = new RegExp(`${method}:\\s*missing\\('${method}'\\)`);
 		assert.match(host, re, `${method} must stay missing(...) on the Host side`);
 		const stub = /case 'rewind':[\s\S]*?throw new DshIdeTransportError\('dsh-ide\/feature-unavailable'/.exec(transport);
@@ -198,9 +199,9 @@ test('D16 round-33 contract prerequisite is documented (wired in round 34)', () 
 	const tableEnd = dev.indexOf('#### 8.10.10', tableStart);
 	assert.ok(tableStart > 0 && tableEnd > tableStart, '§8.10.9 / §8.10.10 must both exist');
 	assert.doesNotMatch(dev.slice(tableStart, tableEnd), /wire 形状未核对前不接线/, 'the stale pre-round-31 wording must be gone from the §8.10.9 conclusion table');
-	// 第 34 轮按契约先行接线两者；剩余 fail-closed 只有 rewind / loadOlder。
-	assert.equal(UNVERIFIED.length, 2, 'after round-34 wiring only rewind/loadOlder stay fail-closed');
-	for (const method of ['runCommand', 'setPermissionPreset']) {
+	// 第 34 轮接线两个 writer、第 21 轮接线 loadOlder；剩余 fail-closed 只有 rewind。
+	assert.equal(UNVERIFIED.length, 1, 'only rewind stays fail-closed after the loadOlder wiring');
+	for (const method of ['runCommand', 'setPermissionPreset', 'loadOlder']) {
 		assert.ok(WIRED.includes(method), `${method} must be marked wired`);
 	}
 });

@@ -347,7 +347,18 @@ function createMethodHandlers(bridge) {
 			return { accepted: true };
 		},
 		rewind: missing('rewind'),
-		loadOlder: missing('loadOlder'),
+		async loadOlder(args) {
+			// D13（第 21 轮）：官方 `session/page` 是只读分页端点，形状见契约注释；
+			// 按 §2 §4 动作类口径返回 { accepted: true }，分页内容仍只经 listen('snapshot') 到达。
+			const sessionId = args.sessionId ?? requireSession();
+			bridge.assertOwnership(sessionId);
+			await controller().page({
+				address: { kind: 'session', sessionId },
+				...(args.beforeSeq === undefined ? {} : { beforeSeq: args.beforeSeq }),
+				...(args.maxMessages === undefined ? {} : { maxMessages: args.maxMessages }),
+			});
+			return { accepted: true };
+		},
 		async answerApproval(args) {
 			const outcome = approvalOutcome(args.decision);
 			if (!bridge.pending.settle(args.requestId, outcome)) {

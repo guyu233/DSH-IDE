@@ -562,6 +562,21 @@ export class DshIdeTransportBackend implements DshIdeBackend {
 				// `workspaceRegistry/deleteSession` 承担（§8.10.8 批准范围）；DSH-IDE 只调用，
 				// 不复制其删除链、不直接删 DSH 会话目录。
 				return this.deleteSessionViaPlugin(String(record['sessionId'] ?? ''));
+			case 'loadOlder': {
+				// D13（第 21 轮）：官方 `session/page`，只读分页；动作类只回 { accepted: true }。
+				const sessionIdForPage = String(record['sessionId'] ?? this.sessionId ?? '');
+				if (sessionIdForPage === '') {
+					throw new DshIdeTransportError('dsh-ide/invalid-argument', 'loadOlder requires a session');
+				}
+				await this.transport.call('session', 'page', {
+					request: {
+						address: { kind: 'session', sessionId: sessionIdForPage },
+						...(typeof record['beforeSeq'] === 'number' ? { beforeSeq: record['beforeSeq'] } : {}),
+						...(typeof record['maxMessages'] === 'number' ? { maxMessages: record['maxMessages'] } : {}),
+					},
+				});
+				return { accepted: true };
+			}
 			case 'archiveSession':
 				// §8.10.11：官方 workspace-controller 的公开 remote；不传 stopActivity，
 				// 保留官方 `workspace/session-active` 拒绝并原样透传。
@@ -581,7 +596,6 @@ export class DshIdeTransportBackend implements DshIdeBackend {
 				return this._runCommandLine(buildDshIdeCommandLine(String(record['command'] ?? ''), args));
 			}
 			case 'rewind':
-			case 'loadOlder':
 				throw new DshIdeTransportError('dsh-ide/feature-unavailable', `DSH-IDE capability "${method}" has no verified DSH endpoint yet`, { capability: method });
 			default:
 				throw new DshIdeTransportError('dsh-ide/feature-unavailable', `DSH-IDE method ${JSON.stringify(method)} is not mapped`);

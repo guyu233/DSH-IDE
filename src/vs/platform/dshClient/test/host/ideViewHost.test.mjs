@@ -970,3 +970,32 @@ test('archiveSession keeps ownership checks and propagates the official active-s
 	await assert.rejects(() => bridge.invoke('archiveSession', { sessionId: 's-1' }),
 		error => /workspace\/session-active/.test(error.message));
 });
+
+// ---------------------------------------------------------------------------
+// D13（第 21 轮）：loadOlder 接线——契约按官方 SessionPageRequest 对齐为
+// { sessionId, beforeSeq?:number, maxMessages?:number }；Host 调 sessionController.page()，
+// 按 §2 §4 动作类口径返回 { accepted: true }。
+// ---------------------------------------------------------------------------
+
+test('loadOlder calls sessionController.page with the official request shape', async () => {
+	const calls = [];
+	const { bridge } = bridgeWith({
+		sessionController: { ...sessionControllerStub(), page: async request => { calls.push(request); return { cursor: 1, events: [] }; } },
+	});
+	bridge.open({ view: 'chat', params: { sessionId: 's-1' } });
+	assert.deepEqual(await bridge.invoke('loadOlder', { beforeSeq: 7, maxMessages: 20 }), { accepted: true });
+	assert.deepEqual(calls[0], { address: { kind: 'session', sessionId: 's-1' }, beforeSeq: 7, maxMessages: 20 });
+	// 省略可选字段时不传该键（官方的省略语义是「按日志末端取页」）。
+	assert.deepEqual(await bridge.invoke('loadOlder', {}), { accepted: true });
+	assert.deepEqual(calls[1], { address: { kind: 'session', sessionId: 's-1' } });
+});
+
+test('loadOlder refuses a foreign session before touching the Host', async () => {
+	const calls = [];
+	const { bridge } = bridgeWith({
+		sessionController: { ...sessionControllerStub(), page: async request => { calls.push(request); return { cursor: 1, events: [] }; } },
+	});
+	bridge.open({ view: 'chat', params: { sessionId: 's-1' } });
+	await assert.rejects(() => bridge.invoke('loadOlder', { sessionId: 's-2' }), error => error.code === SESSION_SWITCHED);
+	assert.equal(calls.length, 0, 'a foreign session must not reach sessionController.page');
+});

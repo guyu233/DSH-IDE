@@ -39,7 +39,7 @@ const VALID_ARGS: Record<DshIdeMethod, unknown> = {
 	newSession: { workspace: 'w1', options: { theme: 'dark' } },
 	fork: { sessionId: 's1', point: 'p1' },
 	rewind: { sessionId: 's1', to: 'p0' },
-	loadOlder: { sessionId: 's1', before: 'm1' },
+	loadOlder: { sessionId: 's1', beforeSeq: 7 },
 	answerApproval: { requestId: 'r1', decision: 'approve' },
 	answerQuestion: { requestId: 'r1', answer: 'yes' },
 	cancelRequest: { requestId: 'r1' },
