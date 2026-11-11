@@ -351,3 +351,29 @@ test('round-26 speech readiness findings are documented and no dictation backend
 	for (const root of roots) { walk(path.join(repoRoot, root)); }
 	assert.deepEqual(offenders, [], `no dictation backend may exist until the user rules on the entry: ${offenders.join(', ')}`);
 });
+
+// ---------------------------------------------------------------------------
+// 第 27 轮：D56 可静态部分——`.npmrc` 的 target 不影响交付物（§8.10.14）。
+// 用打包脚本自身的事实钉住：gulpfile 不读 .npmrc/target，也不重编译原生模块。
+// ---------------------------------------------------------------------------
+
+test('round-27 packaging never reads .npmrc target, so it cannot affect the artifact', () => {
+	const gulp = read('build/gulpfile.vscode.ts');
+	const dev = read('docs/DEVELOPMENT.md');
+
+	// 结论已固化。
+	assert.match(dev, /#### 8\.10\.14[^\n]*`target` 不影响交付物/, '§8.10.14 must exist');
+	assert.match(dev, /不进入 `gulp dsh-ide-pack` 的交付物/, '§8.10.14 must state the conclusion');
+	assert.match(dev, /必须真机实测/, '§8.10.14 must keep the runtime half for real-machine verification');
+
+	// 脚本事实：打包不读这些配置，也不重编译。
+	for (const token of ['npmrc', 'electron-rebuild', 'build_from_source']) {
+		assert.ok(!gulp.includes(token), `gulpfile must not reference ${token}`);
+	}
+	assert.doesNotMatch(gulp, /['"]target['"]\s*:/, 'gulpfile must not read an npmrc target option');
+	assert.doesNotMatch(gulp, /electron-rebuild|nativeRebuild/, 'gulpfile must not recompile native modules');
+
+	// `.npmrc` 仍带着 target（本轮不改它），结论因此始终有前提可核。
+	const npmrc = read('.npmrc');
+	assert.match(npmrc, /^target="43\.7\.7"$/m, 'the .npmrc target must stay unchanged by this round');
+});
