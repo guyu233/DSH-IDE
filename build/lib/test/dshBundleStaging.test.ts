@@ -163,3 +163,32 @@ test('every common/ shared module is explicitly staged for the bundle', () => {
 	const missing = shipped.filter(name => !staged.has(name));
 	assert.deepEqual(missing, [], `these common modules are not staged and would be missing from the bundle: ${missing.join(', ')}`);
 });
+
+
+// ---------------------------------------------------------------------------
+// D20（第 37 轮）：终端宿主入口必须在 desktop 构建里。
+//
+// `electronPtyHostStarter` 以 entryPoint 'vs/platform/terminal/node/ptyHostMain'
+// 启动 PTY 子进程，但该入口原先只列在 serverEntryPoints，导致 desktop 构建
+// 缺这个文件、终端无法启动。本测试钉住它留在 desktopEntryPoints 里。
+// ---------------------------------------------------------------------------
+
+test('D20 ptyHostMain stays in desktopEntryPoints (terminal host entry)', () => {
+	const source = fs.readFileSync(path.join(repoRoot, 'build/next/index.ts'), 'utf8');
+
+	// 取出两个入口数组的正文，避免只看全文造成误判。
+	const desktop = /const desktopEntryPoints = \[([\s\S]*?)\];/.exec(source)?.[1] ?? '';
+	const server = /const serverEntryPoints = \[([\s\S]*?)\];/.exec(source)?.[1] ?? '';
+	assert.ok(desktop !== '', 'desktopEntryPoints must exist');
+	assert.ok(server !== '', 'serverEntryPoints must exist');
+
+	assert.ok(desktop.includes("'vs/platform/terminal/node/ptyHostMain'"),
+		'ptyHostMain must be a desktop entry point, otherwise the packaged desktop build has no PTY host');
+	// 其余两个桌面进程入口也必须在（作为对照，防止有人把整组搬走）。
+	assert.ok(desktop.includes("'vs/workbench/api/node/extensionHostProcess'"), 'extensionHostProcess must stay a desktop entry');
+	assert.ok(desktop.includes("'vs/platform/files/node/watcher/watcherMain'"), 'watcherMain must stay a desktop entry');
+
+	// 启动方确实指向该 entryPoint（证据链，防止入口与启动方脱节）。
+	const starter = fs.readFileSync(path.join(repoRoot, 'src/vs/platform/terminal/electron-main/electronPtyHostStarter.ts'), 'utf8');
+	assert.match(starter, /entryPoint:\s*'vs\/platform\/terminal\/node\/ptyHostMain'/, 'the Electron pty host starter must reference this entry point');
+});

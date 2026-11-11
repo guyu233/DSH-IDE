@@ -103,6 +103,11 @@ const desktopEntryPoints = [
 	'vs/workbench/contrib/debug/node/telemetryApp',
 	'vs/platform/files/node/watcher/watcherMain',
 	'vs/workbench/api/node/extensionHostProcess',
+	// D20：Electron 主进程的终端宿主入口。`electronPtyHostStarter` 以
+	// `entryPoint: 'vs/platform/terminal/node/ptyHostMain'` 启动子进程，
+	// 但该入口原先只列在 serverEntryPoints 里，desktop 构建因此缺这个文件、
+	// 终端无法启动。它与 extensionHostProcess / watcherMain 同属桌面进程入口。
+	'vs/platform/terminal/node/ptyHostMain',
 ];
 
 const codeEntryPoints = [
