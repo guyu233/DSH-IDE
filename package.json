@@ -94,6 +94,7 @@
     "verify:dsh-ide-ci": "node build/lib/dsh/verify/dshIdeCi.mjs",
     "verify:dsh-guard-negative": "node build/lib/dsh/verify/dshGuardNegative.mjs",
     "verify:dsh-artifact": "node build/lib/dsh/verify/dshArtifactContents.mjs",
+    "verify:dsh-install-drift": "node build/lib/dsh/verify/dshInstallDrift.mjs",
     "verify:docs-graph": "node build/lib/dsh/verify/dshDocsGraph.mjs"
   },
   "dependencies": {
