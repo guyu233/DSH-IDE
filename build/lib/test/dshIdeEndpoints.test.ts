@@ -270,3 +270,28 @@ test('D17 deleteSession calls the approved physical-delete endpoint, never a clo
 		// 归档不依赖第三方插件：契约里不得出现 archive 的插件绑定常量。
 		assert.doesNotMatch(protocol, /DSH_IDE_ARCHIVE_SESSION_PLUGIN/, 'archive must not require a third-party plugin binding');
 	});
+
+// ---------------------------------------------------------------------------
+// D54（第 20 轮）：探针执行清单（§8.10.12）。
+// 钉住「清单存在、三类齐全、条目编号可数、六列回填格式与 AI 不代跑纪律」，
+// 防止清单被删空或倒退成无法执行的散文。
+// ---------------------------------------------------------------------------
+
+test('D54 probe checklist exists with U2/U3/U12 items and the six-column discipline', () => {
+	const dev = read('docs/DEVELOPMENT.md');
+	assert.match(dev, /#### 8\.10\.12[^\n]*探针执行清单/, '§8.10.12 must exist');
+	// 六列回填格式。
+	assert.match(dev, /断言 \/ 方法 \/ 观察值 \/ 结论 \/ 解锁或否决哪一步 \/ 对应 §0\.2 项/, 'the six-column format must be stated');
+	// 三类探针与条目数量（U2 6 + U3 5 + U12 5 = 16）。
+	for (const [prefix, count] of [['U2', 6], ['U3', 5], ['U12', 5]]) {
+		const found = [...dev.matchAll(new RegExp(`\\| ${prefix}-(\\d+) \\|`, 'g'))].map(m => Number(m[1]));
+		assert.equal(found.length, count, `${prefix} must list ${count} probe items, got ${found.length}`);
+		assert.deepEqual(found, [...Array(count).keys()].map(i => i + 1), `${prefix} items must be numbered 1..${count}`);
+	}
+	// 执行归用户、AI 不得代跑。
+	assert.match(dev, /执行一律归用户/, 'the checklist must state that execution belongs to the user');
+	assert.match(dev, /不得代跑 GUI/, 'the checklist must forbid the AI from running the GUI');
+	assert.match(dev, /不是验收完成声明/, 'the checklist must not claim acceptance is done');
+	// 不允许把未执行记成通过。
+	assert.match(dev, /不得写「结论」/, 'a row without an observation must not carry a conclusion');
+});
