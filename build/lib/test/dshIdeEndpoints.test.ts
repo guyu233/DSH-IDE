@@ -688,3 +688,52 @@ test('no stale "still contains map" claims remain in the handbook', () => {
 	assert.deepEqual(offenders, [],
 		'the P7 status row and D29 row must not claim maps are still shipped (found ' + offenders.length + ')');
 });
+
+// ---------------------------------------------------------------------------
+// 第 67 轮：§0.2 用户动作的**阻塞理由**不得引用已完成项。
+//
+// 发现的过时：U10 的阻塞理由原文写「D46 / D49–D50 / D52 尚未实施」，但其中
+// D46、D49、D52 早已完成，只有 D50 仍未完成；同时它的 U3 五条探针已有四条
+// 由 AI 执行（第 57 轮）。这会让读者以为整条都动不了，实际只差真实 profile。
+//
+// 本测试对每条 `| Uxx |` 行做结构检查：若阻塞理由里出现 `Dxx`
+// 而该 Dxx 在 §7.3 待办表里已是「已完成」，即判失败。
+// ---------------------------------------------------------------------------
+
+test('user-action blocker reasons must not cite already-completed todos', async () => {
+	const fsMod = await import('node:fs');
+	const dev = fsMod.readFileSync(path.join(repoRoot, 'docs/DEVELOPMENT.md'), 'utf8');
+
+	// 收集 §7.3 待办表里已完成项的编号。
+	const done = new Set();
+	for (const line of dev.split(/\r?\n/)) {
+		if (!line.startsWith('| D')) { continue; }
+		const cells = line.split('|').map(c => c.trim());
+		if (cells.length < 6) { continue; }
+		const id = cells[1];
+		const status = cells[4];
+		if (/^D\d+$/.test(id) && status === '已完成') { done.add(id); }
+	}
+	assert.ok(done.size > 0, 'the todo table must list completed items');
+
+	// 逐条检查用户动作行的**阻塞理由所在列**（第 4 列）。
+	const offenders = [];
+	for (const line of dev.split(/\r?\n/)) {
+		if (!/^\| U\d+ /.test(line)) { continue; }
+		const cells = line.split('|').map(c => c.trim());
+		if (cells.length < 6) { continue; }
+		const uid = cells[1];
+		const reason = cells[4] ?? '';
+		if (!reason.includes('暂阻塞')) { continue; }
+		// 只看**否定式断言**：形如「Dxx 尚未实施 / 未完成 / 未做」。
+		// 不能把所有 Dxx 都算进去——第 67 轮修正 U10 时，新理由里写了
+		// 「D46、D49、D52 均已完成」作为证据，若按「出现即算」会把它自己判为过时
+		// （第 42 / 64 / 66 轮之后的第四次同类自指错误）。
+		for (const match of reason.matchAll(/(D\d+)\s*(?:尚未实施|尚未完成|未实施|未完成|未做)/g)) {
+			if (done.has(match[1])) { offenders.push(`${uid} 声称 ${match[1]} 未完成，但它已完成`); }
+		}
+	}
+
+	assert.deepEqual(offenders, [],
+		'blocker reasons must be refreshed after their cited todos complete: ' + offenders.join('; '));
+});
