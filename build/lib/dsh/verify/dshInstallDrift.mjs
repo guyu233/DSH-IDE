@@ -136,4 +136,55 @@ if (configIssues.length > 0) {
 	process.exit(1);
 }
 
-console.log('STATUS: PASS  [install-drift] 已安装内容与产物逐字节一致、装载配置链完整（注意：仍须重启 DSH 才算运行时加载）');
+// ---------------------------------------------------------------------------
+// 第 50 轮追加：检查 Host 入口能否被 Loader 装载。
+// 文件对、配置对，仍可能因**语法错误或导出形状不符**而装载失败——且失败信息
+// 往往淹没在启动日志里。这里做两项纯静态检查：
+//   ① 已安装的全部 `.js`（index.js / client.js / host/**）能通过 `node --check`；
+//   ② `index.js` 导出 `name` 与 `apply`（Cordis 插件的最小约定）。
+// 注意：`node --check` 只验证语法，不执行模块；不评估运行时依赖是否可用。
+// ---------------------------------------------------------------------------
+const syntaxIssues = [];
+
+/** 收集 host/ 下全部 .js，外加 index.js 与 client.js。 */
+function collectJs(dir, out = []) {
+	for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+		const full = path.join(dir, entry.name);
+		if (entry.isDirectory()) { collectJs(full, out); continue; }
+		if (entry.name.endsWith('.js')) { out.push(full); }
+	}
+	return out;
+}
+
+const jsFiles = [
+	...collectJs(path.join(installedRoot, 'host')),
+	path.join(installedRoot, 'index.js'),
+	path.join(installedRoot, 'client.js'),
+].filter(p => fs.existsSync(p));
+
+for (const file of jsFiles) {
+	try {
+		execFileSync(process.execPath, ['--check', file], { stdio: 'ignore' });
+	} catch {
+		syntaxIssues.push(`语法错误: ${path.relative(installedRoot, file)}`);
+	}
+}
+
+try {
+	const indexSource = fs.readFileSync(path.join(installedRoot, 'index.js'), 'utf8');
+	if (!/export\s+const\s+name\s*=/.test(indexSource)) { syntaxIssues.push('index.js 未导出 name'); }
+	if (!/export\s+(?:async\s+)?function\s+apply\b/.test(indexSource)) { syntaxIssues.push('index.js 未导出 apply'); }
+} catch (error) {
+	syntaxIssues.push(`读取 index.js 失败: ${error.message}`);
+}
+
+console.log(`  入口语法/导出检查文件数  : ${jsFiles.length}`);
+console.log(`  入口问题                : ${syntaxIssues.length}`);
+if (syntaxIssues.length > 0) {
+	for (const item of syntaxIssues) { console.error(`  ✗ ${item}`); }
+	console.error('');
+	console.error('STATUS: FAIL  [install-drift] 入口语法或导出形状不符合 Loader 约定，重启后会装载失败。');
+	process.exit(1);
+}
+
+console.log('STATUS: PASS  [install-drift] 文件逐字节一致、装载配置链完整、入口语法与导出形状合规（注意：仍须重启 DSH 才算运行时加载）');
