@@ -18,6 +18,7 @@
 
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
+import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { test } from 'node:test';
@@ -143,4 +144,67 @@ test('regenerating chat-render PROVENANCE is idempotent (no self-inflicted diff)
 	const generator = fs.readFileSync(path.join(chatRenderRoot, 'gen-provenance.mjs'), 'utf8');
 	assert.ok(generator.includes('\\`docs/DEVELOPMENT.md\\` 第 1 章资源复用章节'),
 		'the generator template must keep the backticks around the document name only');
+});
+
+// ---------------------------------------------------------------------------
+// 第 31 轮：法律/许可文件完整性（D31 原文核对的静态部分）。
+//
+// 关键纪律：`NOTICE.md` 里出现 `vscode-1.143.1/` 这类**扁平化前的历史路径**，
+// 是手册第 7 章 §4 明确裁定「按 AGENTS §5 不得改写、以注记说明差异」的有意保留，
+// **不是缺陷**。本测试同时钉住两件事，防止后来者两头做错：
+//   ① 不得为了「修路径」去改 `NOTICE.md`；
+//   ② 也不得删掉手册里那条说明差异的注记（否则历史表述失去解释）。
+// ---------------------------------------------------------------------------
+
+const legalFiles = ['NOTICE.md', 'LICENSE', 'LICENSE.txt', 'ThirdPartyNotices.txt', 'build/dsh/chat-render/LICENSE-DSH'];
+
+test('D31 legal/license files exist and keep their upstream text', () => {
+	for (const rel of legalFiles) {
+		const abs = path.join(repoRoot, rel);
+		assert.ok(fs.existsSync(abs), `${rel} must exist`);
+		assert.ok(fs.statSync(abs).size > 0, `${rel} must not be empty`);
+	}
+
+	// LICENSE-DSH 必须是上游 LICENSE 的逐字副本（MIT，DeepSeek 版权）。
+	const licenseDsh = fs.readFileSync(path.join(repoRoot, 'build/dsh/chat-render/LICENSE-DSH'));
+	assert.match(licenseDsh.toString('utf8'), /MIT License/, 'LICENSE-DSH must keep the MIT text');
+	const upstreamLicense = 'E:/deepseek-harness-0.2.2-rc.1/LICENSE';
+	if (fs.existsSync(upstreamLicense)) {
+		assert.ok(Buffer.compare(fs.readFileSync(upstreamLicense), licenseDsh) === 0,
+			'LICENSE-DSH must stay byte-identical to the upstream LICENSE');
+	}
+
+	// LICENSE.txt 是 VS Code 上游 MIT 版权声明。
+	const vscodeLicense = fs.readFileSync(path.join(repoRoot, 'LICENSE.txt'), 'utf8');
+	assert.match(vscodeLicense, /MIT License/, 'LICENSE.txt must keep the MIT text');
+	assert.match(vscodeLicense, /Copyright \(c\) 2015 - present Microsoft Corporation/,
+		'LICENSE.txt must keep the Microsoft copyright line verbatim');
+
+	// NOTICE.md 保留来源与商标声明（不得被删减）。
+	const notice = fs.readFileSync(path.join(repoRoot, 'NOTICE.md'), 'utf8');
+	for (const token of ['Visual Studio Code', 'DeepSeek Harness', 'Trademarks', 'MIT License', 'unofficial']) {
+		assert.ok(notice.includes(token), `NOTICE.md must keep "${token}"`);
+	}
+});
+
+test('NOTICE.md historical vscode-1.143.1/ paths are intentionally preserved, not a defect', () => {
+	const notice = fs.readFileSync(path.join(repoRoot, 'NOTICE.md'), 'utf8');
+	const dev = fs.readFileSync(path.join(repoRoot, 'docs/DEVELOPMENT.md'), 'utf8');
+
+	// 历史路径仍在 NOTICE.md 里（有意保留，不得「顺手修掉」）。
+	assert.ok(notice.includes('vscode-1.143.1/LICENSE.txt'),
+		'NOTICE.md must keep the historical vscode-1.143.1/ path verbatim (AGENTS §5 forbids rewriting it)');
+	// 该目录确实不存在（扁平化已删除）——所以那条注记必须存在来解释差异。
+	assert.equal(fs.existsSync(path.join(repoRoot, 'vscode-1.143.1')), false,
+		'the vscode-1.143.1/ directory must stay absent after flattening');
+	assert.match(dev, /`NOTICE\.md` 为定稿时保留原文的法律文件[\s\S]{0,160}?扁平化前的历史表述/,
+		'handbook must keep the note explaining the historical paths in NOTICE.md');
+	assert.match(dev, /不得改写[\s\S]{0,40}?`NOTICE\.md`/,
+		'handbook must keep the rule that NOTICE.md is not to be rewritten');
+});
+
+test('D31 no legal file is modified in the working tree', () => {
+	// 与手册第 7 章 §4 的定稿核验命令同义：这些文件不得有未提交改动。
+	const result = execFileSync('git', ['status', '--short', '--', '*LICENSE*', '*COPYING*', '*NOTICE*', '*ThirdPartyNotices*'], { cwd: repoRoot, encoding: 'utf8' });
+	assert.equal(result.trim(), '', `legal files must stay untouched, got:\n${result}`);
 });
