@@ -284,8 +284,18 @@ test('D54 probe checklist exists with U2/U3/U12 items and the six-column discipl
 	// 六列回填格式。
 	assert.match(dev, /断言 \/ 方法 \/ 观察值 \/ 结论 \/ 解锁或否决哪一步 \/ 对应 §0\.2 项/, 'the six-column format must be stated');
 	// 三类探针与条目数量（U2 6 + U3 5 + U12 5 = 16）。
+	//
+	// 注意：只统计**定义表**范围，不统计「U3 探针执行结果」那张表（第 57 轮回填的
+	// 结果表同样带 `U3-n` 标记；若连它也统计，5 会被数成 9——该 bug 本轮实测暴露并修正）。
+	const secStart = dev.indexOf('#### 8.10.12');
+	const resultAt = dev.indexOf('**U3 探针执行结果', secStart);
+	const u12At = dev.indexOf('**U12 插件 endpoint', secStart);
+	assert.ok(secStart > 0 && u12At > secStart, '§8.10.12 must precede the U12 checklist heading');
+	assert.ok(resultAt > secStart && resultAt < u12At, 'the U3 execution-result table must sit between the definition tables');
+
+	const definitions = dev.slice(secStart, resultAt) + dev.slice(u12At);
 	for (const [prefix, count] of [['U2', 6], ['U3', 5], ['U12', 5]]) {
-		const found = [...dev.matchAll(new RegExp(`\\| ${prefix}-(\\d+) \\|`, 'g'))].map(m => Number(m[1]));
+		const found = [...definitions.matchAll(new RegExp(`\\| ${prefix}-(\\d+) \\|`, 'g'))].map(m => Number(m[1]));
 		assert.equal(found.length, count, `${prefix} must list ${count} probe items, got ${found.length}`);
 		assert.deepEqual(found, [...Array(count).keys()].map(i => i + 1), `${prefix} items must be numbered 1..${count}`);
 	}
@@ -409,4 +419,29 @@ test('D27 CI aggregate entry exists, follows §2 order, and refuses PENDING', ()
 	// 仓库当前仍无 CI 配置目录（D27 未完成，平台待定）。
 	assert.equal(fs.existsSync(path.join(repoRoot, '.github')), false, 'no .github/ may be created before the platform is decided');
 	assert.equal(fs.existsSync(path.join(repoRoot, 'build/azure-pipelines')), false, 'no azure-pipelines/ may be created before the platform is decided');
+});
+
+// ---------------------------------------------------------------------------
+// D54 第 57 轮：U3 探针的**可本地观测部分**已执行并回填（§8.10.12）。
+// 四条依赖文件系统的探针（U3-1/2/3/5）已由 AI 实测；U3-4（删除后不重建）
+// 涉及真实删除动作，按 AGENTS §6 归用户，故 U3 未全部完成、D54 保持未完成。
+// 本测试钉住「结果已回填、结论包含两个否决项、且未谎称全部完成」。
+// ---------------------------------------------------------------------------
+
+test('D54 U3 probes were executed locally and recorded without overclaiming', () => {
+	const dev = read('docs/DEVELOPMENT.md');
+
+	// 四条已执行 + 一条未执行，必须写清。
+	assert.match(dev, /U3 探针执行结果（第 57 轮/, '§8.10.12 must record the round-57 U3 execution');
+	for (const id of ['U3-1', 'U3-2', 'U3-3', 'U3-5']) {
+		assert.ok(dev.includes(id), `the executed probe ${id} must be recorded`);
+	}
+	assert.match(dev, /U3-4 仍未执行/, 'U3-4 must stay explicitly unexecuted (it deletes a real session)');
+
+	// 两个否决项必须写进结论——它们是探针真正的产出。
+	assert.match(dev, /否决[\s\S]{0,40}仅用存在性判定/, 'U3-3 must reject existence-only checks');
+	assert.match(dev, /否决[\s\S]{0,40}纯字符串前缀/, 'U3-5 must reject string-prefix-only validation');
+
+	// 不得把 D54 或 U3 标为全部完成。
+	assert.match(dev, /D54 保持未完成/, 'D54 must stay unfinished because U3-4 is not executed');
 });
