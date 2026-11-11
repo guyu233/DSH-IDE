@@ -39,8 +39,8 @@
 | `electron-main/dshClientBootstrap.ts` ⚠已删(阶段3第三批) | 1532 | `2a9b6cd5487a6b0bb2bf922d80cd3340ce0ddc91821529456a2f4cf0644ad2f7` |
 | `common/dshClientProtocol.ts` ⚠已删(阶段3第三批) | 4400 | `c648c35d5378771e994662b8b0f27ebf8300290e8c2a1edb4cadb03739364bad` |
 | `common/dshClientChannel.ts` ⚠已删(阶段3第三批) | 10148 | `6fe820480c3e41d792dd714f5b2469fa7a4091ecd10f631e8119d5f64b161eec` |
-| `common/dshClientService.ts` | 11606 | `1e4f59caed1cf5026f880af9e742adfeddcc0a4e4345162ace702af4b2bc9f2d` |
-| `common/env.js` | 590 | `375d5ba8332647fd15dcd9001bb7a2e85dd67b61ae605db95b4dc351aec8fb1e` |
+| `common/dshClientService.ts` | 9027 | `ea70f9637e6c52aa119290390994362b0f3ebb059f26a58a2812601ccdaa0ff2` |
+| `common/env.js` | 713 | `fed4823221b7c14f620c16368d5bf1da3fa5079559fb2ff4813817d11ef0fdf7` |
 
 ### 完整 sha256（可复算）
 
