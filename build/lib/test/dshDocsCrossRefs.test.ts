@@ -79,3 +79,36 @@ test('the retargeted references point at the single-channel invariant (I2)', () 
 	assert.match(chapter1, /### 1\. 四条不变量/, 'chapter 1 §1 must still be the invariants section');
 	assert.match(chapter1, /\|\s*I2\s*\|\s*唯一通道/, 'I2 must stay the single-channel invariant');
 });
+
+// ---------------------------------------------------------------------------
+// 第 33 轮：第 5 章 §2「唯一命令真源」必须覆盖所有 verify / test 脚本。
+//
+// 发现：该表标称「唯一命令真源」，却漏登 `verify:docs-graph`——而 AGENTS §6
+// 要求每次文档变更都跑它。补齐后本测试钉住「表里不能漏任何 verify/test 脚本」。
+// ---------------------------------------------------------------------------
+
+const repoPkg = JSON.parse(fs.readFileSync(path.join(repoRoot, 'package.json'), 'utf8')) as { scripts: Record<string, string> };
+
+test('chapter-5 §2 command table covers every verify/test script in package.json', () => {
+	const lines = handbook.split(/\r?\n/);
+	const start = lines.findIndex(line => line.startsWith('### 2. 命令清单'));
+	assert.ok(start > 0, 'chapter 5 §2 command table must exist');
+	let end = lines.length;
+	for (let i = start + 1; i < lines.length; i++) {
+		if (/^#### 2\.1/.test(lines[i])) { end = i; break; }
+	}
+	const table = lines.slice(start, end).join('\n');
+	const documented = new Set([...table.matchAll(/npm run ([a-zA-Z0-9:_-]+)/g)].map(m => m[1]));
+
+	// 所有 CI 相关脚本（verify:* / test-dsh*）都必须在「唯一命令真源」里出现。
+	const required = Object.keys(repoPkg.scripts).filter(name => /^(verify:|test-dsh)/.test(name));
+	assert.ok(required.length >= 8, `expected the CI script family, got ${required.length}`);
+	const missing = required.filter(name => !documented.has(name));
+	assert.deepEqual(missing, [], `every verify/test script must be documented in §2, missing: ${missing.join(', ')}`);
+});
+
+test('the handbook registers verify:docs-graph where AGENTS §6 requires it', () => {
+	// AGENTS §6：任何文档变更后必须跑引用图脚本。表中登记 + 正文引用两处都要在。
+	assert.match(handbook, /npm run verify:docs-graph/, 'the command must be registered in the handbook');
+	assert.match(handbook, /文档引用图（§10\.1）/, 'the table row must name the reference-graph purpose');
+});
