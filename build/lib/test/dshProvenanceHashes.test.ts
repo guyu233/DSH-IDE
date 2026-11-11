@@ -79,3 +79,68 @@ test('D31 PROVENANCE records the validated upstream version and source commit', 
 	assert.ok(version !== undefined && version !== '', 'PROVENANCE must record the upstream version');
 	assert.ok(commit !== undefined && commit !== '', 'PROVENANCE must record a full 40-hex sourceCommit');
 });
+
+// ---------------------------------------------------------------------------
+// 第 30 轮：`build/dsh/chat-render/PROVENANCE.md` 的可复算校验。
+// 该文件是第二份法律/许可凭据（AGENTS §5），其 20 个源文件哈希 + tree digest
+// + LICENSE-DSH 哈希都应能从只读源与仓库内文件复算出来。
+// ---------------------------------------------------------------------------
+
+const chatRenderRoot = path.join(repoRoot, 'build/dsh/chat-render');
+const upstreamRoot = 'E:/deepseek-harness-0.2.2-rc.1';
+const chatRenderProvenance = fs.readFileSync(path.join(chatRenderRoot, 'PROVENANCE.md'), 'utf8');
+
+/** 第 2 节「复制的源码文件」表：序号 / rel / sha256。 */
+function copiedSourceRows() {
+	const rows = [];
+	for (const line of chatRenderProvenance.split(/\r?\n/)) {
+		const m = /^\|\s*(\d+)\s*\|\s*`([^`]+)`\s*\|\s*`([0-9a-f]{64})`\s*\|\s*$/.exec(line);
+		if (m !== null) { rows.push({ index: Number(m[1]), rel: m[2], sha: m[3] }); }
+	}
+	return rows;
+}
+
+test('chat-render PROVENANCE lists 20 copied sources whose hashes match the read-only upstream', { skip: !fs.existsSync(upstreamRoot) }, () => {
+	const rows = copiedSourceRows();
+	assert.equal(rows.length, 20, `expected 20 copied source rows, got ${rows.length}`);
+	// 序号连续 1..20，防止漏行或重编号。
+	assert.deepEqual(rows.map(r => r.index), [...Array(20).keys()].map(i => i + 1), 'row indexes must be 1..20');
+
+	const uiRoot = path.join(upstreamRoot, 'packages/client/ui-chat');
+	for (const row of rows) {
+		// 表格里的 rel 形如 `src/client/<path>`；上游按同样相对路径读取。
+		const abs = path.join(uiRoot, row.rel);
+		assert.ok(fs.existsSync(abs), `upstream source ${row.rel} must exist in the read-only tree`);
+		const sha = crypto.createHash('sha256').update(fs.readFileSync(abs)).digest('hex');
+		assert.equal(sha, row.sha, `${row.rel} sha256 must match the recorded upstream hash`);
+	}
+});
+
+test('chat-render tree digest is recomputable from the recorded rows', () => {
+	// 生成器（gen-provenance.mjs）的算法：每行 `<rel-without-src/client>\0<sha>`，
+	// 用 `\n` 连接后取 sha256。这里用同一算法复算并比对文档记录值。
+	const rows = [...chatRenderProvenance.matchAll(/^\|\s*\d+\s*\|\s*`src\/client\/([^`]+)`\s*\|\s*`([0-9a-f]{64})`\s*\|\s*$/gm)];
+	assert.equal(rows.length, 20, 'the digest must cover exactly the 20 copied sources');
+	const lines = rows.map(m => `${m[1]}\0${m[2]}`);
+	const digest = crypto.createHash('sha256').update(Buffer.from(lines.join('\n'))).digest('hex');
+	const recorded = /### 整组 tree digest[\s\S]*?```\s*\n([0-9a-f]{64})\s*\n```/.exec(chatRenderProvenance)?.[1];
+	assert.ok(recorded !== undefined, 'PROVENANCE must record the tree digest');
+	assert.equal(digest, recorded, 'the tree digest must equal the recomputed value');
+});
+
+test('chat-render LICENSE-DSH hash matches the recorded value', () => {
+	const recorded = /sha256 `([0-9a-f]{64})`/.exec(chatRenderProvenance)?.[1];
+	assert.ok(recorded !== undefined, 'PROVENANCE must record the LICENSE-DSH sha256');
+	const license = fs.readFileSync(path.join(chatRenderRoot, 'LICENSE-DSH'));
+	const digest = crypto.createHash('sha256').update(license).digest('hex');
+	assert.equal(digest, recorded, 'LICENSE-DSH sha256 must match; the license text itself must not be edited');
+	assert.match(license.toString('utf8'), /MIT License/, 'LICENSE-DSH must keep the MIT license text');
+});
+
+test('regenerating chat-render PROVENANCE is idempotent (no self-inflicted diff)', { skip: !fs.existsSync(upstreamRoot) }, () => {
+	// 第 30 轮修复：生成器模板曾把 `` `docs/DEVELOPMENT.md` 第 1 章 `` 拼成
+	// `` `docs/DEVELOPMENT.md 第 1 章` ``，导致每次重新生成都产生一行无关差异。
+	const generator = fs.readFileSync(path.join(chatRenderRoot, 'gen-provenance.mjs'), 'utf8');
+	assert.ok(generator.includes('\\`docs/DEVELOPMENT.md\\` 第 1 章资源复用章节'),
+		'the generator template must keep the backticks around the document name only');
+});
