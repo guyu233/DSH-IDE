@@ -47,6 +47,7 @@ const ALL_METHODS: DshIdeMethod[] = [
 	'setPermissionPreset', 'runCommand', 'listSessions', 'deleteSession', 'listModels',
 	'listCommands', 'fetchRowDetail', 'refreshSnapshot',
 	'accountGetState', 'accountGetProfile',
+	'archiveSession', 'unarchiveSession', 'searchSessions',
 ];
 
 interface FakeBackend extends DshIdeBackend {
@@ -224,6 +225,9 @@ const VALID: Record<DshIdeMethod, unknown> = {
 	refreshSnapshot: {},
 	accountGetState: { client: { version: '2.0.0', locale: 'zh-CN', timezoneOffsetSeconds: 28800 } },
 	accountGetProfile: { client: { version: '2.0.0', locale: 'zh-CN', timezoneOffsetSeconds: 28800 } },
+	archiveSession: { sessionId: 's-1' },
+	unarchiveSession: { sessionId: 's-1' },
+	searchSessions: { query: 'hello' },
 };
 
 async function openedChannel(backend = fakeBackend()) {
@@ -233,7 +237,7 @@ async function openedChannel(backend = fakeBackend()) {
 	return { view, channel, backend, first };
 }
 
-test('channel dispatches all 24 DTO methods through validateDshIdeInput', async () => {
+test('channel dispatches all 25 DTO methods through validateDshIdeInput', async () => {
 	const { channel, backend } = await openedChannel();
 	for (const method of ALL_METHODS) {
 		const output = await channel.call<{ value: unknown }>('ctx-a', method, VALID[method]);

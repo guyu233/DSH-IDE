@@ -19,6 +19,7 @@ import { projectDshIdeSessionList } from '../common/dshIdeSessionList.js';
 import { projectDshIdeCommandList } from '../common/dshIdeCommandList.js';
 import { buildDshIdeCommandLine, mapDshIdeCommandExecution } from '../common/dshIdeCommandLine.js';
 import { projectDshIdeArchiveSet } from '../common/dshIdeArchiveSet.js';
+import { projectDshIdeSessionSearch } from '../common/dshIdeSessionSearch.js';
 import { safeErrorText } from '../common/dshIdeAuthRedaction.js';
 
 /** 与 common/dshIdeProtocol.ts 同值的错误码（Host 半身为纯 JS，不跨层 import TS）。 */
@@ -415,6 +416,11 @@ function createMethodHandlers(bridge) {
 		async runCommand(args) {
 			// 契约 `command` 为不带前导斜杠的命令名，`args` 单空格拼入 rawInput。
 			return executeCommandLine(buildDshIdeCommandLine(args.command, args.args));
+		},
+		async searchSessions(args) {
+			// D59 分批检索：官方 `session/search`，只读。依赖宿主挂载
+			// `@deepseek-ai/dsh-session-query`；未挂载时官方抛 gateway/internal，原样透传。
+			return projectDshIdeSessionSearch(await controller().search({ query: args.query }));
 		},
 		async listSessions() {
 			const sessionId = bridge.sessionId;

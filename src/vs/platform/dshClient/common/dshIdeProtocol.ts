@@ -163,6 +163,17 @@ export interface DshIdeMethodArgs {
 	archiveSession: { sessionId: string };
 	/** 恢复一个已归档会话（官方 `workspaceRegistry.unarchiveSession`）；返回**完整**归档集合。 */
 	unarchiveSession: { sessionId: string };
+	/**
+	 * 分批检索会话（官方 `session/search`，只读）。
+	 *
+	 * 形状对齐官方 `SessionSearchRequest{query}` → `SessionSearchValue{items, hasMore}`
+	 * （`api/session-controller/src/types.ts:255-263`）：每项为 `{sessionId, snippet}`
+	 * （`:168-171`），`hasMore` 表示还有下一批。官方单批上限 20 条
+	 * （`SESSION_SEARCH_RESULT_LIMIT`）、snippet 上限 240 码点。
+	 * 该能力依赖宿主挂载 `@deepseek-ai/dsh-session-query`；未挂载时官方抛
+	 * `gateway/internal`，本契约原样透传该失败，不伪造空结果。
+	 */
+	searchSessions: { query: string };
 	/** 列出可用模型。 */
 	listModels: { workspace?: string };
 	/** 列出可用命令。 */
@@ -239,6 +250,7 @@ const DSH_IDE_METHOD_KEYS: Record<DshIdeMethod, readonly string[]> = {
 	deleteSession: ['sessionId'],
 	archiveSession: ['sessionId'],
 	unarchiveSession: ['sessionId'],
+	searchSessions: ['query'],
 	listModels: ['workspace'],
 	listCommands: ['workspace'],
 	fetchRowDetail: ['rowId'],
@@ -472,6 +484,10 @@ export function validateDshIdeInput<K extends DshIdeMethod>(command: K, args: un
 		case 'unarchiveSession':
 			// 归档类 method 只接受一个会话标识；官方形状见 §8.10.11 `{ sessionId }`。
 			nonEmptyString(record['sessionId'], `DshIdeInput.${command}.sessionId`);
+			break;
+		case 'searchSessions':
+			// 官方 `search(query)` 只接受一个非空查询串。
+			nonEmptyString(record['query'], 'DshIdeInput.searchSessions.query');
 			break;
 		case 'interrupt':
 		case 'listSessions':

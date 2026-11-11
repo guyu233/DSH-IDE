@@ -999,3 +999,37 @@ test('loadOlder refuses a foreign session before touching the Host', async () =>
 	await assert.rejects(() => bridge.invoke('loadOlder', { sessionId: 's-2' }), error => error.code === SESSION_SWITCHED);
 	assert.equal(calls.length, 0, 'a foreign session must not reach sessionController.page');
 });
+
+// ---------------------------------------------------------------------------
+// D59（第 22 轮）：searchSessions 接线——官方 session/search，只读；
+// 返回 { items:{sessionId,snippet}[], hasMore }，依赖宿主挂载 dsh-session-query。
+// ---------------------------------------------------------------------------
+
+test('searchSessions calls sessionController.search and returns the neutral projection', async () => {
+	const calls = [];
+	const { bridge } = bridgeWith({
+		sessionController: { ...sessionControllerStub(), search: async request => {
+			calls.push(request);
+			return { items: [{ sessionId: 's-1', snippet: 'found', score: 1 }], hasMore: true };
+		} },
+	});
+	bridge.open({ view: 'chat', params: { sessionId: 's-1' } });
+	assert.deepEqual(await bridge.invoke('searchSessions', { query: 'found' }), {
+		items: [{ sessionId: 's-1', snippet: 'found' }],
+		hasMore: true,
+	});
+	assert.deepEqual(calls[0], { query: 'found' });
+});
+
+test('searchSessions propagates the official unavailable-provider failure', async () => {
+	const { bridge } = bridgeWith({
+		sessionController: { ...sessionControllerStub(), search: async () => {
+			const error = new Error('session search is unavailable: this deployment does not mount @deepseek-ai/dsh-session-query');
+			error.code = 'gateway/internal';
+			throw error;
+		} },
+	});
+	bridge.open({ view: 'chat', params: { sessionId: 's-1' } });
+	// 不把「未挂载检索 provider」伪造成空结果。
+	await assert.rejects(() => bridge.invoke('searchSessions', { query: 'x' }), error => /session search is unavailable/.test(error.message));
+});

@@ -52,7 +52,7 @@ test('D46 A① chapter-2 §2–§6 tables are all present', () => {
 	for (const heading of [
 		'### 2. 通道快照与视图宿主',
 		'### 3. 适配层的中立 DTO',
-		'### 4. 方法白名单（24 个',
+		'### 4. 方法白名单（25 个',
 		'### 5. 校验契约',
 		'### 6. 错误码',
 	]) {
@@ -80,9 +80,9 @@ test('D46 A① method-count correction has no stale "20 method" claim in source'
 	for (const [name, text] of [['protocol', protocol], ['translator', translator], ['entry', entry]]) {
 		assert.doesNotMatch(text, /20\s*(个)?\s*method|20\s*个方法|methods?\s*[:=]\s*20\b/i, `${name} must not claim 20 methods`);
 	}
-	// 白名单本身恰好 24 个 key（正则抽取 DSH_IDE_METHOD_KEYS 块；第 19 轮新增 2 个归档 method）。
+	// 白名单本身恰好 25 个 key（第 19 轮 +2 归档、第 22 轮 +1 检索）。
 	const block = /const DSH_IDE_METHOD_KEYS[\s\S]*?\n\};/.exec(protocol);
 	assert.ok(block !== null, 'DSH_IDE_METHOD_KEYS must exist');
 	const keys = [...block[0].matchAll(/^\s*([a-zA-Z]+):/gm)].map(m => m[1]);
-	assert.equal(keys.length, 24, `expected 24 methods, got ${keys.length}`);
+	assert.equal(keys.length, 25, `expected 25 methods, got ${keys.length}`);
 });

@@ -32,6 +32,7 @@ import { projectDshIdeSessionList } from '../common/dshIdeSessionList.js';
 import { projectDshIdeCommandList } from '../common/dshIdeCommandList.js';
 import { buildDshIdeCommandLine, mapDshIdeCommandExecution } from '../common/dshIdeCommandLine.js';
 import { projectDshIdeArchiveSet } from '../common/dshIdeArchiveSet.js';
+import { projectDshIdeSessionSearch } from '../common/dshIdeSessionSearch.js';
 import { safeErrorText } from '../common/dshIdeAuthRedaction.js';
 
 /** 通道 id：由 Host 侧绑定生成，这里只做透传。 */
@@ -510,6 +511,14 @@ export class DshIdeTransportBackend implements DshIdeBackend {
 						reasoningEffort: effort,
 					},
 				});
+			}
+			case 'searchSessions': {
+				// D59 分批检索：官方 `session/search`（形参名 request）；未挂载
+				// `@deepseek-ai/dsh-session-query` 时官方抛 gateway/internal，原样透传。
+				const found = await this.transport.call('session', 'search', {
+					request: { query: String(record['query'] ?? '') },
+				});
+				return projectDshIdeSessionSearch(found);
 			}
 			case 'listSessions':
 				return this._listSessions();

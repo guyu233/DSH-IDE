@@ -97,11 +97,11 @@ const UNVERIFIED = FINDINGS.filter(f => !WIRED.includes(f.method)).map(f => f.me
 // 契约口径：24 method 白名单（20 会话域 + 2 账号域 + 2 归档域）
 // ---------------------------------------------------------------------------
 
-	test('D16 contract still declares exactly 24 methods', () => {
+	test('D16 contract still declares exactly 25 methods', () => {
 	const block = /const DSH_IDE_METHOD_KEYS[\s\S]*?\n\};/.exec(protocol);
 	assert.ok(block !== null, 'DSH_IDE_METHOD_KEYS must exist in the protocol single source');
 	const keys = [...block[0].matchAll(/^\s*([a-zA-Z]+):/gm)].map(m => m[1]);
-	assert.equal(keys.length, 24, `expected 24 methods, got ${keys.length}`);
+	assert.equal(keys.length, 25, `expected 25 methods, got ${keys.length}`);
 	for (const f of FINDINGS) {
 		assert.ok(keys.includes(f.method), `D16 finding must reference a real whitelist method: ${f.method}`);
 	}
@@ -257,7 +257,7 @@ test('D17 deleteSession calls the approved physical-delete endpoint, never a clo
 		// 归档 / 恢复已按 §2 §9 走完契约先行并接线（第 19 轮）；契约现在恰 24 method。
 		const block = /const DSH_IDE_METHOD_KEYS[\s\S]*?\n\};/.exec(protocol);
 		assert.ok(block !== null);
-		assert.equal([...block[0].matchAll(/^\s*([a-zA-Z]+):/gm)].length, 24, 'contract must declare 24 methods after the archive wiring');
+		assert.equal([...block[0].matchAll(/^\s*([a-zA-Z]+):/gm)].length, 25, 'contract must declare 25 methods after the search wiring');
 		for (const endpoint of ['archiveSession', 'unarchiveSession']) {
 			assert.ok(protocol.includes(`${endpoint}:`), `${endpoint} must be a contract method`);
 			assert.ok(transport.includes(`'${endpoint}'`), `${endpoint} must be called by the transport`);

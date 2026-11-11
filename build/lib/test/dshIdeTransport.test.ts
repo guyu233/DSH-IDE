@@ -1022,3 +1022,23 @@ test('backend maps loadOlder to session/page with the official request shape', a
 	assert.deepEqual(second.payload.args, { request: { address: { kind: 'session', sessionId: 's-1' } } });
 	transport.dispose();
 });
+
+// ---------------------------------------------------------------------------
+// D59（第 22 轮）：searchSessions → 官方 session/search（只读，形参名 request）。
+// ---------------------------------------------------------------------------
+
+test('backend maps searchSessions to session/search with the official request shape', async () => {
+	const { backend, transport, requests } = backendWithHost((url, body) => {
+		const rpcId = (body as { rpcId: string }).rpcId;
+		if (url.endsWith('/api/session/search')) {
+			return { json: { type: 'server-response', rpcId, result: { ok: true, value: { items: [{ sessionId: 's-1', snippet: 'hit' }], hasMore: false } } } };
+		}
+		return OK(url, body);
+	});
+	assert.deepEqual(await backend.invoke('searchSessions', { query: 'hit' }), { items: [{ sessionId: 's-1', snippet: 'hit' }], hasMore: false });
+	assert.equal(requests.length, 1);
+	assert.equal(requests[0]!.url.split('/api/')[1], 'session/search');
+	const body = requests[0]!.body as { payload: { args: Record<string, unknown> } };
+	assert.deepEqual(body.payload.args, { request: { query: 'hit' } });
+	transport.dispose();
+});
