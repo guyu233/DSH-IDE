@@ -616,3 +616,30 @@ test('no dsh test silently returns when a required path is missing', async () =>
 	assert.deepEqual(offenders, [],
 		`these tests silently pass when a path is missing (use assert.ok instead): ${offenders.join(', ')}`);
 });
+
+// ---------------------------------------------------------------------------
+// 第 65 轮：`test-dsh:all` 用**显式文件列表**（不是 glob），因此新增测试文件若忘记
+// 登记就会静默不运行——这是第 64 轮「条件跳过」的近亲：测试存在、CI 变绿、但它跑没跑
+// 无人知道。本测试把「本项目每个 dsh*.test.ts 都在列表里」变成不变量。
+//
+// 说明：`build/lib/test/` 下还有约 32 个**上游 VS Code** 自带测试（eslint / i18n /
+// stylelint 等），它们不属于本项目、也不在该命令范围内，故只约束 `dsh*` 前缀文件。
+// ---------------------------------------------------------------------------
+
+test('every project dsh test file is registered in test-dsh:all', async () => {
+	const fsMod = await import('node:fs');
+	const pkg = JSON.parse(fsMod.readFileSync(path.join(repoRoot, 'package.json'), 'utf8'));
+	const command = pkg?.scripts?.['test-dsh:all'];
+	assert.ok(typeof command === 'string' && command.length > 0, 'package.json must define test-dsh:all');
+
+	const registered = new Set(
+		[...command.matchAll(/build\/lib\/test\/[\w.]+\.test\.ts/g)].map(m => m[0]),
+	);
+	const onDisk = fsMod.readdirSync(path.join(repoRoot, 'build/lib/test'))
+		.filter(name => name.startsWith('dsh') && name.endsWith('.test.ts'))
+		.map(name => `build/lib/test/${name}`);
+
+	const missing = onDisk.filter(file => !registered.has(file));
+	assert.deepEqual(missing, [],
+		`these test files exist but never run (add them to test-dsh:all): ${missing.join(', ')}`);
+});
