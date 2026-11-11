@@ -1,0 +1,99 @@
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) DSH-IDE contributors. All rights reserved.
+ *  Licensed under the MIT License.
+ *--------------------------------------------------------------------------------------------*/
+
+// D23 前置（第 38 轮）：5 个随包原生模块的 `.node` 产物必须是 **NAPI** 模块。
+//
+// 背景：手册第 3 章 P6 ⑥ 断言「随包 5 个原生模块全部走 NAPI，重编降级为 ABI/NAPI
+// 加载冒烟」——但此前这只是文档说法，没有任何可执行证据。第 38 轮逐个读取
+// `node_modules` 里的 `.node` 二进制并检查 `napi_*` 符号，确认五者**全部**是 NAPI
+// （node-pty 的 `conpty` / `conpty_console_list`、`@vscode/spdlog`、`@vscode/sqlite3`、
+// `@vscode/windows-process-tree`、`@parcel/watcher`）。
+//
+// 本测试把这一结论钉死：
+//   - 若某模块被换成 ABI 构建（不含 `napi_` 符号），测试失败 → 提醒重编或换源；
+//   - 若模块缺失（未安装），本测试**跳过而不失败**——因为「未安装」不是 NAPI 回退，
+//     真正的加载结果仍须真机 U06 / D23 判定。
+//
+// 边界：NAPI 与 ABI 解耦只说明「不因 Electron 主版本不同而必须重编」，
+// **不等于**已验证在宿主 Electron 44.7.0 下加载成功；后者归 §0.2 U06 / D23。
+
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
+import { test } from 'node:test';
+
+const repoRoot = path.resolve(import.meta.dirname, '../../..');
+const nodeModules = path.join(repoRoot, 'node_modules');
+
+/** 随包 5 个原生模块：包名 → 期望存在的绑定文件所在目录。 */
+const NATIVE_MODULES = [
+	{ pkg: 'node-pty', expect: ['conpty', 'conpty_console_list'] },
+	{ pkg: '@vscode/spdlog', expect: ['spdlog'] },
+	{ pkg: '@vscode/sqlite3', expect: ['vscode-sqlite3'] },
+	{ pkg: '@vscode/windows-process-tree', expect: ['windows_process_tree'] },
+	{ pkg: '@parcel/watcher', expect: ['watcher'] },
+];
+
+/** 递归找出目录下全部 `.node` 文件。 */
+function findBindings(dir) {
+	const found = [];
+	const walk = (current) => {
+		for (const entry of fs.readdirSync(current, { withFileTypes: true })) {
+			const full = path.join(current, entry.name);
+			if (entry.isDirectory()) { walk(full); continue; }
+			if (entry.name.endsWith('.node')) { found.push(full); }
+		}
+	};
+	walk(dir);
+	return found;
+}
+
+test('D23 the five shipped native modules are NAPI builds, not ABI-only', () => {
+	const checked = [];
+	const missing = [];
+
+	for (const mod of NATIVE_MODULES) {
+		const pkgDir = path.join(nodeModules, mod.pkg);
+		if (!fs.existsSync(pkgDir)) { missing.push(mod.pkg); continue; }
+
+		const bindings = findBindings(pkgDir);
+		if (bindings.length === 0) { missing.push(`${mod.pkg} (no .node)`); continue; }
+
+		for (const binding of bindings) {
+			// NAPI 模块会导入 napi_* ；纯 ABI 模块只有 node:: / v8:: 符号。
+			const content = fs.readFileSync(binding).toString('latin1');
+			assert.match(content, /napi_/, `${mod.pkg}: ${path.basename(binding)} must import napi_* symbols (NAPI build)`);
+			checked.push(`${mod.pkg}:${path.basename(binding)}`);
+		}
+
+		// 期望的主绑定文件确实在其中（防止只剩一个无关的 .node）。
+		for (const expected of mod.expect) {
+			const hit = bindings.some(binding => path.basename(binding) === `${expected}.node`);
+			assert.ok(hit, `${mod.pkg} must ship ${expected}.node`);
+		}
+	}
+
+	assert.ok(checked.length >= 5, `expected at least five NAPI bindings verified, got ${checked.length}: ${checked.join(', ')}`);
+	// 未安装不算失败（真正的加载结论归真机），但要在测试名/输出里可见。
+	if (missing.length > 0) {
+		console.log(`[D23] not installed, skipped: ${missing.join(', ')} — real load result belongs to U06/D23`);
+	}
+});
+
+test('D23 on win32 the node-pty binding is conpty (not pty)', () => {
+	const release = path.join(nodeModules, 'node-pty', 'build', 'Release');
+	if (!fs.existsSync(release)) { return; }
+
+	// 依据 node-pty 自身的加载分支：win32 用 conpty，非 win32 用 pty。
+	const index = fs.readFileSync(path.join(nodeModules, 'node-pty', 'lib', 'index.js'), 'utf8');
+	assert.match(index, /process\.platform !== 'win32'[\s\S]{0,60}loadNativeModule\)\('pty'\)/,
+		'node-pty must only load pty.node off win32; on win32 conpty is the binding');
+
+	const bindings = fs.readdirSync(release).filter(name => name.endsWith('.node'));
+	if (process.platform === 'win32') {
+		assert.ok(bindings.includes('conpty.node'), 'win32 builds must ship conpty.node');
+		assert.ok(!bindings.includes('pty.node'), 'win32 builds must not be expected to ship pty.node');
+	}
+});
