@@ -15,7 +15,8 @@
 //   §8.10.9「D16 官方落点核对结论」。第 26 轮据此把唯一已核对完整 wire 形状的
 //   setEffort 接线（session/projections → session/selectModel），故本表把
 //   deleteSession + setEffort 标为已接线；第 32 轮据第 31 轮核实的 commands
-//   wire 形状把 listCommands 接线，故本表为 3 个已接线 / 4 个继续 fail-closed。
+//   wire 形状把 listCommands 接线，故本表为 3 个已接线 / 4 个继续 fail-closed；
+//   第 33 轮把 runCommand / setPermissionPreset 的契约前置固化于 §8.10.10。
 // 形状一律以契约真源 dshIdeProtocol.ts 与 DSH 源码为准，不凭记忆臆造。
 
 import assert from 'node:assert/strict';
@@ -63,13 +64,13 @@ const FINDINGS: readonly EndpointFinding[] = [
 		method: 'setPermissionPreset',
 		landing: 'commands/execute（/permission <preset>）',
 		evidence: 'ui-permission-presets/src/client/index.ts:136 live.command(`/permission ${preset}`)；permission-presets/src/index.ts:291 @Remote(catalog) 仅只读；interaction/commands/src/index.ts:360 execute；第 31 轮 wire 证据同 runCommand 行',
-		note: '第 31 轮：commands/execute 的 args 精确为 { agentId: sessionId, line, submittedAttachments }（信号不入 args）。形状已核对，但 /permission 斜杠命令拼接属 D13，保持 fail-closed。',
+		note: '第 33 轮：wire 形状已核对；契约 {preset}→line 与返回值映射的语义空白见 §8.10.10，未补契约真源前保持 fail-closed。',
 	},
 	{
 		method: 'runCommand',
 		landing: 'commands/execute',
 		evidence: 'interaction/commands/src/index.ts:360 @Remote execute(agent,line,submittedAttachments,signal)；ui-plan/src/client/index.ts:122、ui-commands/src/client/service.ts:423 execute(sessionId,line,attachments)；core/agent/src/index.ts:266-273 lookups.register(agent,{wire:agentId,SessionId})；session-controller/src/client/index.ts:141 identity()=sessionId；gateway/client/index.ts:518-533 args[agentId]=identity；gateway/index.ts:1269-1273/:1630-1655',
-		note: '第 31 轮：wire 形状已核对——commands/execute args={agentId,line,submittedAttachments}，signal 由 cancellation 承载，line=/name+rawInput（parseCommand :125-131）。契约 {command,args?}→line 拼接与 attachments 投影属 D13，保持 fail-closed。',
+		note: '第 33 轮：wire 形状已核对；契约 {command,args?}→line 拼接、返回值到动作类错误码映射等 5 项语义空白见 §8.10.10，未补契约真源前保持 fail-closed。',
 	},
 	{
 		method: 'listCommands',
@@ -175,4 +176,30 @@ test('D16 round-32 commands wire shape: listCommands wired, remaining scoped met
 	for (const method of ['runCommand', 'setPermissionPreset']) {
 		assert.ok(stub[0].includes(`case '${method}':`), `${method} must stay in the transport fail-closed stub`);
 	}
+});
+
+// ---------------------------------------------------------------------------
+// 第 33 轮：runCommand / setPermissionPreset 的契约前置（§8.10.10）。
+// wire 形状已核对，但 IDE 契约语义空白未补前不得接线；本断言钉住这段前置
+// 清单与两套 backend 的拒绝状态，防止有人绕过第 2 章 §9 契约先行抢跑。
+// ---------------------------------------------------------------------------
+
+test('D16 round-33 contract prerequisite is documented and both command writers stay fail-closed', () => {
+	const dev = read('docs/DEVELOPMENT.md');
+	assert.match(dev, /#### 8\.10\.10[^\n]*契约前置/, '§8.10.10 must exist');
+	// 5 项语义空白都要有源码依据与契约决定。
+	for (const token of ['command` 是否带前导', 'args` 如何拼', '返回值如何映射动作类', 'Host 侧 `signal`', 'submittedAttachments`']) {
+		assert.ok(dev.includes(token), `§8.10.10 must cover the ${token} gap`);
+	}
+	assert.match(dev, /必须先补契约真源，不得凭猜测实现/, '§8.10.10 must demand contract-first');
+	assert.match(dev, /不是接线完成声明/, '§8.10.10 must not claim wiring is done');
+	// setPermissionPreset 行的陈旧「wire 形状未核对」表述已被修正。
+	assert.doesNotMatch(dev, /wire 形状未核对前不接线/, 'the stale pre-round-31 wording must be gone');
+	// 两套 backend 仍拒绝这两个 method。
+	for (const method of ['runCommand', 'setPermissionPreset']) {
+		assert.match(host, new RegExp(`${method}:\\s*missing\\('${method}'\\)`), `${method} must stay missing(...) on Host`);
+		const stub = /case 'rewind':[\s\S]*?throw new DshIdeTransportError\('dsh-ide\/feature-unavailable'/.exec(transport);
+		assert.ok(stub !== null && stub[0].includes(`case '${method}':`), `${method} must stay in the transport fail-closed stub`);
+	}
+	assert.equal(UNVERIFIED.length, 4, 'the prerequisite documentation must not change the fail-closed set');
 });
