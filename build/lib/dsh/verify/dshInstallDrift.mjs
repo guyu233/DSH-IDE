@@ -91,4 +91,49 @@ if (drift.length > 0) {
 	process.exit(1);
 }
 
-console.log('STATUS: PASS  [install-drift] 已安装内容与产物逐字节一致（注意：仍须重启 DSH 才算运行时加载）');
+// ---------------------------------------------------------------------------
+// 第 49 轮追加：检查「装载配置链」是否完整。
+// 文件一致还不够——插件要被加载，还需要三处配置对齐：
+//   ① 安装包 package.json 声明 `dsh.bundle.patch`；
+//   ② 该 patch 文件存在且至少含一条 `insert` 条目；
+//   ③ profile 的 `package.json` 把 `dsh-ide` 列进 `dsh.profile.bundles`。
+// 任一缺失，重启后都不会加载（且不会有任何报错提示）。
+// ---------------------------------------------------------------------------
+const configIssues = [];
+
+try {
+	const installedPkg = JSON.parse(fs.readFileSync(path.join(installedRoot, 'package.json'), 'utf8'));
+	const patchRel = installedPkg?.dsh?.bundle?.patch;
+	if (typeof patchRel !== 'string' || patchRel === '') {
+		configIssues.push('安装包 package.json 未声明 dsh.bundle.patch');
+	} else {
+		const patchPath = path.join(installedRoot, patchRel);
+		if (!fs.existsSync(patchPath)) {
+			configIssues.push(`patch 文件不存在: ${patchRel}`);
+		} else if (!/-\s*insert:/.test(fs.readFileSync(patchPath, 'utf8'))) {
+			configIssues.push(`patch 文件里没有 insert 条目: ${patchRel}`);
+		}
+	}
+} catch (error) {
+	configIssues.push(`读取安装包 package.json 失败: ${error.message}`);
+}
+
+try {
+	const profilePkg = JSON.parse(fs.readFileSync(path.join(profileDir, 'package.json'), 'utf8'));
+	const bundles = profilePkg?.dsh?.profile?.bundles;
+	if (!Array.isArray(bundles) || !bundles.includes(PACKAGE_NAME)) {
+		configIssues.push(`profile 的 dsh.profile.bundles 未包含 ${PACKAGE_NAME}`);
+	}
+} catch (error) {
+	configIssues.push(`读取 profile package.json 失败: ${error.message}`);
+}
+
+console.log(`  装载配置链问题          : ${configIssues.length}`);
+if (configIssues.length > 0) {
+	for (const item of configIssues) { console.error(`  ✗ ${item}`); }
+	console.error('');
+	console.error('STATUS: FAIL  [install-drift] 文件一致但装载配置链不完整，重启后仍不会加载。');
+	process.exit(1);
+}
+
+console.log('STATUS: PASS  [install-drift] 已安装内容与产物逐字节一致、装载配置链完整（注意：仍须重启 DSH 才算运行时加载）');
