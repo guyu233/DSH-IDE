@@ -520,3 +520,22 @@ test('D27 the CI aggregate checks prerequisites and names the fix command', () =
 	// 缺失时必须退出 1（不得静默继续跑门禁）。
 	assert.match(ci, /前置条件缺失，未开始跑门禁/, 'missing prerequisites must abort before running gates');
 });
+
+// ---------------------------------------------------------------------------
+// D21 第 61 轮：九项真机验收的**前置静态核查**已记录（§5 §6 之后）。
+// 关键纪律：这九项只能真机判定，静态核查**不构成任何一项通过**。本测试钉住
+// 记录存在、且明确写着「不构成通过结论」与「D21 整体保持未完成」。
+// ---------------------------------------------------------------------------
+
+test('D21 static precheck is recorded without claiming any acceptance item passed', () => {
+	const dev = read('docs/DEVELOPMENT.md');
+
+	assert.match(dev, /D21 九项的前置静态核查（第 61 轮/, 'the round-61 static precheck must be recorded');
+	assert.match(dev, /不构成任何一项的通过结论/, 'the precheck must disclaim that it is not an acceptance result');
+	assert.match(dev, /D21 整体保持未完成/, 'D21 must stay unfinished');
+	assert.match(dev, /九项仍须由用户按固定顺序执行/, 'the nine items must stay with the user');
+
+	// 第 6 项的两个静态事实必须写明（否则用户跑之前无法确认件齐）。
+	assert.match(dev, /ptyHostMain\.js`\s*\*\*在产物中\*\*|ptyHostMain.*在产物中/, 'item 6 must record ptyHostMain presence');
+	assert.match(dev, /5 个必需模块的 `\.node` \*\*全部随包\*\*/, 'item 6 must record all five native modules shipped');
+});
