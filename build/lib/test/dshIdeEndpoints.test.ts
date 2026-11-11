@@ -204,3 +204,36 @@ test('D16 round-33 contract prerequisite is documented (wired in round 34)', () 
 		assert.ok(WIRED.includes(method), `${method} must be marked wired`);
 	}
 });
+
+// ---------------------------------------------------------------------------
+// D17：删除能力归属确认——`deleteSession` 必须是真正的物理删除端点调用，
+// 不得用「关闭视图 / 隐藏列表行 / 本地 rmSync」冒充（§8.2.4、§8.10.7、§8.10.8）。
+// 本条是源码级守护：行为级覆盖见 Host / transport 各自的 deleteSession 用例。
+// ---------------------------------------------------------------------------
+
+test('D17 deleteSession calls the approved physical-delete endpoint, never a close/hide/rmSync fallback', () => {
+	// Host：唯一删除路径是 resolveDeleteSessionMethod() 取到的插件 overlay / 网关 remote。
+	assert.match(host, /async deleteSession\(args\)\s*\{[\s\S]*?resolveDeleteSessionMethod\(bridge\.ctx\)/,
+		'Host deleteSession must resolve the approved plugin endpoint');
+	assert.doesNotMatch(host, /async deleteSession\(args\)\s*\{[\s\S]{0,600}?\.close\(\)/,
+		'Host deleteSession must not close the view as a substitute for deleting');
+	// 只查 deleteSession 函数体：文件别处的 unlink 是 D55 端点文件清理，与删会话无关。
+	const hostCode = host.split('\n').filter(line => !line.trim().startsWith('//')).join('\n');
+	const deleteBody = /async deleteSession\(args\)\s*\{([\s\S]*?)\n\t\t\},/.exec(hostCode)?.[1] ?? '';
+	assert.ok(deleteBody.length > 0, 'Host deleteSession body must be found');
+	assert.doesNotMatch(deleteBody, /\brmSync\s*\(|\bfs\.promises\.rm\s*\(|\bunlink\s*\(|\.close\(\)/,
+		'Host deleteSession must not delete directories locally or close the view instead');
+	// transport：唯一删除路径是 workspaceRegistry/deleteSession。
+	assert.match(transport, /call\('workspaceRegistry',\s*'deleteSession',\s*\{ sessionId \}\)/,
+		'transport must call the approved endpoint with the exact wire field');
+	assert.doesNotMatch(transport, /deleteSessionViaPlugin[\s\S]{0,400}?\.close\(\)/,
+		'transport must not close the stream/view as a substitute for deleting');
+	// 只有 { deleted: true } 才能报告成功；其余一律拒绝。
+	assert.match(transport, /value\['deleted'\] !== true/, 'transport must require the confirmed delete result');
+	assert.match(host, /result\.deleted !== true/, 'Host must require the confirmed delete result');
+	// 归属与判活前置必须保留。
+	assert.match(host, /async deleteSession\(args\)\s*\{\s*bridge\.assertOwnership\(args\.sessionId\)/,
+		'Host deleteSession must assert ownership first');
+	assert.match(host, /if \(!\(await sessionExists\(bridge\.ctx, args\.sessionId\)\)\)/,
+		'Host deleteSession must verify the session exists before calling the plugin');
+});
