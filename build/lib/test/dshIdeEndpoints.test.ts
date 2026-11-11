@@ -377,3 +377,36 @@ test('round-27 packaging never reads .npmrc target, so it cannot affect the arti
 	const npmrc = read('.npmrc');
 	assert.match(npmrc, /^target="43\.7\.7"$/m, 'the .npmrc target must stay unchanged by this round');
 });
+
+// ---------------------------------------------------------------------------
+// D27（第 28 轮）：CI 聚合入口——不选平台、不改仓库结构，只提供单一入口，
+// 并如实把 PENDING 记为未通过（与第 5 章 §9 / §9.4 一致）。
+// ---------------------------------------------------------------------------
+
+test('D27 CI aggregate entry exists, follows §2 order, and refuses PENDING', () => {
+	const pkg = JSON.parse(read('package.json')) as { scripts: Record<string, string> };
+	assert.equal(pkg.scripts['verify:dsh-ide-ci'], 'node build/lib/dsh/verify/dshIdeCi.mjs', 'the CI entry must be registered');
+
+	const script = read('build/lib/dsh/verify/dshIdeCi.mjs');
+	// 顺序取自第 5 章 §2（四门禁 → test-dsh:all → docs-graph）。
+	const order = [...script.matchAll(/script: '(verify:dsh-ide-[a-z-]+|test-dsh:all|verify:docs-graph)'/g)].map(m => m[1]);
+	assert.deepEqual(order, [
+		'verify:dsh-ide-protocol-single-source',
+		'verify:dsh-ide-boundary',
+		'verify:dsh-ide-projection-golden',
+		'verify:dsh-ide-contract',
+		'test-dsh:all',
+		'verify:docs-graph',
+	], 'the CI steps must follow chapter-5 §2 order');
+	// PENDING 不计通过（§9）。
+	assert.match(script, /status === 'PASS'/, 'the entry must require STATUS: PASS');
+	assert.match(script, /PENDING 不计通过|PENDING` 不计通过/, 'the entry must document the PENDING rule');
+	// 不选平台、不新建 CI 配置目录。
+	assert.match(script, /不选 CI 平台/, 'the entry must state it does not choose a CI platform');
+	// 注释里可以提到「不新建 .github」，但代码不得真的读写这些目录。
+	assert.doesNotMatch(script, /mkdir|writeFile|cp\w*\(.*(github|azure-pipelines)/, 'the entry must not create a CI platform directory');
+
+	// 仓库当前仍无 CI 配置目录（D27 未完成，平台待定）。
+	assert.equal(fs.existsSync(path.join(repoRoot, '.github')), false, 'no .github/ may be created before the platform is decided');
+	assert.equal(fs.existsSync(path.join(repoRoot, 'build/azure-pipelines')), false, 'no azure-pipelines/ may be created before the platform is decided');
+});

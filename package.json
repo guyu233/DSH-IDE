@@ -91,6 +91,7 @@
     "verify:dsh-ide-projection-golden": "node build/lib/dsh/verify/dshIdeVerify.mjs projection-golden",
     "verify:dsh-ide-contract": "node build/lib/dsh/verify/dshIdeVerify.mjs contract",
     "verify:dsh-ide-release-gate": "node build/lib/dsh/verify/dshIdeVerify.mjs release-gate",
+    "verify:dsh-ide-ci": "node build/lib/dsh/verify/dshIdeCi.mjs",
     "verify:docs-graph": "node build/lib/dsh/verify/dshDocsGraph.mjs"
   },
   "dependencies": {
