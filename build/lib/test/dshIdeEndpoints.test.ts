@@ -778,3 +778,26 @@ test('D68 contract gate can actually reach PASS, and fails on a lower installed 
 	assert.notEqual(low.code, 0, 'a lower installed version must fail the gate');
 	assert.match(low.out, /STATUS: FAIL/, 'a lower installed version must yield FAIL');
 });
+
+// ---------------------------------------------------------------------------
+// 第 69 轮：`projection-golden` 内置 P95 断言（此前只是打印说明）。
+//
+// 与第 68 轮修掉的 `contract` 同类：**文字在、校验不在**。第 51 轮已用真实事件流
+// 实测 P95（235,214 B / 14,522 B ≪ 512 KiB），但门禁里仍只有一行
+// `console.log('PENDING(P6): 真实事件流 P95 字节数校准…')`，超限也不会失败。
+// 本轮把度量内置：有真实样本时重算并断言，超限即抛错；无样本时明确跳过。
+// ---------------------------------------------------------------------------
+
+test('D69 projection-golden asserts real-sample P95 instead of only printing a note', () => {
+	const gate = read('build/lib/dsh/verify/dshIdeVerify.mjs');
+
+	// 必须有真实的度量函数与断言，而不是一句 PENDING 说明。
+	assert.match(gate, /function probeRealSessionP95/, 'the gate must define the real-sample P95 probe');
+	assert.match(gate, /真实样本 P95 \$\{p95\} B 超出阈值/, 'the gate must throw when P95 exceeds the limit');
+	// 只禁止**代码行**里的旧说明；注释中保留「此前只有一行 console.log(...)」作为历史
+	// 记录是有意的（第 42 / 64 / 66 / 67 轮反复踩到的自指陷阱：守护不能扫自己的说明文字）。
+	const codeLines = gate.split(/\r?\n/).filter(line => !line.trimStart().startsWith('//'));
+	assert.equal(
+		codeLines.filter(line => line.includes("PENDING(P6): 真实事件流 P95 字节数校准")).length, 0,
+		'the old print-only note must not survive in executable code');
+});

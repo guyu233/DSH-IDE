@@ -19,6 +19,7 @@ import { createHash } from 'node:crypto';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { pathToFileURL } from 'node:url';
+import * as zlib from 'node:zlib';
 
 const repoRoot = path.resolve(import.meta.dirname, '../../../..');
 const srcRoot = path.join(repoRoot, 'src/vs');
@@ -198,6 +199,88 @@ function boundary() {
 // ---------------------------------------------------------------------------
 // 3. verify:dsh-ide-projection-golden  —— P2 已实现（真实回放比对）
 // ---------------------------------------------------------------------------
+/**
+ * 第 69 轮：从本机真实 DSH 会话样本重算 rows 的 P95 字节数。
+ *
+ * 与 `verify:dsh-real-p95` 同源逻辑（多帧 zstd 逐帧解压 + 滑窗投影 + 最近秩法），
+ * 但内置在门禁里，便于 `projection-golden` 直接断言。
+ *
+ * @returns {{ p95:number, limit:number, events:number, windows:number } | undefined}
+ *   `undefined` 表示本机没有真实会话样本（不是失败）。
+ */
+function probeRealSessionP95(repoRoot, translatorUrl, projectorUrl) {
+	const sessionsRoot = path.join(process.env['USERPROFILE'] ?? process.env['HOME'] ?? '', '.dsh', 'sessions');
+	if (!fs.existsSync(sessionsRoot)) { return undefined; }
+
+	// 取最新的 session.v4.jsonl.zstd
+	let newest = null;
+	let newestMtime = 0;
+	for (const ws of fs.readdirSync(sessionsRoot, { withFileTypes: true })) {
+		if (!ws.isDirectory()) { continue; }
+		const wsDir = path.join(sessionsRoot, ws.name);
+		let sessions = [];
+		try { sessions = fs.readdirSync(wsDir, { withFileTypes: true }); } catch { continue; }
+		for (const s of sessions) {
+			if (!s.isDirectory()) { continue; }
+			const candidate = path.join(wsDir, s.name, 'session.v4.jsonl.zstd');
+			if (!fs.existsSync(candidate)) { continue; }
+			const mtime = fs.statSync(candidate).mtimeMs;
+			if (mtime > newestMtime) { newestMtime = mtime; newest = candidate; }
+		}
+	}
+	if (newest === null) { return undefined; }
+
+	// 逐帧解压（Node 的 zstdDecompressSync 只解首帧）
+	const MAGIC = Buffer.from([0x28, 0xb5, 0x2f, 0xfd]);
+	const raw = fs.readFileSync(newest);
+	const starts = [];
+	for (let i = 0; i <= raw.length - 4; i++) {
+		if (raw.compare(MAGIC, 0, 4, i, i + 4) === 0) { starts.push(i); }
+	}
+	if (starts.length === 0) { return undefined; }
+	const chunks = [];
+	for (let k = 0; k < starts.length; k++) {
+		const start = starts[k];
+		const end = k + 1 < starts.length ? starts[k + 1] : raw.length;
+		try { chunks.push(zlib.zstdDecompressSync(raw.subarray(start, end))); } catch { /* 跳过坏帧 */ }
+	}
+	const events = [];
+	for (const line of Buffer.concat(chunks).toString('utf8').split('\n')) {
+		if (line.trim() === '') { continue; }
+		try {
+			const parsed = JSON.parse(line);
+			if (parsed.type !== 'session') { events.push(parsed); }
+		} catch { /* 跳过坏行 */ }
+	}
+	if (events.length < 10) { return undefined; }
+
+	// 子进程里跑投影（与 golden 回放同一条真实实现路径）
+	const WINDOW = 100;
+	const sizes = [];
+	for (let i = 0; i < events.length; i += WINDOW) {
+		const win = events.slice(i, i + WINDOW);
+		if (win.length < 10) { continue; }
+		const body = [
+			`import { translateAll } from ${JSON.stringify(translatorUrl)};`,
+			`import { projectIdeView } from ${JSON.stringify(projectorUrl)};`,
+			`const ev = JSON.parse(fs.readFileSync(0, 'utf8'));`,
+			`process.stdout.write(JSON.stringify(projectIdeView(translateAll(ev)).rows));`,
+		].join('\n');
+		const out = execFileSync(process.execPath, ['--experimental-strip-types', '--input-type=module', '-e',
+			`import { readFileSync } from 'node:fs'; const fs = { readFileSync };\n${body}`], {
+			cwd: repoRoot, encoding: 'utf8', input: JSON.stringify(win),
+		});
+		sizes.push(Buffer.byteLength(out, 'utf8'));
+	}
+	if (sizes.length === 0) { return undefined; }
+
+	const sorted = [...sizes].sort((a, b) => a - b);
+	const p95 = sorted[Math.ceil(0.95 * sorted.length) - 1];
+	const limit = 512 * 1024;
+	return { p95, limit, events: events.length, windows: sizes.length };
+}
+
+
 function projectionGolden() {
 	const goldenDir = path.join(import.meta.dirname, 'golden');
 	const fixtures = fs.existsSync(goldenDir) ? walk(goldenDir).filter(f => f.endsWith('.json')) : [];
@@ -231,7 +314,28 @@ function projectionGolden() {
 	}
 
 	console.log(`PASS  projection-golden: ${fixtures.length} fixture(s) replayed against ${path.relative(repoRoot, common)}/translator.ts + ide-view-projector.ts, byte-exact match`);
-	console.log('      PENDING(P6): 真实事件流 P95 字节数校准（见 docs/DEVELOPMENT.md 第 5 章 §5，参数校准非架构回退）');
+
+	// -----------------------------------------------------------------------
+	// 第 69 轮：把 P95 从「打印说明」改为**真实断言**。
+	//
+	// 此前这里只有一行 `console.log('PENDING(P6): 真实事件流 P95 字节数校准…')`——
+	// 与第 68 轮修掉的 contract 同类问题：**文字在、校验不在**。
+	//
+	// 第 51 轮已用真实 DSH 事件流实测（235,214 B / 14,522 B，均 ≤ 512 KiB），
+	// 并固化为独立脚本。这里把同一度量内置进门禁：**有真实样本时**重算 P95，
+	// 超过 ROWS_P95_BYTE_LIMIT 即抛错 FAIL；**无样本时**明确说明跳过（CI 干净
+	// checkout 不应因缺本机会话数据而红）。
+	// -----------------------------------------------------------------------
+	const realSessionP95 = probeRealSessionP95(repoRoot, translatorUrl, projectorUrl);
+	if (realSessionP95 === undefined) {
+		console.log('      P95: 本机无真实 DSH 会话样本，跳过（不因缺数据判失败；可用 npm run verify:dsh-real-p95 在有样本的机器上复跑）');
+	} else {
+		const { p95, limit, events, windows } = realSessionP95;
+		console.log(`      P95: 真实样本 ${events} 事件 / ${windows} 窗 → ${p95} B（阈值 ${limit} B）`);
+		if (p95 > limit) {
+			throw new Error(`projection-golden: 真实样本 P95 ${p95} B 超出阈值 ${limit} B —— 按第 5 章 §5 的固定序列校准（① 下调 MAX_ROWS → ② 收紧 preview → ③ 重生成 golden），属参数校准非架构回退`);
+		}
+	}
 }
 
 // ---------------------------------------------------------------------------
