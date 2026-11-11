@@ -920,3 +920,53 @@ test('D52 deleteSession proceeds only when the session is provably stopped', asy
 	assert.deepEqual(await bridge.invoke('deleteSession', { sessionId: 's-1' }), { accepted: true });
 	assert.deepEqual(registry.calls, ['s-1'], 'a provably stopped session reaches the delete endpoint');
 });
+
+// ---------------------------------------------------------------------------
+// D59（第 19 轮）：archiveSession / unarchiveSession 接线（§8.10.11）。
+// 官方 workspace-controller 的公开 remote，不需第三方批准；返回完整归档集合，
+// 契约按列表类投影为 string[]（不是 { accepted: true }）。
+// ---------------------------------------------------------------------------
+
+test('archiveSession calls the official registry and returns the projected archive set', async () => {
+	const calls = [];
+	const { bridge } = bridgeWith({
+		workspaceRegistry: {
+			list: () => [{ id: 'w-1', sessionIds: ['s-1', 's-2'] }],
+			archiveSession: async request => { calls.push(request); return { archivedSessionIds: ['s-1', 's-2'] }; },
+			unarchiveSession: async request => { calls.push(request); return { archivedSessionIds: ['s-2'] }; },
+		},
+	});
+	bridge.open({ view: 'chat', params: { sessionId: 's-1' } });
+	assert.deepEqual(await bridge.invoke('archiveSession', { sessionId: 's-1' }), ['s-1', 's-2']);
+	// 不传 stopActivity：是否强停运行中会话由调用方显式决定，缺省保留官方拒绝语义。
+	assert.deepEqual(calls[0], { sessionId: 's-1' });
+	assert.deepEqual(await bridge.invoke('unarchiveSession', { sessionId: 's-1' }), ['s-2']);
+	assert.deepEqual(calls[1], { sessionId: 's-1' });
+});
+
+test('archiveSession refuses when the registry lacks the official method', async () => {
+	const { bridge } = bridgeWith({ workspaceRegistry: { list: () => [{ id: 'w-1', sessionIds: ['s-1'] }] } });
+	bridge.open({ view: 'chat', params: { sessionId: 's-1' } });
+	await assert.rejects(() => bridge.invoke('archiveSession', { sessionId: 's-1' }),
+		error => error.code === FEATURE_UNAVAILABLE && /archiveSession/.test(error.message));
+	await assert.rejects(() => bridge.invoke('unarchiveSession', { sessionId: 's-1' }),
+		error => error.code === FEATURE_UNAVAILABLE && /unarchiveSession/.test(error.message));
+});
+
+test('archiveSession keeps ownership checks and propagates the official active-session refusal', async () => {
+	let called = false;
+	const { bridge } = bridgeWith({
+		workspaceRegistry: {
+			list: () => [{ id: 'w-1', sessionIds: ['s-1', 's-2'] }],
+			archiveSession: async () => { called = true; const e = new Error('workspace/session-active'); e.code = 'workspace/session-active'; throw e; },
+		},
+	});
+	bridge.open({ view: 'chat', params: { sessionId: 's-1' } });
+	// 归属校验：其它会话被拒绝，且不触达官方端点。
+	await assert.rejects(() => bridge.invoke('archiveSession', { sessionId: 's-2' }),
+		error => error.code === SESSION_SWITCHED);
+	assert.equal(called, false, 'a foreign session must not reach archiveSession');
+	// 官方拒绝原样透传（不吞成 accepted、不自行决定强停）。
+	await assert.rejects(() => bridge.invoke('archiveSession', { sessionId: 's-1' }),
+		error => /workspace\/session-active/.test(error.message));
+});

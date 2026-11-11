@@ -961,3 +961,45 @@ test('backend refuses a non-admitted or error command result instead of faking a
 		transport.dispose();
 	}
 });
+
+// ---------------------------------------------------------------------------
+// D59（第 19 轮）：archiveSession / unarchiveSession（§8.10.11）。
+// 官方 remote，args 形参名是 request；返回完整归档集合 → 投影为 string[]。
+// ---------------------------------------------------------------------------
+
+test('backend maps archiveSession/unarchiveSession to the official registry remotes', async () => {
+	const { backend, transport, requests } = backendWithHost((url, body) => {
+		const rpcId = (body as { rpcId: string }).rpcId;
+		if (url.endsWith('/api/workspaceRegistry/archiveSession')) {
+			return { json: { type: 'server-response', rpcId, result: { ok: true, value: { archivedSessionIds: ['s-1', 's-2'] } } } };
+		}
+		if (url.endsWith('/api/workspaceRegistry/unarchiveSession')) {
+			return { json: { type: 'server-response', rpcId, result: { ok: true, value: { archivedSessionIds: ['s-2'] } } } };
+		}
+		return OK(url, body);
+	});
+	assert.deepEqual(await backend.invoke('archiveSession', { sessionId: 's-1' }), ['s-1', 's-2']);
+	assert.deepEqual(await backend.invoke('unarchiveSession', { sessionId: 's-1' }), ['s-2']);
+	assert.deepEqual(requests.map(r => r.url.split('/api/')[1]), ['workspaceRegistry/archiveSession', 'workspaceRegistry/unarchiveSession']);
+	// 形参名是 request（Typert 按 descriptor 逐字段校验）。
+	const archive = requests[0]!.body as { payload: { args: Record<string, unknown> } };
+	assert.deepEqual(archive.payload.args, { request: { sessionId: 's-1' } });
+	transport.dispose();
+});
+
+test('backend archiveSession projects a malformed Host reply to an empty list', async () => {
+	const { backend, transport } = backendWithHost((_url, body) => (
+		{ json: { type: 'server-response', rpcId: (body as { rpcId: string }).rpcId, result: { ok: true, value: 'not-an-object' } } }
+	));
+	assert.deepEqual(await backend.invoke('archiveSession', { sessionId: 's-1' }), []);
+	transport.dispose();
+});
+
+test('backend archiveSession propagates the official active-session refusal', async () => {
+	const { backend, transport } = backendWithHost((_url, body) => (
+		{ json: { type: 'server-response', rpcId: (body as { rpcId: string }).rpcId, result: { ok: false, error: { code: 'workspace/session-active', message: 'session is active' } } } }
+	));
+	await assert.rejects(() => backend.invoke('archiveSession', { sessionId: 's-1' }),
+		(error: DshIdeTransportError) => /session-active|session is active/.test(`${error.code} ${error.message}`));
+	transport.dispose();
+});

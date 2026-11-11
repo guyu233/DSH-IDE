@@ -9,7 +9,7 @@
 // 后续接线把设计基线写散：
 //   ① 官方事件名只在 translator.ts 有一份映射，index.js 订阅官方 4 类事件；
 //   ② deleteSession 语义（直接删除 / 不入回收站）在契约与 §2 §4 表一致；
-//   ③ 第 2 章 §2–§6 表格齐全（快照 / DTO / 22 method / 校验契约 / 错误码）；
+//   ③ 第 2 章 §2–§6 表格齐全（快照 / DTO / method 白名单 / 校验契约 / 错误码）；
 //   ④ 第 3 章 §6 状态表 P0–P7 依据列非空；
 //   ⑤ 20→22 计数校正已生效，源码零「20 method」残留。
 // 本测试只做静态核对，不声称 waterfall 已接线（D50 仍待 U10 / U12 探针）。
@@ -52,7 +52,7 @@ test('D46 A① chapter-2 §2–§6 tables are all present', () => {
 	for (const heading of [
 		'### 2. 通道快照与视图宿主',
 		'### 3. 适配层的中立 DTO',
-		'### 4. 方法白名单（22 个',
+		'### 4. 方法白名单（24 个',
 		'### 5. 校验契约',
 		'### 6. 错误码',
 	]) {
@@ -75,14 +75,14 @@ test('D46 A① state-table basis column is filled for all 8 phases', () => {
 	}
 });
 
-test('D46 A① 20→22 count correction has no stale "20 method" claim in source', () => {
+test('D46 A① method-count correction has no stale "20 method" claim in source', () => {
 	// 历史记录（§7.7 / P3 依据列）允许追述「当时 20」；源码与规格正文不得再写 20 method。
 	for (const [name, text] of [['protocol', protocol], ['translator', translator], ['entry', entry]]) {
 		assert.doesNotMatch(text, /20\s*(个)?\s*method|20\s*个方法|methods?\s*[:=]\s*20\b/i, `${name} must not claim 20 methods`);
 	}
-	// 白名单本身恰好 22 个 key（正则抽取 DSH_IDE_METHOD_KEYS 块）。
+	// 白名单本身恰好 24 个 key（正则抽取 DSH_IDE_METHOD_KEYS 块；第 19 轮新增 2 个归档 method）。
 	const block = /const DSH_IDE_METHOD_KEYS[\s\S]*?\n\};/.exec(protocol);
 	assert.ok(block !== null, 'DSH_IDE_METHOD_KEYS must exist');
 	const keys = [...block[0].matchAll(/^\s*([a-zA-Z]+):/gm)].map(m => m[1]);
-	assert.equal(keys.length, 22, `expected 22 methods, got ${keys.length}`);
+	assert.equal(keys.length, 24, `expected 24 methods, got ${keys.length}`);
 });

@@ -3,7 +3,7 @@
  *  Licensed under the MIT License.
  *--------------------------------------------------------------------------------------------*/
 
-// P3 验收单测：通道分发（22 method 全覆盖）、listen 三层过滤、disposeOwner 本通道清理、
+// P3 验收单测：通道分发（24 method 全覆盖）、listen 三层过滤、disposeOwner 本通道清理、
 // 视图宿主快照纪律（channelId 守恒 / version 严格 +1 / 首帧 starting / 投影 ready）。
 // 运行：node --experimental-strip-types --test build/lib/test/dshIdeChannel.test.ts
 // 通道与视图宿主经 `out/`（`build-dsh-tests` 转译产物）加载：两者依赖 base/common 的 .js 说明符，
@@ -198,7 +198,7 @@ test('unavailable backend never fabricates snapshots or events', () => {
 });
 
 // ---------------------------------------------------------------------------
-// 通道：22 method 全覆盖 + 未知 method + 入参违规
+// 通道：24 method 全覆盖 + 未知 method + 入参违规
 // ---------------------------------------------------------------------------
 
 const VALID: Record<DshIdeMethod, unknown> = {

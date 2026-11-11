@@ -18,6 +18,7 @@ import { randomUUID } from 'node:crypto';
 import { projectDshIdeSessionList } from '../common/dshIdeSessionList.js';
 import { projectDshIdeCommandList } from '../common/dshIdeCommandList.js';
 import { buildDshIdeCommandLine, mapDshIdeCommandExecution } from '../common/dshIdeCommandLine.js';
+import { projectDshIdeArchiveSet } from '../common/dshIdeArchiveSet.js';
 import { safeErrorText } from '../common/dshIdeAuthRedaction.js';
 
 /** 与 common/dshIdeProtocol.ts 同值的错误码（Host 半身为纯 JS，不跨层 import TS）。 */
@@ -479,6 +480,25 @@ function createMethodHandlers(bridge) {
 		async accountGetProfile(args) {
 			// 官方 `accountController.getProfile(client)`：Host 依据 client 派生 Platform 请求头。
 			return account().getProfile(args.client);
+		},
+		async archiveSession(args) {
+			// §8.10.11：官方 workspace-controller 的公开 remote，不需第三方插件批准。
+			// 不传 stopActivity：是否强停运行中的会话由调用方显式决定，缺省时保留官方的
+			// `workspace/session-active` 拒绝并原样透传，DSH-IDE 不自行决定强停。
+			bridge.assertOwnership(args.sessionId);
+			const registry = service(bridge.ctx, 'workspaceRegistry');
+			if (typeof registry.archiveSession !== 'function') {
+				throw coded(FEATURE_UNAVAILABLE, 'DSH workspaceRegistry has no archiveSession()', { capability: 'archiveSession' });
+			}
+			return projectDshIdeArchiveSet(await registry.archiveSession({ sessionId: args.sessionId }));
+		},
+		async unarchiveSession(args) {
+			bridge.assertOwnership(args.sessionId);
+			const registry = service(bridge.ctx, 'workspaceRegistry');
+			if (typeof registry.unarchiveSession !== 'function') {
+				throw coded(FEATURE_UNAVAILABLE, 'DSH workspaceRegistry has no unarchiveSession()', { capability: 'unarchiveSession' });
+			}
+			return projectDshIdeArchiveSet(await registry.unarchiveSession({ sessionId: args.sessionId }));
 		},
 		async deleteSession(args) {
 			bridge.assertOwnership(args.sessionId);

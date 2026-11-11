@@ -31,6 +31,7 @@ import type { DshIdeBackend, DshIdeMethod, DshIdeOpenSpec, IDshIdeSessionSummary
 import { projectDshIdeSessionList } from '../common/dshIdeSessionList.js';
 import { projectDshIdeCommandList } from '../common/dshIdeCommandList.js';
 import { buildDshIdeCommandLine, mapDshIdeCommandExecution } from '../common/dshIdeCommandLine.js';
+import { projectDshIdeArchiveSet } from '../common/dshIdeArchiveSet.js';
 import { safeErrorText } from '../common/dshIdeAuthRedaction.js';
 
 /** 通道 id：由 Host 侧绑定生成，这里只做透传。 */
@@ -561,6 +562,16 @@ export class DshIdeTransportBackend implements DshIdeBackend {
 				// `workspaceRegistry/deleteSession` 承担（§8.10.8 批准范围）；DSH-IDE 只调用，
 				// 不复制其删除链、不直接删 DSH 会话目录。
 				return this.deleteSessionViaPlugin(String(record['sessionId'] ?? ''));
+			case 'archiveSession':
+				// §8.10.11：官方 workspace-controller 的公开 remote；不传 stopActivity，
+				// 保留官方 `workspace/session-active` 拒绝并原样透传。
+				return projectDshIdeArchiveSet(await this.transport.call('workspaceRegistry', 'archiveSession', {
+					request: { sessionId: String(record['sessionId'] ?? '') },
+				}));
+			case 'unarchiveSession':
+				return projectDshIdeArchiveSet(await this.transport.call('workspaceRegistry', 'unarchiveSession', {
+					request: { sessionId: String(record['sessionId'] ?? '') },
+				}));
 			case 'setPermissionPreset': {
 				// §8.10.9：官方无独立 setter，`/permission <preset>` 是注册的斜杠命令。
 				return this._runCommandLine(buildDshIdeCommandLine('permission', [String(record['preset'] ?? '')]));

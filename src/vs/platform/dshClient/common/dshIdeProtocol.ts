@@ -152,6 +152,10 @@ export interface DshIdeMethodArgs {
 	listSessions: Record<string, never>;
 	/** 删除会话（直接删除，不入回收站）。 */
 	deleteSession: { sessionId: string };
+	/** 归档一个已知会话（官方 `workspaceRegistry.archiveSession`）；返回**完整**归档集合。 */
+	archiveSession: { sessionId: string };
+	/** 恢复一个已归档会话（官方 `workspaceRegistry.unarchiveSession`）；返回**完整**归档集合。 */
+	unarchiveSession: { sessionId: string };
 	/** 列出可用模型。 */
 	listModels: { workspace?: string };
 	/** 列出可用命令。 */
@@ -226,6 +230,8 @@ const DSH_IDE_METHOD_KEYS: Record<DshIdeMethod, readonly string[]> = {
 	runCommand: ['command', 'args'],
 	listSessions: [],
 	deleteSession: ['sessionId'],
+	archiveSession: ['sessionId'],
+	unarchiveSession: ['sessionId'],
 	listModels: ['workspace'],
 	listCommands: ['workspace'],
 	fetchRowDetail: ['rowId'],
@@ -433,6 +439,11 @@ export function validateDshIdeInput<K extends DshIdeMethod>(command: K, args: un
 		case 'accountGetProfile':
 			// 官方 `AccountClientMetadata` 四字段必填；缺一个就会让 Host 派生出错误的请求身份。
 			accountClientMetadata(record['client'], `DshIdeInput.${command}.client`);
+			break;
+		case 'archiveSession':
+		case 'unarchiveSession':
+			// 归档类 method 只接受一个会话标识；官方形状见 §8.10.11 `{ sessionId }`。
+			nonEmptyString(record['sessionId'], `DshIdeInput.${command}.sessionId`);
 			break;
 		case 'interrupt':
 		case 'listSessions':

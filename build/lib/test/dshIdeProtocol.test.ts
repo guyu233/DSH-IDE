@@ -53,14 +53,16 @@ const VALID_ARGS: Record<DshIdeMethod, unknown> = {
 	fetchRowDetail: { rowId: 'row1' },
 	refreshSnapshot: {},
 	deleteSession: { sessionId: 's1' },
+	archiveSession: { sessionId: 's1' },
+	unarchiveSession: { sessionId: 's1' },
 	accountGetState: { client: { version: '2.0.0', locale: 'zh-CN', timezoneOffsetSeconds: 28800 } },
 	accountGetProfile: { client: { version: '2.0.0', locale: 'zh-CN', timezoneOffsetSeconds: 28800 } },
 };
 
 const ALL_METHODS = Object.keys(VALID_ARGS) as DshIdeMethod[];
 
-test('method whitelist has the 22 methods (20 session + 2 account)', () => {
-	assert.equal(ALL_METHODS.length, 22);
+test('method whitelist has the 24 methods (20 session + 2 account + 2 archive)', () => {
+	assert.equal(ALL_METHODS.length, 24);
 	assert.equal(new Set(ALL_METHODS).size, ALL_METHODS.length);
 });
 
