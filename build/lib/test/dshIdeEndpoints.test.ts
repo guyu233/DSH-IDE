@@ -193,8 +193,12 @@ test('D16 round-33 contract prerequisite is documented and both command writers 
 	}
 	assert.match(dev, /必须先补契约真源，不得凭猜测实现/, '§8.10.10 must demand contract-first');
 	assert.match(dev, /不是接线完成声明/, '§8.10.10 must not claim wiring is done');
-	// setPermissionPreset 行的陈旧「wire 形状未核对」表述已被修正。
-	assert.doesNotMatch(dev, /wire 形状未核对前不接线/, 'the stale pre-round-31 wording must be gone');
+	// setPermissionPreset 行的陈旧「wire 形状未核对」表述已被修正：
+	// 只核 §8.10.9 结论表区，§7.7 历史记录引用该旧文案属合法追述，不误判。
+	const tableStart = dev.indexOf('#### 8.10.9');
+	const tableEnd = dev.indexOf('#### 8.10.10', tableStart);
+	assert.ok(tableStart > 0 && tableEnd > tableStart, '§8.10.9 / §8.10.10 must both exist');
+	assert.doesNotMatch(dev.slice(tableStart, tableEnd), /wire 形状未核对前不接线/, 'the stale pre-round-31 wording must be gone from the §8.10.9 conclusion table');
 	// 两套 backend 仍拒绝这两个 method。
 	for (const method of ['runCommand', 'setPermissionPreset']) {
 		assert.match(host, new RegExp(`${method}:\\s*missing\\('${method}'\\)`), `${method} must stay missing(...) on Host`);
