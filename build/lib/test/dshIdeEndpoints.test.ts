@@ -296,3 +296,26 @@ test('D54 probe checklist exists with U2/U3/U12 items and the six-column discipl
 	// 不允许把未执行记成通过。
 	assert.match(dev, /不得写「结论」/, 'a row without an observation must not carry a conclusion');
 });
+
+// ---------------------------------------------------------------------------
+// 第 24 轮：listen 事件面的边界（§8.10.2 与契约注释的澄清）。
+// 钉住「snapshot 是当前唯一事件名、扩展须先改契约」，防止在实现里私自加名字
+// 或用自建出站通道把 waterfall 帧绕过契约送达。
+// ---------------------------------------------------------------------------
+
+test('round-24 listen event surface stays snapshot-only until the contract changes', () => {
+	const protocol = read('src/vs/platform/dshClient/common/dshIdeProtocol.ts');
+	const channel = read('src/vs/platform/dshClient/electron-main/dshIdeChannel.ts');
+	const dev = read('docs/DEVELOPMENT.md');
+
+	// 契约里有澄清注释，且明确「当前唯一」「须先改本契约」。
+	assert.match(protocol, /当前唯一\*\*允许的事件名/, 'the contract must state that snapshot is currently the only event name');
+	assert.match(protocol, /须\*\*先改本契约\*\*/, 'the contract must require a contract change before extending');
+	// 通道实现只认这一个名字，其它返回 Event.None（行为未变）。
+	assert.match(channel, /export const DSH_IDE_SNAPSHOT_EVENT = 'snapshot'/, 'the snapshot event name must stay "snapshot"');
+	assert.match(channel, /if \(event !== DSH_IDE_SNAPSHOT_EVENT\) \{[\s\S]{0,80}?return Event\.None/, 'listen must keep returning Event.None for other names');
+	// §8.10.2 的「允许」已限定为「须先改契约真源」。
+	assert.match(dev, /`listen` \*\*可以\*\*增加官方事件名，但\*\*须先改契约真源\*\*/, '§8.10.2 must scope the permission to a prior contract change');
+	// 实现里不得出现第二个 listen 事件名常量。
+	assert.equal((channel.match(/DSH_IDE_[A-Z_]*EVENT\s*=/g) ?? []).length, 1, 'only one listen event-name constant may exist');
+});

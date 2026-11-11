@@ -502,6 +502,12 @@ export function validateDshIdeInput<K extends DshIdeMethod>(command: K, args: un
  * `invoke` 输出契约：只返回 `{ value }`（或错误），**绝不返回快照**。
  * 所有状态变化只走 `listen('snapshot')` 一条路。
  * `DshIdeChannel.call()` 组装输出时调用。
+ *
+ * 关于 `listen` 的事件面（第 24 轮澄清边界，不改行为）：`DSH_IDE_SNAPSHOT_EVENT`
+ * 是**当前唯一**允许的事件名，`DshIdeChannel.listen()` 对其它名字返回 `Event.None`。
+ * 若将来要把官方 waterfall 帧（审批 / 问卷）送达到 IDE，须**先改本契约**（新增
+ * 事件名常量 + 帧形状 + 消费者校验）并按第 2 章 §9 走完手续；在此之前不得在实现里
+ * 私自增加事件名，也不得改用自建出站通道（§8.10.2 的「允许增加」以「先改契约」为前提）。
  */
 export function validateDshIdeInvokeOutput(value: unknown): { readonly value: unknown } {
 	const output = exactRecord(value, ['value'], 'DshIdeInvokeOutput');
