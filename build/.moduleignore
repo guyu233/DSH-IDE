@@ -126,7 +126,26 @@ ssh2/.github/**
 ssh2/.eslint*
 ssh2/SFTP.md
 
-node-pty/**
+node-pty/binding.gyp
+node-pty/build/Debug/**
+node-pty/build/config.gypi
+node-pty/build/*.sln
+node-pty/build/*.vcxproj*
+node-pty/build/*.filters
+node-pty/node_modules/**
+node-pty/scripts/**
+node-pty/README.md
+node-pty/.github/**
+node-pty/.eslint*
+node-pty/src/**
+node-pty/third_party/**
+node-pty/typings/**
+node-pty/**/*.map
+node-pty/**/*.ts
+!node-pty/lib/**/*.js
+!node-pty/build/Release/*.node
+!node-pty/package.json
+!node-pty/LICENSE
 
 @parcel/watcher/binding.gyp
 @parcel/watcher/build/**
