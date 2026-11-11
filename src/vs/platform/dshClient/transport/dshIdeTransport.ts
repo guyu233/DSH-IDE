@@ -438,6 +438,10 @@ export class DshIdeTransportBackend implements DshIdeBackend {
 			case 'refreshSnapshot':
 				return { accepted: true };
 			case 'deleteSession':
+				// 删除由社区插件 `@michengai/dsh-archive-manager@1.3.1` 注册的
+				// `workspaceRegistry/deleteSession` 承担（§8.10.8 批准范围）；DSH-IDE 只调用，
+				// 不复制其删除链、不直接删 DSH 会话目录。
+				return this.deleteSessionViaPlugin(String(record['sessionId'] ?? ''));
 			case 'rewind':
 			case 'loadOlder':
 			case 'setEffort':
@@ -448,6 +452,37 @@ export class DshIdeTransportBackend implements DshIdeBackend {
 			default:
 				throw new DshIdeTransportError('dsh-ide/feature-unavailable', `DSH-IDE method ${JSON.stringify(method)} is not mapped`);
 		}
+	}
+
+	/**
+	 * 调用社区插件暴露的删除端点，并把「插件缺失 / 方法不可用」映射为契约错误码。
+	 *
+	 * 端点名与插件版本以 `common/dshIdeProtocol.ts` 的 `DSH_IDE_DELETE_SESSION_ENDPOINT` /
+	 * `DSH_IDE_DELETE_SESSION_PLUGIN_VERSION` 为真源；本文件只用字面量发起调用，因为
+	 * `transport/` 由 node --experimental-strip-types 直接加载（值导入 `.js` 说明符无法解析），
+	 * 漂移由 `dshIdeProtocol.test.ts` 的端点一致性断言兜住。
+	 *
+	 * 三种降级都不伪造成功：网关报 `gateway/invocation-unavailable`（插件未注册该 endpoint）
+	 * 或结果不是 `{ deleted: true }` 时一律拒绝，由调用方保留列表项并报告原因。
+	 */
+	private async deleteSessionViaPlugin(sessionId: string): Promise<{ accepted: true }> {
+		let value: unknown;
+		try {
+			value = await this.transport.call('workspaceRegistry', 'deleteSession', { sessionId });
+		} catch (error) {
+			if (error instanceof DshIdeTransportError && error.code.startsWith('gateway/')) {
+				throw new DshIdeTransportError(
+					'dsh-ide/feature-unavailable',
+					'session delete endpoint is unavailable: install and enable @michengai/dsh-archive-manager@1.3.1',
+					{ capability: 'deleteSession', cause: error.code },
+				);
+			}
+			throw error;
+		}
+		if (!isRecord(value) || value['deleted'] !== true) {
+			throw new DshIdeTransportError('dsh-ide/feature-unavailable', `session delete did not confirm deletion for ${sessionId}`, { capability: 'deleteSession' });
+		}
+		return { accepted: true };
 	}
 
 	close(): void {

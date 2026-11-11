@@ -195,13 +195,13 @@ MB」，而是不再构建 / 打包 server-web 的 164.2 MiB。server-web
 | 阶段状态       | 不在此复制状态值，只保留入口                                                                                                                                                      | 第 3 章 §6                 |
 | 待办与完成标记 | 不在此复制条数，只保留入口                                                                                                                                                        | 第 7 章 §3                 |
 | 用户操作清单   | 真机验证一律由用户执行；每轮只整理「用户现在要干啥」                                                                                                                              | §0.2                       |
-| 门禁 / 测试    | 3 `PASS` + 1 `PENDING`（`PENDING` 不计通过）；`test-dsh:all` 基线 194/194（13 + 181）                                                              | 第 5 章 §3–§4              |
+| 门禁 / 测试    | 3 `PASS` + 1 `PENDING`（`PENDING` 不计通过）；发布聚合 `release-gate` 就位（§9.4，当前如实拒绝：`contract` 为 `PENDING`）；`test-dsh:all` 基线 209/209（13 + 196）                                                              | 第 5 章 §3–§4              |
 | 分发体积       | 重打包实测 119,704,107 B（114.2 MiB）：已无 server-web；仍含 `*.js.map`、未 minified（D29 未完成）                                                                                | 第 8 章 §8.2.5             |
-| 承载现状 | 开窗链路代码侧已闭环（命名空间挂载 / 心跳 / 防抖 / `sessionId`）；按钮 → 原生 IDE 窗口按 AI 记录可用，按 AGENTS §6 需用户复验（§0.2 U08） | 第 7 章 §3 / 第 5 章 §10.2 |
+| 承载现状 | 开窗链路代码侧已闭环（命名空间挂载 / 心跳 / 防抖 / `sessionId`）；按钮 → 原生 IDE 窗口按 AI 记录可用，按 AGENTS §6 需用户复验（§0.2 U08）；第 21 轮新增会话删除接线（D51，endpoint 可用性归 U12） | 第 7 章 §3 / 第 5 章 §10.2 |
 | 终端载荷       | `runtime/app` 仍缺 `ptyHostMain` 与 `node-pty`                                                                                                                                    | 第 8 章 §8.2.5             |
-| 最近一轮改动 | D45：发布首个插件包并补仓库展示——新增 `CHANGELOG.md`（2.0.0 更新说明，含新增/变更/修复/移除/已知限制），README 增加插件介绍（是什么、解决什么问题、关键特性、架构图、安装方式）并保持 §2–§8 章节号不变，代码推送至 origin/main | 第 7 章 §7.7 |
-| 未验证项 | K5 / D19 Chat 面板 DTO 回填观测（§0.2 U02，需用户在窗口内发消息）；另 8 项真机验收（§0.2 U03–U07）；剔 map / minified 打包（D29）；D41 修复本身的真机复核并入 U02；R2 每轮加载凭据待用户按 §0.2 U09 回填 | 第 5 章 §10.2 / §0.2 |
-| 最后更新       | 2026-11-10 / `cf0a04e5`                                                                                                                                                           | 本表                       |
+| 最近一轮改动 | 第 21 轮（代码实现）：D51 会话删除接线（Host 双形态 endpoint 解析 + 归属 / 存在性前置校验 + `{deleted:true}` 结果判定 + live 核验；transport 调 `workspaceRegistry/deleteSession`，`gateway/*` 映射 `FEATURE_UNAVAILABLE`）；D61 版本绑定三常量入契约真源 + 协议单测 3 项；D57 `release-gate` 发布聚合（如实拒绝 PENDING）；D60 文档 11 处 20→22 口径 + channel 分发清单补齐 2 账号域；勘误修复 `test-dsh:all` stale 条目（`947e8902` 漏改），基线升至 209/209；删除根目录异常 `CON` 文件（用户确认） | 第 7 章 §7.7 |
+| 未验证项 | K5 / D19 Chat 面板 DTO 回填观测（§0.2 U02，需用户在窗口内发消息）；另 8 项真机验收（§0.2 U03–U07）；剔 map / minified 打包（D29）；D41 修复本身的真机复核并入 U02；§8.10 的 U2 / U3 探针与 D46–D50 / D52–D54 / D59 未实现（U1 已定论），U10 / U11 / U12 待用户执行；**D51 / D61 的 endpoint 运行时可用性（插件是否已安装、overlay 与 inject 加载顺序、删除后两侧列表同步）全部归 U12 真机探针**；认证材料脱敏、5 个原生模块逐模块加载未实测（U11）；官方会话删除入口不存在已由静态源码定论，不列为真机项 | 第 5 章 §10.2 / §0.2 / §8.10 / §8.10.7 / §8.10.8 / §8.8.7 |
+| 最后更新       | 2026-11-11 / `9b6b45eb`                                                                                          | 本表                       |
 
 ### 0.2 用户本轮操作清单（每轮更新）
 
@@ -218,15 +218,18 @@ MB」，而是不再构建 / 打包 server-web 的 164.2 MiB。server-web
 | U02 | 重新打包并重装（`gulp dsh-ide-pack` → 覆盖安装 → 重启 DSH），再点鲸鱼按钮打开原生 IDE 窗口，在 Chat 面板发一条消息，观察 DTO 投影行：**回答文字只能出现一次、且必须是完整的（不能只剩开头一段）** | D19 / D41 / K5 / 第 5 章 §6 第 8 项       | 需先重装本轮代码（D41 改了投影层，旧包不含）；U01 已完成                    | Chat 面板出现来自 `dshIde` 的 DTO 行，`version` 连续、无错位状态；流式回答不重复、不截断；留截图或日志 | 第 5 章 §10.2、D19 / D41 状态     | 待用户执行 |
 | U03 | 保持 DSH 主窗口与 IDE 窗口同时打开，对照同一会话消息流；再关闭 IDE 窗口                     | 第 5 章 §6 第 1 / 2 / 5 项          | U02 完成                                                                     | 两窗口消息一致；关闭 IDE 后 DSH 会话 / 审批 / 生成未被取消                     | 第 5 章 §6 验收记录、D14    | 待用户执行 |
 | U04 | 在语音服务未就绪时确认 IDE 听写入口明确不可用                                               | D15 / 第 5 章 §6 第 9 项            | U01 完成                                                                     | 入口不可用，且不启动本地识别后端                                               | 第 5 章 §6、D15             | 待用户执行 |
-| U05 | 双窗口触发 `approval/request` 与 `user-questions/request`，任一窗口 resolve                 | 第 5 章 §6 第 3 / 4 项、D13 / D14   | 暂阻塞：20 method 功能接线与双窗口镜像未完成（D13 / D14）                    | 两边弹出，首个决议生效，重复返回 `ALREADY_RESOLVED`                            | 第 5 章 §6、D13 / D14       | 暂阻塞     |
+| U05 | 双窗口触发 `approval/request` 与 `user-questions/request`，任一窗口 resolve                 | 第 5 章 §6 第 3 / 4 项、D13 / D14   | 暂阻塞：审批问卷双窗口接线未完成（D13 / D14）；会话删除已接线（D51 / D61 / D57） | 两边弹出，首个决议生效，重复返回 `ALREADY_RESOLVED`                            | 第 5 章 §6、D13 / D14       | 暂阻塞     |
 | U06 | 在 IDE 内打开终端并跑一条命令，确认 PTY 数据流与 5 个 NAPI 模块加载                         | 第 5 章 §6 第 6 项、D20 / D23 / D24 | 暂阻塞：`ptyHostMain` / `node-pty` 载荷未补、重打包未含终端入口（D20 / D29） | 终端可开、数据流走原生 `node-pty`，Electron 44.7.0 下加载无 ABI 报错           | 第 5 章 §6、D20 / D23 / D24 | 暂阻塞     |
 | U07 | 按固定顺序跑完 9 项真机验收，并在上游升版后重放 4 个注入点 patch                            | 第 5 章 §6 全 9 项、D21 / D26       | 暂阻塞：K6 前置与 P6 上游核对未完成（D13 / D14 / D20 / D26）                 | 9 项全部通过、4 个指纹一致                                                     | 第 5 章 §6、D21 / D26       | 暂阻塞     |
 | U08 | 复验会话头部鲸鱼按钮：确认它在「…」右侧、点击能按当前工作区打开原生 IDE 窗口 | D37 / D38 / D39 | U01 已完成 | 按钮可见且点击后出现 IDE 窗口；失败时按钮复位并给出原因 | 第 5 章 §10.2、D37 状态 | 待用户执行 |
 | U09 | 在 DSH 创造模式下加载「创造插件」的技能与规范（§0 R2），回填加载凭据：技能名 / 版本、规范来源、加载时间与加载结果 | §0 R2 / D11 / 第 7 章 §7.7 | 已完成：用户在创造模式确认就绪，AI 加载 `cordis-plugin-development`（含 `references/practices.md`）、`editing-cordis-compositions`、`cordis-composition-reference`；来源 `@deepseek-ai/dsh-agent-preset/skills/`（0.2.2-rc.1），时间 2026-11-10T14:56–15:05 | 技能正文返回、适用规范已读；凭据写入 §7.7 第 14 轮 | 第 7 章 §7.7 第 14 轮行、D11 依据 | 已完成 |
+| U10 | 执行 §8.10.5 的 U2 删除链判据 / U3 目录与归属两项剩余探针（U1 官方入口已由静态源码定论），按「断言 / 方法 / 观察值 / 结论 / 解锁或否决哪一步 / 对应项」逐条回填 | D54 / §8.10.5、§8.10.6、§8.10.7 | 暂阻塞：D46–D52 尚未实施，且需真实 DSH profile 与用户操作 | 每条给出成立 / 不成立 / 无法判定；无法判定一律列未完成项、不标 `PASS` | §0.2 结果写回列、第 7 章 §3（D52 / D54）、§7.7 | 待用户执行 |
+| U11 | 在真实 DSH profile 上复核两项：`host-endpoint.json` 的 query token 是否落盘或进入日志；5 个原生模块在宿主 Electron 44.7.0 下逐个加载结果。官方会话删除入口是否存在已由 §8.10.7 静态定论，不再需要真机判定 | D55 / D56 / §8.8.5 / §8.8.7 / §8.10.7 | 需用户安装当前插件并在真机窗口操作 | 两项各给出「已脱敏 / 仍泄露」「逐模块加载记录」；无法判定一律列未完成项 | 第 5 章 §10.2、§0.2 结果写回列、D55 / D56 | 待用户执行 |
+| U12 | 在真实 DSH profile 安装并启用 `@michengai/dsh-archive-manager@1.3.1` 后复核：插件 overlay 是否生效、`ctx.get('workspaceRegistry').deleteSession` 是否可调用、与 DSH-IDE 的加载顺序、删一条测试会话后 DSH 主窗口与 IDE 侧栏是否同步；并在插件未安装时确认返回 `FEATURE_UNAVAILABLE` | D51 / D62 / §8.10.8（2）（3）（5） | 需用户安装第三方插件并在真机窗口操作 | 给出 endpoint 存在性、调用返回形态、加载顺序结论与删后两侧列表观测；无法判定一律列未完成项、不标 `PASS` | 第 5 章 §10.2、§0.2 结果写回列、D51 / D62、§7.7 | 待用户执行 |
 
-统计（由 `verify:docs-graph` 输出）：4 项待用户执行 / 2 项已完成 / 3
-项暂阻塞（U01 已由 AI 完成安装与重启，其余为观测 / 复验或 DSH 会话动作，必须由用户执行；U09 是 R2 前置动作）。每轮只按实际进展改「状态」列、把新动作补进本表，并同步 §7.7
-一行；未取得用户回填的观测结果前，不得把 D19 / D21 等标成已完成。
+统计（由 `verify:docs-graph` 输出）：7 项待用户执行 / 2 项已完成 / 3
+项暂阻塞（U01 已由 AI 完成安装与重启，其余为观测 / 复验或 DSH 会话动作，必须由用户执行；U09 是 R2 前置动作；U10 / U11 / U12 的探针与真机复核归用户执行）。每轮只按实际进展改「状态」列、把新动作补进本表，并同步 §7.7
+一行；未取得用户回填的观测结果前，不得把 D19 / D21 等标成已完成。U05 的阻塞范围随第 21 轮收窄：删除会话的 Host 侧接线已完成（D51 / D61 / D57），剩余阻塞为 D13 / D14 的审批问卷双窗口接线与语音（D15）。
 
 **当前执行顺序建议（不改变待办状态与阶段门禁）**：
 
@@ -619,7 +622,7 @@ E8），不改变落点。「错误码」只列
 
 | 编号 | 触发条件                                     | 检测点                                                  | 处理动作                                                                                  | 对外结果                           | 边界条件                                                                             |
 |------|----------------------------------------------|---------------------------------------------------------|-------------------------------------------------------------------------------------------|------------------------------------|--------------------------------------------------------------------------------------|
-| E1   | method 不在 20 项白名单                      | `validateDshIdeInput`                                   | 抛确定性 `TypeError`，`call()` 映射为统一错误                                             | `dsh-ide/feature-unavailable`      | 绝不静默 no-op、绝不猜测近似方法名                                                   |
+| E1   | method 不在 22 项白名单                      | `validateDshIdeInput`                                   | 抛确定性 `TypeError`，`call()` 映射为统一错误                                             | `dsh-ide/feature-unavailable`      | 绝不静默 no-op、绝不猜测近似方法名                                                   |
 | E2   | 参数形状违规                                 | `validateDshIdeInput` → `exactRecord` / `jsonValue`     | 抛 `TypeError`                                                                            | `dsh-ide/invalid-argument`         | 未知字段、显式 `undefined`、非有限数、环、class 实例一律拒绝；仅 `x-` 前缀字段可扩展 |
 | E3   | `invoke` 输出含快照或额外字段                | `validateDshIdeInvokeOutput`                            | 抛 `TypeError`                                                                            | 调用失败                           | 输出对象键集合恒为 `['value']`                                                       |
 | E4   | 快照连续性违规                               | `assertSnapshotContinuity`                              | 抛 `TypeError`，消费者不渲染该帧                                                          | 流程级 `STF`                       | `prev === undefined` 是唯一豁免；`channelId` / `wireRevision` 变化不可恢复           |
@@ -697,15 +700,24 @@ E8），不改变落点。「错误码」只列
 
 3.  **不可跳过**：任一出口判据未满足，禁止启动后继阶段，禁止先把后继阶段的产物落盘再补判据。
 
-    **唯一例外（2026-11-09 用户显式授权）**：P5 的「开窗接线」可在 K5
-    未达成时先行实施。理由：K5 的 最后一条判据是「Chat 面板显示 DTO
-    投影内容」的真机观测，而该观测**必须先有开窗**（用户从 DSH 主窗口
-    点「DSH-IDE」），开窗本身属 P5。形成「K5 等 P5、P5 等 K5」的循环。
-    授权记录：用户在本轮明确选择「授权我打破 §3.1 顺序：先做 P5
-    开窗，再回头看 K5」。 边界：**仅开窗链路**可先行（`client.js` 按钮 →
-    开窗 → 建立连接）；P5 的其余活动（20 method 功能接线、
-    双窗口镜像、语音、删除会话）仍必须等 K5
-    达成后才能开始。开窗完成后立即回到 K5 补齐真机观测。
+    **K5 与 P5 的依赖拆分（消除循环，不新增阶段）**：K5 的末条判据是
+    「在原生 IDE 窗口内观测 Chat 面板的 DTO 投影内容」。该观测需要窗口
+    可打开，但不需要 P5 的全部功能接线完成。因此把 P5 拆为两个
+    **工作包**（工作包不是阶段，编号仍用现有 D 编号，阶段仍只有 P0–P7）：
+
+    - **开窗工作包**（D37 / D38 / D39 / D40）：`client.js` 按钮 →
+      `remote.$mount(IDE_REMOTE)` → Host 心跳 / 拉起防抖 → `sessionId`
+      全链路 → 原生 IDE 窗口。**完成判据**：`ide/ping` 与带 `sessionId`
+      的 `ide/launch` 返回成功、窗口可打开；此判据是 **K5 的前置**。
+    - **功能接线工作包**（D13 / D14 / D15 / D16 / D17 等）：审批、问卷、
+      双窗口镜像、语音、会话管理。**完成判据**：K6 所列各项；**前置
+      仍为 K5 达成**。
+
+    固定顺序：开窗工作包 → K5 真机观测（U02 / D19）→ 功能接线工作包 →
+    K6。K5 依赖「开窗工作包产出」而非「P5 阶段完成」，功能接线不先于
+    K5 落盘，因此不存在「K5 等 P5、P5 等 K5」的循环，也不改变 P0–P7
+    严格串行定义。授权留痕：2026-11-09 用户明确选择「先做开窗，再回头
+    看 K5」。
 
 4.  **阶段内返工**：出口判据未满足时停留在本阶段修复，并重新执行本阶段**全部**出口判据；这属于同一阶段的重复执行，不是新路线。返工记录写入提交信息。
 
@@ -770,7 +782,7 @@ P7 打包为 DSH 插件与交付
 #### P1 契约定义与通道骨架
 
 - **前置**：K1。
-- **活动**：把 `dshIde/v1` 协议、校验器、20 方法 schema
+- **活动**：把 `dshIde/v1` 协议、校验器、22 方法 schema（20 会话域 + 2 账号域，见第 2 章 §4）
   与版本契约一次性冻结；建立 `DshIdeChannel` 骨架、`EmptyIdeViewHost`
   占位与 `app.ts` 唯一注册；建立四条门禁脚手架与协议单测。
 - **产出**：`common/dshIdeProtocol.ts`（17
@@ -812,7 +824,7 @@ P7 打包为 DSH 插件与交付
   侧**官方客户端传输适配**（Host 的 loopback 端点 + 官方
   `dsh-client-connection` + `connection.authenticatedUrl()`
   派生鉴权），把 `session/event` / `agent/assistant-stream` 翻译成中立
-  `IdeEvent` 交给 `DshIdeViewService`，并把 20 个 method
+  `IdeEvent` 交给 `DshIdeViewService`，并把 22 个 method
   经同一链路回送；适配层放在 `platform/dshClient/common` 与
   `electron-main` 之外以保住 `boundary` 门禁（裁定见第 7 章
   §3.1）；在插件 Host 半身（`apply(ctx)` 拿到的 `dshCtx`）内订阅
@@ -955,7 +967,7 @@ anchor（ENOENT），而该路径在被混淆的 asar
 
 **K4 判定（唯一结论）**：K4
 的**代码与协议**判据全部满足——真实端口接通（端点自解析 +
-官方传输适配）、 20 method 有确定 handler
+官方传输适配）、 22 method 有确定 handler
 且过校验、`call`/`listen`/`disposeOwner` 符合第 2 章、`invoke` 恒为
 `{ value }`、 waterfall 语义单测覆盖、`boundary` PASS、17
 符号仍单源。**真机端到端**（`session/follow` 实时流 +
@@ -963,7 +975,7 @@ anchor（ENOENT），而该路径在被混淆的 asar
 决议仍未在真机观察（需要两个 IDE 窗口同时挂到同一会话，属 P6 的 9
 项真机验收）。
 
-因此：上述 K4 判据均有实测记录（真实端口接通、20 method
+因此：上述 K4 判据均有实测记录（真实端口接通、22 method
 确定、call/listen/disposeOwner 合规、invoke 恒 `{ value }`、 waterfall
 语义单测覆盖、boundary PASS、17
 符号单源、端到端实跑有记录）；阶段状态以第 3 章 §6 为准。P4 的入口判据
@@ -995,11 +1007,11 @@ K5 另有要求， 双窗口 waterfall 观测按第 5 章 §6 第 3/4 项在 P6 
   Electron**」（§0 R1 修订），加固 `ensureElectronHome()`；`client.js`
   按钮改为 `remote.ide.launch(workspace, sessionId)` 打开原生窗口（先
   `remote.$mount(IDE_REMOTE)` 挂载 `ide` 命名空间），删除 iframe
-  页面注册与 `idePageUrl()`；一次性接上 20 个 method
-  对应的功能（审批、问卷、权限预设、模型、effort、斜杠命令、resume /
-  fork / rewind、goal / todo / usage / TPS / workingActivity
-  投影、`ping` /
-  `inlineComplete`、账号、语音、删除会话）；保持双窗口并存，DSH
+  页面注册与 `idePageUrl()`；一次性接上 **22 个 method**（20 个会话域 +
+  2 个账号域，见第 2 章 §2 与 D42）对应的功能（审批、问卷、权限预设、
+  模型、effort、斜杠命令、resume / fork / rewind、goal / todo / usage /
+  TPS / workingActivity 投影、`ping` / `inlineComplete`、账号登录态、
+  语音、删除会话）；保持双窗口并存，DSH
   主窗口按钮可用；语音未就绪时入口明确不可用。
 - **产出**：`app.ts` 真实接线、`client.js` 开窗、Electron home
   加固与单测、完整功能接线、双窗口镜像。
@@ -1043,7 +1055,7 @@ K5 另有要求， 双窗口 waterfall 观测按第 5 章 §6 第 3/4 项在 P6 
 - **出口判据 K7**：`protocol-single-source` / `boundary` /
   `projection-golden` 均 `PASS`；`contract`
   启用失败断言后完成一次上游核对且 4 个注入点指纹一致，并按第 5 章 §9
-  记录状态；`test-dsh:all` 不低于 194/194；9 项真机验收全部通过；P95 ≤
+  记录状态；`test-dsh:all` 不低于 209/209；9 项真机验收全部通过；P95 ≤
   512 KiB；IDE 终端可开、PTY 数据流走原生 `node-pty`，且 NAPI/ABI
   加载冒烟通过；CI 配置中可见同一组命令；第 7
   章登记的历史阶段标记与失效章节引用零残留。
@@ -1081,7 +1093,7 @@ K5 另有要求， 双窗口 waterfall 观测按第 5 章 §6 第 3/4 项在 P6 
 | K1   | P0       | 工程基线就绪 | 无   | 只读参考目录不得写入；官方构建脚本可用                                                                   |
 | K2   | P1       | 契约冻结     | K1   | 协议真源唯一；全仓只注册一条 `dshIde` 通道                                                               |
 | K3   | P2       | 投影冻结     | K2   | golden 逐字节一致；适配层零厂商依赖                                                                      |
-| K4   | P3       | 通道贯通     | K3   | 20 方法全覆盖；waterfall 只存在一种 answerer 形态                                                        |
+| K4   | P3       | 通道贯通     | K3   | 22 方法全覆盖；waterfall 只存在一种 answerer 形态                                                        |
 | K5   | P4       | 视图贯通     | K4   | 连续性 fail-closed；`workbench/**` 边界不破                                                              |
 | K6   | P5       | 双窗口贯通   | K5   | 关闭 IDE 窗口不取消 DSH 会话                                                                             |
 | K7   | P6       | 验证通过     | K6   | 九项真机验收全通过；P95 ≤ 512 KiB；NAPI/ABI 加载冒烟与终端冒烟闭环；CI 接入与第 7 章 第 7 章残留清理闭环 |
@@ -1117,14 +1129,14 @@ Spike 编号，与业务流程状态 `ST0–ST4` / `STF` 无关。
 
 | 阶段 | 状态       | 依据（证据或命令）                                                                                                                                                                                                                   | 最后实测                |
 |------|------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|-------------------------|
-| P0   | 已完成     | 工程基线、bundle 清单、patch、资源、官方打包任务齐备                                                                                                                                                                                 | 2026-11-10 / `cf0a04e5` |
-| P1   | 已完成     | K2 判据实测通过；`verify:dsh-ide-protocol-single-source`                                                                                                                                                                             | 2026-11-10 / `cf0a04e5` |
-| P2   | 已完成     | `translator.ts` / `ide-view-projector.ts` / golden / 单测；K3 判据实测通过                                                                                                                                                           | 2026-11-10 / `cf0a04e5` |
-| P3   | 已完成     | K4 判据：真实端口接通、20 method 确定、`call`/`listen`/`disposeOwner` 合规、`invoke` 恒 `{ value }`、waterfall 单测覆盖、`boundary` PASS；端到端实跑（独立真实 Host）listSessions=52 / listModels=3 / follow=329 records → 98 行投影 | 2026-11-10 / `cf0a04e5` |
-| P4   | 进行中     | 消费者 + 快照流 + DTO→UI + DTO→Chat 内容 + 唯一 Chat Agent + `dshChatSeam` 均已落地；测试基线见第 5 章 §4；原生 IDE 窗口已可渲染（D33 完成），Chat 面板 DTO 回填由用户按 §0.2 U02 观测（D19）                                        | 2026-11-10 / `cf0a04e5` |
-| P5   | 进行中     | 开窗链路代码侧已闭环（`remote.$mount` 命名空间挂载、Host 心跳、拉起防抖、`sessionId` 全链路）：按钮 → 按当前工作区开原生 IDE 窗口按 AI 记录可用，但按 AGENTS §6 需用户复验（§0.2 U08 / D37 待核对）；终端载荷缺口与双窗口镜像未接线（第 7 章 §3）                                                             | 2026-11-10 / `cf0a04e5` |
-| P6   | 未开始     | 门禁脚手架 3 `PASS` + 1 `PENDING`（第 5 章 §3）；9 项真机验收由用户按 §0.2 执行，NAPI/ABI 加载冒烟、终端冒烟未跑                                                                                                                     | 2026-11-10 / `cf0a04e5` |
-| P7   | 未满足出口 | 打包链路可执行，前置 K7 未达成；重打包实测 119,704,107 B，已无 server-web，仍含 map、未 minified（第 8 章 §8.2.5）                                                                                                                   | 2026-11-10 / `cf0a04e5` |
+| P0   | 已完成     | 工程基线、bundle 清单、patch、资源、官方打包任务齐备                                                                                                                                                                                 | 2026-11-11 / `9b6b45eb` |
+| P1   | 已完成     | K2 判据实测通过；`verify:dsh-ide-protocol-single-source`                                                                                                                                                                             | 2026-11-11 / `9b6b45eb` |
+| P2   | 已完成     | `translator.ts` / `ide-view-projector.ts` / golden / 单测；K3 判据实测通过                                                                                                                                                           | 2026-11-11 / `9b6b45eb` |
+| P3   | 已完成     | K4 判据：真实端口接通、当时 20 method 确定（D42 后为 22：20 会话域 + 2 账号域，契约真源与门禁已同步；第 21 轮 D60 完成全仓口径核对）、`call`/`listen`/`disposeOwner` 合规、`invoke` 恒 `{ value }`、waterfall 单测覆盖、`boundary` PASS；端到端实跑（独立真实 Host）listSessions=52 / listModels=3 / follow=329 records → 98 行投影 | 2026-11-11 / `9b6b45eb` |
+| P4   | 进行中     | 消费者 + 快照流 + DTO→UI + DTO→Chat 内容 + 唯一 Chat Agent + `dshChatSeam` 均已落地；测试基线见第 5 章 §4；原生 IDE 窗口已可渲染（D33 完成），Chat 面板 DTO 回填由用户按 §0.2 U02 观测（D19）；§8.10 设计基线的 D51（会话删除接线）/ D60（22 method 口径）/ D61（版本绑定 + 四类单测）已于第 21 轮完成（D46–D50 / D52–D54 仍未完成；D58 已完成：官方入口不存在，删除走社区插件 endpoint） | 2026-11-11 / `9b6b45eb` |
+| P5   | 进行中     | 开窗链路代码侧已闭环（`remote.$mount` 命名空间挂载、Host 心跳、拉起防抖、`sessionId` 全链路）：按钮 → 按当前工作区开原生 IDE 窗口按 AI 记录可用，但按 AGENTS §6 需用户复验（§0.2 U08 / D37 待核对）；第 21 轮完成 D57 发布聚合（P7 闸门先行落地）并修复 `test-dsh:all` stale 条目；终端载荷缺口、双窗口镜像与审批问卷接线仍未完成（第 7 章 §3）                                                             | 2026-11-11 / `9b6b45eb` |
+| P6   | 未开始     | 门禁脚手架 3 `PASS` + 1 `PENDING` + 聚合 `release-gate`（第 21 轮实测如实拒绝，§9.4）；9 项真机验收由用户按 §0.2 执行，NAPI/ABI 加载冒烟、终端冒烟未跑                                                                                                                     | 2026-11-11 / `9b6b45eb` |
+| P7   | 未满足出口 | 打包链路可执行，前置 K7 未达成；重打包实测 119,704,107 B，已无 server-web，仍含 map、未 minified（第 8 章 §8.2.5）                                                                                                                   | 2026-11-11 / `9b6b45eb` |
 
 「最后实测」是最后一次核对的日期与
 commit，不是该阶段达成时间。阶段状态以本表为准；实现差距见第 7 章
@@ -1407,11 +1419,12 @@ B1–B5 是流程内的检查点，与开发路线的 K1–K8 不同，二者不
 |------------------------|-------------------------------------------------------------------------------------------------------------|---------------------------------------------------------|
 | 编译 DSH 测试          | `npm run build-dsh-tests`                                                                                   | 退出 0，产出 `out/`                                     |
 | mocha tdd 半场         | `npm run test-dsh`                                                                                          | `13 passing`                                            |
-| 全量 DSH 测试          | `npm run test-dsh:all`                                                                                      | `13 passing` + `181/181`，合计 194/194                  |
+| 全量 DSH 测试          | `npm run test-dsh:all`                                                                                      | `13 passing` + `196/196`，合计 209/209                  |
 | 门禁 1                 | `npm run verify:dsh-ide-protocol-single-source`                                                             | `STATUS: PASS`                                          |
 | 门禁 2                 | `npm run verify:dsh-ide-boundary`                                                                           | `STATUS: PASS`                                          |
 | 门禁 3                 | `npm run verify:dsh-ide-projection-golden`                                                                  | `STATUS: PASS`                                          |
 | 门禁 4                 | `npm run verify:dsh-ide-contract`                                                                           | `STATUS: PENDING`（当前，见 §3）                        |
+| 发布聚合（§9.4，D57）  | `npm run verify:dsh-ide-release-gate`                                                                       | 全部 `PASS` 才退出 0；任一 `PENDING` / `FAIL` 退出 1    |
 | 类型检查               | `$env:NODE_OPTIONS='--max-old-space-size=12288'; .\node_modules\.bin\tsc.cmd -p src/tsconfig.json --noEmit` | 变更文件 0 错误（§4）                                   |
 | 官方打包               | `node ./node_modules/gulp/bin/gulp.js dsh-ide-pack`                                                         | 产出 `dist/dsh-ide-2.0.0.tgz`（§8）                     |
 | sidecar 构建           | `node build/dsh/chat-render/build-render.mjs`                                                               | 产出 `build/dsh/chat-render/dist/dsh-chat.js` 与 `.css` |
@@ -1430,8 +1443,12 @@ B1–B5 是流程内的检查点，与开发路线的 K1–K8 不同，二者不
 
 ``` powershell
 node node_modules/mocha/bin/mocha.js --ui tdd "out/vs/platform/dshClient/test/node/*.test.mjs" "out/vs/workbench/contrib/dsh/test/browser/chatClient/*.test.js" "out/vs/workbench/contrib/dsh/test/browser/chatClient/*.test.mjs"
-node --experimental-strip-types --test build/lib/test/dshBuildProvenance.test.ts build/lib/test/dshBundleStaging.test.ts build/lib/test/ripgrep.test.ts build/lib/test/dshIdeProtocol.test.ts build/lib/test/dshIdeProjection.test.ts build/lib/test/dshIdeChannel.test.ts build/lib/test/dshIdeTransport.test.ts src/vs/platform/dshClient/test/host/ideViewHost.test.mjs
+node --experimental-strip-types --test build/lib/test/dshBuildProvenance.test.ts build/lib/test/dshBundleStaging.test.ts build/lib/test/ripgrep.test.ts build/lib/test/dshIdeProtocol.test.ts build/lib/test/dshIdeProjection.test.ts build/lib/test/dshIdeChannel.test.ts build/lib/test/dshIdeTransport.test.ts build/lib/test/dshIdeConsumer.test.ts build/lib/test/dshIdeUiProjection.test.ts build/lib/test/dshChatAgent.test.ts build/lib/test/dshIdeToSeamChain.test.ts build/lib/test/dshIdeLaunchListener.test.ts src/vs/platform/dshClient/test/host/ideViewHost.test.mjs src/vs/platform/dshClient/test/host/electronHome.test.mjs src/vs/platform/dshClient/test/host/ideLaunchQueue.test.mjs
 ```
+
+> 第 21 轮勘误：`dshIdeChatContent.test.ts` 已随 `947e8902`（R0 清理）删除，但本清单与
+> `package.json` 的 `test-dsh:all` 此前仍引用它——node:test 遇缺失文件直接退出 1，
+> 两条执行入口都因此被卡。第 21 轮已同步移除该条目，`test-dsh:all` 入口恢复可用。
 
 ### 3. 四条门禁判据与当前实测
 
@@ -1444,6 +1461,7 @@ node --experimental-strip-types --test build/lib/test/dshBuildProvenance.test.ts
 | `boundary`               | `src/vs/workbench` 全部 `.ts`（实测 4442 文件）零 `from '@deepseek-ai/` 与 `require('@deepseek-ai/`；`dshIdeChannel.ts` 零 Cordis / `dshCtx` / `apply(ctx)` 且构造函数必须含 `IdeViewHost`；`platform/dshClient/{common,electron-main,transport}` 下 `.ts`（排除 `test/`，实测 10 个文件）零 electron API、`@deepseek-ai/*`、Cordis 引用；`listen` 三层过滤与 `call` 真实分发断言；**P4/K5 起启用 UI 投影层隔离**：`dshIdeConsumer` / `dshIdeUiProjection` / `dshChatAgent` 三文件零 `electron-main` 反向依赖、零 DSH 包；快照校验只允许出现在消费者（通道层不得重复）；Chat Agent 必须是 `isDefault` 且经 `registerDynamicAgent` 注册 | **PASS**，退出 0                                                                             |
 | `projection-golden`      | `verify/golden/*.json` 至少 1 个 fixture；每个 fixture 起子进程真实执行 `projectIdeView(translateAll(fx.events))`，与 `fixture.expected` 做 `JSON.stringify` 逐字节比对；`fx.events` 必须为非空数组                                                                                                                                                                                                                                                                                                                                                                                                                                    | **PASS**，退出 0，1 个 fixture；脚本内附 `PENDING(P6)` 说明：真实事件流 P95 校准未执行（§5） |
 | `contract`               | `dshIdeContract.ts` 必须导出 `UPSTREAM_VALIDATED_VERSION`、`BLESSED_PACKAGES`、`installedMeetsVersion`、`upstreamDrift`、`VSCODE_PATCH_POINTS`；正则抽取的注入点恰好 4 个；逐文件计算 sha256 前 16 位指纹并打印基线                                                                                                                                                                                                                                                                                                                                                                                                                    | **PENDING**（状态语义见 §9），退出 0；首次基线：`validated=0.2.2-rc.1`，4 个指纹已产出       |
+| `release-gate`（§9.4 聚合，不新增门禁语义） | 依次执行四条门禁并读取各自 `STATUS` 与退出码：任一 `FAIL` / 退出码非 0 / `PENDING` → 拒绝发布（退出 1）；全部 `PASS` → 通过（退出 0） | 第 21 轮实测：如实拒绝发布（`contract=PENDING`，退出 1），行为与 §9.4 一致 |
 
 本表只记录实测结果；`PENDING`
 的状态语义、触发条件、升级条件与交付口径（含脚本内 `PENDING(2.4)` /
@@ -1464,23 +1482,24 @@ node --experimental-strip-types --test build/lib/test/dshBuildProvenance.test.ts
 | `dshBuildProvenance.test.ts`   | 构建来源凭据                                                                                                                                                                                   | 4                  |
 | `dshBundleStaging.test.ts`     | bundle 清单与 stage 字面量                                                                                                                                                                     | 7                  |
 | `ripgrep.test.ts`              | 平台过滤                                                                                                                                                                                       | 5                  |
-| `dshIdeProtocol.test.ts`       | 22 方法白名单、双向校验器、连续性 fail-closed                                                                                                                                                  | 19                 |
+| `dshIdeProtocol.test.ts`       | 22 方法白名单、双向校验器、连续性 fail-closed、**deleteSession 插件绑定（插件名 / 版本 / endpoint 与传输层一致性，D61）**                                                                       | 22                 |
 | `dshIdeProjection.test.ts`     | golden 回放、事件分类、seq 幂等、稳定 id、600 行折叠、P95 脚手架、架构边界、**真实 DSH 线上事件（斜杠命名 + data 信封）翻译**、**瞬时流帧：attempt 身份去重、跨批次续写、结算替换占位行、漏收 start、失败尝试丢弃临时行（瞬时结局与 durable `assistant/attempt` 两条路径）** | 25                 |
-| `dshIdeChannel.test.ts`        | 通道分发（22 method）、三层过滤、`disposeOwner`、快照纪律、`state.view` 行级校验、`launch` 开窗命令、sessionId 传递与绑定、**follow 帧解包（含瞬时流帧归一、结局判定与无身份帧丢弃）**                          | 32                 |
-| `ideViewHost.test.mjs`         | Host 半身：四类事件订阅与归属过滤、唯一 answerer 形态、waterfall 一致性、会话归属、method 映射、Host 端点自解析与发布（不含 cookie）、插件入口 inject 与延迟等待清单一致、**等端口就绪再发布** | 25                 |
+| `dshIdeChannel.test.ts`        | 通道分发（22 method 全覆盖，含 2 个账号域）、三层过滤、`disposeOwner`、快照纪律、`state.view` 行级校验、`launch` 开窗命令、sessionId 传递与绑定、**follow 帧解包（含瞬时流帧归一、结局判定与无身份帧丢弃）**                          | 32                 |
+| `ideViewHost.test.mjs`         | Host 半身：四类事件订阅与归属过滤、唯一 answerer 形态、waterfall 一致性、会话归属、method 映射、Host 端点自解析与发布（不含 cookie）、插件入口 inject 与延迟等待清单一致、**等端口就绪再发布**、**deleteSession（overlay 成功 / 插件缺失 / 网关形态 / 网关失败 / 未确认删除 / 未知与越权会话前置拒绝 / 插件内部失败透传 / live 未移除核验）** | 34                 |
 | `electronHome.test.mjs`        | Electron 主页物化：同卷硬链接 + 目录联接、排除卸载器/7zip/许可文本、版本标记重建、幂等、跨卷拒绝复制、非 Windows 明确失败、载荷缺失                                                            | 7                  |
 | `ideLaunchQueue.test.mjs`      | Host 侧开窗客户端队列：clientId 校验、重复报到、在线投递、暂存与轮询取走、暂存请求交还、未知客户端不消耗、**心跳超时跳过并清理**、poll 刷新心跳、重复报到刷新心跳                              | 11                 |
-| `dshIdeTransport.test.ts`      | IDE 侧传输适配：鉴权交换、一元信封、remote.mux 流、waterfall 回投、method 映射与拒绝、**连接前不发送**                                                                                         | 14                 |
+| `dshIdeTransport.test.ts`      | IDE 侧传输适配：鉴权交换、一元信封、remote.mux 流、waterfall 回投、method 映射与拒绝、**连接前不发送**、**deleteSession 四类结果（endpoint 调用成功 / 插件缺失 / 未确认删除 / 插件内部失败透传）**                 | 18                 |
 | `dshIdeConsumer.test.ts`       | 消费者：校验、fail-closed（断号/倒退/channelId 变化）、16ms 合并、行级 diff                                                                                                                    | 10                 |
 | `dshIdeUiProjection.test.ts`   | 行展示文本：折叠用 preview、非折叠用 text、皆无返回 undefined                                                                                                                                  | 4                  |
 | `dshChatAgent.test.ts`         | 唯一 Chat Agent：元数据、submit 转发、失败不伪造、**等快照增长后只回显新行**、超时明确说明、取消                                                                                               | 7                  |
 | `dshIdeToSeamChain.test.ts`    | DTO 行 → 接缝的**串联**：五种 kind 都被接管、空行被过滤、折叠带 preview、isTrusted 策略                                                                                                        | 5                  |
 | `dshIdeLaunchListener.test.ts` | IDE 侧开窗接单：报到一次不重复、失败重试、onLaunch 抛错不断循环、畸形载荷、dispose 停止                                                                                                        | 5                  |
-| **合计**                       | —                                                                                                                                                                                              | **13 + 181 = 194** |
+| **合计**                       | —                                                                                                                                                                                              | **13 + 196 = 209** |
 
-- 当前基线：**194/194**（mocha `13 passing` + node:test
-  `181/181`），实测退出 0；该数值与 §0.1 快照及 §7.7 第 12
-  轮记录一致。`191/191`、`183/183` 与 `180/180` 都是更早一轮的历史基线，不再作为当前值。
+- 当前基线：**209/209**（mocha `13 passing` + node:test
+  `196/196`），实测退出 0（第 21 轮，`npm run test-dsh:all` 入口直接跑通）；该数值与 §0.1 快照及 §7.7 第 21
+  轮记录一致。`194/194`、`191/191`、`183/183` 与 `180/180` 都是更早一轮的历史基线，不再作为当前值。
+  第 21 轮勘误：`947e8902` 删除 `dshIdeChatContent.test.ts` 时漏改 `test-dsh:all` 清单，node:test 遇缺失文件退出 1，该入口在 `194/194` 时期从未整体跑通过；本轮已修复并计入 §7.7。
 - mocha 的 13 个用例来自 `packaging.test.mjs`（7 项）与
   `dshChatSeamMap.test.js`（6 项）；第三个 glob `chatClient/*.test.mjs`
   当前无匹配文件（既有现象，不减少测试项）。`client.test.mjs`（原零用例、仅
@@ -1625,6 +1644,28 @@ stable，不在 rc 迭代期盲目追新。
 | 触发条件               | `contract()` 处于脚手架实现：除上述 2 项结构断言外没有失败断言，末尾固定返回 `PENDING`。结构断言不通过时抛错转 `FAIL`（退出 1），这是当前该门禁唯一会失败的情形。                                                                                                                                        |
 | 何时变 `PASS` / `FAIL` | P6 中按本章 §7 的上游核对步骤把 `contract()` 改为**启用失败断言**：比对 `installedMeetsVersion()` / `upstreamDrift()` 与 `UPSTREAM_VALIDATED_VERSION = 0.2.2-rc.1`、比对 4 个注入点 sha256 与冻结基线。全部相符 → `PASS`；任一不符 → `FAIL`（退出 1）。启用断言之前，该门禁不存在 `PASS` / `FAIL` 语义。 |
 | PENDING 期间交付判据   | **不降级，也不因 `PENDING` 自动放行**。`PENDING` 不计入通过；K7 要求以本章 §7 上游核对的人工记录与 4 个注入点指纹一致性作为补偿判据，未完成该记录即 K7 不满足、P7 不得启动。                                                                                                                             |
+
+#### 9.4 发布级状态聚合检查（新增闸门，不改变门禁语义）
+
+**问题**：`PENDING` 按 §9 定义退出 0、不拦截；若 CI 只按退出码判断，会把
+「脚手架未启用断言」误判为成功。§9 已规定 `PENDING` 不计入通过且不自动
+放行，但缺少一条可被自动化执行的发布级聚合判据。
+
+**规则**：在 P7 发布前增加一次状态聚合检查（D57）。它不修改任何单条门禁的
+`PASS` / `PENDING` / `FAIL` 语义与退出码，只读取四条门禁的 `STATUS`：
+
+1. 依次执行 `protocol-single-source`、`boundary`、`projection-golden`、
+   `contract`，逐条记录 `STATUS` 与退出码。
+2. 任一 `FAIL` 或任一命令退出码非 0 → 发布拒绝。
+3. 任一 `PENDING` → 发布拒绝；只有当 §9.3 的补偿判据（上游核对人工记录与
+   4 个注入点指纹一致）已登记、且该门禁按 §9.3 升级为 `PASS` 时，才允许
+   进入发布。
+4. 全部 `PASS` → 发布闸门通过；结果写入 §7.7 与提交信息。
+
+**无歧义口径**：`PENDING` 在单条门禁层仍退出 0；在发布聚合层视为
+「未完成」，不是失败也不是通过。CI 不得只依赖单条门禁的退出码，必须执行
+聚合检查；聚合检查本身拒绝发布时退出非 0。本条只增加发布闸门，不改写
+§9 状态表、不新增阶段、不把 `PENDING` 改成 `PASS`。
 
 ### 10. 记录规则
 
@@ -1923,7 +1964,7 @@ e:/DSH-IDE/                              git 仓库根 / 唯一代码树
 | 路径                             | 职责边界                                                        |
 |----------------------------------|-----------------------------------------------------------------|
 | `index.js`                       | Cordis 插件入口，`apply(ctx, config)` 注册 Host 侧服务          |
-| `common/dshIdeProtocol.ts`       | **协议唯一真源**：常量、DTO、20 方法 schema、双向校验器、连续性 |
+| `common/dshIdeProtocol.ts`       | **协议唯一真源**：常量、DTO、22 方法 schema、双向校验器、连续性 |
 | `common/translator.ts`           | DSH 事件 → 中立 `IdeEvent`，`dshEmits()` 穷举分类               |
 | `common/ide-view-projector.ts`   | 增量 reducer：`IdeRow` / `IdeViewSnapshot`、稳定 id、有界折叠   |
 | `electron-main/dshIdeChannel.ts` | 唯一 `IServerChannel` 实现，构造只接 `IdeViewHost`              |
@@ -2046,7 +2087,7 @@ e:/DSH-IDE/                              git 仓库根 / 唯一代码树
 | D10  | 扩展类型依赖断链重定向并移除 42 个孤儿联接                                                                                                                                                     | P0       | 已完成   | 第 7 章 §3 历史登记                                                                                                                            | 2026-11-09 |
 | D11  | 每轮回写 §0.1 项目情况、本清单与 §7.7 更新记录（含 §0 R2 每轮加载凭据），并跑 `verify:docs-graph`                                                                                  | 常设     | 已完成   | 第 5 章 §10、§0 R2、AGENTS §6；机制已建立，每轮重复执行                                                                                           | 2026-11-10 |
 | D12  | `ide-service.js` 的 launch / register / poll 单测（现靠 launch listener 与真机覆盖）                                                                                                           | P5       | 已完成   | 队列抽为 `host/ide-launch-queue.js`；单测 11 项（含心跳超时、poll 刷新、重复报到）；`launch()` 在线客户端查找缺陷一并修复                                                          | 2026-11-10 |
-| D13  | 20 个 method 功能接线：审批、问卷、权限预设、模型、effort、斜杠命令、resume / fork / rewind、goal / todo / usage / TPS / workingActivity 投影、`ping` / `inlineComplete`、账号、语音、删除会话 | P5       | 未完成   | 第 3 章 P5 活动、第 2 章 §4                                                                                                                    | 2026-11-09 |
+| D13  | 22 个 method 功能接线：审批、问卷、权限预设、模型、effort、斜杠命令、resume / fork / rewind、goal / todo / usage / TPS / workingActivity 投影、`ping` / `inlineComplete`、账号、语音、删除会话 | P5       | 未完成   | 第 3 章 P5 活动、第 2 章 §4                                                                                                                    | 2026-11-09 |
 | D14  | 双窗口镜像与 K6 出口判据（含关闭 IDE 窗口不取消 DSH 会话）                                                                                                                                     | P5       | 未完成   | 第 3 章 P5 出口判据、第 1 章 §4                                                                                                                | 2026-11-09 |
 | D15  | 语音未就绪时入口明确不可用，且不启动本地识别后端                                                                                                                                               | P5       | 未完成   | 第 3 章 P5、第 5 章 §6 第 9 项                                                                                                                 | 2026-11-09 |
 | D16  | 7 个 method 的 DSH 官方落点核对（`rewind` / `loadOlder` / `setEffort` / `setPermissionPreset` / `runCommand` / `listCommands` / `deleteSession`）                                              | P5       | 未完成   | 第 7 章 §3 原登记                                                                                                                              | 2026-11-09 |
@@ -2058,7 +2099,7 @@ e:/DSH-IDE/                              git 仓库根 / 唯一代码树
 | D22  | P95 校准 ≤ 512 KiB 并重生成 golden                                                                                                                                                             | P6       | 未完成   | 第 5 章 §5                                                                                                                                     | 2026-11-09 |
 | D23  | NAPI/ABI 加载冒烟（`.npmrc` 43.7.7 编译产物在宿主 Electron 44.7.0 下加载）                                                                                                                     | P6       | 未完成   | 第 3 章 P6 ⑥、第 5 章 §6 第 6 项                                                                                                               | 2026-11-09 |
 | D24  | IDE 终端冒烟（PTY 数据流走原生 `node-pty`）                                                                                                                                                    | P6       | 未完成   | 第 3 章 P6 ⑦                                                                                                                                   | 2026-11-09 |
-| D25  | 四条门禁 + `test-dsh:all` + 完整 `tsc --noEmit` 全量复跑                                                                                                                                       | P6       | 已完成   | 本轮（D41）全量复跑：四门禁 3 `PASS` + 1 `PENDING`；`test-dsh:all` 当前基线 194/194（191/191、183/183、180/180 为更早历史基线）；完整 tsc 变更文件 0 错误（基线见第 5 章 §10.2）                                         | 2026-11-10 |
+| D25  | 四条门禁 + `test-dsh:all` + 完整 `tsc --noEmit` 全量复跑                                                                                                                                       | P6       | 已完成   | 第 21 轮再次复跑：四门禁 3 `PASS` + 1 `PENDING` + 聚合 `release-gate`；`test-dsh:all` 当前基线 209/209（194/194、191/191、183/183、180/180 为更早历史基线）；完整 tsc 变更文件 0 错误（全仓基线 931 条，见第 5 章 §10.2 与 §7.7 第 21 轮）                                         | 2026-11-11 |
 | D26  | 上游核对：`contract` 启用失败断言、4 个注入点指纹一致                                                                                                                                          | P6       | 未完成   | 第 5 章 §7 / §9.3                                                                                                                              | 2026-11-09 |
 | D27  | CI 接入同一组门禁与 `test-dsh:all` 命令                                                                                                                                                        | P6       | 未完成   | 第 5 章 §1、第 7 章 §7.4                                                                                                                       | 2026-11-09 |
 | D28  | 历史阶段标记与失效章节引用清理                                                                                                                                                                 | P6       | 未完成   | 第 7 章 §7.1 / §7.3                                                                                                                            | 2026-11-09 |
@@ -2079,9 +2120,26 @@ e:/DSH-IDE/                              git 仓库根 / 唯一代码树
 | D43  | AI 用量/额度 UI 整块移除（用户在 §0.2 明确要求「IDE 里不显示任何额度」） | P4 | 已完成 | 删除 `editStats/{aiStatsChart,aiStatsFeature,aiStatsStatusBar}.ts` 与 `media.css` + `aiStats.fixture.ts`；移除 `editor.aiStats.enabled` 设置项与 `AI_STATS_SETTING_ID`；`editTelemetryContribution.ts` 不再实例化 `AiStatsFeature` | 2026-11-10 |
 | D44  | 齿轮 Manage 按钮彻底移除，其 `MenuId.GlobalActivity` 整份菜单改由账号右键菜单承载（用户第 9 轮指定：齿轮还在，按「搬进账号右键菜单」原意应去掉） | P4 | 已完成 | `globalCompositeBar.ts`：不再 push `globalActivityAction`；`buildManageMenuActions()` 取 `MenuId.GlobalActivity` 的 primary+secondary 并入账号右键菜单；`toggleAccountsActivity` 的 `length()===2` 改为按实际条数判定（否则账号显隐开关永久错位）；`AccountsActivityActionViewItem` 的 `IMenuService`/`IContextKeyService` 更名为 `accountMenuService`/`accountContextKeyService` 以避免遮蔽基类 private 成员 | 2026-11-10 |
 | D45  | 发布首个插件包并补仓库展示：新增 `CHANGELOG.md`（2.0.0 更新说明）、重写 README 增加插件介绍（是什么 / 解决什么 / 特性 / 架构图 / 安装）、推送代码到 origin/main | P7 | 已完成 | `CHANGELOG.md`（新增）；`README.md` §1 扩为项目概述（1.1 这个插件是什么 / 1.2 项目定义 / 1.3 两种时态），原有 §2–§8 章节号保持不变以兼容 `dshDocsGraph` 的硬编码断言；`dist/dsh-ide-2.0.0.tgz` 119,691,712 B | 2026-11-10 |
+| D46  | Chat 容器设计基线：契约与文档先行（官方事件名、`deleteSession` 语义、第 2 章 §2–§6 表格、状态表依据列、20→22 陈旧计数校正） | P4    | 未完成 | §8.10.4 批次 A①；`dshIdeProtocol.ts`、§8.10.3 | 2026-11-10 |
+| D47  | 取数层：Host 半身延迟 `ctx.inject`，`sessionController.list({})` + `workspaceRegistry`，同步 inject 与 `REQUIRED_SERVICES` | P4    | 未完成 | §8.10.2；`index.js`、`host/ide-view-host.js` | 2026-11-10 |
+| D48  | `listSessions` 返回项扩展标题以外字段与可用性状态，两套 backend 同步，无运行时校验 | P4    | 未完成 | §8.10.2；`dshIdeTransport.ts`、`ide-view-host.js` | 2026-11-10 |
+| D49  | 会话列表正常 / 未绑定两态、focus 重拉与手动刷新；插件删除成功后清理记账、IDE 主动重拉，不设「已删除 / 未知」两态 | P4    | 未完成 | §8.10.4 批次 A③与 B⑧；§8.2.4、§8.10.8（5） | 2026-11-10 |
+| D50  | 审批 / 问卷接官方 `$events` waterfall：通道类型与分发、独立消费者、撤销 Host 进程内 answerer、多端决议语义验证 | P4    | 未完成 | §8.10.2、§8.10.3；`dshIdeChannel.ts`、`ide-view-service.ts` | 2026-11-10 |
+| D51  | 会话永久删除：按第 20 轮批准路径，把两套 backend（`ide-view-host.js` / `dshIdeTransport.ts`）的 `deleteSession` 从 `FEATURE_UNAVAILABLE` 改为调用社区插件 `workspaceRegistry.deleteSession`；保留归属校验与判活，插件缺失 / 方法不可用仍拒绝 | P4    | 已完成 | 第 21 轮实现（代码侧）：Host 半身经 `resolveDeleteSessionMethod()` 支持进程内 overlay 与网关 remote 两种形态（§8.10.8（2）），前置归属校验 + 存在性校验，结果只认 `{ deleted: true }`，删除后核验 live registry 已移除；transport 侧调 `workspaceRegistry/deleteSession`（`gateway/*` 错误映射 `FEATURE_UNAVAILABLE`）；新增单测 11 项（Host 7 + transport 4）；endpoint 运行时可用性与删后两侧列表同步仍归 U12 | 2026-11-11 |
+| D52  | 活动会话删除判据与降级规则：flush / detach 任一失败即终止；无法证明停止与资源释放时拒绝，不写成完整支持 | P4    | 未完成 | §8.10.1、§8.10.5；U2、R2 / R3 / R4 | 2026-11-10 |
+| D53  | 改写 README 项目定义为有边界一致性、登记会话删除依赖第三方插件 endpoint 这一例外，不造通知机制；§8.2.4 本轮已同步为「必须提供 / 按批准路径」 | 常设  | 未完成 | §8.2.4、§8.10.1、§8.10.8；`README.md` §1；权威层级见 README §4 | 2026-11-10 |
+| D54  | 整理并执行 U2 删除链判据 / U3 目录与归属 / U12 插件 endpoint 三类探针，按格式回填 §0.2 后才更新待办与状态回写 | P4    | 未完成 | §8.10.5、§8.10.6、§8.10.8；§0.2 U10 / U12 | 2026-11-10 |
+| D55  | `host-endpoint.json` 与 `DSH_IDE_LAUNCH_URL` 的 query token 处置：文件权限、日志 / 遥测 / 错误路径脱敏、换取 cookie 后不落盘明文、轮换清理路径与负向测试 | P5    | 未完成 | §8.8.7「认证材料的具体边界」；`host/ide-view-host.js`、`dshIdeTransport.ts` | 2026-11-10 |
+| D56  | 修正 `.npmrc` 的 `target="43.7.7"` 与宿主 Electron 44.7.0 不一致，或证明其不影响交付物；5 个原生模块逐模块记录来源、构建参数、`NODE_MODULE_VERSION` 与实际加载结果 | P6    | 未完成 | §8.8.5 第 6、7 条；D20 / D23 / D24 / D29 | 2026-11-10 |
+| D57  | 发布级状态聚合检查：读取四门禁 `STATUS`，任一 `PENDING` / `FAIL` 或退出码非 0 即拒绝发布；不改单条门禁语义与退出码 | P7    | 已完成 | 第 21 轮实现：`dshIdeVerify.mjs release-gate`（`npm run verify:dsh-ide-release-gate`）依次执行四门禁读取 STATUS；当前如实拒绝发布（`contract=PENDING` 退出 1），行为与 §9.4 一致；§2 命令清单与 §3 门禁表已同步 | 2026-11-11 |
+| D58  | 核实 DSH 官方会话存储删除入口是否存在、是否同步索引 / 缓存 / 运行时状态；并核对社区插件依赖的内部服务在 DSH-IDE 宿主版本的可用性 | P4    | 已完成 | **结论：官方入口不存在（已定论，第 20 轮批准不推翻此结论）**；6 个符号公开性逐项定性见 §8.10.7 | 2026-11-10 |
+| D59  | 会话管理扩展（归档 / 恢复 / 收藏 / 分批检索 / 只读预览 / 批量操作 / 孤儿清理）：归档 / 恢复优先复用官方 `archiveSession` / `unarchiveSession`；检索 / 收藏 / 孤儿清理可评估复用插件其它公开 remote，但须逐项批准，不自建独立会话数据库 | P4    | 未完成 | §8.10.1（3）–（6）、§8.10.8（5） | 2026-11-10 |
+| D60  | 统一 22 method 口径（20 会话域 + 2 账号域）：校正代码注释、第 3 章 P5 活动段与状态表历史依据列，消除 20 / 22 歧义 | P4    | 已完成 | 第 21 轮核对：代码侧第 18 轮已改完 3 个文件且 `grep` 零残留；本轮补齐文档侧 11 处（P1 活动、P2/P3 依据、E1、K4、第 6 章 §2、§8.7 映射、D13、U05）并把 `dshIdeChannel.test.ts` 的分发清单补到 22 个（此前漏 `accountGetState` / `accountGetProfile`）；P3 依据列的「当时 20」是历史记录，保留不改 | 2026-11-11 |
+| D61  | 版本绑定扩大为 DSH `0.2.2-rc.1` + `@michengai/dsh-archive-manager@1.3.1`：`DSH_IDE_API_VERSION`、PROVENANCE、契约注释记录插件版本与 endpoint 签名；补「插件缺失 / 方法不可用 / 调用失败 / 调用成功」四类契约单测；按第 2 章 §9 同步 §2–§6 表格 | P4    | 已完成 | 第 21 轮实现（代码侧）：`dshIdeProtocol.ts` 新增 `DSH_IDE_DELETE_SESSION_PLUGIN` / `_PLUGIN_VERSION`（1.3.1）/ `_ENDPOINT`（`workspaceRegistry/deleteSession`）三个绑定常量；协议单测 3 项钉死插件名 / 版本 / endpoint 与传输层调用一致性；传输层与 Host 层的「插件缺失（含网关 `gateway/*`） / 未确认删除 / 调用失败透传 / 调用成功」四类结果各有单测（共 11 项）；PROVENANCE 未新增第三方代码搬运（只调用公开 endpoint），按 §8.10.8（4）不触发 `NOTICE.md`；插件是否已安装 / endpoint 运行时可用性仍归 U12 | 2026-11-11 |
+| D62  | 加载时序与插件缺失探针：两个独立插件行的 overlay 与 `ctx.inject(['workspaceRegistry'])` 相对顺序未定义；确定进程内直调还是走 Typert Gateway，并验证插件未安装时的 `FEATURE_UNAVAILABLE` 路径 | P4    | 未完成 | §8.10.8（2）（3）、`build/lib/dsh/cordis.patch.yml:3-6`；U12 | 2026-11-10 |
 
-统计（由 `verify:docs-graph` 输出）：26 已完成 / 18 未完成 / 1
-待核对，共 41
+统计（由 `verify:docs-graph` 输出）：27 已完成 / 34 未完成 / 1
+待核对，共 62
 项；每轮回写时按实际完成情况改「是否完成」与「最后核对」，并在 §7.7
 增加一行。**D41 的完成判据是代码侧 + 本地单测/golden；真机效果并入 §0.2 U02
 由用户复核，未回填前不得据此宣称 K5 通过。**§0 R2 的每轮加载凭据由 D11
@@ -2333,6 +2391,11 @@ commit」必须与快照「最后更新」、第 3 章 §6「最后实测」一�
 | 15   | 2026-11-10 / `cf0a04e5` | **D44：齿轮 Manage 按钮彻底移除（用户真机反馈驱动）**。用户装上新插件后截图指出左下角齿轮仍在——D42 只把「设置」搬进账号右键菜单，齿轮本身仍渲染。本轮按用户确认改为彻底移除：`GlobalCompositeBar` 不再 push `globalActivityAction`；其 `MenuId.GlobalActivity` 整份菜单（扩展 / 主题 / 同步 / 配置文件 / 更新等）经新增的 `buildManageMenuActions()` 并入账号右键菜单，因此没有任何入口失联；同时修掉一个由此暴露的实质缺陷：`toggleAccountsActivity()` 原用 `length() === 2` 判定账号是否可见，齿轮移除后该判定永久为假，会让账号显隐开关失效，改为按实际条数（0/1）判定。编译期另修两处：`AccountsActivityActionViewItem` 访问基类 private 的 `menuService`/`contextKeyService` 不可行，改为自己的 `accountMenuService`/`accountContextKeyService` 注入成员并透传给 super。**R2 已加载**：本轮改动前重新加载 `cordis-plugin-development`（不沿用上一轮）。 | D44 并入 §7.3 标 `已完成`（25 已完成 / 18 未完成 / 1 待核对）；§0.1 最近改动同步 | 四门禁 3 `PASS` + 1 `PENDING`；`test-dsh:all` **194/194**（13 + 181）；`tsc -p src/tsconfig.json --noEmit` 本文件 0 错误（全仓 847 条既有基线）；`docs-graph` PASS |
 
 | 16   | 2026-11-10 / `cf0a04e5` | **D45：发布首个插件包 + 仓库展示**（用户要求：推送代码、发布首包并写更新说明、README 详细展示插件介绍）。新增 `CHANGELOG.md`：2.0.0 首发说明，按 Keep a Changelog 结构分「新增 / 变更 / 修复 / 移除 / 已知限制」，修复项写明流式回答截断/重复/失败残留、账号「永远不可用」、账号显隐开关失效五个用户可感知问题。README 新增 §1 项目概述与 §1.1 插件介绍（是什么、解决什么问题、关键特性、mermaid 架构图、安装方式）。**章节编号保持不变**：`dshDocsGraph.mjs` 硬编码了 `## 2. 统一术语` 与 §4.1 图注、§7 状态入口三处断言，整体重编号会直接让门禁 FAIL（实测已触发一次并回滚），故改为把新内容并入 §1 内部子节。**R2 已加载**：本轮改动前重新加载 `cordis-plugin-development`。 | D45 并入 §7.3 标 `已完成`（26 已完成 / 18 未完成 / 1 待核对）；§0.1 最近改动同步 | 四门禁 3 `PASS` + 1 `PENDING`；`test-dsh:all` **194/194**；`tsc` 0 错误（本文件）；`docs-graph` PASS；断链检查：README 与 CHANGELOG 引用的 4 个文件均存在；CHANGELOG 无阶段状态泄露 |
+| 17   | 2026-11-10 / `cf0a04e5` | **第 17 轮（纯文档）**：把参考 dsh-TUI 进程内接入方式的 Chat 视图容器与会话管理改造讨论结论登记为 §8.10 设计基线（现状三层、唯一例外条款、决策清单、冲突复核、实施次序、U1 / U2 / U3 探针与降级规则）；修订 §8.2.4 为主动查询、有边界最终一致性、`accepted: true` 仅表示物理删除完成、删除后 IDE 主动重查；本轮未提交，日期 / commit 沿用当前 HEAD，提交后按第 5 章 §10 同步。四门禁 / `test-dsh:all` / `tsc` 本轮未跑（纯文档改动，如实标注）。 | 新增 D46–D54 共 9 条「未完成」待办（26 已完成 / 27 未完成 / 1 待核对，共 54 项）；新增 §0.2 U10（待用户执行）；§0.1 最近改动与未验证项同步；阶段状态与门禁状态不变 | `docs-graph` PASS（3 节点 / 3 边 / 0 环、术语表唯一、状态单一性 8 阶段、待办 26/27/1、用户操作 5/2/3、17 轮）；断链 0（新增内容未引入跨文档链接）；`git diff --check` 退出 0 |
+| 18   | 2026-11-10 / `cf0a04e5` | **第 18 轮：工程技术审查 + 开发路线校正 + 手册重构**（用户发起）：联网核实 `MichengAI/dsh-archive-manager`（社区插件，Apache-2.0，1.3.1，支持 DSH 0.2.x RC）`src/workspace.ts` 删除链源码；本地核实 DSH 官方 0.2.2-rc.1 未发现公开会话删除 remote（`workspace-controller` 的 `@Remote('delete')` 只删 Workspace 登记且保留文件与 Sessions）、`E:/dsh-TUI` 的 `compat/sessionLog.ts` 为 TUI 私有 compat 实现。据此按官方入口优先原则重写 §8.10 会话永久删除规范，作废此前「Host 半身自己 `sessionsRoots()` + `rmSync`」取舍；拆分 P5 / K5 循环为开窗与功能接线工作包（不新增 P5a / P5b）；统一 22 method 口径并同步 3 个代码文件注释；补 §8.8.5 第 6、7 条（`.npmrc` 43.7.7 与宿主 44.7.0 不一致、逐模块 ABI）、§8.8.7 认证材料具体边界（query token）、§9.4 发布级状态聚合检查；§8.10.3 登记六项审查结论与「不新建第二份手册」约束。本轮未提交，日期 / commit 沿用当前 HEAD | 新增 D55–D60 共 6 条未完成（26 已完成 / 33 未完成 / 1 待核对，共 60 项）；修订 D51 / D52 / D54 描述；新增 §0.2 U11（6 待执行 / 2 已完成 / 3 暂阻塞）；§0.1 与第 3 章 §6 依据列同步；阶段状态与门禁状态不变 | 四门禁 3 `PASS` + 1 `PENDING`（`contract`，退出 0）；`test-dsh:all` 入口因 `SAFE_DELETE_BULK_CONFIRM_REQUIRED` 守卫首跑与重试均 EXIT=1，按 §2.1 固定执行方式跑同组测试 `13 passing` + `181/181` = **194/194**；`tsc -p src/tsconfig.json --noEmit` 全仓 847 条既有基线错误、本轮改动 3 个代码文件 0 错误；`docs-graph` PASS（3 节点 / 3 边 / 0 环、待办 26/33/1、用户操作 6/2/3、18 轮）；断链 27 链接 0 断链；`git diff --check` 退出 0 |
+| 19   | 2026-11-10 / `cf0a04e5` | **第 19 轮：源码核实 + 手册定稿**（用户把相关源码放入 `E:/`）：新增完整社区仓库 `E:/dsh-archive-manager`（28 个 `src/*.ts`、47 个 `test/*`、`cordis.patch.yml`、Apache-2.0 LICENSE、多语言 README），`E:/vscode-dsh` 为空目录。两项独立源码核实交叉验证：① 官方 0.2.2-rc.1 的 20 + 11 个 `@Remote`、`SessionPersistence` 契约与全库删除类命名检索 → **官方会话删除入口不存在（已定论）**；② 社区插件 `workspaceRegistry/deleteSession` 为自造 Typert Remote（共 14 个），`installArchiveWorkspace()` 运行时把子类方法拷到官方 `workspaceRegistry` 实例（overlay，非官方扩展点），依赖 `locate()` / `requireTable()` / `detachEntered()` / `enqueueOperation()` 等私有成员，`forgetIndexedSession` / `removeFromWorkspaceAccounts` 为插件自造，`api-session/removed` 官方事件语义是「离开 live Host registry」而非永久删除。据此把 §8.2.4 改为「设计目标 / 当前不可实现」，§8.10.1（1）（2）从「未发现待验证」收敛为「不存在已定论」，§8.10.2 决策表、§8.10.4 批次 B、§8.10.5 U1 与降级规则、§8.10.6 未完成项全部同步；新增 §8.10.7 固化证据（官方入口核查表、6 符号定性表、社区插件定性、可借鉴设计要点、最终影响、许可证与来源）。本轮未提交，日期 / commit 沿用当前 HEAD | D58 由未完成收敛为**已完成**（27 已完成 / 32 未完成 / 1 待核对，共 60 项）；修订 D49 / D51 / D52 / D53 / D54 / D59 描述；U10 / U11 去掉已定论的官方入口项（6 待执行 / 2 已完成 / 3 暂阻塞不变）；§0.1 与第 3 章 §6 依据列同步；阶段状态与门禁状态不变 | `docs-graph` PASS（3 节点 / 3 边 / 0 环、待办 27/32/1、用户操作 6/2/3、19 轮）；断链 27 链接 0 断链；`git diff --check` 退出 0；四门禁 3 `PASS` + 1 `PENDING`（`contract`）；本轮代码零改动，`test-dsh:all` / `tsc` 沿用第 18 轮实测（§2.1 固定执行方式 194/194、全仓 847 条既有基线错误且改动文件 0 错误） |
+| 20   | 2026-11-10 / `cf0a04e5` | **第 20 轮：用户批准 + 手册回写**（用户明确「批准用社区插件的 `deleteSession` 方法」）：核查 `E:/dsh-archive-manager` 的 `host-install.ts:8-12`（overlay 到官方 `workspaceRegistry`）、`workspace.ts:893-898`（`deleteSession` 串行入口）、`client.ts:3723-3728`（客户端调用后主动刷新列表）与 DSH-IDE `cordis.patch.yml:3-6`（只插 `dsh-ide` 一行）。据此把 §8.2.4、§8.10.1（1）–（3）（6）、§8.10.2 决策表、§8.10.3 审查表、§8.10.4 批次 B、§8.10.5 U1 / 降级规则 / 执行纪律、§8.10.6 未完成项全部从「当前不可实现」回改为「按批准路径实现」；**新增 §8.10.8** 固化批准范围（只调用公开 endpoint，不复制私有穿透代码、不直接 `rmSync`、不改写官方实例）、两种调用形态（进程内 `ctx.get('workspaceRegistry')` 或 Typert Gateway，由 U12 定）、前置条件与加载时序风险、两套 backend 同步点、版本绑定（DSH 0.2.2-rc.1 + 插件 1.3.1）、调用而非复制故不触发 `NOTICE.md`、以及对 D58 定论与 D49 两态的影响。§8.10.7「官方入口不存在」定论**不变**。本轮未提交，日期 / commit 沿用当前 HEAD | 新增 D61（版本绑定 / 许可 / 四类契约单测）、D62（加载时序与插件缺失探针）与 §0.2 U12（真机：安装生效 + endpoint 调用 + 顺序）；修订 D49 / D51 / D52 / D53 / D54 / D59；D58 保持已完成；统计 **27 已完成 / 34 未完成 / 1 待核对，共 62**；用户操作 **7 待执行 / 2 已完成 / 3 暂阻塞**；§0.1 与第 3 章 §6 依据列同步；阶段状态与门禁状态不变 | `docs-graph` PASS（3 节点 / 3 边 / 0 环、待办 27/34/1、用户操作 7/2/3、20 轮）；断链 27 链接 0 断链；`git diff --check` 退出 0；四门禁 3 `PASS` + 1 `PENDING`（`contract`）；本轮代码零改动，`test-dsh:all` / `tsc` 沿用第 18 轮实测 |
+| 21   | 2026-11-11 / `9b6b45eb` | **第 21 轮：D51 / D57 / D60 / D61 代码实现 + `test-dsh:all` 修复**。① **D51 会话删除接线**：Host 半身 `ide-view-host.js` 的 `deleteSession` 从恒抛 `FEATURE_UNAVAILABLE` 改为「归属校验（`SESSION_SWITCHED`）→ `resolveDeleteSessionMethod()` 取插件 endpoint（进程内 overlay 或网关 remote 两形态，每次动态取、不缓存）→ 存在性校验（live registry 或 API 列表）→ 调用 → 只认 `{ deleted: true }` → 删除后核验 live registry 已移除」；插件缺失 / 方法不可用 / 网关失败 / 未确认删除 / live 未移除一律拒绝，绝不伪造成功；transport 侧 `dshIdeTransport.ts` 的 `deleteSession` 调 `workspaceRegistry/deleteSession`，`gateway/*` 错误映射 `FEATURE_UNAVAILABLE` 并附安装提示，插件内部失败保留官方错误码透传。② **D61 版本绑定**：契约真源新增 `DSH_IDE_DELETE_SESSION_PLUGIN` / `_PLUGIN_VERSION`（1.3.1）/ `_ENDPOINT` 三常量；协议单测 3 项钉死插件名 / 版本 / endpoint 与传输层一致性；§2–§6 表格无需改（method 形状未变，wireRevision 不动）。③ **D57 发布聚合**：`dshIdeVerify.mjs` 新增 `release-gate`（只读四门禁 STATUS，不改语义与退出码），`npm run verify:dsh-ide-release-gate` 接入；当前如实拒绝发布（`contract=PENDING` 退出 1），与 §9.4 一致。④ **D60 口径核对**：文档残留 11 处「20 method」改为 22，`dshIdeChannel.test.ts` 分发清单补齐 2 个账号域 method（194 时期该清单只有 20 个，`accountGetState` / `accountGetProfile` 从未走通道分发断言）。⑤ **`test-dsh:all` 修复**：勘误 `947e8902` 删除 `dshIdeChatContent.test.ts` 时漏改清单导致入口必然失败；移除 stale 条目后 `npm run test-dsh:all` 首次整体跑通。⑥ 顺带删除仓库根的异常 `CON` 文件（用户确认）；设置仓库级 git 身份（与历史提交一致）。**R2 已加载**：本轮改动前加载 `cordis-plugin-development`（SKILL.md + practices.md 适用部分）、`cordis-composition-reference`；来源为 DSH 创造模式挂载的 `@deepseek-ai/dsh-agent-preset/skills/`；时间 2026-11-10T23:05 起、复核 2026-11-11 补载 practices 参考 | D25 依据更新；D51 / D57 / D60 / D61 标 `已完成`（31 已完成 / 30 未完成 / 1 待核对，共 62）；D25 基线改为 209/209；§0.1 门禁行、U05 阻塞说明、第 3 章 §6 P3–P6 依据列同步；U12 仍待用户执行 | 四门禁 3 `PASS` + 1 `PENDING`（`contract`，退出 0）；`release-gate` 如实拒绝（退出 1，与 §9.4 一致）；`test-dsh:all` **209/209**（mocha 13 + node:test 196，较上轮 194 增 15 项：Host 25→34、transport 14→18、protocol 19→22、channel 28→32；本轮 npm 入口直接跑通）；`tsc -p src/tsconfig.json --noEmit` 改动文件 0 错误、全仓 931 条既有基线错误（较手册原记 847 条多 84 条，经 stash 对比证实与本次改动无关）；`docs-graph` PASS；`git diff --check` 退出 0 |
 
 ------------------------------------------------------------------------
 
@@ -2426,17 +2489,27 @@ DTO（见第 1 章 §1、第 7 章 §3.1）。IDE 窗口只经唯一一条
 - “与桌面端保持一致”的手段：IDE 不持有配置默认值，全部以 DSH 下发 schema
   为准，桌面端改默认值 IDE 自动跟随。
 
-#### 8.2.4 会话管理对齐（工作区范围 + 与桌面端同步 + DSH-IDE 直接删除）
+#### 8.2.4 会话管理对齐（工作区范围 + 有边界一致性 + DSH-IDE 直接删除）
 
-- 功能边界：会话是 DSH 内核状态，IDE 侧不持有第二份会话表；会话列表来自
-  DSH 内核经 `dshIde` 通道下发的快照（契约 `listSessions` 已登记，P4
-  接线）。
-- 工作区对齐：IDE 只显示**当前 DSH-IDE 打开工作区**内的会话，与 DSH
-  桌面端在该工作区显示的会话**完全同步**——两侧读同一份内核会话集合，不做本地缓存或本地新建会话源。
-- 删除（直接删除，不入回收站）：DSH-IDE 必须提供删除会话能力，**无论 DSH
-  桌面端是否自带删除**；`deleteSession` 已加入契约真源（第 2 章
-  §4），调用方为 IDE 会话 UI，参数为
-  `{ sessionId }`，语义为**直接物理删除**、不进入任何回收站/软删除队列。删除后由内核回推快照，列表即时更新（fail-closed：删除失败则保留原列表，不静默丢弃）。
+- 功能边界：会话是 DSH 内核状态，IDE 侧不持有第二份会话表；会话列表由 IDE 经
+  `invoke('listSessions')` 主动取得（列表类返回数组，不进入快照 `rows`）。
+- 工作区对齐：按开窗绑定的 `bridge.sessionId` 反查所属 workspace，IDE 只显示
+  当前 workspace 的会话，其它工作区不显示；与 DSH 桌面端为**有边界的最终一致性**
+  —— 不宣称完全同步，不以本地缓存代替内核状态。
+- 删除（直接删除，不入回收站）：DSH-IDE 必须提供删除会话能力；`deleteSession`
+  已加入契约真源（第 2 章 §4）、参数为 `{ sessionId }`，语义为直接物理删除、
+  不进入任何回收站 / 软删除队列；`accepted: true` 只表示物理删除已成功完成，
+  不表示「已接收请求」或「已开始尝试」。
+  **第 20 轮用户批准**：§8.10.7「DSH 0.2.2-rc.1 官方无删除入口」的定论不变；
+  用户批准**改用社区插件 `@michengai/dsh-archive-manager@1.3.1` 暴露的
+  `deleteSession` 方法**（官方 `workspaceRegistry` 实例的 overlay 方法，或等价的
+  `workspaceRegistry/deleteSession` Typert remote）。批准范围、加载时序前置、
+  版本绑定与失败口径见 §8.10.8；插件未安装或方法不可用时仍返回
+  `FEATURE_UNAVAILABLE`，不得伪造成功或用隐藏列表行冒充删除。
+  删除成功后由 IDE 主动重查、窗口聚焦重查并提供手动刷新，不做定时轮询、
+  不新增通知机制；删除失败保留原列表并明确报告原因（fail-closed）。
+- 当前实现形状、决策取舍、冲突边界与探针清单见 §8.10；阶段状态只由第 3 章 §6
+  承载，待办只由第 7 章 §3 承载。本节不定义任何新 DTO / 接口形状。
 
 #### 8.2.5 运行时复用桌面端资源与体积边界
 
@@ -2721,7 +2794,7 @@ P6、第 5 章 §6 第 6 项）。`.npmrc` 仍是 `target="43.7.7"`，但随包 
 
 ### 8.6 与现有手册的映射
 
-以上设计对应本手册既有章节：架构不变量（第 1 章）、契约与 20 method（第
+以上设计对应本手册既有章节：架构不变量（第 1 章）、契约与 22 method（第
 2 章）、路线 P0–P7（第 3 章，P2 投影冻结 / P3 通道 / P4 消费者 / P5
 功能接线）、流程 T1–T9（第 4 章）、门禁与验证（第 5 章
 `projection-golden` / `boundary`）。本章不新增架构，仅把“资源复用 +
@@ -2847,6 +2920,17 @@ PASS。若通用建议与 DSH 官方运行时约束冲突，先记录差异与�
     版本下执行加载冒烟。
 5.  `node-pty`、`ptyHostMain` 和其余原生模块仍按 D20 / D23 / D24 与第 5
     章 §6 验收；在目标环境加载成功前不得标记终端能力完成。
+6.  **构建目标与宿主版本不一致（当前事实）**：根 `.npmrc` 的
+    `target="43.7.7"` 与宿主 Electron `44.7.0`（内嵌 Node 24.21.0、
+    `process.versions.modules = 149`）不一致。该值只影响本地原生模块重建
+    的头文件来源，**不能**作为插件交付物的 ABI 依据；交付物必须在宿主
+    Electron 44.7.0 下逐模块加载验证。修正 `.npmrc` 或证明其不影响交付物
+    列为 D56，未完成前不得把 ABI 兼容性写成已验证。
+7.  **不得仅凭 N-API 声明推断兼容**：第 2 条是判据而非豁免。5 个随包
+    原生模块（node-pty、sqlite3、spdlog、watcher、
+    windows-process-tree）逐个记录 `.node` 来源、构建参数、
+    `NODE_MODULE_VERSION`、实际 `require()` 与关键功能调用结果；任一模块
+    无记录即该模块未完成，不得由其它模块的成功推断。
 
 #### 8.8.6 可观测性与性能
 
@@ -2874,12 +2958,27 @@ PASS。若通用建议与 DSH 官方运行时约束冲突，先记录差异与�
 | preload 暴露面         | API 白名单、参数校验、无原始 IPC 泄漏         | 待审计                                                      |
 | IPC sender 校验        | handler 清单与负向测试                        | 待审计                                                      |
 | Host loopback 绑定     | 实际监听地址与端口日志（脱敏）                | 以官方 Host 配置为准，需持续复核                            |
-| 认证材料保护           | 日志扫描与错误路径测试                        | 待审计                                                      |
+| 认证材料保护           | `host-endpoint.json` 与 `DSH_IDE_LAUNCH_URL` 的 query token 处置、文件权限、日志与错误路径负向测试 | 待审计，见下方「认证材料的具体边界」与 D55 |
 | 导航 / 新窗口策略      | 白名单与负向测试                              | 待审计                                                      |
 | 资源释放               | dispose 幂等测试、窗口关闭后无残留            | 部分由 `disposeOwner` / launch queue 测试覆盖，需端到端复核 |
 | 原生模块 ABI           | 目标 Electron 44.7.0 下逐模块加载记录         | 未完成，见 D23                                              |
 | PTY 完整链路           | `ptyHostMain`、`node-pty`、终端数据流真机记录 | 未完成，见 D20 / D24                                        |
 | 性能基线               | 固定环境、样本与 P95 报告                     | 未完成，见 D22                                              |
+
+**认证材料的具体边界（当前事实，处置待实现）**：`runtime/host-endpoint.json`
+的 `launchUrl` 由 Host 侧 `connection.authenticatedUrl()` 生成，形如
+`<origin>/?token=<launchToken>`（`host/ide-view-host.js:426-429`；
+`test/host/ideViewHost.test.mjs:335` 断言 `token=secret`）；IDE 进程经
+`DSH_IDE_LAUNCH_URL` 取得，用于 `GET /?token=…` 交换签名 cookie
+（`transport/dshIdeTransport.ts:79-89`）。**文件中没有 cookie 不等于没有
+凭据**：query token 与承载它的环境变量都是认证材料。
+
+处置要求（D55，未完成前一律标「待审计」）：文件仅插件自身可读、不进打包
+产物与版本库；日志、遥测、错误消息、异常堆栈一律脱敏，禁止输出完整
+`launchUrl` 或 token；IDE 换取 cookie 后不再次落盘 token 明文；窗口关闭与
+Host 重启明确凭据轮换 / 清理路径；至少一条负向测试验证非法读取与日志泄露
+被阻断。本条只登记风险与规则，不改写官方 launch token 交换流程，也不新增
+第二条认证通道。
 
 #### 8.8.8 外部规范与项目规则的关系
 
@@ -2932,6 +3031,381 @@ DSH / Electron / VS Code 源码和实测为准。
 10. **VS Code Extension API** —
     https://code.visualstudio.com/api
     用于核对 VS Code 原生扩展能力的官方入口；不得将普通 VS Code Extension Host 模型直接等同于 DSH bundle 插件 Host。
+
+### 8.10 Chat 视图容器与会话管理改造（设计基线）
+
+本节登记「参考 DSH-TUI 的进程内接入方式，把 DSH-IDE 的 Chat 视图容器与 Sessions
+侧栏对齐 DSH 聊天与会话管理」的讨论结论，并按第 18 轮技术审查修订了会话永久
+删除方案。**性质**：实现形状与差距登记，不是新增开发路线、阶段、可选形态或
+回退路径；属第 3 章 §6 中 P4 / P5 活动内的实施次序。阶段状态只由第 3 章 §6
+承载，待办只由第 7 章 §3 承载，验收只认第 5 章。本节**不定义任何新 DTO /
+接口形状**，形状以契约真源 `src/vs/platform/dshClient/common/dshIdeProtocol.ts`
+为准；契约未修改前不得据此实现。设计基线通过不等于实现验收通过，未验证项
+一律不标 `PASS`。
+
+#### 8.10.1 现状三层与会话永久删除规范
+
+| 层 | 位置 | 职责 |
+|---|---|---|
+| Host 半身（DSH Host 进程） | `src/vs/platform/dshClient/index.js`、`host/ide-view-host.js`、`client/client.js` | 进程内 `ctx.get(...)` / `ctx.on(...)` 取数与订阅；会话生命周期操作的唯一执行侧 |
+| 唯一通道 | `electron-main/dshIdeChannel.ts`、`transport/dshIdeTransport.ts`、`electron-main/ide-view-service.ts` | `invoke` 去程、`listen` 回程；waterfall 决议经官方 `$events` 回投 |
+| IDE renderer | `src/vs/workbench/**` | 只消费 DTO，零 `@deepseek-ai/*` 值导入；Chat 容器与 Sessions 侧栏为 VS Code 原生外壳 + 单接缝 |
+
+**会话永久删除规范（第 18 轮修订取代「唯一例外条款：会话日志目录读写」，第 19 轮源码核实定稿）**
+
+**（1）来源辨析，不得混用**
+
+| 来源 | 已核实事实 | 在 DSH-IDE 的地位 |
+|---|---|---|
+| DSH 官方 `0.2.2-rc.1` | 全量核查 `session-controller` 的 20 个 `@Remote`、`workspace-controller` 的 11 个 `@Remote`、`SessionPersistence` 抽象契约（`create/open/flush/stat/list`）、`session-projection-cache`、`spill-local`，**均无任何会话删除入口**；`workspace-controller/src/index.ts:129` 的 `@Remote('delete')` 只删 Workspace 登记且明确保留文件与 Sessions（`commands.ts:94-104`） | **已定论：不存在**，不再是「待验证」；见 §8.10.7 逐项证据 |
+| DSH-TUI（只读参考树 `E:/dsh-TUI/`） | `src/dsh-adapter/compat/sessionLog.ts:1295-1314` 有 `deleteSessionLog()` 用 `rmSync` 删目录，`src/dsh-adapter/channel/session-metadata.ts:275-284` 调用它；这是 TUI 自己的 compat 层 | **进程内接入方式可参考**；物理删除不能表述为「照搬 DSH-TUI 官方实现」。公开项目的用户可见行为（Ctrl+X 停止后台会话、`/clear` 清屏、工作区从列表移除且保留日志）不等于物理删除 |
+| `E:/dsh-archive-manager`（社区插件，本轮下载完整仓库） | `@michengai/dsh-archive-manager@1.3.1`、Apache-2.0、`engines.dsh >=0.2.0-rc.1 <0.3.0-0`、README 明示「社区维护、非 DeepSeek AI 官方产品」、devDependencies 钉在 `0.2.2-rc.1`；`src/workspace.ts:153-169` 自造 14 个 Typert Remote（含 `workspaceRegistry/deleteSession`），`src/workspace.ts:1336-1355` 把子类方法运行时拷到官方 `workspaceRegistry` 实例（overlay），`cordis.patch.yml:12-17` 只插一条 `ui-workspace-archive-manager` | **第 20 轮批准为可复用 endpoint**：它不是 DSH 官方 API，但用户已批准「调用其公开的 `deleteSession` 方法」。批准范围不含复制私有穿透代码；加载时序、版本绑定与失败口径见 §8.10.8 |
+
+**（2）结论与实施边界（第 19 轮定论 + 第 20 轮批准）**
+
+- 官方会话存储删除入口**不存在**（静态源码已定论，证据 §8.10.7），该事实不变。
+- **第 20 轮用户批准**：允许改用社区插件 `@michengai/dsh-archive-manager@1.3.1`
+  暴露的 `deleteSession` 方法，作为 DSH-IDE `deleteSession` 的 Host 侧实现。
+  这是「调用第三方插件提供的公开 endpoint」，**不是**「自行仿造删除 API」，
+  也**不是**「DSH 官方 API」；前提从「只用官方公开接口」改写为「允许依赖经
+  核实、版本绑定的第三方插件公开方法」，适用范围**仅限本端点**。
+- **批准范围**：只调用插件在官方 `workspaceRegistry` 实例上 overlay 的
+  `deleteSession(sessionId)`（或等价的 `workspaceRegistry/deleteSession` Typert
+  remote）。**不批准**把 `deleteSessionCore` / `removeTranscriptDirectory` /
+  `installArchiveWorkspace` 等私有穿透与 overlay 代码复制进 DSH-IDE；删除链由
+  插件自己负责，DSH-IDE 只做前置校验、调用、结果判定与列表刷新。若需移植
+  Apache-2.0 源码，须另行批准代码搬用与私有成员依赖。
+- **前置条件**：宿主安装并启用该插件、其 `ui-workspace-archive-manager` 行生效；
+  Host 半身运行时探测 `ctx.get('workspaceRegistry').deleteSession` 是否为函数。
+  缺失即返回 `FEATURE_UNAVAILABLE`，不回退到 `rmSync` / 归档 / 隐藏列表行。
+- 保留现有 `bridge.assertOwnership(...)` 归属校验与 live 会话判活；活动会话的
+  flush / detach 由插件执行，DSH-IDE 侧仍按（3）的更严格规则判定：无法确认
+  安全则拒绝，不把 best-effort 写成完整支持。
+- 所有 DSH 私有存储操作只由插件在 Host 进程内完成；renderer 只传 ID 与参数、
+  接收结果；删除必须经插件的**串行操作队列**，避免与写入 / 缓存重建竞争。
+- `sessionPersistence.locate()` 返回的工件路径**不构成父目录所有权证明**；
+  插件已实现「归属不明时只删工件」（§8.10.7），DSH-IDE 不改写该策略。
+- 插件内部的「尽力而为」（flush / detach / 级联 / Spill 仅 warn）由插件承担；
+  DSH-IDE 侧的调用结果判定、失败报告与重试入口必须可见、可追踪，不得把
+  父会话的部分成功报告为全部成功。此前「Host 半身自己计算 `sessionsRoots()`
+  并 `rmSync`」的取舍仍然**作废**。
+
+**（3）删除流程（按社区插件 endpoint 的实现规范）**
+
+1. 校验会话 ID、会话存在性、workspace 归属与当前运行状态。
+2. 活动会话先停止：flush 失败即终止删除；detach 失败即终止删除；必须确认
+   会话不再活动且资源已释放，不接受固定 sleep 代替判据。
+3. 清理官方投影缓存行。
+4. 处理子会话：仅当 `origin === "subagent"` 且 `parentSession` 明确指向本
+   会话时级联；**普通 fork 分支即使带 `parentSession` 也不得删除**。
+5. 清理该会话专属 Spill 数据。
+6. 通过官方持久化接口定位转录工件；对已验证的 JSONL 后端，校验存储根、
+   项目目录、会话 ID 编码、文件名、符号链接与目录归属后，才允许删除会话
+   专属目录；归属不明时只删工件。
+7. **确认物理删除成功后**，再清归档标记、工作区记账与宿主内存索引，并
+   发布会话移除事件通知其它客户端。
+8. 删除成功才返回 `accepted: true`；失败保留列表项并返回确定错误；成功后
+   由 IDE 主动重新查询会话列表。
+
+**（4）失败与重试**：物理删除失败时保留足以定位该会话的记账信息以支持
+重试；批量删除逐条串行执行，单条失败不阻断后续；返回请求、成功、跳过、
+失败四类结果；附属清理失败可见可重试；删除成功但记账失败时支持幂等重试，
+不得因工件已不存在而无法完成剩余清理。
+
+**（5）孤儿子代理清理**：诊断与清理分离，清理前重新校验六项条件——
+`origin === "subagent"`、存在合法 `parentSession`、子代理自身非活动、母会话
+不在内存会话与持久化列表、母会话物理工件确证不存在、子代理自身工件仍存在。
+注意：官方 JSONL 的 `stat()` 在日志首行损坏 / 空文件 / 格式异常时也会返回
+`undefined`，**不能单凭 `stat() === undefined` 断定文件不存在**，须结合
+物理工件定位与存储根目录扫描双重确认。
+
+**（6）验收要求**：覆盖冷会话、活动会话、损坏转录、flush 失败、detach 失败、
+符号链接、路径越界、目录归属不明、删除中断、并发写入、子代理级联、fork 排除、
+孤儿检测、部分失败与重复重试。任何未通过安全校验的删除必须拒绝执行，不得
+通过忽略异常或提前清理索引制造成功结果。以上为**实现规范**：删除链由社区
+插件的 `deleteSessionCore` 执行，DSH-IDE 按（2）的批准范围调用并承担前置
+校验、结果判定与列表刷新；当前代码尚未接线，见 D51 与 §8.10.8。验收用例
+以插件 `test/host.test.mjs` 的覆盖面为基线，DSH-IDE 侧另补「插件缺失 /
+方法不可用 / 调用失败 / 调用成功」四类契约单测。
+
+#### 8.10.2 决策清单
+
+| 决策项 | 结论 |
+|---|---|
+| 取数位置 | Host 半身进程内 `ctx.get(...)`，不是 IDE renderer |
+| 取数源 | `sessionController.list({})` + `workspaceRegistry`，保留 ACL；不用 `sessionPersistence` |
+| 送数形状 | `invoke('listSessions')` 返回数组，不改快照形状 |
+| 名单口径 | `registry.sessionIds` 与 `controller.list` 交集为正常名单；插件删除成功后会清理归档标记 / 工作区记账 / 内存索引，IDE 主动重拉即可，**不设「已删除 / 未知」两态**；差集仅用于观察一致性 |
+| 工作区 | 按 `bridge.sessionId` 反查所属 workspace，其它工作区会话不显示 |
+| 未绑定 | 侧栏空状态提示「未绑定会话」；禁止降级显示全部；禁止 submit / follow / steer；归属检查 fail-closed |
+| 列表字段 | 需要标题以外字段；不加运行时校验，改由 `DSH_IDE_API_VERSION` + PROVENANCE + 契约单测的版本绑定承担 |
+| 注入 | 延迟 `ctx.inject`；`index.js` 的 inject 与 `REQUIRED_SERVICES` 保持同步 |
+| 永久删除 | 官方入口**不存在**（第 19 轮定论，事实不变）；**第 20 轮用户批准**改用社区插件 `@michengai/dsh-archive-manager@1.3.1` 的 `deleteSession` endpoint。只调用其公开方法、不复制私有穿透代码；插件缺失或方法不可用仍 `FEATURE_UNAVAILABLE`；前置与版本绑定见 §8.10.8 |
+| 活动会话 | 产品目标保留；flush / detach 任一失败即终止删除；无法证明停止与资源释放则安全拒绝并如实报告，不把 best-effort 写成完整支持 |
+| 审批 / 问卷 | 接官方 `$events` waterfall；允许 `listen` 增加官方事件名，不另建私有出站通道；撤销 Host 进程内 answerer；首个被 DSH 内核接受的有效决议生效（多端与已解决语义待验证） |
+| Steer | 不开；继续 `submit({text})` + queue，不加接口与 DTO 字段 |
+| 通知机制 | 不接 `transport.post`、不加快照字段、不加事件总线；删除成功后 IDE 主动重查、窗口聚焦重查、提供手动刷新，不定时轮询 |
+| 文档 | 改 README 项目定义与 §8.2.4；不造通知机制 |
+| 变更回滚 | 分阶段提交、独立变更、未验收不合入；缺陷时允许撤销对应提交（代码变更回滚，不是产品架构回退路径） |
+
+#### 8.10.3 冲突边界与复核结论
+
+| 组 | 仍然成立的冲突 |
+|---|---|
+| A 架构 | I1 单根单宿主；I2 唯一通道（两条官方链路分工不混写）；I3 renderer 零 `@deepseek-ai/*`；I4 插件当翻译官 |
+| B 会话 | 会话归 DSH 决定（自行物理删除须显式改写项目定义）；快照 `rows` 是消息行、没有会话列表；IDE 不持有第二份会话表 |
+| C 流程 | 唯一路线 P0–P7、唯一流程 T1–T9，不新增阶段或替代形态；改契约先改真源并走第 2 章 §9 手续（20→22 已有先例，不必回退阶段） |
+| D 纪律 | 无快照时零介入；搬码留 PROVENANCE 与版权头；上游英文注释原样、新增中文；四门禁、`test-dsh:all`、`tsc`、`verify:docs-graph`、文档回写、真机归用户 |
+
+**复核判反、不再算冲突**：不能改 profile / 不能碰 DSH 客户端 UI 包（插件本就有
+`dsh.bundle.patch` 与 `dsh.client.inject`）；`transport.post` 是第二条私有通路
+（实为未接线可选端口）；会话 provider 必须挂 `dshChatRenderEnabled`（gate 只管
+渲染件）；搬 TUI 源码必须追加 `NOTICE.md`（触发词是新增依赖或素材）；扩
+`listSessions` 返回字段等于 22→N method（输出校验只要求 `{value}` + JSON）；
+`approval/request` 不在官方白名单（在，`mode:'waterfall'`）；DSH 没有 steer
+（有 `prompt(mode:'steer')` 与 `updateQueue(kind:'steer')`）；README 禁回退等于
+不能撤销提交（禁的是阶段 / 路线回退）；禁止遍历所有 workspace 使按 ID 定位落不了地
+（单次定位不等于建立索引）。
+
+**不是冲突但必须补的缺口**：`transport.post` 未接线导致审批 / 问卷请求到不了 IDE；
+`follow()` 有 `sessionId` 时只开 `session/follow`、不开 `$events`；
+`ide-view-service.ts` 丢弃 `waterfall / ready / cancel` 帧；`DshIdeConsumer.accept()`
+强制校验快照，新增官方事件名必须配独立消费者；`submit` 在 Host 与 transport 两处
+硬编码 `mode:'queue'`；契约计数已在第 18 轮由 20 校正为 22，第 21 轮 D60 完成全仓口径核对（代码注释 3 处 + 文档 11 处，`grep` 零残留）。
+
+**第 18 轮技术审查的修正与保留（无歧义口径）**：
+
+| 项 | 核实结论 | 手册处置 |
+|---|---|---|
+| P5 / K5 循环 | 属实：K5 真机观测需先有窗口，而开窗原属 P5 | 第 3 章 §3 拆为「开窗工作包 / 功能接线工作包」消除循环；**不采用 P5a / P5b**，因 `AGENTS.md` §1.2 规定阶段编号统一 P0–P7 且旧 `2.2a` 形式已废止 |
+| method 总数 | 属实：部分代码注释与 P5 活动段仍写 20 | 统一为 22（20 会话域 + 2 账号域）；代码注释同步；P3 依据列保留「当时 20」的历史实测并注明 D42 |
+| `.npmrc` 43.7.7 / 宿主 44.7.0 | 属实；Electron 官方要求按目标 ABI 重编译 | §8.8.5 增第 6、7 条与 D56；不因 N-API 声明免除逐模块加载验证 |
+| `host-endpoint.json` 的 query token | 属实且高优先级 | §8.8.7 增具体边界与 D55；不改写官方 token 交换流程 |
+| 会话物理删除 | 第 18 轮修正为「优先复用官方入口」；**第 19 轮静态源码定论：官方入口不存在**（不推翻）；第 20 轮用户批准改用社区插件 endpoint | §8.10.7 固化源码定论与证据；§8.10.8 固化批准范围与实现边界；§8.2.4 / §8.10.1 按批准路径回改为「必须提供」 |
+| 发布级状态聚合 | 属实：`PENDING` 退出 0 | §9.4 新增发布闸门与 D57；**不改** §9 的门禁状态语义与退出码 |
+| 第 19 轮源码核实 | 用户下载完整社区仓库 `E:/dsh-archive-manager`；逐文件核查官方 20 + 11 个 `@Remote`、`SessionPersistence` 契约与 6 个内部符号 | 官方会话删除入口**不存在（已定论）**，D58 收敛为已完成；证据见 §8.10.7 |
+| 第 20 轮用户批准 | 用户明确批准「用社区插件的 `deleteSession` 方法」；核查确认插件把该方法 overlay 到官方 `workspaceRegistry` 实例（`host-install.ts:8-12`、`workspace.ts:893-898`），客户端经 `remote.workspaceRegistry` 调用后主动刷新列表（`client.ts:3723-3728`） | 前提改写为「允许依赖经核实、版本绑定的第三方插件公开方法」，**仅限本端点**；§8.2.4、§8.10.1、§8.10.2、§8.10.4–§8.10.6 回改为「按批准路径实现」；新增 §8.10.8 登记批准范围、加载时序风险与版本绑定 |
+
+**保留的项目专属约束**（通用最佳实践不得破坏）：`docs/DEVELOPMENT.md`
+仍是唯一开发手册，不新建 `DSH-IDE-DEVELOPMENT-HANDBOOK.md`（README §3
+规定规格文档只有三份，`dshDocsGraph.mjs` 校验定义依赖图固定 3 节点）；
+不新增并行路线、阶段、替代形态；不把设计基线写成已实现；真机与探针归
+用户。网络资料只作技术依据，DSH 相关实现仍以
+`E:/deepseek-harness-0.2.2-rc.1/` 与 `E:/dsh-TUI/` 只读源树及本仓代码为准。
+
+#### 8.10.4 实施次序（不新增阶段）
+
+以下是第 3 章 §6 现有 P4 / P5 活动内的实施次序，不新增阶段编号。每步给验收判据；
+判据不满足即不合入、不推进状态表、待办保持未完成，`PENDING` 不计通过；缺陷时
+允许撤销对应提交。
+
+| 批次 | 步骤 | 依赖 |
+|---|---|---|
+| A（可先准备） | ① 契约与文档先行（官方事件名、`deleteSession` 语义、第 2 章 §2–§6 表格、状态表依据列、22 method 口径校正） | 无 |
+| A | ② 取数层：延迟 `ctx.inject`、两套 backend 字段扩展 | 无 |
+| A | ③ 会话列表先做「正常 / 未绑定」两态、focus 重拉、手动刷新 | 无 |
+| A | ④ waterfall 代码：`$events` 订阅、通道类型与分发、独立消费者、撤 answerer | 验收依赖探针 |
+| A | ⑤ 版本绑定（`DSH_IDE_API_VERSION` + PROVENANCE + 契约单测）、D60 口径核对 | 无 |
+| B（插件 endpoint 核实后） | ⑥ 核实宿主已安装并启用 `@michengai/dsh-archive-manager@1.3.1`、`workspaceRegistry.deleteSession` 运行时可调用、overlay 与 DSH-IDE 的加载顺序 | U12 / D62 |
+| B | ⑦ Host 侧两套 backend 把 `deleteSession` 从 `FEATURE_UNAVAILABLE` 改为调用插件方法；保留归属校验与判活，失败返回确定错误 | D51 / D61 |
+| B | ⑧ 删除成功后列表主动重查、窗口聚焦重查；插件负责清理记账，不设「已删除 / 未知」两态 | D49 |
+| B | ⑨ waterfall 验收、R1–R7 结论回填、真机 U02 | 用户执行 |
+
+主要改动文件：`dshIdeProtocol.ts`、`dshIdeChannel.ts`、`ide-view-service.ts`、
+`dshIdeTransport.ts`、`ide-view-host.js`、`index.js`、`contrib/dsh/browser/` 下新增
+waterfall 消费者与会话 provider、相关单测与文档；`contrib/chat/**` 尽量零改；
+不动 `wireRevision`、golden、`DshIdeSnapshot` 结构与 22 个 method 计数。
+
+#### 8.10.5 结论、剩余探针与降级规则
+
+| 组 | 内容 |
+|---|---|
+| U1 官方入口 | **已定论，不再是探针**：DSH `0.2.2-rc.1` 不存在任何会话永久删除 remote / 服务方法（§8.10.7）。第 20 轮批准后新增的运行时探针是「社区插件 endpoint 是否可用」：宿主安装生效、`workspaceRegistry.deleteSession` 可调用、overlay 与 DSH-IDE 的加载顺序、返回形态 → 真机 U12 / D62 |
+| U2 删除链判据（保留 `PENDING`） | 活动会话停止后有哪些公开信号可证明真正停止（`session/disposed`、`agent/status`、`agent/disposed`、`ctx.sessions.get` 消失）；flush 与 detach 失败的正确处置；`{accepted:true}` 只是受理而非完成；`inbox.hasPending` 是否触发重新唤醒；`updateQueue({kind:'remove'})` 的公开性与语义；不调用它时能否靠「agent disposed + 无 live + 无 pending」规避竞态 |
+| U3 目录与归属（保留 `PENDING`） | `sessionPersistence.locate()` 返回工件路径时，父目录归属如何证明；官方 JSONL 后端的根目录、项目目录、会话 ID 编码、文件名规则与符号链接检查；`stat()` 在损坏 / 空日志下返回 `undefined` 的误判风险；删除后工件是否确证消失且不重建；孤儿六条件的双重确认 |
+
+| 判定结果 | 行为 | 文档 / 待办措辞 |
+|---|---|---|
+| 插件已启用、endpoint 可调用且安全条件满足 | 调用插件 `deleteSession`，物理成功后返回 `accepted: true`，IDE 主动重拉列表 | 「会话永久删除：已实现（按社区插件 endpoint）」 |
+| 插件缺失 / 方法不可用 | 返回 `FEATURE_UNAVAILABLE`、列表保留；不伪造、不回退到 `rmSync` / 归档 / 隐藏列表行 | 「会话永久删除：未完成（依赖插件未就绪）」 |
+| 任一安全条件无法证明或调用失败 | 返回确定错误、列表保留；删除成功但列表重拉失败时保留旧列表并报告「刷新失败」 | 不写 best-effort、不写完整支持 |
+
+执行纪律：AI 已完成静态源码核查（§8.10.7）并给出官方入口不存在的定论；
+社区插件 endpoint 的运行时可用性、加载顺序与删除效果须由用户在真实 DSH
+profile 上执行（`AGENTS.md` §6，U12）。不修改 DSH 安装内容、不在真实用户
+会话上试删、不把社区插件的内部私有成员当作 DSH 官方接口、不把源码推断
+写成观测结论、不标 `PASS`。每条按「断言 / 方法 / 观察值 / 结论 / 解锁或
+否决哪一步 / 对应 §0.2 项」回填后，AI 才更新待办、§0.1、第 7 章 §3 与 §7.7。
+
+#### 8.10.6 未完成项与验收口径
+
+U1 官方入口已由静态源码**定论为不存在**（§8.10.7），D58 保持已完成；**第 20 轮
+用户批准后**，会话永久删除能力按 §8.10.8 的批准路径重新开放，D51 / D61 / D62
+为未完成。U2 删除链判据、U3 目录与归属保持 `PENDING`（删除链由社区插件承担，
+DSH-IDE 侧仍需确认结果判定与失败口径）。插件删除成功后会清理归档标记 / 工作区
+记账 / 内存索引，IDE 主动重拉即可，因此仍不设「已删除 / 未知」两态。U4 跨进程
+占用、U5 dshCtx 公开性、U6 多端决议语义、U7 内核残留、U8 变更回滚写法确认、
+U9 门禁与状态回写，以及 R1–R7 全部列为未完成项。待办见第 7 章 §3
+（D46–D62），需用户执行的动作见 §0.2（U10、U11、U12）。
+
+验收口径：四门禁 + 发布级状态聚合检查（§9.4）+ `test-dsh:all` +
+`tsc --noEmit` + `verify:docs-graph` + 断链检查；
+sidecar 三脚本（`build-render.mjs`、`regen-sources.mjs --check`、`smoke.mjs`）；
+官方 `gulp dsh-ide-pack`；第 5 章 §6 的 9 项真机验收与 §0.2 U02；
+社区插件「缺失 / 方法不可用 / 调用失败 / 调用成功」四类契约单测。所有未验证项
+不标 `PASS`，真机与探针归用户。
+
+#### 8.10.7 第 19 轮源码核实定论（官方入口与内部符号）
+
+用户本轮把涉及源码放在 `E:/`：新增完整社区仓库 `E:/dsh-archive-manager`
+（28 个 `src/*.ts`、47 个 `test/*`、`cordis.patch.yml`、`LICENSE`、多语言
+README），`E:/vscode-dsh` 为空目录。以下结论均为本地源码静态核查，未做真机验证。
+
+**（1）官方会话删除入口：不存在（已定论）**
+
+此处使用「不存在」而非「尚未发现」：已对 `session-controller` /
+`workspace-controller` 的 `@Remote` 逐文件全量枚举、对 `SessionPersistence`
+抽象契约全量列出方法，并以全库命名正则复查删除类符号。§8.8.7「不能把
+『尚未发现』写成『不存在』」约束的是**审计表 `N/A` 判定**；本结论是全量
+枚举后的源码事实，不是审计项 `PASS`，两者口径不冲突。
+
+| 核查面 | 结果 |
+|---|---|
+| `packages/api/session-controller/src/index.ts` | 20 个 `@Remote`：`list / search / create / selectModel / modelCatalog / openWorkspacePath / workspacePathApplications / rename / fork / prompt / attachment / updateQueue / cancel / page / observeEvent / observeProjections / observeState / follow / projections / control`，**无删除类** |
+| `packages/api/workspace-controller/src/index.ts` | 11 个 `@Remote`；`@Remote('delete')`（`:129`）注释为「Remove one Workspace registration while retaining files and Sessions」，`commands.ts:94-104` 只调 `workspaceRegistry.delete(...)` |
+| `packages/session/session-persistence/src/index.ts:144-211` | 抽象契约只有 `create / open / flush / stat / list`，**无 delete** |
+| `packages/session/session-projection-cache/src/index.ts` | 公开方法无 delete |
+| 全库 `deleteSession / removeSession / purge / destroy` | 会话删除类 0 命中；`session-query-sqlite` 的 `private _deleteSession` 只清搜索索引行 |
+
+**（2）社区插件依赖的 6 个符号：逐项定性**
+
+| 符号 | 判定 | 证据 |
+|---|---|---|
+| `sessionPersistence.locate()` | 官方存在但**私有**，且不在抽象契约内 | `session-persistence-jsonl/src/index.ts:345` `private locate(...)`；`session-persistence/src/index.ts:144-211` 无此方法 |
+| `sessionProjectionCache.requireTable().delete()` | 服务**公开**、删除方法是**私有穿透** | `session-projection-cache/src/index.ts:113-115` 注册、`:398` `private requireTable()` |
+| `spillStore.sessionDir(sessionId)` | 单参方法**不存在**；官方是模块级 `sessionDir(root, sessionId)` | `spill/spill/src/index.ts:45-55`；`spill/spill-local/src/store.ts:78` |
+| `sessions.flush` / `detach` | `flush` 公开（返回 `Promise<boolean>`）；`detach` 不是服务方法，`detachEntered` / `liveEntryFor` **私有** | `core/session/src/index.ts:1342, 1231-1263, 1267, 1362` |
+| `workspaceRegistry.enqueueOperation` | **私有**；`forgetIndexedSession` / `removeFromWorkspaceAccounts` 官方不存在、插件自造 | `workspace/workspace/src/index.ts:894`；官方全库 0 命中 |
+| `api-session/removed` | 官方**公开**事件，但语义是「离开 live Host registry」而非永久删除；插件借壳 emit | `api/session-controller/src/index.ts:224-226`、`api/remotes/src/remote-events.ts:31-32` |
+
+**（3）社区插件的删除能力不是官方入口**
+
+- `src/workspace.ts:153-169` 自造 14 个 Typert Remote（含
+  `workspaceRegistry/deleteSession`）；`src/workspace.ts:893-898` 的
+  `deleteSession()` 只调 `enqueueOperation(() => deleteSessionCore(...))`，
+  **不调用任何官方删除 API**（仅 `unarchiveSession()` 走 `super.unarchiveSession`）。
+- `src/host-install.ts:4-12` 与 `src/workspace.ts:1336-1355` 把子类方法运行时
+  拷到官方 `workspaceRegistry` **实例**（overlay，非官方扩展点），卸载时还原；
+  `cordis.patch.yml:12-17` 只插一条 `ui-workspace-archive-manager` 行。
+- 因此它是「自造 endpoint + 穿透私有成员 + 运行时 monkey patch」，**不是 DSH
+  官方 API**。按第 19 轮「只用官方公开接口」前提不得作为可复用入口；**第 20 轮
+  用户已批准把该前提改写为「允许依赖经核实、版本绑定的第三方插件公开方法」，
+  且仅限本端点**（§8.10.8）。无论前提如何，都不得把其 `lib/*.js` / `src/*.ts`
+  复制进 DSH-IDE 冒充官方能力；DSH-IDE 只调用其公开方法。
+
+**（4）可借鉴、已写入 §8.10.1 的设计要点**（证据行号）
+- 删除链顺序与「物理删除成功后才清记账」：`src/workspace.ts:30-43, 900-953`；
+- 目录归属校验（后端名 / `location.kind` / 绝对路径 / 文件名正则 / `~XXXX`
+  编码 / `lstat` 符号链接 / 归属不明只删工件）及 `lstat + rm` 非原子注释：
+  `:45-96, 1012-1015`；
+- 子代理仅 `origin === "subagent"`、排除 fork：`:1080-1124`；孤儿六条件与
+  `stat()` 在损坏日志下误判的注释：`:621-626, 1141-1157`；
+- 批量四类结果、单条失败不阻断、失败保留记账可重试：`:814-845, 937-950, 1058`；
+- 测试覆盖：`test/host.test.mjs`（删除 / flush / detach / 符号链接 / 路径越界 /
+  级联 / fork 排除 / 孤儿 / 部分失败 / 重试 / Typert 网关）、
+  `test/workspace-composition.test.mjs`、`test/archive-organizer*.test.mjs`。
+
+**（5）对方案的影响（第 19 轮结论快照）**
+
+本表是第 19 轮「不自行仿造」前提下的结论。**第 20 轮用户批准**改变了「是否允许
+依赖第三方插件 endpoint」这一项，**不改变**「官方入口不存在」的源码定论；当前
+状态一律以 §8.10.8（5）为准。
+
+| 项 | 第 19 轮结论 | 第 20 轮后的当前状态 |
+|---|---|---|
+| D58 官方入口核实 | 已完成：不存在，证据如上 | **不变**，仍为已完成 |
+| D51 会话永久删除 | 未完成 / 不可实现：Host 保留 `FEATURE_UNAVAILABLE` | **重新开放**：按批准路径调用插件 endpoint，仍未实现（D51 / D61 / D62） |
+| D49 「已删除 / 未知」两态 | 不实现 | **仍不实现**，理由改为「插件清理记账 + IDE 主动重拉」 |
+| D59 会话管理扩展 | 未完成，不得依赖私有成员 | **仍为未完成**；归档 / 恢复优先复用官方接口，其它插件 remote 须逐项批准 |
+| 真机动作 | U11 只保留认证材料与 ABI 两项 | 新增 **U12**：插件安装生效、endpoint 调用与加载顺序 |
+| 若官方后续提供入口 | 按 §8.10.1 重新评估，本轮不实施 | 不再作为删除能力的前置：已按 §8.10.8 批准路径实现；官方入口出现时可再评估替换 |
+
+**许可证与来源**：`E:/dsh-archive-manager` 为 Apache-2.0（`LICENSE` 未填写
+版权人），README 明示「社区维护、非 DeepSeek AI 官方产品」，`engines.dsh`
+为 `>=0.2.0-rc.1 <0.3.0-0`、devDependencies 钉在 `0.2.2-rc.1`。本手册只登记
+设计结论与路径，**未复制其代码、未新增依赖或素材**，因此不触发
+`NOTICE.md` 追加（`AGENTS.md` §5）。
+
+#### 8.10.8 第 20 轮批准决定与实现边界
+
+用户明确批准「用社区插件的 `deleteSession` 方法」。本节把批准范围、调用形态、
+前置条件与风险写死，避免把「调用 endpoint」扩大成「移植私有穿透代码」。
+
+**（1）批准的与不批准的**
+
+| 范围 | 结论 |
+|---|---|
+| 批准 | 调用 `@michengai/dsh-archive-manager@1.3.1` 在官方 `workspaceRegistry` 实例上 overlay 的 `deleteSession(sessionId)`，或等价的 `workspaceRegistry/deleteSession` Typert remote，作为 DSH-IDE `deleteSession` 的 Host 侧实现 |
+| 不批准 | 复制 / 改写插件的 `deleteSessionCore` / `removeTranscriptDirectory` / `deleteDescendants` / `installArchiveWorkspace` 等私有穿透与 overlay 代码；直接 `rmSync` DSH 会话目录；改写官方 `workspaceRegistry` 实例；绕过插件调用 DSH 私有成员 |
+| 前提改写 | 从「只用 DSH 官方公开接口」改为「允许依赖经核实、版本绑定的第三方插件公开方法」，**适用范围仅限本端点**；其余架构不变量（I1 / I2 / I3 / I4、唯一 `dshIde` 通道、renderer 零官方包）不变 |
+
+**（2）调用形态与返回**（源码证据）
+
+- 插件安装：`E:/dsh-archive-manager/src/host-install.ts:8-12`
+  `inject = ["workspaceRegistry","sessionPersistence","typert"]`，`apply()` 调
+  `installArchiveWorkspace(ctx.workspaceRegistry)`；`src/workspace.ts:1336-1355`
+  把 `ArchiveWorkspaceRegistry.prototype` 的方法拷到官方实例，卸载时还原。
+- 方法定义：`src/workspace.ts:893-898` `deleteSession(sessionId)` →
+  `enqueueOperation(() => deleteSessionCore(sessionId))` → `{ deleted: true }`，
+  内部已串行化。
+- 客户端用法：`src/client.ts:3723-3728` 经 `ctx.get("remote.workspaceRegistry")`
+  调 `registry.deleteSession(sessionId)`，检查 `result.ok` 后
+  `refreshSessionList()` —— 印证「IDE 主动重拉」的设计。
+- DSH-IDE 可选两条：① Host 半身进程内
+  `ctx.get('workspaceRegistry').deleteSession(...)`（同一 `dshCtx`，不经网关，
+  返回 `{deleted:true}`）；② 经 Typert Gateway `workspaceRegistry/deleteSession`
+  （返回 `{ok,...}` 网关包装）。**选哪条由 U12 真机探针定**，本轮不裁定。
+
+**（3）前置条件与加载时序风险**
+
+1. 宿主安装并启用 `@michengai/dsh-archive-manager@1.3.1`，其
+   `ui-workspace-archive-manager` 行生效（`cordis.patch.yml:12-17`）。
+2. DSH-IDE 自己的 `build/lib/dsh/cordis.patch.yml:3-6` 只插 `dsh-ide` 一行、
+   无 `inject` 配置；两个插件是**独立行**，overlay 与
+   `ctx.inject(['workspaceRegistry'])` 的相对顺序**未在源码中定义** → 启动时序
+   风险，须由 U12 验证；必要时用 `ctx.inject` 延迟取并重试，不得假设方法一定
+   存在。
+3. Host 半身运行时探测 `typeof registry.deleteSession === 'function'`；缺失即
+   `FEATURE_UNAVAILABLE`，不伪造、不回退到 `rmSync` / 归档 / 隐藏列表行。
+4. 保留 `bridge.assertOwnership(args.sessionId)` 归属校验与 `sessions.get(id)`
+   判活；活动会话可否删除按 §8.10.5 U2 的判据，无法证明安全则拒绝。
+5. 两套 backend 必须同步：`host/ide-view-host.js:381-390` 与
+   `transport/dshIdeTransport.ts:440-447` 当前都抛 `FEATURE_UNAVAILABLE`，
+   都要改为调用插件方法（D51）。契约入参 / 返回形状不变，不改
+   `DSH_IDE_METHOD_KEYS` / `wireRevision` / golden，但须按第 2 章 §9 同步
+   §2–§6 表格、契约注释与四类单测。
+
+**（4）版本绑定与许可**
+
+- 绑定扩大为 **DSH `0.2.2-rc.1` + 插件 `1.3.1`**（其 `engines.dsh` 为
+  `>=0.2.0-rc.1 <0.3.0-0`）；`DSH_IDE_API_VERSION`、PROVENANCE、契约单测都要
+  记录插件版本与 endpoint 签名（D61）。任一升级都须重新验证 endpoint 存在性
+  与返回形态。
+- 本方案是**调用**第三方插件的公开方法，不复制其代码、不新增依赖或素材 →
+  不触发 `NOTICE.md` 追加（`AGENTS.md` §5）。若将来改为移植源码，须按
+  Apache-2.0 保留版权头、登记 PROVENANCE / tree digest，并重新走批准
+  （第（1）表「不批准」行）。
+
+**（5）影响与状态**
+
+| 项 | 结论 |
+|---|---|
+| §8.10.7 定论 | **不变**：官方入口不存在；D58 保持已完成 |
+| D51 会话永久删除 | 重新开放为「未完成（已批准路径，待实现）」 |
+| D49 两态 | 仍不设「已删除 / 未知」两态：插件清理记账 + IDE 主动重拉 |
+| D59 会话管理扩展 | 归档 / 恢复仍优先复用官方 `archiveSession` / `unarchiveSession`；检索 / 收藏 / 孤儿清理可评估复用插件其它公开 remote，但须逐项批准 |
+| 新增 | D61（版本绑定 / 许可 / 四类单测）、D62（加载时序与插件缺失探针）、U12（真机：安装生效 + endpoint 调用 + 顺序） |
+| 未验证 | 插件是否已安装在用户 profile、overlay 时序、网关 remote 是否对 Host 半身可见、删除后 DSH 主窗口列表是否同步 —— 全部由 U12 归用户执行，AI 不代跑 |
 
 ---
 

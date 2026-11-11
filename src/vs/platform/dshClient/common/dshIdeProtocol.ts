@@ -25,9 +25,21 @@ export const DSH_IDE_API_VERSION = '0.2.2-rc.1';
  */
 export const DSH_IDE_WIRE_REVISION = 2;
 
+/**
+ * `deleteSession` 依赖的社区插件版本（§8.10.8（4）版本绑定）。
+ *
+ * DSH 官方 0.2.2-rc.1 不存在会话永久删除入口（§8.10.7 已定论），因此该 method 的唯一
+ * 实现路径是调用本插件在官方 `workspaceRegistry` 实例上 overlay 的 `deleteSession`。
+ * 插件升级必须重新验证 endpoint 存在性、入参 wire 与返回形态（`{ deleted: true }`）。
+ * **只调用其公开方法，不复制其删除链代码**（批准范围见 §8.10.8（1））。
+ */
+export const DSH_IDE_DELETE_SESSION_PLUGIN = '@michengai/dsh-archive-manager';
+export const DSH_IDE_DELETE_SESSION_PLUGIN_VERSION = '1.3.1';
+/** 插件注册的 Typert endpoint（`workspace.ts:359-378`：namespace/method 同名，wire = `sessionId`）。 */
+export const DSH_IDE_DELETE_SESSION_ENDPOINT = 'workspaceRegistry/deleteSession';
+
 /** 功能暂不可用的统一错误码：method 不在白名单，或宿主端口尚未接线。 */
 export const DSH_IDE_FEATURE_UNAVAILABLE = 'dsh-ide/feature-unavailable';
-
 /** 入参校验失败的统一错误码（对应 dsh-TUI 的 TypeError 协议违规）。 */
 export const DSH_IDE_INVALID_ARGUMENT = 'dsh-ide/invalid-argument';
 

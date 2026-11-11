@@ -85,11 +85,12 @@
     "build-dsh-tests": "node build/next/index.ts transpile --out out",
     "pretest-dsh": "npm run build-dsh-tests",
     "test-dsh": "node node_modules/mocha/bin/mocha.js --ui tdd \"out/vs/platform/dshClient/test/node/*.test.mjs\" \"out/vs/workbench/contrib/dsh/test/browser/chatClient/*.test.js\" \"out/vs/workbench/contrib/dsh/test/browser/chatClient/*.test.mjs\"",
-    "test-dsh:all": "npm run test-dsh && node --experimental-strip-types --test --test-force-exit build/lib/test/dshBuildProvenance.test.ts build/lib/test/dshBundleStaging.test.ts build/lib/test/ripgrep.test.ts build/lib/test/dshIdeProtocol.test.ts build/lib/test/dshIdeProjection.test.ts build/lib/test/dshIdeChannel.test.ts build/lib/test/dshIdeTransport.test.ts build/lib/test/dshIdeConsumer.test.ts build/lib/test/dshIdeUiProjection.test.ts build/lib/test/dshIdeChatContent.test.ts build/lib/test/dshChatAgent.test.ts build/lib/test/dshIdeToSeamChain.test.ts build/lib/test/dshIdeLaunchListener.test.ts src/vs/platform/dshClient/test/host/ideViewHost.test.mjs src/vs/platform/dshClient/test/host/electronHome.test.mjs src/vs/platform/dshClient/test/host/ideLaunchQueue.test.mjs",
+    "test-dsh:all": "npm run test-dsh && node --experimental-strip-types --test --test-force-exit build/lib/test/dshBuildProvenance.test.ts build/lib/test/dshBundleStaging.test.ts build/lib/test/ripgrep.test.ts build/lib/test/dshIdeProtocol.test.ts build/lib/test/dshIdeProjection.test.ts build/lib/test/dshIdeChannel.test.ts build/lib/test/dshIdeTransport.test.ts build/lib/test/dshIdeConsumer.test.ts build/lib/test/dshIdeUiProjection.test.ts build/lib/test/dshChatAgent.test.ts build/lib/test/dshIdeToSeamChain.test.ts build/lib/test/dshIdeLaunchListener.test.ts src/vs/platform/dshClient/test/host/ideViewHost.test.mjs src/vs/platform/dshClient/test/host/electronHome.test.mjs src/vs/platform/dshClient/test/host/ideLaunchQueue.test.mjs",
     "verify:dsh-ide-protocol-single-source": "node build/lib/dsh/verify/dshIdeVerify.mjs protocol-single-source",
     "verify:dsh-ide-boundary": "node build/lib/dsh/verify/dshIdeVerify.mjs boundary",
     "verify:dsh-ide-projection-golden": "node build/lib/dsh/verify/dshIdeVerify.mjs projection-golden",
     "verify:dsh-ide-contract": "node build/lib/dsh/verify/dshIdeVerify.mjs contract",
+    "verify:dsh-ide-release-gate": "node build/lib/dsh/verify/dshIdeVerify.mjs release-gate",
     "verify:docs-graph": "node build/lib/dsh/verify/dshDocsGraph.mjs"
   },
   "dependencies": {

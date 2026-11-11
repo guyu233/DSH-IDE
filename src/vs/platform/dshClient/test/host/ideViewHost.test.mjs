@@ -2,7 +2,7 @@
 //   - 四类官方事件的订阅与解绑、会话归属过滤；
 //   - answerer 只有一种形态：界面接管则等待决议，未接管则 next() 委托；
 //   - 重复决议 ALREADY_RESOLVED、会话切换 SESSION_SWITCHED、缺服务 FEATURE_UNAVAILABLE；
-//   - 已核对的 20 method 映射（含拒绝形状）。
+//   - 已核对的 22 method 映射（含拒绝形状）。
 //
 // 运行：node --test src/vs/platform/dshClient/test/host/ideViewHost.test.mjs
 // 位置说明：放在 test/host/ 而非 test/node/，避免与 mocha 的 `out/.../test/node/*.test.mjs` glob 重叠。
@@ -68,9 +68,16 @@ function sessionControllerStub(overrides = {}) {
 }
 
 function bridgeWith(services = {}) {
-	const ctx = fakeCtx({ sessions: { get: id => ({ id }) }, sessionController: sessionControllerStub(), ...services });
+	// 默认 live registry：s-1 / s-2 可查；删除桩成功时从这里移除（插件在返回
+	// `{ deleted: true }` 前已同步 detach live 会话，见 workspace.ts:905-930）。
+	const live = new Map([['s-1', { id: 's-1' }], ['s-2', { id: 's-2' }]]);
+	const ctx = fakeCtx({
+		sessions: { get: id => live.get(id) },
+		sessionController: sessionControllerStub(),
+		...services,
+	});
 	const bridge = new DshIdeHostBridge(ctx, {});
-	return { ctx, bridge };
+	return { ctx, bridge, live };
 }
 
 test('required services are the verified pair', () => {
@@ -204,8 +211,119 @@ test('unverified capabilities and unbound sessions are refused, not faked', asyn
 	const { bridge } = bridgeWith();
 	await assert.rejects(() => bridge.invoke('runCommand', { command: '/help' }), error => error.code === FEATURE_UNAVAILABLE);
 	await assert.rejects(() => bridge.invoke('submit', { text: 'hi' }), error => error.code === INVALID_ARGUMENT);
-	await assert.rejects(() => bridge.invoke('deleteSession', { sessionId: 's-1' }), error => error.code === FEATURE_UNAVAILABLE);
 	await assert.rejects(() => bridge.invoke('__bogus', {}), error => error.code === FEATURE_UNAVAILABLE);
+});
+
+// ---------------------------------------------------------------------------
+// deleteSession：按 §8.10.8 批准的路径调用社区插件 endpoint
+//
+// 插件 `@michengai/dsh-archive-manager@1.3.1` 在官方 workspaceRegistry 实例上 overlay
+// `deleteSession(sessionId)`（`host-install.ts:8-12`、`workspace.ts:893-898`）。DSH-IDE 只做
+// 前置校验、调用与结果判定：插件缺失 / 方法不可用 / 结果未确认一律拒绝，绝不伪造成功。
+// ---------------------------------------------------------------------------
+
+/** 带 overlay 删除方法的假 registry；`calls` 记录收到的 sessionId，成功时同步 detach live 会话。 */
+function archiveRegistryStub(result = { deleted: true }, live) {
+	const calls = [];
+	return {
+		calls,
+		deleteSession: async sessionId => {
+			calls.push(sessionId);
+			if (result instanceof Error) {
+				throw result;
+			}
+			if (live !== undefined && result.deleted === true) {
+				live.delete(sessionId);
+			}
+			return result;
+		},
+	};
+}
+
+test('deleteSession calls the plugin overlay and reports accepted', async () => {
+	const { bridge, live } = bridgeWith();
+	const registry = archiveRegistryStub({ deleted: true }, live);
+	// 用一个能看到本次 registry 的上下文重建 bridge（bridgeWith 的 live map 由此共享）。
+	const ctx = fakeCtx({ sessions: { get: id => live.get(id) }, sessionController: sessionControllerStub(), workspaceRegistry: registry });
+	const reborn = new DshIdeHostBridge(ctx, {});
+	reborn.open({ view: 'chat', params: { sessionId: 's-1' } });
+	assert.deepEqual(await reborn.invoke('deleteSession', { sessionId: 's-1' }), { accepted: true });
+	assert.deepEqual(registry.calls, ['s-1'], 'the plugin overlay must receive the requested session id');
+	assert.equal(live.has('s-1'), false, 'the live entry must be detached before the plugin reports success');
+});
+
+test('deleteSession refuses when the plugin is not installed (no overlay)', async () => {
+	const { bridge } = bridgeWith();
+	await assert.rejects(
+		() => bridge.invoke('deleteSession', { sessionId: 's-1' }),
+		error => error.code === FEATURE_UNAVAILABLE && /archive-manager/.test(error.message),
+		'a missing plugin must be reported as feature-unavailable with the install hint',
+	);
+});
+
+test('deleteSession accepts the gateway shape remote.workspaceRegistry.deleteSession', async () => {
+	const { bridge, live } = bridgeWith();
+	const calls = [];
+	const remote = {
+		deleteSession: async sessionId => {
+			calls.push(sessionId);
+			live.delete(sessionId);
+			return { ok: true, value: { deleted: true } };
+		},
+	};
+	const ctx = fakeCtx({ sessions: { get: id => live.get(id) }, sessionController: sessionControllerStub(), 'remote.workspaceRegistry': remote });
+	const reborn = new DshIdeHostBridge(ctx, {});
+	reborn.open({ view: 'chat', params: { sessionId: 's-1' } });
+	assert.deepEqual(await reborn.invoke('deleteSession', { sessionId: 's-1' }), { accepted: true });
+	assert.deepEqual(calls, ['s-1']);
+});
+
+test('deleteSession refuses a gateway failure instead of reporting success', async () => {
+	const remote = { deleteSession: async () => ({ ok: false, error: { message: 'flush failed' } }) };
+	const { bridge } = bridgeWith({ 'remote.workspaceRegistry': remote });
+	await assert.rejects(() => bridge.invoke('deleteSession', { sessionId: 's-1' }), error => error.code === FEATURE_UNAVAILABLE && /flush failed/.test(error.message));
+});
+
+test('deleteSession refuses a result that does not confirm deletion', async () => {
+	const { bridge } = bridgeWith({ workspaceRegistry: archiveRegistryStub({ deleted: false }) });
+	await assert.rejects(() => bridge.invoke('deleteSession', { sessionId: 's-1' }), error => error.code === FEATURE_UNAVAILABLE);
+});
+
+test('deleteSession rejects unknown and foreign sessions before calling the plugin', async () => {
+	const registry = archiveRegistryStub();
+	// 归属校验：绑定了 s-1 的视图不能删 s-2。
+	const { bridge } = bridgeWith({ workspaceRegistry: registry });
+	bridge.open({ view: 'chat', params: { sessionId: 's-1' } });
+	await assert.rejects(() => bridge.invoke('deleteSession', { sessionId: 's-2' }), error => error.code === SESSION_SWITCHED);
+	// 未知会话：内核 live registry 与 API 列表都查不到。
+	const unknown = bridgeWith({
+		workspaceRegistry: registry,
+		sessions: { get: () => undefined },
+		sessionController: sessionControllerStub({ list: async () => ({ items: [] }) }),
+	});
+	await assert.rejects(() => unknown.bridge.invoke('deleteSession', { sessionId: 's-1' }), error => error.code === INVALID_ARGUMENT);
+	assert.deepEqual(registry.calls, [], 'no physical action may happen for a rejected request');
+});
+
+test('deleteSession propagates a plugin call failure unchanged', async () => {
+	const failure = new Error('transcript damaged');
+	failure.code = 'session/flush-failed';
+	const { bridge } = bridgeWith({ workspaceRegistry: archiveRegistryStub(failure) });
+	await assert.rejects(() => bridge.invoke('deleteSession', { sessionId: 's-1' }), error => error === failure);
+});
+
+test('deleteSession refuses when the session is still live after a confirmed delete', async () => {
+	// 插件返回 { deleted: true }，但 live registry 仍持有该会话：核验失败，不把「受理」写成「已删除」。
+	// （不复查 API 列表：列表按 §8.2.4 是「有边界的最终一致」，同步复查会把滞后误报成失败。）
+	const registry = archiveRegistryStub();
+	const liveSessions = { get: () => ({ id: 's-1' }) };
+	const { bridge } = bridgeWith({ workspaceRegistry: registry, sessions: liveSessions });
+	bridge.open({ view: 'chat', params: { sessionId: 's-1' } });
+	await assert.rejects(
+		() => bridge.invoke('deleteSession', { sessionId: 's-1' }),
+		error => error.code === FEATURE_UNAVAILABLE && /still live/.test(error.message),
+	);
+	assert.deepEqual(registry.calls, ['s-1'], 'the delete itself must have been attempted exactly once');
 });
 
 test('PendingRequests settles once and reports duplicates', () => {

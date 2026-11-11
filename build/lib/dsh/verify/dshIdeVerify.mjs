@@ -260,12 +260,51 @@ function contract() {
 }
 
 // ---------------------------------------------------------------------------
+// 5. verify:dsh-ide-release-gate  —— §9.4 发布级状态聚合检查（D57）
+//
+// 只读四条门禁的 STATUS，不改任何单条门禁的语义与退出码：
+//   - 任一 FAIL 或任一命令退出码非 0 → 拒绝发布（退出 1）；
+//   - 任一 PENDING → 拒绝发布（退出 1），因为 PENDING 不计入通过；
+//   - 全部 PASS → 聚合通过（退出 0）。
+// ---------------------------------------------------------------------------
+const RELEASE_GATES = ['protocol-single-source', 'boundary', 'projection-golden', 'contract'];
+
+function releaseGate() {
+	const results = [];
+	for (const gate of RELEASE_GATES) {
+		let status = 'FAIL';
+		let code = 1;
+		try {
+			const out = execFileSync(process.execPath, [import.meta.filename, gate], { encoding: 'utf8', cwd: repoRoot, stdio: ['ignore', 'pipe', 'pipe'] });
+			code = 0;
+			status = /^STATUS:\s*(\S+)/m.exec(out)?.[1] ?? 'UNKNOWN';
+		} catch (error) {
+			code = typeof error.status === 'number' ? error.status : 1;
+			const text = `${error.stdout ?? ''}${error.stderr ?? ''}`;
+			status = /^STATUS:\s*(\S+)/m.exec(text)?.[1] ?? 'FAIL';
+		}
+		results.push({ gate, status, code });
+		console.log(`  ${gate}: ${status} (exit ${code})`);
+	}
+
+	const blocking = results.filter(result => result.code !== 0 || result.status !== 'PASS');
+	if (blocking.length > 0) {
+		// PENDING 与 FAIL 都拒绝发布，但原因不同：PENDING 是「未启用断言、不计通过」，
+		// 不是失败也不是通过（§9.3 / §9.4 无歧义口径）。
+		const reasons = blocking.map(result => `${result.gate}=${result.status}(exit ${result.code})`).join(', ');
+		throw new Error(`release refused: ${reasons} — 发布聚合要求四条门禁全部 PASS（PENDING 不计入通过）`);
+	}
+	console.log(`PASS  release-gate: ${results.length} gates all PASS (${RELEASE_GATES.join(', ')})`);
+}
+
+// ---------------------------------------------------------------------------
 
 const gates = {
 	'protocol-single-source': protocolSingleSource,
 	'boundary': boundary,
 	'projection-golden': projectionGolden,
 	'contract': contract,
+	'release-gate': releaseGate,
 };
 
 const gate = process.argv[2];

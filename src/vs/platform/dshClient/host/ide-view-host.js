@@ -2,7 +2,7 @@
 // DSH-IDE Host 半身：在 DSH Host 进程内把官方事件与官方服务桥接给 IDE 主进程。
 //
 // 职责边界（第 1 章 §3）：本文件是唯一允许持有插件上下文、订阅 DSH 官方事件的插件侧代码。
-// 它只做三件事：订阅四类官方事件并原样转发、注册唯一的交互式 answerer、把 20 个 DTO method
+// 它只做三件事：订阅四类官方事件并原样转发、注册唯一的交互式 answerer、把 22 个 DTO method
 // 映射到已核对的官方服务调用。投影与快照版本计数在 electron-main 的 `DshIdeViewService`
 // （两者共用 common/ 的 translator + projector，与 golden 门禁同一份实现）。
 //
@@ -380,14 +380,29 @@ function createMethodHandlers(bridge) {
 		},
 		async deleteSession(args) {
 			bridge.assertOwnership(args.sessionId);
-			const sessions = service(bridge.ctx, 'sessions');
-			const target = typeof sessions.get === 'function' ? sessions.get(args.sessionId) : undefined;
-			if (target === undefined) {
+			// 删除链由社区插件承担（§8.10.8 批准的端点），DSH-IDE 只做前置校验、调用与结果判定。
+			// 插件缺失或未 overlay 出该方法时明确拒绝：不回退到 rmSync / 归档 / 隐藏列表行。
+			const remove = resolveDeleteSessionMethod(bridge.ctx);
+			if (remove === undefined) {
+				throw coded(FEATURE_UNAVAILABLE, 'session delete endpoint is unavailable: install and enable @michengai/dsh-archive-manager', { capability: 'deleteSession' });
+			}
+			if (!(await sessionExists(bridge.ctx, args.sessionId))) {
 				throw coded(INVALID_ARGUMENT, `unknown session ${args.sessionId}`);
 			}
-			// DSH 的会话生命周期由拥有它的 fiber 决定：没有公开的物理删除接口时明确拒绝，
-			// 不做「关闭视图冒充删除」。
-			throw coded(FEATURE_UNAVAILABLE, 'DSH has no public physical session delete; refusing to fake it', { capability: 'deleteSession' });
+			const result = await remove(args.sessionId);
+			// 插件在物理删除完成、记账清理后才返回 `{ deleted: true }`；其余形态一律视为未完成。
+			if (result === null || typeof result !== 'object' || result.deleted !== true) {
+				throw coded(FEATURE_UNAVAILABLE, `session delete did not confirm deletion for ${args.sessionId}`, { capability: 'deleteSession' });
+			}
+			// 删除后核验（§8.10.1（3）8）：只核「live registry 已移除」这一**确定**判据——
+			// 插件在返回 `{ deleted: true }` 前已同步 detach live 会话（`workspace.ts:905-930`），
+			// live 会话此刻必须查不到。不复查 `sessionController.list`：列表按 §8.2.4 是
+			// 「有边界的最终一致」，同步复查会把列表滞后误报成删除失败。
+			const sessions = typeof bridge.ctx.get === 'function' ? bridge.ctx.get('sessions') : undefined;
+			if (sessions !== undefined && typeof sessions.get === 'function' && sessions.get(args.sessionId) !== undefined) {
+				throw coded(FEATURE_UNAVAILABLE, `session delete reported success but ${args.sessionId} is still live`, { capability: 'deleteSession' });
+			}
+			return { accepted: true };
 		},
 	};
 }
@@ -395,6 +410,64 @@ function createMethodHandlers(bridge) {
 function splitModel(model) {
 	const slash = model.indexOf('/');
 	return slash <= 0 ? ['deepseek', model] : [model.slice(0, slash), model.slice(slash + 1)];
+}
+
+/**
+ * 取社区插件 overlay 到官方 `workspaceRegistry` 实例上的 `deleteSession`。
+ *
+ * 两种形态都只调公开方法（§8.10.8 批准范围）：
+ *   ① 进程内直调：插件在官方实例上 overlay 出 `deleteSession(sessionId)`（`host-install.ts:8-12`）；
+ *   ② 经官方 Typert Gateway 的 `remote.workspaceRegistry.deleteSession`（插件自造 remote）。
+ * 两者都要求宿主已安装并启用插件；方法缺失时返回 undefined，由调用方明确拒绝。
+ *
+ * 加载时序（§8.10.8（3）2）：插件与 DSH-IDE 是两条独立行，overlay 与本次取值的先后
+ * 未在源码中定义，因此这里每次都重新取，不在模块加载期缓存结果。
+ *
+ * @returns `(sessionId) => Promise<unknown>` 或 undefined
+ */
+export function resolveDeleteSessionMethod(ctx) {
+	const registry = typeof ctx.get === 'function' ? ctx.get('workspaceRegistry') : undefined;
+	if (registry !== undefined && registry !== null && typeof registry.deleteSession === 'function') {
+		return sessionId => registry.deleteSession(sessionId);
+	}
+	const remote = typeof ctx.get === 'function' ? ctx.get('remote.workspaceRegistry') : undefined;
+	if (remote !== undefined && remote !== null && typeof remote.deleteSession === 'function') {
+		// 网关包装返回 `{ ok, value }` 或 `{ ok:false, error }`；这里统一成「值或抛出」，
+		// 让调用方只看删除结果，不关心两种形态的差异。
+		return async sessionId => {
+			const result = await remote.deleteSession(sessionId);
+			if (result === null || typeof result !== 'object') {
+				return result;
+			}
+			if (result.ok === false) {
+				throw coded(FEATURE_UNAVAILABLE, `session delete failed: ${result.error && result.error.message ? result.error.message : 'unknown error'}`, { capability: 'deleteSession' });
+			}
+			return result.ok === true ? result.value : result;
+		};
+	}
+	return undefined;
+}
+
+/**
+ * 会话是否存在：优先问内核 live registry（`sessions.get`），其次问 API 列表。
+ *
+ * 为什么两处都问：`sessions.get` 只认 live 会话，冷会话必须问 `sessionController.list`。
+ * 两处都查不到即判「未知会话」，与删除链「未知会话不做物理动作」的口径一致。
+ *
+ * @returns 布尔值；查询本身失败时抛错（不把查询失败当成「不存在」）
+ */
+async function sessionExists(ctx, sessionId) {
+	const sessions = typeof ctx.get === 'function' ? ctx.get('sessions') : undefined;
+	if (sessions !== undefined && typeof sessions.get === 'function' && sessions.get(sessionId) !== undefined) {
+		return true;
+	}
+	const controller = typeof ctx.get === 'function' ? ctx.get('sessionController') : undefined;
+	if (controller === undefined || typeof controller.list !== 'function') {
+		return false;
+	}
+	const value = await controller.list({});
+	const items = value && Array.isArray(value.items) ? value.items : [];
+	return items.some(item => item && item.sessionId === sessionId);
 }
 
 /**

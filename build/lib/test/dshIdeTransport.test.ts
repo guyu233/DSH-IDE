@@ -318,7 +318,7 @@ test('backend maps submit/interrupt/setModel to verified session endpoints', asy
 
 test('backend refuses unverified capabilities with feature-unavailable', async () => {
 	const { backend, transport, requests } = backendWithHost(OK);
-	const refusing: DshIdeMethod[] = ['rewind', 'loadOlder', 'setEffort', 'setPermissionPreset', 'runCommand', 'listCommands', 'deleteSession'];
+	const refusing: DshIdeMethod[] = ['rewind', 'loadOlder', 'setEffort', 'setPermissionPreset', 'runCommand', 'listCommands'];
 	for (const method of refusing) {
 		await assert.rejects(
 			() => backend.invoke(method, {}),
@@ -327,6 +327,84 @@ test('backend refuses unverified capabilities with feature-unavailable', async (
 		);
 	}
 	assert.equal(requests.length, 0, 'refused capabilities must not hit the Host at all');
+	transport.dispose();
+});
+
+// ---------------------------------------------------------------------------
+// deleteSession：按 §8.10.8 批准的路径调用社区插件 endpoint（四类契约结果）
+//
+// 插件 `@michengai/dsh-archive-manager@1.3.1` 在官方 workspaceRegistry 实例上 overlay
+// `deleteSession(sessionId)`，并经 Typert 注册 `workspaceRegistry/deleteSession`
+// （`src/workspace.ts:359-378`，入参 wire = `sessionId`，结果 codec 要求 `deleted: true`）。
+// ---------------------------------------------------------------------------
+
+test('deleteSession calls the plugin endpoint and maps { deleted: true } to accepted', async () => {
+	const host = fakeHost((_url, body) => ({
+		json: { type: 'server-response', rpcId: (body as { rpcId: string }).rpcId, result: { ok: true, value: { deleted: true } } },
+	}));
+	const transport = new DshIdeTransport({ origin: 'http://127.0.0.1:9', cookie: 'c', primitives: host.primitives });
+	const backend = new DshIdeTransportBackend(transport);
+	backend.open({ view: 'chat', params: { sessionId: 's-1' } });
+
+	assert.deepEqual(await backend.invoke('deleteSession', { sessionId: 's-1' }), { accepted: true });
+	assert.equal(host.requests.length, 1, 'the plugin endpoint must actually be called exactly once');
+	assert.equal(host.requests[0].url.split('/api/')[1], 'workspaceRegistry/deleteSession');
+	// 入参键 = 服务方法形参名：deleteSession(sessionId) → { sessionId }
+	const body = host.requests[0].body as { payload: { args: Record<string, unknown> } };
+	assert.deepEqual(body.payload.args, { sessionId: 's-1' });
+	transport.dispose();
+});
+
+test('deleteSession refuses when the plugin endpoint is missing (gateway error)', async () => {
+	const host = fakeHost((_url, body) => ({
+		json: {
+			type: 'server-response',
+			rpcId: (body as { rpcId: string }).rpcId,
+			result: { ok: false, error: { code: 'gateway/invocation-unavailable', message: 'no active Remote method exports this endpoint' } },
+		},
+	}));
+	const transport = new DshIdeTransport({ origin: 'http://127.0.0.1:9', cookie: 'c', primitives: host.primitives });
+	const backend = new DshIdeTransportBackend(transport);
+	backend.open({ view: 'chat', params: { sessionId: 's-1' } });
+	await assert.rejects(
+		() => backend.invoke('deleteSession', { sessionId: 's-1' }),
+		(error: DshIdeTransportError) => error.code === DSH_IDE_FEATURE_UNAVAILABLE,
+		'a missing plugin endpoint must map to feature-unavailable, never to success',
+	);
+	transport.dispose();
+});
+
+test('deleteSession refuses a call result that does not confirm deletion', async () => {
+	const host = fakeHost((_url, body) => ({
+		json: { type: 'server-response', rpcId: (body as { rpcId: string }).rpcId, result: { ok: true, value: { deleted: false } } },
+	}));
+	const transport = new DshIdeTransport({ origin: 'http://127.0.0.1:9', cookie: 'c', primitives: host.primitives });
+	const backend = new DshIdeTransportBackend(transport);
+	backend.open({ view: 'chat', params: { sessionId: 's-1' } });
+	await assert.rejects(
+		() => backend.invoke('deleteSession', { sessionId: 's-1' }),
+		(error: DshIdeTransportError) => error.code === DSH_IDE_FEATURE_UNAVAILABLE,
+		'only { deleted: true } may be reported as accepted',
+	);
+	transport.dispose();
+});
+
+test('deleteSession propagates a plugin call failure unchanged', async () => {
+	const host = fakeHost((_url, body) => ({
+		json: {
+			type: 'server-response',
+			rpcId: (body as { rpcId: string }).rpcId,
+			result: { ok: false, error: { code: 'session/flush-failed', message: 'could not flush' } },
+		},
+	}));
+	const transport = new DshIdeTransport({ origin: 'http://127.0.0.1:9', cookie: 'c', primitives: host.primitives });
+	const backend = new DshIdeTransportBackend(transport);
+	backend.open({ view: 'chat', params: { sessionId: 's-1' } });
+	// 插件内部失败不是「能力缺失」：保留官方错误码，便于上层如实报告原因。
+	await assert.rejects(
+		() => backend.invoke('deleteSession', { sessionId: 's-1' }),
+		(error: DshIdeTransportError) => error.code === 'session/flush-failed',
+	);
 	transport.dispose();
 });
 

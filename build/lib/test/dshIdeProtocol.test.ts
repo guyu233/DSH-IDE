@@ -9,8 +9,13 @@
 // 运行：node --experimental-strip-types --test build/lib/test/dshIdeProtocol.test.ts
 
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import {
+	DSH_IDE_API_VERSION,
+	DSH_IDE_DELETE_SESSION_ENDPOINT,
+	DSH_IDE_DELETE_SESSION_PLUGIN,
+	DSH_IDE_DELETE_SESSION_PLUGIN_VERSION,
 	DSH_IDE_WIRE_REVISION,
 	assertSnapshotContinuity,
 	exactRecord,
@@ -207,4 +212,41 @@ test('validateDshIdeInvokeOutput rejects snapshot/unknown fields/undefined', () 
 	assert.throws(() => validateDshIdeInvokeOutput({ value: 1, snapshot: snapshot() }), /unknown field/);
 	assert.throws(() => validateDshIdeInvokeOutput({ value: undefined }), /must omit explicit undefined field/);
 	assert.throws(() => validateDshIdeInvokeOutput(undefined), /must be an object/);
+});
+
+// ---------------------------------------------------------------------------
+// 版本绑定（D61 / §8.10.8（4））：deleteSession 依赖的第三方插件端点
+//
+// 官方 0.2.2-rc.1 无会话删除入口（§8.10.7 定论），因此 deleteSession 的唯一实现路径是
+// 调用 `@michengai/dsh-archive-manager@1.3.1` 的 `workspaceRegistry/deleteSession`。
+// 三条断言把「插件没换、endpoint 没改名、传输层没有自己发明端点」钉死在契约层。
+// ---------------------------------------------------------------------------
+
+test('deleteSession plugin binding names the approved plugin, version and endpoint', () => {
+	assert.equal(DSH_IDE_DELETE_SESSION_PLUGIN, '@michengai/dsh-archive-manager');
+	assert.equal(DSH_IDE_DELETE_SESSION_PLUGIN_VERSION, '1.3.1');
+	// 插件 src/workspace.ts:359-378：namespace 与 method 同名，wire = `sessionId`。
+	assert.equal(DSH_IDE_DELETE_SESSION_ENDPOINT, 'workspaceRegistry/deleteSession');
+});
+
+test('DSH_IDE_API_VERSION pins the validated upstream version', () => {
+	// `dshIdeContract.ts` 依赖 `base/common/process.js`，strip-types 下无法直接加载，
+	// 因此用源码断言核对两者的字面量一致（契约门禁另有版本比对）。
+	const contract = readFileSync(new URL('../../../src/vs/platform/dshClient/common/dshIdeContract.ts', import.meta.url), 'utf8');
+	const upstream = /UPSTREAM_VALIDATED_VERSION\s*=\s*'([^']+)'/.exec(contract)?.[1];
+	assert.equal(DSH_IDE_API_VERSION, upstream, 'DSH_IDE_API_VERSION must equal UPSTREAM_VALIDATED_VERSION');
+});
+
+test('the transport calls exactly the contracted endpoint for deleteSession', () => {
+	// 传输层是纯 JS 可加载模块（值导入 `.js` 说明符在 strip-types 下不可解析），
+	// 因此用源码断言守住「不自己发明端点、不写死第二个插件名」。
+	const source = readFileSync(new URL('../../../src/vs/platform/dshClient/transport/dshIdeTransport.ts', import.meta.url), 'utf8');
+	const [namespace, method] = DSH_IDE_DELETE_SESSION_ENDPOINT.split('/');
+	assert.match(
+		source,
+		new RegExp(`call\\(\\s*'${namespace}'\\s*,\\s*'${method}'\\s*,\\s*\\{ sessionId \\}`),
+		'the transport must call the contracted endpoint with the exact wire field',
+	);
+	assert.match(source, new RegExp(DSH_IDE_DELETE_SESSION_PLUGIN.replace(/[/@]/g, '\\$&')), 'the refusal message must name the approved plugin');
+	assert.match(source, /deleted'\] !== true/, 'only { deleted: true } may be reported as accepted');
 });

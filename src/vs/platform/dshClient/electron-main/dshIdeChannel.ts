@@ -9,7 +9,7 @@
 // 也不直连 electron API；DSH 能力的真实实现由插件 Host 层的视图宿主提供。
 //
 // 三个职责：
-//   call()         —— 控制命令（open / close）与 20 个 DTO method 的唯一分发入口；
+//   call()         —— 控制命令（open / close）与 22 个 DTO method 的唯一分发入口；
 //   listen()       —— 只发布本条连接所属视图的快照（三层过滤）；
 //   disposeOwner() —— 窗口断开时只清理该连接持有的订阅，不代用户取消 DSH 会话。
 
@@ -28,7 +28,7 @@ import {
 	type IdeViewHost,
 } from '../common/dshIdeProtocol.js';
 
-/** 通道控制命令：负责建立/释放一条连接，不属于 20 个 DTO method 白名单。 */
+/** 通道控制命令：负责建立/释放一条连接，不属于 22 个 DTO method 白名单。 */
 export const DSH_IDE_CONTROL_OPEN = 'open';
 export const DSH_IDE_CONTROL_CLOSE = 'close';
 /**
@@ -122,7 +122,7 @@ export class DshIdeChannel extends Disposable implements IServerChannel<string> 
 		try {
 			spec = exactRecord(arg ?? {}, ['workspace', 'sessionId'], 'DshIdeChannel.launch');
 		} catch (error) {
-			// 参数形状违规：按契约返回确定错误码，不让异常穿透通道（与 20 method 口径一致）。
+			// 参数形状违规：按契约返回确定错误码，不让异常穿透通道（与 22 method 口径一致）。
 			return { ok: false, code: DSH_IDE_INVALID_ARGUMENT, message: error instanceof Error ? error.message : String(error) };
 		}
 		const workspace = spec['workspace'];
@@ -170,7 +170,7 @@ export class DshIdeChannel extends Disposable implements IServerChannel<string> 
 		return first;
 	}
 
-	/** 20 个 DTO method 的唯一分发路径：入参校验 → 宿主调用 → 出参校验。 */
+	/** 22 个 DTO method 的唯一分发路径：入参校验 → 宿主调用 → 出参校验。 */
 	private async invoke<T>(ctx: string, method: string, arg: unknown): Promise<T> {
 		this.assertOpen(ctx);
 		let validated: unknown;

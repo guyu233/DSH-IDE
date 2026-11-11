@@ -3,7 +3,7 @@
  *  Licensed under the MIT License.
  *--------------------------------------------------------------------------------------------*/
 
-// P3 验收单测：通道分发（20 method 全覆盖）、listen 三层过滤、disposeOwner 本通道清理、
+// P3 验收单测：通道分发（22 method 全覆盖）、listen 三层过滤、disposeOwner 本通道清理、
 // 视图宿主快照纪律（channelId 守恒 / version 严格 +1 / 首帧 starting / 投影 ready）。
 // 运行：node --experimental-strip-types --test build/lib/test/dshIdeChannel.test.ts
 // 通道与视图宿主经 `out/`（`build-dsh-tests` 转译产物）加载：两者依赖 base/common 的 .js 说明符，
@@ -46,6 +46,7 @@ const ALL_METHODS: DshIdeMethod[] = [
 	'answerApproval', 'answerQuestion', 'cancelRequest', 'setModel', 'setEffort',
 	'setPermissionPreset', 'runCommand', 'listSessions', 'deleteSession', 'listModels',
 	'listCommands', 'fetchRowDetail', 'refreshSnapshot',
+	'accountGetState', 'accountGetProfile',
 ];
 
 interface FakeBackend extends DshIdeBackend {
@@ -232,7 +233,7 @@ async function openedChannel(backend = fakeBackend()) {
 	return { view, channel, backend, first };
 }
 
-test('channel dispatches all 20 DTO methods through validateDshIdeInput', async () => {
+test('channel dispatches all 22 DTO methods through validateDshIdeInput', async () => {
 	const { channel, backend } = await openedChannel();
 	for (const method of ALL_METHODS) {
 		const output = await channel.call<{ value: unknown }>('ctx-a', method, VALID[method]);
