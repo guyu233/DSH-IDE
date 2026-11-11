@@ -983,8 +983,8 @@ test('loadOlder calls sessionController.page with the official request shape', a
 		sessionController: { ...sessionControllerStub(), page: async request => { calls.push(request); return { cursor: 1, events: [] }; } },
 	});
 	bridge.open({ view: 'chat', params: { sessionId: 's-1' } });
-	assert.deepEqual(await bridge.invoke('loadOlder', { beforeSeq: 7, maxMessages: 20 }), { accepted: true });
-	assert.deepEqual(calls[0], { address: { kind: 'session', sessionId: 's-1' }, beforeSeq: 7, maxMessages: 20 });
+	assert.deepEqual(await bridge.invoke('loadOlder', { throughSeq: 9, beforeSeq: 7, maxMessages: 20 }), { accepted: true });
+	assert.deepEqual(calls[0], { address: { kind: 'session', sessionId: 's-1' }, throughSeq: 9, beforeSeq: 7, maxMessages: 20 });
 	// 省略可选字段时不传该键（官方的省略语义是「按日志末端取页」）。
 	assert.deepEqual(await bridge.invoke('loadOlder', {}), { accepted: true });
 	assert.deepEqual(calls[1], { address: { kind: 'session', sessionId: 's-1' } });

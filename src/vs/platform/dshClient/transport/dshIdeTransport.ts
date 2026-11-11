@@ -580,6 +580,7 @@ export class DshIdeTransportBackend implements DshIdeBackend {
 				await this.transport.call('session', 'page', {
 					request: {
 						address: { kind: 'session', sessionId: sessionIdForPage },
+						...(typeof record['throughSeq'] === 'number' ? { throughSeq: record['throughSeq'] } : {}),
 						...(typeof record['beforeSeq'] === 'number' ? { beforeSeq: record['beforeSeq'] } : {}),
 						...(typeof record['maxMessages'] === 'number' ? { maxMessages: record['maxMessages'] } : {}),
 					},

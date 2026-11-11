@@ -1011,11 +1011,11 @@ test('backend archiveSession propagates the official active-session refusal', as
 
 test('backend maps loadOlder to session/page with the official request shape', async () => {
 	const { backend, transport, requests } = backendWithHost(OK);
-	assert.deepEqual(await backend.invoke('loadOlder', { beforeSeq: 7, maxMessages: 20 }), { accepted: true });
+	assert.deepEqual(await backend.invoke('loadOlder', { throughSeq: 9, beforeSeq: 7, maxMessages: 20 }), { accepted: true });
 	assert.equal(requests.length, 1);
 	assert.equal(requests[0]!.url.split('/api/')[1], 'session/page');
 	const body = requests[0]!.body as { payload: { args: Record<string, unknown> } };
-	assert.deepEqual(body.payload.args, { request: { address: { kind: 'session', sessionId: 's-1' }, beforeSeq: 7, maxMessages: 20 } });
+	assert.deepEqual(body.payload.args, { request: { address: { kind: 'session', sessionId: 's-1' }, throughSeq: 9, beforeSeq: 7, maxMessages: 20 } });
 	// 省略可选字段时不传该键。
 	await backend.invoke('loadOlder', {});
 	const second = requests[1]!.body as { payload: { args: Record<string, unknown> } };

@@ -355,6 +355,7 @@ function createMethodHandlers(bridge) {
 			bridge.assertOwnership(sessionId);
 			await controller().page({
 				address: { kind: 'session', sessionId },
+				...(args.throughSeq === undefined ? {} : { throughSeq: args.throughSeq }),
 				...(args.beforeSeq === undefined ? {} : { beforeSeq: args.beforeSeq }),
 				...(args.maxMessages === undefined ? {} : { maxMessages: args.maxMessages }),
 			});

@@ -139,8 +139,11 @@ export interface DshIdeMethodArgs {
 	 * （`api/session-controller/src/types.ts:469-478`）：`beforeSeq` 是**数值**游标
 	 * （不是旧的字符串 `before`），`maxMessages` 限定本页条数。省略 `beforeSeq`
 	 * 时官方按观察到的日志末端取页。
+	 * `throughSeq` 是**包含式日志切点**：给出时只读该 seq 及之前的历史（「按固定切点
+	 * 只读查看」的官方支撑）；省略时按观察到的日志末端取页。三者可组合：
+	 * `throughSeq` 定切点、`beforeSeq` 定向后翻页、`maxMessages` 限本页条数。
 	 */
-	loadOlder: { sessionId: string; beforeSeq?: number; maxMessages?: number };
+	loadOlder: { sessionId: string; throughSeq?: number; beforeSeq?: number; maxMessages?: number };
 	/** 决议审批请求。 */
 	answerApproval: { requestId: string; decision: 'approve' | 'reject'; reason?: string };
 	/** 决议问卷请求。 */
@@ -238,7 +241,7 @@ const DSH_IDE_METHOD_KEYS: Record<DshIdeMethod, readonly string[]> = {
 	newSession: ['workspace', 'options'],
 	fork: ['sessionId', 'point'],
 	rewind: ['sessionId', 'to'],
-	loadOlder: ['sessionId', 'beforeSeq', 'maxMessages'],
+	loadOlder: ['sessionId', 'throughSeq', 'beforeSeq', 'maxMessages'],
 	answerApproval: ['requestId', 'decision', 'reason'],
 	answerQuestion: ['requestId', 'answer'],
 	cancelRequest: ['requestId'],
@@ -426,6 +429,7 @@ export function validateDshIdeInput<K extends DshIdeMethod>(command: K, args: un
 			nonEmptyString(record['sessionId'], 'DshIdeInput.loadOlder.sessionId');
 			optionalNonNegativeInteger(record['beforeSeq'], 'DshIdeInput.loadOlder.beforeSeq');
 			optionalPositiveInteger(record['maxMessages'], 'DshIdeInput.loadOlder.maxMessages');
+			optionalNonNegativeInteger(record['throughSeq'], 'DshIdeInput.loadOlder.throughSeq');
 			break;
 		case 'answerApproval':
 			nonEmptyString(record['requestId'], 'DshIdeInput.answerApproval.requestId');
