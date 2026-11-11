@@ -13,6 +13,7 @@ import { test } from 'node:test';
 import { dshEmits, translateAll, translateDshEvent, wireEventType } from '../../../src/vs/platform/dshClient/common/translator.ts';
 import {
 	MAX_ROWS,
+	RESULT_PREVIEW_LIMIT,
 	ROWS_P95_BYTE_LIMIT,
 	createIdeViewProjector,
 	projectIdeView,
@@ -350,16 +351,58 @@ test('bounded window folds rows beyond MAX_ROWS while keeping stable ids and pre
 });
 
 // ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
 // P95 参数校准脚手架（mock 样本；真实样本到位后替换并更新 golden）
+//
+// 第 23 轮把「单样本字节数」升级为**真正的 P95 分位数测量**：
+// ① 以 golden 的 21 条事件为骨架，按不同倍数放大成多条模拟会话样本；
+// ② 每条样本独立走 translateAll → projectIdeView，再对 rows 序列化取字节数；
+// ③ 用最近秩法（nearest-rank）取第 95 百分位，与 ROWS_P95_BYTE_LIMIT 比较。
+// 真实事件流样本到位后，只需替换 `p95Samples` 的来源，度量与阈值不变。
+// 标注：P95 超阈值时按第 5 章 §5 固定序列校准（① 下调 MAX_ROWS → ② 收紧 preview
+// → ③ 更新 golden），属参数校准而非架构回退。
 // ---------------------------------------------------------------------------
 
-test('P95 rows byte-size calibration scaffold: mock sample is under the 512 KiB threshold', () => {
-	const rows = projectIdeView(translateAll(golden.events)).rows;
-	const bytes = Buffer.byteLength(JSON.stringify(rows), 'utf8');
-	assert.ok(bytes < ROWS_P95_BYTE_LIMIT, `mock rows ${bytes} bytes must stay under ${ROWS_P95_BYTE_LIMIT}`);
-	// 标注：真实事件流 P95 实测超阈值时按 verification.md §3.2 有序序列校准
-	// （① 下调 MAX_ROWS → ② 收紧 preview → ③ 更新 golden），属参数校准而非架构回退。
+/** 最近秩法 P95：升序排列后取 ceil(0.95 * n) 位（1-based），n≥1。 */
+function p95Of(samples: readonly number[]): number {
+	assert.ok(samples.length > 0, 'P95 needs at least one sample');
+	const sorted = [...samples].sort((a, b) => a - b);
+	const rank = Math.ceil(0.95 * sorted.length);
+	return sorted[Math.min(Math.max(rank, 1), sorted.length) - 1]!;
+}
+
+test('P95 rows byte-size calibration: nearest-rank P95 over mock sessions stays under 512 KiB', () => {
+	const base = golden.events;
+	assert.ok(base.length > 0, 'golden must carry events');
+	// 5 条模拟会话样本：1×/2×/4×/8×/16× 骨架，覆盖从小会话到长会话的分布。
+	//
+	// 关键：投影器按 `seq` 幂等去重，直接重复 push 同一批事件只会得到同一份行
+	// （实测 16× 仍是 466 B / 5 行）。因此每条样本必须**改写 seq 偏移**，
+	// 构造出真正不同、真正更长的会话，P95 才有分布意义。
+	const multipliers = [1, 2, 4, 8, 16];
+	const samples = multipliers.map(multiplier => {
+		const events = [];
+		for (let copy = 0; copy < multiplier; copy++) {
+			const offset = copy * 1000;
+			for (const event of base) {
+				const source = event as { readonly seq?: unknown };
+				// 只有带数值 seq 的事件需要偏移；其余字段原样保留（不改事件语义）。
+				events.push(typeof source.seq === 'number' ? { ...source, seq: source.seq + offset } : event);
+			}
+		}
+		const rows = projectIdeView(translateAll(events)).rows;
+		return Buffer.byteLength(JSON.stringify(rows), 'utf8');
+	});
+	// 样本必须真的随倍数增长，否则测的仍是同一份数据（守住度量的有效性）。
+	assert.ok(new Set(samples).size > 1, 'P95 samples must differ across multipliers, not repeat one projection');
+	const p95 = p95Of(samples);
+	assert.ok(p95 <= ROWS_P95_BYTE_LIMIT, `mock P95 ${p95} bytes must stay at or under ${ROWS_P95_BYTE_LIMIT}`);
+	// 最大样本也必须受同一阈值约束（P95 之外不放过极端值）。
+	assert.ok(Math.max(...samples) <= ROWS_P95_BYTE_LIMIT, 'the largest mock sample must also stay under the threshold');
+	// 常量与第 5 章 §5 的冻结值一致。
 	assert.equal(ROWS_P95_BYTE_LIMIT, 512 * 1024);
+	assert.equal(MAX_ROWS, 600);
+	assert.equal(RESULT_PREVIEW_LIMIT, 240);
 });
 
 // ---------------------------------------------------------------------------
