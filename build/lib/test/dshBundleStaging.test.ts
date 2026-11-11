@@ -140,3 +140,26 @@ test('DSH bundle: runtime host-endpoint.json is removed from staging before pack
 	assert.ok(literals.includes('host-endpoint.json'), 'the pack task must explicitly delete the token-bearing endpoint file');
 	assert.match(gulp, /fs\.promises\.rm\([^)]*host-endpoint\.json/, 'the removal must run in the official gulp task');
 });
+
+// ---------------------------------------------------------------------------
+// 第 36 轮：staging 清单必须与 `common/` 下的共享模块一一对应。
+//
+// 背景：磁盘上的 `dist/dsh-ide-2.0.0.tgz` 是**第 19 轮之前的旧产物**——它的
+// `package/` 里只有 `common/env.js`，而 gulpfile 现在明确 stage 7 个 common 文件
+// （`dshIdeArchiveSet` / `dshIdeCommandLine` / `dshIdeCommandList` / `dshIdeSessionList` /
+// `dshIdeSessionSearch` / `dshIdeAuthRedaction` / `env`）。产物陈旧本身由「重打包」解决
+// （D29），但**漏登记**会在每次打包时悄悄少带一个模块，故用本测试钉住。
+// ---------------------------------------------------------------------------
+
+test('every common/ shared module is explicitly staged for the bundle', () => {
+	const gulp = fs.readFileSync(path.join(repoRoot, 'build/gulpfile.vscode.ts'), 'utf8');
+
+	const commonDir = path.join(repoRoot, 'src/vs/platform/dshClient/common');
+	const shipped = fs.readdirSync(commonDir).filter(name => name.endsWith('.js')).sort();
+	assert.ok(shipped.length >= 7, `expected the shared common modules, got ${shipped.length}`);
+
+	// gulpfile 里每个 common 模块都应有 `'common', '<file>'` 形式的 staging 条目。
+	const staged = new Set([...gulp.matchAll(/'common',\s*'([a-zA-Z]+\.js)'/g)].map(m => m[1]));
+	const missing = shipped.filter(name => !staged.has(name));
+	assert.deepEqual(missing, [], `these common modules are not staged and would be missing from the bundle: ${missing.join(', ')}`);
+});
