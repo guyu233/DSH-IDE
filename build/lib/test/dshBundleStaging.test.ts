@@ -182,11 +182,17 @@ test('D20 ptyHostMain stays in desktopEntryPoints (terminal host entry)', () => 
 	assert.ok(desktop !== '', 'desktopEntryPoints must exist');
 	assert.ok(server !== '', 'serverEntryPoints must exist');
 
-	assert.ok(desktop.includes("'vs/platform/terminal/node/ptyHostMain'"),
-		'ptyHostMain must be a desktop entry point, otherwise the packaged desktop build has no PTY host');
+	// 只认同「整行就是一个数组元素」的写法（可带缩进），排除注释里出现的同名并串。
+	// 第 42 轮反向验证发现：若用 includes() 匹配，注释里写了同一个 entryPoint
+	// 字符串会让「入口已被删除」的守护仍然通过（假通过），故改为逐行比对。
+	const entryLines = desktop.split(/\r?\n/).map(line => line.trim());
+	const hasEntry = module => entryLines.includes(`'${module}',`);
+
+	assert.ok(hasEntry('vs/platform/terminal/node/ptyHostMain'),
+		'ptyHostMain must be a desktop entry point (an actual array element), otherwise the packaged desktop build has no PTY host');
 	// 其余两个桌面进程入口也必须在（作为对照，防止有人把整组搬走）。
-	assert.ok(desktop.includes("'vs/workbench/api/node/extensionHostProcess'"), 'extensionHostProcess must stay a desktop entry');
-	assert.ok(desktop.includes("'vs/platform/files/node/watcher/watcherMain'"), 'watcherMain must stay a desktop entry');
+	assert.ok(hasEntry('vs/workbench/api/node/extensionHostProcess'), 'extensionHostProcess must stay a desktop entry');
+	assert.ok(hasEntry('vs/platform/files/node/watcher/watcherMain'), 'watcherMain must stay a desktop entry');
 
 	// 启动方确实指向该 entryPoint（证据链，防止入口与启动方脱节）。
 	const starter = fs.readFileSync(path.join(repoRoot, 'src/vs/platform/terminal/electron-main/electronPtyHostStarter.ts'), 'utf8');
