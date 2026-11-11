@@ -9,7 +9,7 @@
 // 运行：node --experimental-strip-types --test build/lib/test/dshIdeProtocol.test.ts
 
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import {
 	DSH_IDE_API_VERSION,
@@ -18,6 +18,7 @@ import {
 	DSH_IDE_DELETE_SESSION_PLUGIN_VERSION,
 	DSH_IDE_WIRE_REVISION,
 	assertSnapshotContinuity,
+	dshAccountClientMetadata,
 	exactRecord,
 	jsonValue,
 	validateDshIdeInput,
@@ -249,4 +250,37 @@ test('the transport calls exactly the contracted endpoint for deleteSession', ()
 	);
 	assert.match(source, new RegExp(DSH_IDE_DELETE_SESSION_PLUGIN.replace(/[/@]/g, '\\$&')), 'the refusal message must name the approved plugin');
 	assert.match(source, /deleted'\] !== true/, 'only { deleted: true } may be reported as accepted');
+});
+
+// ---------------------------------------------------------------------------
+// D18：AccountClientMetadata 构造器归并入协议真源（原 legacy-account-endpoints.ts 已删）
+// ---------------------------------------------------------------------------
+
+test('dshAccountClientMetadata returns the three required identity fields', () => {
+	const meta = dshAccountClientMetadata('ja-JP', '2.0.0');
+	assert.deepEqual(
+		{ version: meta.version, locale: meta.locale, tz: meta.timezoneOffsetSeconds },
+		{ version: '2.0.0', locale: 'ja-JP', tz: -new Date().getTimezoneOffset() * 60 },
+	);
+	// 三字段都必填，且不含任何凭据。
+	assert.equal(typeof meta.version, 'string');
+	assert.equal(typeof meta.locale, 'string');
+	assert.equal(typeof meta.timezoneOffsetSeconds, 'number');
+	assert.ok(!('token' in meta) && !('cookie' in meta) && !('secret' in meta));
+});
+
+test('dshAccountClientMetadata falls back to a non-empty version and locale', () => {
+	const meta = dshAccountClientMetadata();
+	assert.equal(meta.version, 'dsh-ide');
+	assert.equal(meta.locale, 'zh-CN');
+	assert.equal(dshAccountClientMetadata('', '').version, 'dsh-ide');
+	assert.equal(dshAccountClientMetadata('', '').locale, 'zh-CN');
+});
+
+test('D18 legacy account endpoints file is gone and the consumer uses the protocol single source', () => {
+	const legacy = new URL('../../../src/vs/platform/dshClient/common/legacy-account-endpoints.ts', import.meta.url);
+	assert.equal(existsSync(legacy), false, 'the legacy file must be deleted after the D18 merge');
+	const consumer = readFileSync(new URL('../../../src/vs/workbench/browser/parts/globalCompositeBar.ts', import.meta.url), 'utf8');
+	assert.match(consumer, /from '[^']*common\/dshIdeProtocol\.js'/, 'the consumer must import the builder from the protocol single source');
+	assert.ok(!consumer.includes('legacy-account-endpoints'), 'no stale legacy import may remain');
 });

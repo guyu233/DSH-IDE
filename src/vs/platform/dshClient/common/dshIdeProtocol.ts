@@ -183,6 +183,28 @@ export interface IDshAccountClientMetadataArgs {
 	readonly timezoneOffsetSeconds: number;
 }
 
+/** 客户端版本号的兜底值：无构建注入时也要给出非空串，否则 Host 会拒绝该身份。 */
+const DSH_IDE_FALLBACK_CLIENT_VERSION = 'dsh-ide';
+
+/**
+ * 构造官方 `AccountClientMetadata` 调用方身份（D18：归并入协议真源，不再有第二份文件）。
+ *
+ * 依据（只读核对 DSH `packages/client/ui-settings-account/src/client/client-metadata.ts`）：
+ * `Date.getTimezoneOffset()` 返回「UTC 以西的分钟数」，Platform 要的是「UTC 以东的秒数」，
+ * 故取负再乘 60。三字段都必填、不含任何密钥——账号凭据只存在于 Host。
+ *
+ * @param locale 当前界面语言（如 `zh-CN`）；Host 会再收敛成 Platform 的线上 locale。
+ * @param version 客户端构建版本；缺省时用本插件标识兜底。
+ */
+export function dshAccountClientMetadata(locale?: string, version?: string): IDshAccountClientMetadataArgs {
+	return {
+		version: typeof version === 'string' && version !== '' ? version : DSH_IDE_FALLBACK_CLIENT_VERSION,
+		locale: typeof locale === 'string' && locale !== '' ? locale : 'zh-CN',
+		// 与官方实现同一口径：偏移取反、分钟转秒。
+		timezoneOffsetSeconds: -new Date().getTimezoneOffset() * 60,
+	};
+}
+
 /** 方法白名单（由 DshIdeMethodArgs 键派生，单一真源）。 */
 export type DshIdeMethod = keyof DshIdeMethodArgs;
 
@@ -539,6 +561,6 @@ export interface IdeViewHost {
 	close(): { closed: true };
 }
 
-// 注：账号能力的**端点名**已是本协议的正式 method（`accountGetState` / `accountGetProfile`）。
-// 仅「调用方身份」元数据（官方 `AccountClientMetadata` 四字段的来源）仍放在
-// `legacy-account-endpoints.ts`，因为它描述的是 Platform 客户端凭据，不是 DTO 形状。
+// 注：账号能力的**端点名**是本协议的正式 method（`accountGetState` / `accountGetProfile`），
+// 「调用方身份」元数据（官方 `AccountClientMetadata` 三字段）及其构造器
+// `dshAccountClientMetadata` 也同在本文件（D18 归并），协议侧只留唯一真源。

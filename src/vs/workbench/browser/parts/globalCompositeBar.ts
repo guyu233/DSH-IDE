@@ -46,7 +46,7 @@ import { KeyCode } from '../../../base/common/keyCodes.js';
 import { ACTIVITY_BAR_BADGE_BACKGROUND, ACTIVITY_BAR_BADGE_FOREGROUND } from '../../common/theme.js';
 import { IBaseActionViewItemOptions } from '../../../base/browser/ui/actionbar/actionViewItems.js';
 import { IDshClientService } from '../../../platform/dshClient/common/dshClientService.js';
-import { dshAccountClientMetadata } from '../../../platform/dshClient/common/legacy-account-endpoints.js';
+import { dshAccountClientMetadata } from '../../../platform/dshClient/common/dshIdeProtocol.js';
 import { IOpenerService } from '../../../platform/opener/common/opener.js';
 import { ICommandService } from '../../../platform/commands/common/commands.js';
 
