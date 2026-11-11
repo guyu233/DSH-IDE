@@ -351,7 +351,7 @@ test('backend maps submit/interrupt/setModel to verified session endpoints', asy
 
 test('backend refuses unverified capabilities with feature-unavailable', async () => {
 	const { backend, transport, requests } = backendWithHost(OK);
-	const refusing: DshIdeMethod[] = ['rewind', 'loadOlder', 'setEffort', 'setPermissionPreset', 'runCommand', 'listCommands'];
+	const refusing: DshIdeMethod[] = ['rewind', 'loadOlder', 'setPermissionPreset', 'runCommand', 'listCommands'];
 	for (const method of refusing) {
 		await assert.rejects(
 			() => backend.invoke(method, {}),
@@ -360,6 +360,47 @@ test('backend refuses unverified capabilities with feature-unavailable', async (
 		);
 	}
 	assert.equal(requests.length, 0, 'refused capabilities must not hit the Host at all');
+	transport.dispose();
+});
+
+// D13：setEffort（§8.10.9 已核对落点：session/projections → session/selectModel）。
+test('backend maps setEffort to projections then selectModel with reasoningEffort', async () => {
+	const { backend, transport, requests } = backendWithHost((url, body) => {
+		const rpcId = (body as { rpcId: string }).rpcId;
+		if (url.endsWith('/api/session/projections')) {
+			return { json: { type: 'server-response', rpcId, result: { ok: true, value: { values: { modelSelection: { next: { provider: 'deepseek', model: 'chat' } } } } } } };
+		}
+		return OK(url, body);
+	});
+	await backend.invoke('setEffort', { effort: 'high' });
+	assert.deepEqual(requests.map(r => r.url.split('/api/')[1]), ['session/projections', 'session/selectModel']);
+	const projections = requests[0].body as { payload: { args: { request: Record<string, unknown> } } };
+	assert.deepEqual(projections.payload.args.request, { sessionId: 's-1' });
+	const select = requests[1].body as { payload: { args: { request: Record<string, unknown> } } };
+	assert.deepEqual(select.payload.args.request, { sessionId: 's-1', provider: 'deepseek', model: 'chat', reasoningEffort: 'high' });
+	transport.dispose();
+});
+
+test('backend refuses setEffort with an empty effort without hitting the Host', async () => {
+	const { backend, transport, requests } = backendWithHost(OK);
+	await assert.rejects(
+		() => backend.invoke('setEffort', { effort: '' }),
+		(error: DshIdeTransportError) => error.code === 'dsh-ide/invalid-argument',
+	);
+	assert.equal(requests.length, 0);
+	transport.dispose();
+});
+
+test('backend refuses setEffort when projections carry no current model', async () => {
+	const { backend, transport, requests } = backendWithHost((url, body) => {
+		const rpcId = (body as { rpcId: string }).rpcId;
+		return { json: { type: 'server-response', rpcId, result: { ok: true, value: { values: { modelSelection: { next: null } } } } } };
+	});
+	await assert.rejects(
+		() => backend.invoke('setEffort', { effort: 'high' }),
+		(error: DshIdeTransportError) => error.code === DSH_IDE_FEATURE_UNAVAILABLE,
+	);
+	assert.equal(requests.length, 1, 'must read projections once, then refuse without re-selecting');
 	transport.dispose();
 });
 

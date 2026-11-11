@@ -10,7 +10,9 @@
 //   ② 上游升级后落点变了，而契约与接线仍停在旧结论上。
 //
 // 依据（只读核对 E:/deepseek-harness-0.2.2-rc.1/，本地静态源码，无真机观测）：
-//   详见 docs/DEVELOPMENT.md 第 8 章 §8.10.9「D16 官方落点核对结论」。
+//   §8.10.9「D16 官方落点核对结论」。第 26 轮据此把唯一已核对完整 wire 形状的
+//   setEffort 接线（session/projections → session/selectModel），故本表把
+//   deleteSession + setEffort 标为已接线、其余 5 个继续钉死 fail-closed。
 // 形状一律以契约真源 dshIdeProtocol.ts 与 DSH 源码为准，不凭记忆臆造。
 
 import assert from 'node:assert/strict';
@@ -50,9 +52,9 @@ const FINDINGS: readonly EndpointFinding[] = [
 	},
 	{
 		method: 'setEffort',
-		landing: 'session/selectModel',
-		evidence: 'session-controller/src/index.ts:313 @Remote(selectModel)；types.ts:286 SessionSelectModelRequest extends ModelSelection；types.ts:89 ModelSelection{provider,model,reasoningEffort?}；commands.ts:149-159；ui-model-selection/src/client/directory.ts:99-107',
-		note: '落点 = selectModel 的 reasoningEffort 字段，但契约只有 {effort}，还需当前 provider+model（先读 state）。未接线前保持 fail-closed。',
+		landing: 'session/projections → session/selectModel',
+		evidence: 'session-controller/src/index.ts:313 @Remote(selectModel)、:617 @Remote(projections)；types.ts:286 / :89 ModelSelection{provider,model,reasoningEffort?}、:413 SessionProjectionsRequest；core/agent/src/model-selection.ts:72-90 wire.view 产出 modelSelection.next；commands.ts:149-159；ui-model-selection/src/client/directory.ts:99-107 / :161',
+		note: '已完成（代码侧，第 26 轮）：先读 session/projections 的 values.modelSelection.next 拿当前 provider+model，再以 reasoningEffort 调 session/selectModel；无当前选择则 FEATURE_UNAVAILABLE，不伪造默认路由。',
 	},
 	{
 		method: 'setPermissionPreset',
@@ -80,8 +82,10 @@ const FINDINGS: readonly EndpointFinding[] = [
 	},
 ];
 
-/** 尚不允许接线的 6 个 method：除 deleteSession（已完成）外全部保持 fail-closed。 */
-const UNVERIFIED = FINDINGS.filter(f => f.method !== 'deleteSession').map(f => f.method);
+/** 已完成（代码侧）的 method：deleteSession（第 21 轮）与 setEffort（第 26 轮）。 */
+const WIRED = ['deleteSession', 'setEffort'];
+/** 尚不允许接线的 5 个 method：其余形状未核对者全部保持 fail-closed。 */
+const UNVERIFIED = FINDINGS.filter(f => !WIRED.includes(f.method)).map(f => f.method);
 
 // ---------------------------------------------------------------------------
 // 契约口径：22 method 白名单（20 会话域 + 2 账号域）
@@ -108,8 +112,10 @@ test('D16 transport keeps the unverified methods in the feature-unavailable stub
 	for (const method of UNVERIFIED) {
 		assert.ok(stub[0].includes(`case '${method}':`), `${method} must stay in the transport fail-closed stub until its wire shape is verified`);
 	}
-	// deleteSession 已接线，绝不能回退成 stub。
-	assert.ok(!stub[0].includes("case 'deleteSession':"), 'deleteSession must not fall back to the stub');
+	// 两个已接线的 method 绝不能回退成 stub。
+	for (const method of WIRED) {
+		assert.ok(!stub[0].includes(`case '${method}':`), `${method} must not fall back to the stub`);
+	}
 });
 
 test('D16 Host bridge keeps the unverified methods as missing(...)', () => {
@@ -117,7 +123,9 @@ test('D16 Host bridge keeps the unverified methods as missing(...)', () => {
 		const re = new RegExp(`${method}:\\s*missing\\('${method}'\\)`);
 		assert.match(host, re, `Host bridge must keep ${method} as missing(...) until its official endpoint is verified`);
 	}
-	assert.doesNotMatch(host, /deleteSession:\s*missing\(/, 'deleteSession must remain wired on the Host side');
+	for (const method of WIRED) {
+		assert.doesNotMatch(host, new RegExp(`${method}:\\s*missing\\(`), `${method} must remain wired on the Host side`);
+	}
 });
 
 // ---------------------------------------------------------------------------
@@ -132,7 +140,7 @@ test('D16 findings are complete: 7 methods, each with evidence and a conclusion'
 		assert.ok(f.evidence.length > 20, `${f.method} must carry source evidence`);
 		assert.ok(f.note.length > 10, `${f.method} must carry a conclusion / D13 prerequisite`);
 	}
-	// 只有 deleteSession 已完成；其余 6 个保持未核对形状。
-	assert.equal(FINDINGS.filter(f => f.note.startsWith('已完成')).length, 1);
-	assert.equal(UNVERIFIED.length, 6);
+	// deleteSession 与 setEffort 已完成（代码侧）；其余 5 个保持未核对形状。
+	assert.equal(FINDINGS.filter(f => f.note.startsWith('已完成')).length, 2);
+	assert.equal(UNVERIFIED.length, 5);
 });

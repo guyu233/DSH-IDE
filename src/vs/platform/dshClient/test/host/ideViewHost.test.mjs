@@ -69,6 +69,7 @@ function sessionControllerStub(overrides = {}) {
 		fork: record('fork'),
 		state: record('state'),
 		selectModel: record('selectModel'),
+		projections: record('projections'),
 		...overrides,
 	};
 }
@@ -730,4 +731,46 @@ test('D55 removeHostEndpoint deletes the endpoint file and is idempotent', async
 	await assert.rejects(() => fsp.access(file), 'the token-bearing file must be gone');
 	await removeHostEndpoint(file); // 幂等：删不存在的文件不抛错
 	await fsp.rm(dir, { recursive: true, force: true });
+});
+
+// ---------------------------------------------------------------------------
+// D13：setEffort 接线（§8.10.9 已核对落点：session/projections → session/selectModel）
+//
+// 官方无独立 setEffort remote；effort 是 selectModel 的 reasoningEffort 字段。
+// 当前 provider/model 从 projections 的 modelSelection.next wire view 读取，
+// 无当前选择时明确 FEATURE_UNAVAILABLE，不伪造默认路由、不降级成 setModel。
+// ---------------------------------------------------------------------------
+
+test('setEffort reads the current route from projections and re-selects with reasoningEffort', async () => {
+	const calls = [];
+	const controller = sessionControllerStub({
+		projections: async request => {
+			calls.push({ name: 'projections', request });
+			return { values: { modelSelection: { next: { provider: 'deepseek', model: 'chat', reasoningEffort: 'medium' } } } };
+		},
+		selectModel: async request => { calls.push({ name: 'selectModel', request }); return { selected: {} }; },
+	});
+	const { bridge } = bridgeWith({ sessionController: controller });
+	bridge.open({ view: 'chat', params: { sessionId: 's-1' } });
+	assert.deepEqual(await bridge.invoke('setEffort', { effort: 'high' }), { accepted: true });
+	assert.deepEqual(calls.map(c => c.name), ['projections', 'selectModel']);
+	assert.deepEqual(calls[0].request, { sessionId: 's-1' });
+	assert.deepEqual(calls[1].request, { sessionId: 's-1', provider: 'deepseek', model: 'chat', reasoningEffort: 'high' });
+});
+
+test('setEffort refuses an empty effort without querying the Host', async () => {
+	const unexpected = () => { assert.fail('an invalid effort must not query the Host'); };
+	const { bridge } = bridgeWith({ sessionController: { projections: unexpected, selectModel: unexpected } });
+	bridge.open({ view: 'chat', params: { sessionId: 's-1' } });
+	await assert.rejects(() => bridge.invoke('setEffort', { effort: '' }), error => error.code === INVALID_ARGUMENT);
+});
+
+test('setEffort refuses when the session has no current model selection', async () => {
+	const controller = sessionControllerStub({
+		projections: async () => ({ values: { modelSelection: { next: null } } }),
+		selectModel: () => { assert.fail('a missing route must not re-select'); },
+	});
+	const { bridge } = bridgeWith({ sessionController: controller });
+	bridge.open({ view: 'chat', params: { sessionId: 's-1' } });
+	await assert.rejects(() => bridge.invoke('setEffort', { effort: 'high' }), error => error.code === FEATURE_UNAVAILABLE);
 });

@@ -344,7 +344,30 @@ function createMethodHandlers(bridge) {
 			await controller().selectModel({ sessionId, provider, model });
 			return { accepted: true };
 		},
-		setEffort: missing('setEffort'),
+		async setEffort(args) {
+			// D13/D16：官方无独立 setEffort remote；effort 是 session/selectModel 的
+			// reasoningEffort 字段（§8.10.9）。当前 provider/model 从 session/projections
+			// 的 modelSelection.next wire view 读取，避免凭记忆猜路由。
+			const sessionId = requireSession();
+			if (typeof args.effort !== 'string' || args.effort === '') {
+				throw coded(INVALID_ARGUMENT, 'setEffort.effort must be a non-empty string');
+			}
+			const value = await controller().projections({ sessionId });
+			const selection = value && value.values && value.values.modelSelection
+				? value.values.modelSelection.next
+				: undefined;
+			if (!selection || typeof selection.provider !== 'string' || typeof selection.model !== 'string') {
+				// 无当前模型则无法只改 effort：明确拒绝，不伪造默认路由，不悄悄降级成 setModel。
+				throw coded(FEATURE_UNAVAILABLE, 'setEffort requires a current model selection');
+			}
+			await controller().selectModel({
+				sessionId,
+				provider: selection.provider,
+				model: selection.model,
+				reasoningEffort: args.effort,
+			});
+			return { accepted: true };
+		},
 		setPermissionPreset: missing('setPermissionPreset'),
 		runCommand: missing('runCommand'),
 		async listSessions() {

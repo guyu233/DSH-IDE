@@ -468,6 +468,31 @@ export class DshIdeTransportBackend implements DshIdeBackend {
 				const [provider, model] = splitModel(String(record['model'] ?? ''));
 				return this.transport.call('session', 'selectModel', { request: { sessionId, provider, model } });
 			}
+			case 'setEffort': {
+				// D13/D16：官方无独立 setEffort remote；effort 是 session/selectModel 的
+				// reasoningEffort 字段（§8.10.9）。当前 provider/model 从 session/projections
+				// 的 modelSelection.next wire view 读取，避免凭记忆猜路由。
+				const effort = String(record['effort'] ?? '');
+				if (effort === '') {
+					throw new DshIdeTransportError('dsh-ide/invalid-argument', 'setEffort.effort must be a non-empty string');
+				}
+				const projected = await this.transport.call('session', 'projections', { request: { sessionId } });
+				const values = isRecord(projected) && isRecord(projected['values']) ? projected['values'] : undefined;
+				const modelSelection = values !== undefined && isRecord(values['modelSelection']) ? values['modelSelection'] : undefined;
+				const selection = modelSelection !== undefined && isRecord(modelSelection['next']) ? modelSelection['next'] : undefined;
+				if (selection === undefined || typeof selection['provider'] !== 'string' || typeof selection['model'] !== 'string') {
+					// 无当前模型则无法只改 effort：明确拒绝，不伪造默认路由，不悄悄降级成 setModel。
+					throw new DshIdeTransportError('dsh-ide/feature-unavailable', 'setEffort requires a current model selection');
+				}
+				return this.transport.call('session', 'selectModel', {
+					request: {
+						sessionId,
+						provider: selection['provider'],
+						model: selection['model'],
+						reasoningEffort: effort,
+					},
+				});
+			}
 			case 'listSessions':
 				return this._listSessions();
 			case 'listModels': {
@@ -510,7 +535,6 @@ export class DshIdeTransportBackend implements DshIdeBackend {
 				return this.deleteSessionViaPlugin(String(record['sessionId'] ?? ''));
 			case 'rewind':
 			case 'loadOlder':
-			case 'setEffort':
 			case 'setPermissionPreset':
 			case 'runCommand':
 			case 'listCommands':
