@@ -117,6 +117,9 @@ class LazyDshIdeTransportBackend implements DshIdeBackend {
 			// 既无 cookie 也无 launch URL：明确拒绝，不猜测鉴权方式。
 			throw Object.assign(new Error('DSH_IDE_COOKIE and DSH_IDE_LAUNCH_URL are both unset'), { code: 'dsh-ide/host-authentication-failed' });
 		}
-		return authenticateHost(this.origin, this.launchUrl);
+		const cookie = await authenticateHost(this.origin, this.launchUrl);
+		// D55：换取成功后立刻清掉进程环境里的一次性 launch token，不再落盘、不再留驻。
+		delete env[DSH_IDE_LAUNCH_URL_ENV];
+		return cookie;
 	}
 }

@@ -13,7 +13,7 @@
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { IdeRemoteService } from './host/ide-service.js';
-import { REQUIRED_SERVICES, createDshIdeHostBridge, publishHostEndpointWhenListening } from './host/ide-view-host.js';
+import { REQUIRED_SERVICES, createDshIdeHostBridge, publishHostEndpointWhenListening, removeHostEndpoint, endpointLogText } from './host/ide-view-host.js';
 
 export const name = 'dsh-ide';
 // 只硬依赖 `sessions`（内核级、必然存在）。`sessionController` 是 API 层服务，
@@ -38,10 +38,14 @@ export function apply(ctx, config = {}) {
 	// 必须等 `webServer` 真正开始监听：`apply` 时 `webServer.port` 还是 undefined
 	// （端口由 listen 回填），立刻发布只会得到「无从发布」并静默跳过（真机实测踩过）。
 	const endpointFile = join(pluginRoot, 'runtime', 'host-endpoint.json');
+	// D55：插件卸载 / Host 重启时删除端点文件，让一次性 query token 不再落盘。
+	// ctx.effect 的清理函数在上下文销毁时调用；删除是 fire-and-forget，不阻塞卸载。
+	ctx.effect(() => () => void removeHostEndpoint(endpointFile), 'dsh-ide.host-endpoint-cleanup');
 	ctx.inject(['webServer', 'connection'], endpointCtx => {
 		void publishHostEndpointWhenListening(endpointCtx, endpointFile).then(endpoint => {
 			if (endpoint !== undefined) {
-				console.log(`[dsh-ide] host endpoint published: ${endpoint.origin}`);
+				// D55：只记录脱敏后的 origin，绝不输出 launchUrl（内含 token）。
+				console.log(`[dsh-ide] host endpoint published: ${endpointLogText(endpoint)}`);
 			} else {
 				console.warn('[dsh-ide] host endpoint not published within timeout: webServer never reported a port');
 			}

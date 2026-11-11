@@ -21,8 +21,11 @@ import {
 	createDshIdeHostBridge,
 	publishHostEndpoint,
 	publishHostEndpointWhenListening,
+	removeHostEndpoint,
+	endpointLogText,
 	resolveHostEndpoint,
 } from '../../host/ide-view-host.js';
+import { redactAuthMaterial, safeErrorText } from '../../common/dshIdeAuthRedaction.js';
 
 /** 最小假上下文：记录监听、支持 emit，并按名字返回服务。 */
 function fakeCtx(services = {}) {
@@ -656,4 +659,75 @@ test('endpoint lives under the plugin directory, not the host cwd', () => {
 	const wrong = `${profile}/runtime/host-endpoint.json`;
 	assert.notEqual(correct, wrong, 'the two paths must differ — this is the bug that was fixed');
 	assert.ok(correct.includes('node_modules/dsh-ide'), 'the endpoint must be looked up inside the plugin');
+});
+
+// ---------------------------------------------------------------------------
+// D55：认证材料脱敏（第 8 章 §8.8.7）
+//
+// 负向测试：日志与错误文案里不能出现完整 launchUrl / token / cookie；
+// 端点文件权限收紧；清理后文件不再落盘；端点日志只含脱敏 origin。
+// Windows 的 chmod 不改 ACL，这里只断言「调用不抛错、内容仍正确」，不伪称权限 PASS。
+// ---------------------------------------------------------------------------
+
+test('D55 redactAuthMaterial removes query tokens, cookies and bare secrets', () => {
+	assert.equal(
+		redactAuthMaterial('GET http://127.0.0.1:56188/?token=abc123&x=1#frag failed'),
+		'GET http://127.0.0.1:56188/ failed',
+	);
+	assert.equal(redactAuthMaterial('launchUrl=https://h/?token=xyz'), 'launchUrl=[redacted]');
+	assert.equal(redactAuthMaterial('token=secret cookie=abc'), 'token=[redacted] cookie=[redacted]');
+	assert.equal(redactAuthMaterial('set-cookie: dsh.sid=abc123; Path=/'), 'set-cookie=[redacted]; Path=/');
+	assert.equal(redactAuthMaterial('plain text without secrets'), 'plain text without secrets');
+});
+
+test('D55 safeErrorText never leaks a token from an Error or its message', () => {
+	const out = safeErrorText(new Error('fetch to http://h:9/?token=t0ken failed'));
+	assert.ok(!out.includes('t0ken'), 'the launch token must not appear in the error text');
+	assert.ok(!out.includes('?token'), 'the full query must not appear in the error text');
+	assert.equal(safeErrorText(undefined), 'unknown error');
+});
+
+test('D55 endpointLogText exposes origin only, never launchUrl', () => {
+	const endpoint = { origin: 'http://127.0.0.1:5000', port: 5000, launchUrl: 'http://127.0.0.1:5000/?token=secret' };
+	assert.equal(endpointLogText(endpoint), 'http://127.0.0.1:5000');
+	assert.equal(endpointLogText(undefined), 'unavailable');
+	assert.ok(!JSON.stringify(endpointLogText(endpoint)).includes('secret'));
+});
+
+test('D55 publishHostEndpoint writes a 0o600-mode file whose mode never widens group/other on POSIX', async () => {
+	const os = await import('node:os');
+	const fsp = await import('node:fs/promises');
+	const path = await import('node:path');
+	const dir = await fsp.mkdtemp(path.join(os.tmpdir(), 'dsh-d55-mode-'));
+	const file = path.join(dir, 'runtime', 'host-endpoint.json');
+	const ctx = endpointCtx(
+		{ port: 5000, host: '127.0.0.1', protocol: 'http:' },
+		{ authenticatedUrl: base => `${base}?token=secret` },
+	);
+	await publishHostEndpoint(ctx, file);
+	const stat = await fsp.stat(file);
+	if (process.platform !== 'win32') {
+		assert.equal(stat.mode & 0o077, 0, 'group/other must have no permission bits on POSIX');
+	}
+	const parsed = JSON.parse(await fsp.readFile(file, 'utf8'));
+	assert.match(parsed.launchUrl, /token=secret/, 'the file still carries the token for the IDE to consume');
+	assert.equal(parsed.cookie, undefined, 'no cookie copy');
+	await fsp.rm(dir, { recursive: true, force: true });
+});
+
+test('D55 removeHostEndpoint deletes the endpoint file and is idempotent', async () => {
+	const os = await import('node:os');
+	const fsp = await import('node:fs/promises');
+	const path = await import('node:path');
+	const dir = await fsp.mkdtemp(path.join(os.tmpdir(), 'dsh-d55-clean-'));
+	const file = path.join(dir, 'runtime', 'host-endpoint.json');
+	await publishHostEndpoint(endpointCtx(
+		{ port: 1, host: '127.0.0.1', protocol: 'http:' },
+		{ authenticatedUrl: base => `${base}?token=t` },
+	), file);
+	await fsp.access(file);
+	await removeHostEndpoint(file);
+	await assert.rejects(() => fsp.access(file), 'the token-bearing file must be gone');
+	await removeHostEndpoint(file); // 幂等：删不存在的文件不抛错
+	await fsp.rm(dir, { recursive: true, force: true });
 });

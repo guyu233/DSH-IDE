@@ -124,6 +124,15 @@ test('DSH bundle: sidecar target path matches the seam constant', () => {
 test('DSH bundle: only the Host common dependencies are staged (transport modules stay in the app)', () => {
 	const gulp = fs.readFileSync(path.join(vscodeRoot, 'build/gulpfile.vscode.ts'), 'utf8');
 	assert.match(gulp, /path\.join\(dshClientOut, 'common', 'env\.js'\)/, 'common/env.js must be staged as a single file');
+	assert.match(gulp, /path\.join\(dshClientOut, 'common', 'dshIdeAuthRedaction\.js'\)/, 'D55 auth redaction must be shipped with the Host bridge');
 	assert.match(gulp, /path\.join\(dshClientOut, 'common', 'dshIdeSessionList\.js'\)/, 'shared session projection must be shipped with the Host bridge');
 	assert.doesNotMatch(gulp, /path\.join\(dshClientOut, 'common'\), 'common'/, 'common/ must not be staged as a whole directory');
+});
+
+// D55：端点文件含一次性 query token，绝不能随包分发；构建时残留必须被删。
+test('DSH bundle: runtime host-endpoint.json is removed from staging before packaging', () => {
+	const gulp = fs.readFileSync(path.join(vscodeRoot, 'build/gulpfile.vscode.ts'), 'utf8');
+	const literals = dshPackLiterals();
+	assert.ok(literals.includes('host-endpoint.json'), 'the pack task must explicitly delete the token-bearing endpoint file');
+	assert.match(gulp, /fs\.promises\.rm\([^)]*host-endpoint\.json/, 'the removal must run in the official gulp task');
 });

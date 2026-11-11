@@ -149,6 +149,24 @@ test('authenticateHost fails loudly on a non-303 answer', async () => {
 	);
 });
 
+// D55：异常路径负向测试——fetch 抛出的错误若含完整 launchUrl / token，
+// 对外错误文案必须脱敏，不能把认证材料投影给 renderer（§8.8.7）。
+test('D55 authenticateHost redacts a token-bearing fetch failure', async () => {
+	const primitives = {
+		fetch: async () => { throw new Error('network error at http://127.0.0.1:9/?token=t0ken: refused'); },
+		WebSocket: FakeWebSocket as never,
+	};
+	await assert.rejects(
+		() => authenticateHost('http://127.0.0.1:9', 'http://127.0.0.1:9/?token=t0ken', primitives),
+		(error: DshIdeTransportError) => {
+			assert.equal(error.code, 'dsh-ide/host-authentication-failed');
+			assert.ok(!error.message.includes('t0ken'), 'the launch token must not leak into the error message');
+			assert.ok(!error.message.includes('?token'), 'the query must not leak into the error message');
+			return true;
+		},
+	);
+});
+
 // ---------------------------------------------------------------------------
 // 一元 RPC：信封形状 + rpcId 回显 + 错误传播
 // ---------------------------------------------------------------------------

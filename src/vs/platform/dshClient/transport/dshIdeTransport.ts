@@ -29,6 +29,7 @@
 
 import type { DshIdeBackend, DshIdeMethod, DshIdeOpenSpec, IDshIdeSessionSummary } from '../common/dshIdeProtocol.js';
 import { projectDshIdeSessionList } from '../common/dshIdeSessionList.js';
+import { safeErrorText } from '../common/dshIdeAuthRedaction.js';
 
 /** 通道 id：由 Host 侧绑定生成，这里只做透传。 */
 type ChannelBinding = { readonly channelId: string; readonly sessionId?: string };
@@ -80,11 +81,21 @@ interface RpcEnvelope {
 /** 官方 launch token 交换：`GET /?token=…` → `303` + `set-cookie`。 */
 export async function authenticateHost(origin: string, launchUrl: string, primitives?: DshIdeTransportPrimitives): Promise<string> {
 	const doFetch = primitives?.fetch ?? ((input: string | URL, init: RequestInit) => fetch(input, init));
-	const response = await doFetch(launchUrl, { redirect: 'manual' });
-	const cookie = response.headers.get('set-cookie');
-	await response.body?.cancel();
-	if (response.status !== 303 || cookie === null) {
-		throw new DshIdeTransportError('dsh-ide/host-authentication-failed', `Host authentication failed at ${origin} (status ${response.status})`);
+	let status: number;
+	let cookie: string | null;
+	try {
+		// D55：异常路径必须脱敏——fetch 抛出的错误可能含完整 launchUrl（带 token）。
+		const response = await doFetch(launchUrl, { redirect: 'manual' });
+		status = response.status;
+		cookie = response.headers.get('set-cookie');
+		await response.body?.cancel();
+	} catch (error) {
+		throw new DshIdeTransportError('dsh-ide/host-authentication-failed',
+			`Host authentication failed at ${safeErrorText(origin)}: ${safeErrorText(error)}`);
+	}
+	if (status !== 303 || cookie === null) {
+		// D55：错误文案只带脱敏 origin 与状态码，绝不回显 launchUrl / token。
+		throw new DshIdeTransportError('dsh-ide/host-authentication-failed', `Host authentication failed at ${safeErrorText(origin)} (status ${status})`);
 	}
 	const end = cookie.indexOf(';');
 	return end < 0 ? cookie : cookie.slice(0, end);

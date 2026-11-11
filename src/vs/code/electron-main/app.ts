@@ -2011,6 +2011,9 @@ function createLazyLaunchCaller(origin: string): { call(namespace: string, metho
 			return Promise.reject(new Error('DSH-IDE launch caller: neither cookie nor launch URL is available'));
 		}
 		pending = authenticateHost(origin, launchUrl).then(issued => {
+			// D55：cookie 到手后立刻清掉环境变量里的 launch token，
+			// 避免它继续留在进程环境里（可被子进程 / 崩溃转储 / 诊断读取）。
+			delete process.env[DSH_IDE_LAUNCH_URL_ENV];
 			process.env[DSH_IDE_COOKIE_ENV] = issued;
 			transport = new DshIdeTransport({ origin, cookie: issued });
 			return transport;

@@ -16,6 +16,7 @@
 
 import { randomUUID } from 'node:crypto';
 import { projectDshIdeSessionList } from '../common/dshIdeSessionList.js';
+import { safeErrorText } from '../common/dshIdeAuthRedaction.js';
 
 /** 与 common/dshIdeProtocol.ts 同值的错误码（Host 半身为纯 JS，不跨层 import TS）。 */
 export const FEATURE_UNAVAILABLE = 'dsh-ide/feature-unavailable';
@@ -539,6 +540,10 @@ export function resolveHostEndpoint(ctx) {
  *
  * 内容只含 origin / port / launchUrl（launch token 在 URL 里，由 Host 自己生成），
  * 与桌面端把 `ready.url` 交给自己的窗口等价；不写 cookie、不写凭据副本。
+ *
+ * D55：launchUrl 里的 query token 是认证材料，文件按 0o600 建、写入后立刻 chmod 收紧
+ * 到「仅所有者可读写」（POSIX 生效；Windows 的 chmod 不改 ACL，见本函数注释，不伪称 PASS）。
+ * 端点文件由插件运行期写入 `<plugin>/runtime/`，不进版本库、不进打包产物。
  */
 export async function publishHostEndpoint(ctx, targetPath) {
 	const endpoint = resolveHostEndpoint(ctx);
@@ -546,15 +551,40 @@ export async function publishHostEndpoint(ctx, targetPath) {
 		return undefined;
 	}
 	try {
-		const { mkdir, writeFile } = await import('node:fs/promises');
+		const { mkdir, writeFile, chmod } = await import('node:fs/promises');
 		const { dirname } = await import('node:path');
 		await mkdir(dirname(targetPath), { recursive: true });
-		await writeFile(targetPath, JSON.stringify({ ...endpoint, pid: process.pid, writtenAt: Date.now() }, null, 2), 'utf8');
+		// mode 在文件新建时生效；chmod 兜住「旧文件已存在且权限较宽」的情形。
+		await writeFile(targetPath, JSON.stringify({ ...endpoint, pid: process.pid, writtenAt: Date.now() }, null, 2), { encoding: 'utf8', mode: 0o600 });
+		await chmod(targetPath, 0o600);
 		return endpoint;
 	} catch {
 		// 写失败不影响插件加载：IDE 会按「无端点」明确降级，不伪造。
+		// D55：不记录异常原文——它可能含完整路径或端点内容。
 		return undefined;
 	}
+}
+
+/**
+ * D55：凭据清理。窗口关闭 / Host 重启 / 插件卸载时删除端点文件，
+ * 使一次性 query token 不再落盘。清理失败静默：文件本身已随进程退出失去 reader，
+ * 不因删不掉而伪造「已轮换」结论（真机轮换由 U12 复核）。
+ *
+ * @param {string} targetPath - 端点文件路径
+ * @returns {Promise<void>}
+ */
+export async function removeHostEndpoint(targetPath) {
+	try {
+		const { unlink } = await import('node:fs/promises');
+		await unlink(targetPath);
+	} catch {
+		// 文件不存在或已清理都算完成，不暴露路径与异常内容。
+	}
+}
+
+/** D55：把端点（含 launchUrl）安全地转成可日志输出的 origin-only 文案。 */
+export function endpointLogText(endpoint) {
+	return endpoint === undefined ? 'unavailable' : safeErrorText(endpoint.origin);
 }
 
 

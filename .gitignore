@@ -2,6 +2,8 @@
 .cache
 npm-debug.log
 Thumbs.db
+# D55：运行期写入的端点文件含一次性 launch token，绝不进版本库
+**/runtime/host-endpoint.json
 # No trailing slash, so a symlinked node_modules is ignored too
 node_modules
 .tmp/

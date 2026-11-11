@@ -683,14 +683,18 @@ BUILD_TARGETS.forEach(buildTarget => {
 					[path.join(dshClientOut, 'client', 'client.js'), 'client.js'],
 					// host/ 现仅 ide-service.js（P5 终端流 runner 已移除，终端回归原生 node-pty），整目录 stage 即可。
 					[path.join(dshClientOut, 'host'), 'host'],
-					// common/ 只 stage Host 直接依赖的环境常量与中立会话投影；IDE 主进程模块留在 app 内。
+					// common/ 只 stage Host 直接依赖的环境常量、认证脱敏与中立会话投影；IDE 主进程模块留在 app 内。
 					// 因此按文件 stage，避免把传输层误打进 bundle。
 					[path.join(dshClientOut, 'common', 'env.js'), path.join('common', 'env.js')],
+					[path.join(dshClientOut, 'common', 'dshIdeAuthRedaction.js'), path.join('common', 'dshIdeAuthRedaction.js')],
 					[path.join(dshClientOut, 'common', 'dshIdeSessionList.js'), path.join('common', 'dshIdeSessionList.js')],
 				];
 				for (const [from, to] of copyList) {
 					await fs.promises.cp(from, path.join(stagingRoot, to), { recursive: true });
 				}
+				// D55：运行期才写入的端点文件（内含一次性 query token）绝不能随包分发。
+				// 若构建机上残留了旧文件，直接删掉并记入 staging 清单校验之前。
+				await fs.promises.rm(path.join(stagingRoot, 'runtime', 'host-endpoint.json'), { force: true });
 				// 渲染制品 + 合规随包文件（4 个，不含构建期源码/shims/README）。
 				const renderStaging = path.join(stagingRoot, 'chat-render');
 				await fs.promises.mkdir(path.join(renderStaging, 'dist'), { recursive: true });
