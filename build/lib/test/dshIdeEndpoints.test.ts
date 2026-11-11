@@ -474,3 +474,30 @@ test('D62 findings are recorded with the three decided sub-questions', () => {
 	assert.match(dev, /进程内直调（`direct`）/, 'the direct-invocation decision must be recorded');
 	assert.match(dev, /D62 保持未完成/, 'D62 must stay unfinished (UI copy + optional remote work remain)');
 });
+
+// ---------------------------------------------------------------------------
+// D50 第 59 轮：三处缺口的精确现状已复核并有代码位置（§8.10.12 之后的 D50 段落）。
+// 「DshIdeConsumer 存在但只管快照」是易被误读为「未实现」的关键事实，须钉住。
+// ---------------------------------------------------------------------------
+
+test('D50 gap analysis is recorded with concrete code locations', () => {
+	const dev = read('docs/DEVELOPMENT.md');
+	assert.match(dev, /D50 三处缺口的精确现状（第 59 轮复核/, 'the round-59 D50 gap analysis must be recorded');
+	assert.match(dev, /都会接线|已接线 `answerWaterfall`|answerWaterfall`/, 'gap ① must cite the transport wiring');
+	assert.match(dev, /主动丢弃|交回调用方/, 'gap ② must record the deliberate frame drop');
+	assert.match(dev, /DshIdeConsumer` 未承接审批|只处理快照帧/, 'gap ③ must record that the consumer only handles snapshots');
+	assert.match(dev, /D50 仍未完成/, 'D50 must stay unfinished');
+});
+
+test('DshIdeConsumer exists but its accept() only validates snapshots', () => {
+	const consumer = read('src/vs/workbench/contrib/dsh/browser/dshIdeConsumer.ts');
+
+	assert.match(consumer, /export class DshIdeConsumer extends Disposable/, 'the consumer must exist as a class');
+	assert.match(consumer, /accept\(frame: unknown\): boolean/, 'accept() must keep its signature');
+	assert.match(consumer, /validateDshIdeSnapshot\(frame\)/, 'accept() must validate snapshot frames');
+
+	// 关键事实：目前不处理 waterfall / approval / question。若将来补上，本断言需同步更新
+	// 并在手册里把缺口③ 标为已完成——本测试的作用就是让这个变化不能悄悄发生。
+	assert.doesNotMatch(consumer, /waterfall|answerApproval|answerQuestion/,
+		'the consumer currently handles snapshots only; adding waterfall handling requires updating D50 and this test');
+});
