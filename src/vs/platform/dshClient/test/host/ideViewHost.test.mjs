@@ -67,7 +67,8 @@ function sessionControllerStub(overrides = {}) {
 		prompt: record('prompt'),
 		cancel: record('cancel'),
 		fork: record('fork'),
-		state: record('state'),
+		// D52：默认桩为「已停止的冷会话」，让既有删除用例走通；活动 / 读不到状态的用例各自覆盖。
+		state: async request => { calls.push({ name: 'state', request }); return { running: false }; },
 		selectModel: record('selectModel'),
 		projections: record('projections'),
 		...overrides,
@@ -872,4 +873,50 @@ test('runCommand rejects a non-admitted (undefined) or error result instead of f
 		bridge.open({ view: 'chat', params: { sessionId: 's-1' } });
 		await assert.rejects(() => bridge.invoke('setPermissionPreset', { preset: 'x' }), error => error.code === FEATURE_UNAVAILABLE && /unknown preset/.test(error.message));
 	}
+});
+
+// ---------------------------------------------------------------------------
+// D52（第 37 轮）：活动会话删除判据——§8.10.5（2）要求「能证明已停止且资源
+// 已释放」才允许删除。DSH-IDE 不自行 flush / detach，只做 fail-closed 前置：
+// running===true 拒绝、读不到状态同样拒绝、仅 running===false 放行。
+// ---------------------------------------------------------------------------
+
+test('D52 deleteSession refuses a session that is still running', async () => {
+	let pluginCalled = false;
+	const { bridge } = bridgeWith({
+		sessionController: { ...sessionControllerStub(), state: async () => ({ running: true }) },
+		workspaceRegistry: { list: () => [{ id: 'w-1', sessionIds: ['s-1'] }], deleteSession: async () => { pluginCalled = true; return { deleted: true }; } },
+	});
+	bridge.open({ view: 'chat', params: { sessionId: 's-1' } });
+	await assert.rejects(
+		() => bridge.invoke('deleteSession', { sessionId: 's-1' }),
+		error => error.code === FEATURE_UNAVAILABLE && /still running/.test(error.message),
+	);
+	assert.equal(pluginCalled, false, 'a running session must never reach the delete endpoint');
+});
+
+test('D52 deleteSession refuses when the running state cannot be proven', async () => {
+	let pluginCalled = false;
+	const { bridge } = bridgeWith({
+		sessionController: { ...sessionControllerStub(), state: async () => { throw new Error('state unavailable'); } },
+		workspaceRegistry: { list: () => [{ id: 'w-1', sessionIds: ['s-1'] }], deleteSession: async () => { pluginCalled = true; return { deleted: true }; } },
+	});
+	bridge.open({ view: 'chat', params: { sessionId: 's-1' } });
+	await assert.rejects(
+		() => bridge.invoke('deleteSession', { sessionId: 's-1' }),
+		error => error.code === FEATURE_UNAVAILABLE && /cannot prove/.test(error.message),
+	);
+	assert.equal(pluginCalled, false, 'an unprovable state must never reach the delete endpoint');
+});
+
+test('D52 deleteSession proceeds only when the session is provably stopped', async () => {
+	// 复用 success 用例的 registry 桩：它在返回 { deleted: true } 前 detach live 会话，
+	// 这样 D52 前置判据与删除后核验（§8.10.1（3）8）同时得到验证。
+	const { live } = bridgeWith();
+	const registry = archiveRegistryStub({ deleted: true }, live);
+	const ctx = fakeCtx({ sessions: { get: id => live.get(id) }, sessionController: { ...sessionControllerStub(), state: async () => ({ running: false }) }, workspaceRegistry: registry });
+	const bridge = new DshIdeHostBridge(ctx, {});
+	bridge.open({ view: 'chat', params: { sessionId: 's-1' } });
+	assert.deepEqual(await bridge.invoke('deleteSession', { sessionId: 's-1' }), { accepted: true });
+	assert.deepEqual(registry.calls, ['s-1'], 'a provably stopped session reaches the delete endpoint');
 });

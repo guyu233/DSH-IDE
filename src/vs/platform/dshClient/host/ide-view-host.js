@@ -491,6 +491,16 @@ function createMethodHandlers(bridge) {
 			if (!(await sessionExists(bridge.ctx, args.sessionId))) {
 				throw coded(INVALID_ARGUMENT, `unknown session ${args.sessionId}`);
 			}
+			// D52 / §8.10.5（2）：活动会话必须先被证明已停止且资源已释放才允许删除。
+			// DSH-IDE 不自行 flush / detach（那是插件的删除链），因此只做**fail-closed 前置判定**：
+			// 能读到 running 且为 true → 拒绝；读不到状态 → 无法证明安全 → 同样拒绝。
+			// 不接受固定 sleep 代替判据，也不把 best-effort 写成完整支持。
+			const readRunning = await sessionRunning(bridge.ctx, args.sessionId);
+			if (readRunning !== false) {
+				throw coded(FEATURE_UNAVAILABLE, readRunning === true
+					? `session ${args.sessionId} is still running; stop it before deleting`
+					: `cannot prove session ${args.sessionId} is stopped; refusing to delete`, { capability: 'deleteSession', running: readRunning });
+			}
 			const result = await remove(args.sessionId);
 			// 插件在物理删除完成、记账清理后才返回 `{ deleted: true }`；其余形态一律视为未完成。
 			if (result === null || typeof result !== 'object' || result.deleted !== true) {
@@ -558,6 +568,35 @@ export function resolveDeleteSessionMethod(ctx) {
  *
  * @returns 布尔值；查询本身失败时抛错（不把查询失败当成「不存在」）
  */
+/**
+ * 读取会话当前是否仍有活动 turn（D52 前置判据）。
+ *
+ * 官方信号：`sessionController.state({ sessionId })` 返回 `SessionState.running`
+ * （`api/session-controller/src/types.ts:608-611`）。返回三态：
+ *   - `true`  —— 明确仍在运行；
+ *   - `false` —— 明确已停止；
+ *   - `undefined` —— 读不到状态（服务缺失 / 调用失败 / 字段非布尔），无法证明安全。
+ * 调用方按 §8.10.5 只接受 `false`，其余一律拒绝（fail-closed）。
+ *
+ * @param {object} ctx - 插件上下文。
+ * @param {string} sessionId - 目标会话。
+ * @returns {Promise<boolean | undefined>}
+ */
+async function sessionRunning(ctx, sessionId) {
+	const controller = typeof ctx.get === 'function' ? ctx.get('sessionController') : undefined;
+	if (controller === undefined || typeof controller.state !== 'function') {
+		return undefined;
+	}
+	try {
+		const value = await controller.state({ sessionId });
+		const running = value && typeof value === 'object' ? value.running : undefined;
+		return typeof running === 'boolean' ? running : undefined;
+	} catch {
+		// 读状态失败不得被解释成「已停止」：交回 undefined 由调用方拒绝。
+		return undefined;
+	}
+}
+
 async function sessionExists(ctx, sessionId) {
 	const sessions = typeof ctx.get === 'function' ? ctx.get('sessions') : undefined;
 	if (sessions !== undefined && typeof sessions.get === 'function' && sessions.get(sessionId) !== undefined) {
