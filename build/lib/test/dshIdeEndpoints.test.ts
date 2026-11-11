@@ -572,3 +572,47 @@ test('D26 the contract gate fails on fingerprint mismatch instead of only printi
 	assert.match(gate, /VSCODE_PATCH_POINTS 指纹与基线不符/, 'the gate must throw on drift');
 	assert.match(gate, /mismatches\.push/, 'the gate must collect mismatches');
 });
+
+// ---------------------------------------------------------------------------
+// 第 64 轮：禁止「条件跳过」式假守护。
+//
+// 发现：`dshNativeModuleAbi.test.ts` 的 conpty 测试原先写
+// `if (!fs.existsSync(release)) { return; }`——模块缺失时**整个测试静默通过**，
+// D23 的 conpty 断言形同虚设。与第 42 轮 D20 假守护同类：看起来有守护，
+// 但环境不满足时它不会失败。
+//
+// 本测试扫全部 dsh 测试文件，禁止「check-then-return」这种会让断言消失的写法。
+// 允许的替代：`assert.ok(exists, msg)` 显式失败；或 `continue` 但末尾有兜底计数断言。
+// ---------------------------------------------------------------------------
+
+test('no dsh test silently returns when a required path is missing', async () => {
+	const fsMod = await import('node:fs');
+	const files = fsMod.readdirSync(path.join(repoRoot, 'build/lib/test'))
+		.filter(name => name.startsWith('dsh') && name.endsWith('.test.ts'));
+
+	// 注意（第 64 轮踩到的坑）：不能对全文做正则匹配——注释里引用的示例文本、
+	// 以及本测试自身的正则字面量都会被命中（与第 42 轮 D20 假守护同一类错误）。
+	// 因此先剥离行注释再匹配，只检查**真正会被执行的代码**。
+	const stripLineComments = (line) => {
+		// 只在字符串外的 `//` 处截断；这里不需要完整词法分析，覆盖本仓库的写法即可。
+		const idx = line.indexOf('//');
+		if (idx === -1) { return line; }
+		const before = line.slice(0, idx);
+		const quotes = (before.match(/`/g) ?? []).length + (before.match(/'/g) ?? []).length + (before.match(/"/g) ?? []).length;
+		return quotes % 2 === 0 ? before : line;
+	};
+
+	const offenders = [];
+	for (const name of files) {
+		if (name === 'dshIdeEndpoints.test.ts') { continue; } // 本文件含自指的正则与示例
+		const source = fsMod.readFileSync(path.join(repoRoot, 'build/lib/test', name), 'utf8');
+		const offendersInFile = source
+			.split(/\r?\n/)
+			.map(stripLineComments)
+			.filter(line => /if \(!fs\.existsSync\([^)]*\)\)\s*\{\s*return;\s*\}/.test(line));
+		if (offendersInFile.length > 0) { offenders.push(name); }
+	}
+
+	assert.deepEqual(offenders, [],
+		`these tests silently pass when a path is missing (use assert.ok instead): ${offenders.join(', ')}`);
+});
