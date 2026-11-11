@@ -681,7 +681,7 @@ BUILD_TARGETS.forEach(buildTarget => {
 					[path.join(dshResources, 'locale'), 'locale'],
 					[path.join(dshClientOut, 'index.js'), 'index.js'],
 					[path.join(dshClientOut, 'client', 'client.js'), 'client.js'],
-					// host/ 现仅 ide-service.js（P5 终端流 runner 已移除，终端回归原生 node-pty），整目录 stage 即可。
+					// host/ 现仅 ide-service.js（终端已回归原生 node-pty，不再有独立 runner），整目录 stage 即可。
 					[path.join(dshClientOut, 'host'), 'host'],
 					// common/ 只 stage Host 直接依赖的环境常量、认证脱敏与中立会话投影；IDE 主进程模块留在 app 内。
 					// 因此按文件 stage，避免把传输层误打进 bundle。

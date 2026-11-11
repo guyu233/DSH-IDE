@@ -3,7 +3,7 @@
  *  Licensed under the MIT License.
  *--------------------------------------------------------------------------------------------*/
 
-// 阶段 2.2a 验收单测：golden 回放一致、dshEmits() 分类、私有 payload 不透传、
+// P2 验收单测：golden 回放一致、dshEmits() 分类、私有 payload 不透传、
 // 重复 seq 幂等、row 稳定 id 与行级 revision、有界 600 行折叠 preview、P95 字节数度量脚手架。
 // 运行：node --experimental-strip-types --test build/lib/test/dshIdeProjection.test.ts
 

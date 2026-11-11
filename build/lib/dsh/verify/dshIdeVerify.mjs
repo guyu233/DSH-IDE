@@ -201,7 +201,7 @@ function boundary() {
 function projectionGolden() {
 	const goldenDir = path.join(import.meta.dirname, 'golden');
 	const fixtures = fs.existsSync(goldenDir) ? walk(goldenDir).filter(f => f.endsWith('.json')) : [];
-	assert.ok(fixtures.length > 0, 'no golden fixtures: 2.2a must provide at least one golden/*.json');
+	assert.ok(fixtures.length > 0, 'no golden fixtures: P2 must provide at least one golden/*.json');
 
 	// 子进程以 strip-types 加载插件侧真实 translator/projector（不复制实现、不伪造比对）。
 	const common = path.join(srcRoot, 'platform/dshClient/common');

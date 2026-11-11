@@ -62,12 +62,12 @@ test('DSH bundle: host/client/manifest/icon live at their native positions', () 
 		'src/vs/platform/dshClient/client/client.js',
 		'src/vs/platform/dshClient/host/ide-service.js',
 		'src/vs/platform/dshClient/common/env.js',
-		// 阶段 2.1 协议真源与版本契约（单一真源，二者必须存在于原生位置）。
+		// P1：协议真源与版本契约（单一真源，二者必须存在于原生位置）。
 		'src/vs/platform/dshClient/common/dshIdeProtocol.ts',
 		'src/vs/platform/dshClient/common/dshIdeContract.ts',
 		'src/vs/platform/dshClient/electron-main/dshIdeChannel.ts',
 		'src/vs/platform/dshClient/electron-main/ide-view-service.ts',
-		// 第三批已整删的 4 个旧连接层/聊天文件不再列入（协议耦合的 renderer 侧实现与事件映射）。
+		// 旧连接层/聊天文件已整删，不再列入（协议耦合的 renderer 侧实现与事件映射）。
 	];
 	for (const relative of expected) {
 		assert.ok(fs.existsSync(path.join(vscodeRoot, relative)), `missing native source: ${relative}`);
