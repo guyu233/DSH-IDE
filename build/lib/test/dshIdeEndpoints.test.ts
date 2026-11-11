@@ -737,3 +737,44 @@ test('user-action blocker reasons must not cite already-completed todos', async 
 	assert.deepEqual(offenders, [],
 		'blocker reasons must be refreshed after their cited todos complete: ' + offenders.join('; '));
 });
+
+// ---------------------------------------------------------------------------
+// 第 68 轮：`contract` 按 §9.3 启用**完整**失败断言——指纹 + 版本。
+//
+// 此前（第 62 轮及以前）它只比对指纹、末尾硬编码 `return 'PENDING'`，因此
+// **永远不可能 PASS**，`release-gate` 也就永远拒绝。§9.3 明文规定变为
+// 「全部相符 → PASS；任一不符 → FAIL」，本轮把版本比对补上，于是：
+//   - 未设 `DSH_INSTALLED_VERSION` → 无法证明相符 → PENDING（与 upstreamDrift 口径一致）
+//   - 设为 ≥ 校验版本 → PASS
+//   - 设为更低版本 → FAIL
+// 本测试用子进程实测这三条分支，防止以后又被改回「无条件 PENDING」。
+// ---------------------------------------------------------------------------
+
+test('D68 contract gate can actually reach PASS, and fails on a lower installed version', async () => {
+	const { execFileSync } = await import('node:child_process');
+	const script = path.join(repoRoot, 'build/lib/dsh/verify/dshIdeVerify.mjs');
+
+	const run = env => {
+		try {
+			return { code: 0, out: execFileSync(process.execPath, [script, 'contract'], {
+				cwd: repoRoot, encoding: 'utf8', env: { ...process.env, ...env },
+			}) };
+		} catch (error) {
+			return { code: error.status ?? 1, out: `${error.stdout ?? ''}${error.stderr ?? ''}` };
+		}
+	};
+
+	// 未设版本：不得判 PASS（无法证明相符）。
+	const unset = run({ DSH_INSTALLED_VERSION: '' });
+	assert.match(unset.out, /STATUS: PENDING/, 'without DSH_INSTALLED_VERSION the gate must stay PENDING');
+
+	// 版本相符：应当 PASS。
+	const ok = run({ DSH_INSTALLED_VERSION: '0.2.2-rc.1' });
+	assert.equal(ok.code, 0, 'a matching installed version must not fail the gate');
+	assert.match(ok.out, /STATUS: PASS/, 'a matching installed version must yield PASS');
+
+	// 版本过低：应当 FAIL（退出非 0）。
+	const low = run({ DSH_INSTALLED_VERSION: '0.1.0' });
+	assert.notEqual(low.code, 0, 'a lower installed version must fail the gate');
+	assert.match(low.out, /STATUS: FAIL/, 'a lower installed version must yield FAIL');
+});

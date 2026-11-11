@@ -280,10 +280,55 @@ function contract() {
 		throw new Error(`VSCODE_PATCH_POINTS 指纹与基线不符（${mismatches.length} 处）：\n    ${mismatches.join('\n    ')}\n  处置：按第 5 章 §7 核对上游改动，确认后更新契约里的 sha256 基线并记录原因。`);
 	}
 
-	// 指纹全部一致后仍返回 PENDING：`contract` 的**完整**语义还包含「上游升版后
-	// 四条门禁状态符合 §9」这一未来事件，那部分只能在升版时判定。
-	console.log('PENDING(上游升级) contract: 4 个注入点指纹与基线一致；升版后须重跑并核对 §9 门禁状态');
-	return 'PENDING';
+	// ---------------------------------------------------------------------
+	// 第 68 轮：按 §9.3「何时变 PASS / FAIL」启用**完整**失败断言。
+	//
+	// §9.3 原文：P6 中把 contract() 改为启用失败断言——比对
+	// `installedMeetsVersion()` / `upstreamDrift()` 与 `UPSTREAM_VALIDATED_VERSION`、
+	// 比对 4 个注入点 sha256 与冻结基线。全部相符 → PASS；任一不符 → FAIL。
+	//
+	// 第 62 轮已做后者（指纹）；本轮补前者（版本）。已安装版本取自
+	// `DSH_INSTALLED_VERSION`，与契约里 `upstreamDrift()` 的口径一致；
+	// **未设置该变量时视为无法证明相符**，按 §9.3 不得判 PASS，保持 PENDING。
+	// ---------------------------------------------------------------------
+	const validated = /UPSTREAM_VALIDATED_VERSION\s*=\s*'([^']+)'/.exec(text)?.[1];
+	if (validated === undefined) {
+		throw new Error('dshIdeContract.ts must declare UPSTREAM_VALIDATED_VERSION');
+	}
+
+	const installed = process.env['DSH_INSTALLED_VERSION'];
+	if (installed === undefined || installed === '') {
+		console.log('PENDING(上游升级) contract: 4 个注入点指纹与基线一致；未设置 DSH_INSTALLED_VERSION，无法证明已安装版本 ≥ 校验版本');
+		console.log(`  设定 DSH_INSTALLED_VERSION（如 ${validated}）后，本门禁将比对版本并判定 PASS / FAIL（§9.3）`);
+		return 'PENDING';
+	}
+
+	// 版本比对：复用契约自身的比较规则（semver 三段 + prerelease），此处用文本方式
+	// 取出同一份逻辑不现实，故按同一语义最小实现：逐段数值比较，prerelease 低于同版正式版。
+	const parseVer = v => {
+		const m = /^(\d+)\.(\d+)\.(\d+)(?:-(.+))?$/.exec(v.trim());
+		if (m === null) { return undefined; }
+		return { nums: [Number(m[1]), Number(m[2]), Number(m[3])], pre: m[4] };
+	};
+	const a = parseVer(installed);
+	const b = parseVer(validated);
+	if (a === undefined || b === undefined) {
+		throw new Error(`contract: 无法解析版本（installed=${installed} validated=${validated}）`);
+	}
+	let meets = false;
+	for (let i = 0; i < 3; i++) {
+		if (a.nums[i] !== b.nums[i]) { meets = a.nums[i] > b.nums[i]; break; }
+		if (i === 2) {
+			// 三段相同：无 prerelease 的正式版高于带 prerelease 的版本。
+			meets = a.pre === undefined || (b.pre !== undefined && a.pre === b.pre);
+		}
+	}
+	if (!meets) {
+		throw new Error(`contract: 已安装版本 ${installed} 低于经校验版本 ${validated}（upstreamDrift=true）`);
+	}
+
+	console.log(`contract: 4 个注入点指纹与基线一致；已安装版本 ${installed} ≥ 经校验版本 ${validated}`);
+	return 'PASS';
 }
 
 // ---------------------------------------------------------------------------
