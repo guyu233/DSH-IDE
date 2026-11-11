@@ -20,9 +20,38 @@
 // 用法：`npm run verify:dsh-ide-ci`
 
 import { execFileSync } from 'node:child_process';
+import fs from 'node:fs';
+import path from 'node:path';
 import process from 'node:process';
 
 const repoRoot = process.cwd();
+
+// ---------------------------------------------------------------------------
+// 第 60 轮：前置构建检查（干净 CI 环境的真实缺口）。
+//
+// `test-dsh` 从 `out/` 加载测试与模块（`package.json` 的 mocha glob 指向
+// `out/vs/...`，`dshIdeChannel.test.ts` 也 import `out/` 下的产物）。在干净
+// checkout 上直接跑本聚合会以「找不到 out/...」失败，而**失败点在下游**，
+// 报错信息不会告诉使用者「要先构建」。
+//
+// 因此在跑门禁前先确认 `out/` 存在；缺失则以**可操作的提示**退出，而不是让
+// 下游抛出难以定位的模块缺失错误。同理确认 `node_modules/` 存在（CI 需先
+// `npm ci`）。
+// ---------------------------------------------------------------------------
+const PREREQUISITES = Object.freeze([
+	{ dir: 'node_modules', hint: 'npm ci' },
+	{ dir: 'out', hint: 'npm run build-dsh-tests' },
+]);
+
+const missingPrerequisites = PREREQUISITES.filter(p => !fs.existsSync(path.join(repoRoot, p.dir)));
+if (missingPrerequisites.length > 0) {
+	console.error('STATUS: FAIL  [dsh-ide-ci] 前置条件缺失，未开始跑门禁：');
+	for (const p of missingPrerequisites) {
+		console.error(`  ✗ 缺少 ${p.dir}/ —— 先执行: ${p.hint}`);
+	}
+	console.error('  说明：`test-dsh` 从 `out/` 加载测试与模块，干净 checkout 必须先构建。');
+	process.exit(1);
+}
 
 /** CI 必须执行的命令序列（顺序固定，取自第 5 章 §2）。 */
 const STEPS = Object.freeze([

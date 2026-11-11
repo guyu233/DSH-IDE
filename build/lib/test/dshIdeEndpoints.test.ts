@@ -501,3 +501,22 @@ test('DshIdeConsumer exists but its accept() only validates snapshots', () => {
 	assert.doesNotMatch(consumer, /waterfall|answerApproval|answerQuestion/,
 		'the consumer currently handles snapshots only; adding waterfall handling requires updating D50 and this test');
 });
+
+// ---------------------------------------------------------------------------
+// D27 第 60 轮：CI 聚合入口的**前置构建检查**（干净 checkout 的真实缺口）。
+// `test-dsh` 从 `out/` 加载测试与模块，干净 checkout 上直接跑本聚合会以
+// 「找不到 out/...」失败，且失败点在下游，报错不会提示「要先构建」。
+// 本测试钉住：脚本必须显式检查 node_modules/ 与 out/ 并给出可操作命令。
+// ---------------------------------------------------------------------------
+
+test('D27 the CI aggregate checks prerequisites and names the fix command', () => {
+	const ci = read('build/lib/dsh/verify/dshIdeCi.mjs');
+
+	// 两项前置必须被检查，且各自给出可执行命令，而不是让下游报模块缺失。
+	assert.match(ci, /PREREQUISITES/, 'the CI aggregate must declare its prerequisites');
+	assert.match(ci, /dir: 'node_modules'[\s\S]{0,40}hint: 'npm ci'/, 'node_modules prerequisite must hint npm ci');
+	assert.match(ci, /dir: 'out'[\s\S]{0,60}hint: 'npm run build-dsh-tests'/, 'out prerequisite must hint build-dsh-tests');
+
+	// 缺失时必须退出 1（不得静默继续跑门禁）。
+	assert.match(ci, /前置条件缺失，未开始跑门禁/, 'missing prerequisites must abort before running gates');
+});
