@@ -351,7 +351,7 @@ test('backend maps submit/interrupt/setModel to verified session endpoints', asy
 
 test('backend refuses unverified capabilities with feature-unavailable', async () => {
 	const { backend, transport, requests } = backendWithHost(OK);
-	const refusing: DshIdeMethod[] = ['rewind', 'loadOlder', 'setPermissionPreset', 'runCommand'];
+	const refusing: DshIdeMethod[] = ['rewind', 'loadOlder'];
 	for (const method of refusing) {
 		await assert.rejects(
 			() => backend.invoke(method, {}),
@@ -905,4 +905,54 @@ test('backend listCommands projects a malformed Host reply to an empty list', as
 	));
 	assert.deepEqual(await backend.invoke('listCommands', {}), []);
 	transport.dispose();
+});
+
+// ---------------------------------------------------------------------------
+// D13（第 34 轮）：runCommand / setPermissionPreset 接线——`commands/execute`
+// args 精确为 { agentId, line, submittedAttachments: [] }，结果经共享映射收敛。
+// ---------------------------------------------------------------------------
+
+test('backend maps runCommand to commands/execute with the exact wire shape', async () => {
+	const { backend, transport, requests } = backendWithHost((url, body) => {
+		const rpcId = (body as { rpcId: string }).rpcId;
+		if (url.endsWith('/api/commands/execute')) {
+			return { json: { type: 'server-response', rpcId, result: { ok: true, value: { commandId: 'c1', result: { kind: 'success' } } } } };
+		}
+		return OK(url, body);
+	});
+	assert.deepEqual(await backend.invoke('runCommand', { command: 'plan', args: ['a', 'b-c'] }), { accepted: true });
+	assert.equal(requests.length, 1);
+	assert.equal(requests[0]!.url.split('/api/')[1], 'commands/execute');
+	const body = requests[0]!.body as { payload: { args: Record<string, unknown> } };
+	assert.deepEqual(body.payload.args, { agentId: 's-1', line: '/plan a b-c', submittedAttachments: [] });
+	transport.dispose();
+});
+
+test('backend maps setPermissionPreset to the /permission slash command', async () => {
+	const { backend, transport, requests } = backendWithHost((_url, body) => (
+		{ json: { type: 'server-response', rpcId: (body as { rpcId: string }).rpcId, result: { ok: true, value: { commandId: 'c1', result: { kind: 'success' } } } } }
+	));
+	assert.deepEqual(await backend.invoke('setPermissionPreset', { preset: 'workspace-write' }), { accepted: true });
+	const body = requests[0]!.body as { payload: { args: Record<string, unknown> } };
+	assert.equal(body.payload.args['line'], '/permission workspace-write');
+	transport.dispose();
+});
+
+test('backend refuses a non-admitted or error command result instead of faking accepted', async () => {
+	{
+		const { backend, transport } = backendWithHost((_url, body) => (
+			{ json: { type: 'server-response', rpcId: (body as { rpcId: string }).rpcId, result: { ok: true, value: undefined } } }
+		));
+		await assert.rejects(() => backend.invoke('runCommand', { command: 'nope' }),
+			(error: DshIdeTransportError) => error.code === 'dsh-ide/invalid-argument');
+		transport.dispose();
+	}
+	{
+		const { backend, transport } = backendWithHost((_url, body) => (
+			{ json: { type: 'server-response', rpcId: (body as { rpcId: string }).rpcId, result: { ok: true, value: { commandId: 'c1', result: { kind: 'error', text: 'unknown preset "x"' } } } } }
+		));
+		await assert.rejects(() => backend.invoke('setPermissionPreset', { preset: 'x' }),
+			(error: DshIdeTransportError) => error.code === DSH_IDE_FEATURE_UNAVAILABLE && /unknown preset/.test(error.message));
+		transport.dispose();
+	}
 });

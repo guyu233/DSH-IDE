@@ -127,6 +127,7 @@ test('DSH bundle: only the Host common dependencies are staged (transport module
 	assert.match(gulp, /path\.join\(dshClientOut, 'common', 'dshIdeAuthRedaction\.js'\)/, 'D55 auth redaction must be shipped with the Host bridge');
 	assert.match(gulp, /path\.join\(dshClientOut, 'common', 'dshIdeSessionList\.js'\)/, 'shared session projection must be shipped with the Host bridge');
 	assert.match(gulp, /path\.join\(dshClientOut, 'common', 'dshIdeCommandList\.js'\)/, 'D13 shared command projection must be shipped with the Host bridge');
+	assert.match(gulp, /path\.join\(dshClientOut, 'common', 'dshIdeCommandLine\.js'\)/, 'D13 shared command line builder must be shipped with the Host bridge');
 	assert.doesNotMatch(gulp, /path\.join\(dshClientOut, 'common'\), 'common'/, 'common/ must not be staged as a whole directory');
 });
 

@@ -30,6 +30,7 @@
 import type { DshIdeBackend, DshIdeMethod, DshIdeOpenSpec, IDshIdeSessionSummary } from '../common/dshIdeProtocol.js';
 import { projectDshIdeSessionList } from '../common/dshIdeSessionList.js';
 import { projectDshIdeCommandList } from '../common/dshIdeCommandList.js';
+import { buildDshIdeCommandLine, mapDshIdeCommandExecution } from '../common/dshIdeCommandLine.js';
 import { safeErrorText } from '../common/dshIdeAuthRedaction.js';
 
 /** 通道 id：由 Host 侧绑定生成，这里只做透传。 */
@@ -545,10 +546,16 @@ export class DshIdeTransportBackend implements DshIdeBackend {
 				// `workspaceRegistry/deleteSession` 承担（§8.10.8 批准范围）；DSH-IDE 只调用，
 				// 不复制其删除链、不直接删 DSH 会话目录。
 				return this.deleteSessionViaPlugin(String(record['sessionId'] ?? ''));
+			case 'setPermissionPreset': {
+				// §8.10.9：官方无独立 setter，`/permission <preset>` 是注册的斜杠命令。
+				return this._runCommandLine(buildDshIdeCommandLine('permission', [String(record['preset'] ?? '')]));
+			}
+			case 'runCommand': {
+				const args = Array.isArray(record['args']) ? record['args'].map(String) : undefined;
+				return this._runCommandLine(buildDshIdeCommandLine(String(record['command'] ?? ''), args));
+			}
 			case 'rewind':
 			case 'loadOlder':
-			case 'setPermissionPreset':
-			case 'runCommand':
 				throw new DshIdeTransportError('dsh-ide/feature-unavailable', `DSH-IDE capability "${method}" has no verified DSH endpoint yet`, { capability: method });
 			default:
 				throw new DshIdeTransportError('dsh-ide/feature-unavailable', `DSH-IDE method ${JSON.stringify(method)} is not mapped`);
@@ -609,6 +616,33 @@ export class DshIdeTransportBackend implements DshIdeBackend {
 	 * 三种降级都不伪造成功：网关报 `gateway/invocation-unavailable`（插件未注册该 endpoint）
 	 * 或结果不是 `{ deleted: true }` 时一律拒绝，由调用方保留列表项并报告原因。
 	 */
+	/**
+	 * D13（第 34 轮）：`runCommand` / `setPermissionPreset` 共用的官方命令执行。
+	 * `commands/execute` 是 agent-scoped remote，wire 形状由 §8.10.9 第 31 轮核实：
+	 * args 精确为 `{ agentId: sessionId, line, submittedAttachments: [] }`，
+	 * `signal` 由 Gateway cancellation 承载、不入 args（§8.10.10 前置④⑤）。
+	 * 结果经共享 `mapDshIdeCommandExecution` 收敛为动作类语义，不静默 accepted。
+	 */
+	private async _runCommandLine(line: string): Promise<{ accepted: true }> {
+		if (this.sessionId === undefined) {
+			throw new DshIdeTransportError('dsh-ide/invalid-argument', 'command execution requires a bound session', { capability: 'runCommand' });
+		}
+		const execution = await this.transport.call('commands', 'execute', {
+			agentId: this.sessionId,
+			line,
+			submittedAttachments: [],
+		});
+		const outcome = mapDshIdeCommandExecution(execution);
+		if ('error' in outcome) {
+			throw new DshIdeTransportError(
+				outcome.error === 'invalid-argument' ? 'dsh-ide/invalid-argument' : 'dsh-ide/feature-unavailable',
+				outcome.message,
+				{ capability: 'runCommand' },
+			);
+		}
+		return { accepted: true };
+	}
+
 	private async deleteSessionViaPlugin(sessionId: string): Promise<{ accepted: true }> {
 		let value: unknown;
 		try {

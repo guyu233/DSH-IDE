@@ -46,7 +46,7 @@ const VALID_ARGS: Record<DshIdeMethod, unknown> = {
 	setModel: { model: 'deepseek-chat' },
 	setEffort: { effort: 'high' },
 	setPermissionPreset: { preset: 'balanced' },
-	runCommand: { command: '/help', args: ['a', 'b'] },
+	runCommand: { command: 'help', args: ['a', 'b'] },
 	listSessions: {},
 	listModels: { workspace: 'w1' },
 	listCommands: {},
@@ -106,7 +106,7 @@ test('validateDshIdeInput rejects missing/invalid required fields', () => {
 	assert.throws(() => validateDshIdeInput('rewind', { sessionId: 's1' }), /non-empty string/);
 	assert.throws(() => validateDshIdeInput('answerApproval', { requestId: 'r1', decision: 'maybe' }), /decision/);
 	assert.throws(() => validateDshIdeInput('answerQuestion', { requestId: 'r1' }), /must be a JSON value/);
-	assert.throws(() => validateDshIdeInput('runCommand', { command: '/x', args: [1] }), /array of strings/);
+	assert.throws(() => validateDshIdeInput('runCommand', { command: 'help', args: [1] }), /array of strings/);
 	assert.throws(() => validateDshIdeInput('fetchRowDetail', { rowId: '' }), /non-empty string/);
 });
 
@@ -283,4 +283,34 @@ test('D18 legacy account endpoints file is gone and the consumer uses the protoc
 	const consumer = readFileSync(new URL('../../../src/vs/workbench/browser/parts/globalCompositeBar.ts', import.meta.url), 'utf8');
 	assert.match(consumer, /from '[^']*common\/dshIdeProtocol\.js'/, 'the consumer must import the builder from the protocol single source');
 	assert.ok(!consumer.includes('legacy-account-endpoints'), 'no stale legacy import may remain');
+});
+
+// ---------------------------------------------------------------------------
+// 第 34 轮契约决定（§8.10.10 前置①②）：command 为不带斜杠的命令名、
+// args 每项以单空格拼入 rawInput，禁空白/斜杠注入。
+// ---------------------------------------------------------------------------
+
+test('runCommand contract: command is a bare slash-command token', () => {
+	assert.doesNotThrow(() => validateDshIdeInput('runCommand', { command: 'plan', args: ['topic'] }));
+	assert.doesNotThrow(() => validateDshIdeInput('runCommand', { command: 'my_cmd-2' }));
+	for (const bad of ['/plan', 'Plan', '', 'plan extra', 'plan/sub', '1plan']) {
+		assert.throws(() => validateDshIdeInput('runCommand', { command: bad }), /slash-command token/,
+			`command ${JSON.stringify(bad)} must be rejected`);
+	}
+});
+
+test('runCommand contract: args forbid whitespace and slash injection', () => {
+	assert.doesNotThrow(() => validateDshIdeInput('runCommand', { command: 'plan', args: ['a', 'b-c'] }));
+	for (const bad of ['a b', 'a/b', '', 'a\nb']) {
+		assert.throws(() => validateDshIdeInput('runCommand', { command: 'plan', args: [bad] }), /whitespace\/slash/,
+			`arg ${JSON.stringify(bad)} must be rejected`);
+	}
+});
+
+test('setPermissionPreset contract: preset uses the same token constraint', () => {
+	assert.doesNotThrow(() => validateDshIdeInput('setPermissionPreset', { preset: 'workspace-write' }));
+	for (const bad of ['/plan', 'Plan', 'a b', '']) {
+		assert.throws(() => validateDshIdeInput('setPermissionPreset', { preset: bad }), /slash-command token/,
+			`preset ${JSON.stringify(bad)} must be rejected`);
+	}
 });

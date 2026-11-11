@@ -316,7 +316,8 @@ test('bridge startup waits for workspaceRegistry', () => {
 
 test('unverified capabilities and unbound sessions are refused, not faked', async () => {
 	const { bridge } = bridgeWith();
-	await assert.rejects(() => bridge.invoke('runCommand', { command: '/help' }), error => error.code === FEATURE_UNAVAILABLE);
+	// `rewind` 仍是未核对形状的 fail-closed 能力；`runCommand` 已于第 34 轮接线。
+	await assert.rejects(() => bridge.invoke('rewind', { sessionId: 's-1', to: 'p0' }), error => error.code === FEATURE_UNAVAILABLE);
 	await assert.rejects(() => bridge.invoke('submit', { text: 'hi' }), error => error.code === INVALID_ARGUMENT);
 	await assert.rejects(() => bridge.invoke('__bogus', {}), error => error.code === FEATURE_UNAVAILABLE);
 });
@@ -826,4 +827,49 @@ test('listCommands refuses when the bound session has no live agent', async () =
 	const { bridge } = bridgeWith(commandServices({ agents: { get: () => undefined } }));
 	bridge.open({ view: 'chat', params: { sessionId: 's-1' } });
 	await assert.rejects(() => bridge.invoke('listCommands', {}), error => error.code === FEATURE_UNAVAILABLE && /no live agent/.test(error.message));
+});
+
+// ---------------------------------------------------------------------------
+// D13（第 34 轮）：runCommand / setPermissionPreset 接线（§8.10.10 契约决定后）。
+// Host 侧进程内直调 commands.execute(agent, line, [], signal)，共享 line 构造与结果映射。
+// ---------------------------------------------------------------------------
+
+function commandExecuteServices(outcome) {
+	return {
+		agents: { get: id => (id === 's-1' ? { id: 's-1' } : undefined) },
+		commands: { list: () => [], execute: async (agent, line, attachments, signal) => {
+			commandExecuteServices.lastCall = { agent, line, attachments, signal };
+			return outcome;
+		} },
+	};
+}
+
+test('runCommand builds a slash line and maps a success result to accepted', async () => {
+	const { bridge } = bridgeWith(commandExecuteServices({ commandId: 'c1', result: { kind: 'success', text: 'ok' } }));
+	bridge.open({ view: 'chat', params: { sessionId: 's-1' } });
+	assert.deepEqual(await bridge.invoke('runCommand', { command: 'plan', args: ['a', 'b-c'] }), { accepted: true });
+	const call = commandExecuteServices.lastCall;
+	assert.equal(call.line, '/plan a b-c');
+	assert.deepEqual(call.attachments, []);
+	assert.ok(call.signal instanceof AbortSignal, 'Host must provide a real AbortSignal for in-process execute');
+});
+
+test('setPermissionPreset reuses the same executor with /permission <preset>', async () => {
+	const { bridge } = bridgeWith(commandExecuteServices({ commandId: 'c1', result: { kind: 'success' } }));
+	bridge.open({ view: 'chat', params: { sessionId: 's-1' } });
+	assert.deepEqual(await bridge.invoke('setPermissionPreset', { preset: 'workspace-write' }), { accepted: true });
+	assert.equal(commandExecuteServices.lastCall.line, '/permission workspace-write');
+});
+
+test('runCommand rejects a non-admitted (undefined) or error result instead of faking accepted', async () => {
+	{
+		const { bridge } = bridgeWith(commandExecuteServices(undefined));
+		bridge.open({ view: 'chat', params: { sessionId: 's-1' } });
+		await assert.rejects(() => bridge.invoke('runCommand', { command: 'nope' }), error => error.code === INVALID_ARGUMENT && /not admitted/.test(error.message));
+	}
+	{
+		const { bridge } = bridgeWith(commandExecuteServices({ commandId: 'c1', result: { kind: 'error', text: 'unknown preset "x"' } }));
+		bridge.open({ view: 'chat', params: { sessionId: 's-1' } });
+		await assert.rejects(() => bridge.invoke('setPermissionPreset', { preset: 'x' }), error => error.code === FEATURE_UNAVAILABLE && /unknown preset/.test(error.message));
+	}
 });

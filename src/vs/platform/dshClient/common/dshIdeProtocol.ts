@@ -144,9 +144,9 @@ export interface DshIdeMethodArgs {
 	setModel: { model: string };
 	/** 设置 effort。 */
 	setEffort: { effort: string };
-	/** 设置权限预设。 */
+	/** 设置权限预设；预设名作为 `/permission <preset>` 的唯一参数（§8.10.10 前置②，禁空白/斜杠）。 */
 	setPermissionPreset: { preset: string };
-	/** 运行斜杠命令。 */
+	/** 运行斜杠命令；`command` 为不带前导 `/` 的命令名，`args` 以单空格拼成 rawInput（§8.10.10 前置①②）。 */
 	runCommand: { command: string; args?: readonly string[] };
 	/** 列出绑定工作区的可见会话，返回 readonly IDshIdeSessionSummary[]；未绑定或归属不明返回空数组。 */
 	listSessions: Record<string, never>;
@@ -315,6 +315,19 @@ function optionalString(value: unknown, label: string): void {
 }
 
 /**
+ * 斜杠命令名 / 命令参数的中立约束（第 34 轮契约决定，§8.10.10 前置① ② ⑤）。
+ * 官方 `parseCommand` 要求 `^/([a-z][a-z0-9_-]*)(\s|$)`（`interaction/commands/src/index.ts:125-131`）；
+ * IDE 契约的 `command` 为**不带前导斜杠的命令名**，`args` 每项以单空格拼进 `rawInput`。
+ * 因此两处都禁空白与 `/`，防止注入换行 / 多余斜杠把一次调用变成多次或越权命令。
+ */
+function commandToken(value: unknown, label: string): string {
+	if (typeof value !== 'string' || !/^[a-z][a-z0-9_-]*$/.test(value)) {
+		throw new TypeError(`${label} must be a lowercase slash-command token (no leading slash, no whitespace)`);
+	}
+	return value;
+}
+
+/**
  * 校验官方 `AccountClientMetadata`：三个非空/有限数字段，且不额外放宽。
  * 账号凭据不在此结构里（只在 Host），这里只描述「调用方身份」。
  */
@@ -389,13 +402,21 @@ export function validateDshIdeInput<K extends DshIdeMethod>(command: K, args: un
 			nonEmptyString(record['effort'], 'DshIdeInput.setEffort.effort');
 			break;
 		case 'setPermissionPreset':
-			nonEmptyString(record['preset'], 'DshIdeInput.setPermissionPreset.preset');
+			// §8.10.10 前置②：preset 是 `/permission` 的唯一参数，按命令参数约束（禁空白/斜杠）。
+			commandToken(record['preset'], 'DshIdeInput.setPermissionPreset.preset');
 			break;
 		case 'runCommand':
-			nonEmptyString(record['command'], 'DshIdeInput.runCommand.command');
+			// §8.10.10 前置①②：`command` 为不带前导斜杠的命令名，`args` 每项单空格拼入 rawInput。
+			commandToken(record['command'], 'DshIdeInput.runCommand.command');
 			if (record['args'] !== undefined) {
 				if (!Array.isArray(record['args']) || record['args'].some(a => typeof a !== 'string')) {
 					throw new TypeError('DshIdeInput.runCommand.args must be an array of strings');
+				}
+				for (const [index, arg] of (record['args'] as readonly string[]).entries()) {
+					// 参数允许任意非空字符串内容，但不得含空白或 `/`（注入防护）。
+					if (arg === '' || /[\s/]/.test(arg)) {
+						throw new TypeError(`DshIdeInput.runCommand.args[${index}] must not be empty or contain whitespace/slash`);
+					}
 				}
 			}
 			break;

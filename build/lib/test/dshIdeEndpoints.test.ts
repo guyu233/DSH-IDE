@@ -16,7 +16,8 @@
 //   setEffort 接线（session/projections → session/selectModel），故本表把
 //   deleteSession + setEffort 标为已接线；第 32 轮据第 31 轮核实的 commands
 //   wire 形状把 listCommands 接线，故本表为 3 个已接线 / 4 个继续 fail-closed；
-//   第 33 轮把 runCommand / setPermissionPreset 的契约前置固化于 §8.10.10。
+//   第 33 轮把契约前置固化于 §8.10.10，第 34 轮按契约先行接线两者，故本表为
+//   5 个已接线 / 2 个继续 fail-closed（仅 rewind 无独立 remote、loadOlder 形状不符）。
 // 形状一律以契约真源 dshIdeProtocol.ts 与 DSH 源码为准，不凭记忆臆造。
 
 import assert from 'node:assert/strict';
@@ -64,13 +65,13 @@ const FINDINGS: readonly EndpointFinding[] = [
 		method: 'setPermissionPreset',
 		landing: 'commands/execute（/permission <preset>）',
 		evidence: 'ui-permission-presets/src/client/index.ts:136 live.command(`/permission ${preset}`)；permission-presets/src/index.ts:291 @Remote(catalog) 仅只读；interaction/commands/src/index.ts:360 execute；第 31 轮 wire 证据同 runCommand 行',
-		note: '第 33 轮：wire 形状已核对；契约 {preset}→line 与返回值映射的语义空白见 §8.10.10，未补契约真源前保持 fail-closed。',
+		note: '已完成（代码侧，第 34 轮）：按 §8.10.10 契约决定接线——契约 preset 加命令 token 约束、line=/permission <preset>、结果映射 IA/FU；两套 backend 共用 dshIdeCommandLine.js。运行时 preset 可用性归 U10 / U12 真机探针。',
 	},
 	{
 		method: 'runCommand',
 		landing: 'commands/execute',
 		evidence: 'interaction/commands/src/index.ts:360 @Remote execute(agent,line,submittedAttachments,signal)；ui-plan/src/client/index.ts:122、ui-commands/src/client/service.ts:423 execute(sessionId,line,attachments)；core/agent/src/index.ts:266-273 lookups.register(agent,{wire:agentId,SessionId})；session-controller/src/client/index.ts:141 identity()=sessionId；gateway/client/index.ts:518-533 args[agentId]=identity；gateway/index.ts:1269-1273/:1630-1655',
-		note: '第 33 轮：wire 形状已核对；契约 {command,args?}→line 拼接、返回值到动作类错误码映射等 5 项语义空白见 §8.10.10，未补契约真源前保持 fail-closed。',
+		note: '已完成（代码侧，第 34 轮）：按 §8.10.10 契约决定接线——command 为不带斜杠的命令名、args 单空格拼入 rawInput、attachments 恒 []、signal 由框架/Host 提供、结果映射 IA/FU；两套 backend 共用 dshIdeCommandLine.js。',
 	},
 	{
 		method: 'listCommands',
@@ -86,9 +87,9 @@ const FINDINGS: readonly EndpointFinding[] = [
 	},
 ];
 
-/** 已完成（代码侧）的 method：deleteSession（第 21 轮）、setEffort（第 26 轮）、listCommands（第 32 轮）。 */
-const WIRED = ['deleteSession', 'setEffort', 'listCommands'];
-/** 尚不允许接线的 4 个 method：其余形状未核对者全部保持 fail-closed。 */
+/** 已完成（代码侧）的 method：deleteSession（第 21 轮）、setEffort（第 26 轮）、listCommands（第 32 轮）、runCommand / setPermissionPreset（第 34 轮）。 */
+const WIRED = ['deleteSession', 'setEffort', 'listCommands', 'runCommand', 'setPermissionPreset'];
+/** 尚不允许接线的 2 个 method：rewind 无独立 remote、loadOlder 形状不符，保持 fail-closed。 */
 const UNVERIFIED = FINDINGS.filter(f => !WIRED.includes(f.method)).map(f => f.method);
 
 // ---------------------------------------------------------------------------
@@ -116,7 +117,7 @@ test('D16 transport keeps the unverified methods in the feature-unavailable stub
 	for (const method of UNVERIFIED) {
 		assert.ok(stub[0].includes(`case '${method}':`), `${method} must stay in the transport fail-closed stub until its wire shape is verified`);
 	}
-	// 三个已接线的 method 绝不能回退成 stub。
+	// 五个已接线的 method 绝不能回退成 stub。
 	for (const method of WIRED) {
 		assert.ok(!stub[0].includes(`case '${method}':`), `${method} must not fall back to the stub`);
 	}
@@ -144,9 +145,9 @@ test('D16 findings are complete: 7 methods, each with evidence and a conclusion'
 		assert.ok(f.evidence.length > 20, `${f.method} must carry source evidence`);
 		assert.ok(f.note.length > 10, `${f.method} must carry a conclusion / D13 prerequisite`);
 	}
-	// deleteSession / setEffort / listCommands 已完成（代码侧）；其余 4 个保持未核对形状。
-	assert.equal(FINDINGS.filter(f => f.note.startsWith('已完成')).length, 3);
-	assert.equal(UNVERIFIED.length, 4);
+	// deleteSession / setEffort / listCommands / runCommand / setPermissionPreset 已完成；其余 2 个保持未核对形状。
+	assert.equal(FINDINGS.filter(f => f.note.startsWith('已完成')).length, 5);
+	assert.equal(UNVERIFIED.length, 2);
 });
 
 // ---------------------------------------------------------------------------
@@ -155,27 +156,25 @@ test('D16 findings are complete: 7 methods, each with evidence and a conclusion'
 // 这里钉住「形状结论进 §8.10.9、listCommands 已接线、其余不抢跑」。
 // ---------------------------------------------------------------------------
 
-test('D16 round-32 commands wire shape: listCommands wired, remaining scoped methods still fail-closed', () => {
+test('D16 round-34 commands family: 5 wired, only rewind/loadOlder still fail-closed', () => {
 	const dev = read('docs/DEVELOPMENT.md');
-	// 形状结论落在 §8.10.9（agentId = sessionId、字段名 = 参数名、signal 不入 args）。
+	// 第 31 轮的 wire 形状结论仍是接线的唯一依据（agentId = sessionId 等）。
 	assert.match(dev, /形状已核对（第 31 轮）/, '§8.10.9 must record the round-31 wire-shape conclusion');
 	assert.match(dev, /agentId:\s*sessionId/, '§8.10.9 must name the agentId=sessionId wire identity');
 	assert.match(dev, /lookups\.register\('agent'/, '§8.10.9 must cite the agent lookup declaration');
-	assert.match(dev, /仍不接线/, '§8.10.9 must keep the no-wiring decision');
-	assert.match(dev, /属 D13 功能工作/, '§8.10.9 must attribute wiring to D13');
-	// 执行纪律：4 个未接线 method 仍保持 fail-closed（listCommands 已接线）。
-	assert.match(dev, /其余 4 个\s*method 在完成接线前必须保持 fail-closed/, 'discipline must keep the 4 methods fail-closed');
-	// 两套 backend 的拒绝状态一字未动。
-	assert.equal(UNVERIFIED.length, 4, 'the shape conclusion must not change the fail-closed set');
-	for (const method of ['runCommand', 'setPermissionPreset']) {
+	assert.match(dev, /已完成（代码侧，第 34 轮）/, '§8.10.9 must record the round-34 wiring of both writers');
+	// 执行纪律：接线后只剩 2 个 fail-closed。
+	assert.match(dev, /其余 2 个\s*method 在完成接线前必须保持 fail-closed/, 'discipline must keep the 2 methods fail-closed');
+	assert.equal(UNVERIFIED.length, 2, 'only rewind/loadOlder stay fail-closed');
+	for (const method of ['rewind', 'loadOlder']) {
 		const re = new RegExp(`${method}:\\s*missing\\('${method}'\\)`);
 		assert.match(host, re, `${method} must stay missing(...) on the Host side`);
+		const stub = /case 'rewind':[\s\S]*?throw new DshIdeTransportError\('dsh-ide\/feature-unavailable'/.exec(transport);
+		assert.ok(stub !== null && stub[0].includes(`case '${method}':`), `${method} must stay in the transport fail-closed stub`);
 	}
-	const stub = /case 'rewind':[\s\S]*?throw new DshIdeTransportError\('dsh-ide\/feature-unavailable'/.exec(transport);
-	assert.ok(stub !== null);
-	for (const method of ['runCommand', 'setPermissionPreset']) {
-		assert.ok(stub[0].includes(`case '${method}':`), `${method} must stay in the transport fail-closed stub`);
-	}
+	// 两个已接线的 writer 绝不能回退成 stub / missing。
+	assert.doesNotMatch(host, /runCommand:\s*missing\(/, 'runCommand must stay wired on Host');
+	assert.doesNotMatch(host, /setPermissionPreset:\s*missing\(/, 'setPermissionPreset must stay wired on Host');
 });
 
 // ---------------------------------------------------------------------------
@@ -184,7 +183,7 @@ test('D16 round-32 commands wire shape: listCommands wired, remaining scoped met
 // 清单与两套 backend 的拒绝状态，防止有人绕过第 2 章 §9 契约先行抢跑。
 // ---------------------------------------------------------------------------
 
-test('D16 round-33 contract prerequisite is documented and both command writers stay fail-closed', () => {
+test('D16 round-33 contract prerequisite is documented (wired in round 34)', () => {
 	const dev = read('docs/DEVELOPMENT.md');
 	assert.match(dev, /#### 8\.10\.10[^\n]*契约前置/, '§8.10.10 must exist');
 	// 5 项语义空白都要有源码依据与契约决定。
@@ -199,11 +198,9 @@ test('D16 round-33 contract prerequisite is documented and both command writers 
 	const tableEnd = dev.indexOf('#### 8.10.10', tableStart);
 	assert.ok(tableStart > 0 && tableEnd > tableStart, '§8.10.9 / §8.10.10 must both exist');
 	assert.doesNotMatch(dev.slice(tableStart, tableEnd), /wire 形状未核对前不接线/, 'the stale pre-round-31 wording must be gone from the §8.10.9 conclusion table');
-	// 两套 backend 仍拒绝这两个 method。
+	// 第 34 轮按契约先行接线两者；剩余 fail-closed 只有 rewind / loadOlder。
+	assert.equal(UNVERIFIED.length, 2, 'after round-34 wiring only rewind/loadOlder stay fail-closed');
 	for (const method of ['runCommand', 'setPermissionPreset']) {
-		assert.match(host, new RegExp(`${method}:\\s*missing\\('${method}'\\)`), `${method} must stay missing(...) on Host`);
-		const stub = /case 'rewind':[\s\S]*?throw new DshIdeTransportError\('dsh-ide\/feature-unavailable'/.exec(transport);
-		assert.ok(stub !== null && stub[0].includes(`case '${method}':`), `${method} must stay in the transport fail-closed stub`);
+		assert.ok(WIRED.includes(method), `${method} must be marked wired`);
 	}
-	assert.equal(UNVERIFIED.length, 4, 'the prerequisite documentation must not change the fail-closed set');
 });

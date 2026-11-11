@@ -215,7 +215,7 @@ const VALID: Record<DshIdeMethod, unknown> = {
 	setModel: { model: 'deepseek/deepseek-chat' },
 	setEffort: { effort: 'high' },
 	setPermissionPreset: { preset: 'balanced' },
-	runCommand: { command: '/help', args: ['a'] },
+	runCommand: { command: 'help', args: ['a'] },
 	listSessions: {},
 	deleteSession: { sessionId: 's-1' },
 	listModels: { workspace: 'w1' },

@@ -17,6 +17,7 @@
 import { randomUUID } from 'node:crypto';
 import { projectDshIdeSessionList } from '../common/dshIdeSessionList.js';
 import { projectDshIdeCommandList } from '../common/dshIdeCommandList.js';
+import { buildDshIdeCommandLine, mapDshIdeCommandExecution } from '../common/dshIdeCommandLine.js';
 import { safeErrorText } from '../common/dshIdeAuthRedaction.js';
 
 /** 与 common/dshIdeProtocol.ts 同值的错误码（Host 半身为纯 JS，不跨层 import TS）。 */
@@ -280,6 +281,32 @@ function createMethodHandlers(bridge) {
 	const missing = capability => () => {
 		throw coded(FEATURE_UNAVAILABLE, `DSH-IDE capability "${capability}" has no verified DSH method yet`, { capability });
 	};
+	/**
+	 * D13（第 34 轮）：`runCommand` / `setPermissionPreset` 共用的官方命令执行。
+	 * Host 半身进程内直调 `commands.execute(agent, line, [], signal)`：
+	 * `agent` 经 `agents.get(sessionId)` 解析，`signal` 自给（Gateway 路径由框架注入，
+	 * 进程内直调无框架信号），attachments 恒 `[]`（§8.10.10 前置④⑤）。
+	 * 结果经共享 `mapDshIdeCommandExecution` 收敛为动作类语义，不静默 accepted。
+	 */
+	const executeCommandLine = async line => {
+		const sessionId = requireSession();
+		const agents = service(bridge.ctx, 'agents');
+		const agent = typeof agents.get === 'function' ? agents.get(sessionId) : undefined;
+		if (agent === undefined || agent === null) {
+			throw coded(FEATURE_UNAVAILABLE, `no live agent for bound session ${sessionId}`, { capability: 'runCommand' });
+		}
+		const commands = service(bridge.ctx, 'commands');
+		if (typeof commands.execute !== 'function') {
+			throw coded(FEATURE_UNAVAILABLE, 'DSH commands service has no execute()', { capability: 'runCommand' });
+		}
+		const signal = new AbortController().signal;
+		const execution = await commands.execute(agent, line, [], signal);
+		const outcome = mapDshIdeCommandExecution(execution);
+		if ('error' in outcome) {
+			throw coded(outcome.error === 'invalid-argument' ? INVALID_ARGUMENT : FEATURE_UNAVAILABLE, outcome.message, { capability: 'runCommand' });
+		}
+		return { accepted: true };
+	};
 
 	return {
 		async submit(args) {
@@ -369,8 +396,14 @@ function createMethodHandlers(bridge) {
 			});
 			return { accepted: true };
 		},
-		setPermissionPreset: missing('setPermissionPreset'),
-		runCommand: missing('runCommand'),
+		async setPermissionPreset(args) {
+			// §8.10.9：官方无独立 setter，`/permission <preset>` 是注册的斜杠命令。
+			return executeCommandLine(buildDshIdeCommandLine('permission', [args.preset]));
+		},
+		async runCommand(args) {
+			// 契约 `command` 为不带前导斜杠的命令名，`args` 单空格拼入 rawInput。
+			return executeCommandLine(buildDshIdeCommandLine(args.command, args.args));
+		},
 		async listSessions() {
 			const sessionId = bridge.sessionId;
 			const channelId = bridge.channelId;
