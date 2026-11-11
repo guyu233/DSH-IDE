@@ -97,3 +97,27 @@ test('D23 on win32 the node-pty binding is conpty (not pty)', () => {
 		assert.ok(!bindings.includes('pty.node'), 'win32 builds must not be expected to ship pty.node');
 	}
 });
+
+// ---------------------------------------------------------------------------
+// 第 39 轮：5 个原生模块必须由**生产依赖**随包，否则打包后运行时找不到。
+//
+// 发现的真实缺陷：`node-pty` 原先声明在 `devDependencies`，而打包用
+// `npm ls --all --omit=dev` 收集生产依赖 → 它被排除，产物里缺 node-pty，
+// 终端在打包版里无法启动。其余 4 个模块一直在 `dependencies`。
+// 本测试把「5 个模块都在 dependencies、且都不在 devDependencies」钉死。
+// ---------------------------------------------------------------------------
+
+test('the five native modules are declared as production dependencies', () => {
+	const pkg = JSON.parse(fs.readFileSync(path.join(repoRoot, 'package.json'), 'utf8')) as {
+		dependencies?: Record<string, string>;
+		devDependencies?: Record<string, string>;
+	};
+	for (const mod of NATIVE_MODULES) {
+		assert.ok(pkg.dependencies?.[mod.pkg] !== undefined,
+			`${mod.pkg} must be a production dependency, otherwise "npm ls --omit=dev" drops it from the package`);
+		assert.equal(pkg.devDependencies?.[mod.pkg], undefined,
+			`${mod.pkg} must not also be listed in devDependencies`);
+	}
+	// @parcel/watcher 在源码里以 scoped 名声明；这里额外确认未被写成别的名字。
+	assert.ok(pkg.dependencies?.['@parcel/watcher'] !== undefined, '@parcel/watcher must stay a production dependency');
+});
