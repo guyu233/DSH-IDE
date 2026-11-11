@@ -379,7 +379,8 @@ export class DshIdeTransportBackend implements DshIdeBackend {
 	private readonly transport: DshIdeTransport;
 	private channelId: string | undefined;
 	private sessionId: string | undefined;
-	private stream: { streamId: string; close(): void } | undefined;
+	/** 绑定会话期间同时存在的两条逻辑流：`$events`（waterfall 入口）与 `session/follow`（会话内容）。 */
+	private readonly streams = new Set<{ streamId: string; close(): void }>();
 	private readonly _sessionListReads = new Set<AbortController>();
 
 	constructor(transport: DshIdeTransport) {
@@ -397,26 +398,40 @@ export class DshIdeTransportBackend implements DshIdeBackend {
 	}
 
 	follow(sessionId: string | undefined, onEvent: (raw: unknown) => void): { dispose(): void } {
+		// §8.10.3 缺口②：有绑定会话时**两条流都要开**——`$events` 承载 Gateway 转发的
+		// waterfall（审批 / 问卷）与取消帧，`session/follow` 承载会话内容；只开后者会让
+		// 审批 / 问卷请求永远到不了 IDE。两流各自保留官方 Gateway ACL。
+		const events = this.followEvents(onEvent);
 		if (sessionId === undefined) {
-			// 无绑定会话时只订阅转发的 waterfall/事件流，不开 session/follow。
-			return this.followEvents(onEvent);
+			return events;
 		}
 		// `follow(request, signal)`：形参名是 `request`。
-		const stream = this.transport.openStream('session/follow', {
+		const content = this.transport.openStream('session/follow', {
 			request: {
 				address: { kind: 'session', sessionId },
 				assistantStream: true,
 			},
 		}, frame => onEvent(frame));
-		this.stream = stream;
-		return { dispose: () => stream.close() };
+		this.streams.add(content);
+		return {
+			dispose: () => {
+				content.close();
+				this.streams.delete(content);
+				events.dispose();
+			},
+		};
 	}
 
 	/** 只订阅 Gateway 转发的事件（waterfall 决议入口在这里）。 */
 	followEvents(onEvent: (raw: unknown) => void): { dispose(): void } {
 		const stream = this.transport.openStream('$events', {}, frame => onEvent(frame));
-		this.stream = stream;
-		return { dispose: () => stream.close() };
+		this.streams.add(stream);
+		return {
+			dispose: () => {
+				stream.close();
+				this.streams.delete(stream);
+			},
+		};
 	}
 
 	async invoke(method: DshIdeMethod, args: unknown): Promise<unknown> {
@@ -670,8 +685,10 @@ export class DshIdeTransportBackend implements DshIdeBackend {
 			read.abort(new DshIdeTransportError('SESSION_SWITCHED', 'Session list binding closed during the read'));
 		}
 		this._sessionListReads.clear();
-		this.stream?.close();
-		this.stream = undefined;
+		for (const stream of this.streams) {
+			stream.close();
+		}
+		this.streams.clear();
 		this.transport.dispose();
 	}
 }

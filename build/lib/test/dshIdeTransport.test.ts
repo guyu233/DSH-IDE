@@ -808,23 +808,28 @@ test('deleteSession propagates a plugin call failure unchanged', async () => {
 	transport.dispose();
 });
 
-test('backend opens session/follow with the official follow args and closes it', () => {
+test('backend opens $events and session/follow together and closes both', () => {
 	const { backend, transport } = backendWithHost(OK);
 	const seen: unknown[] = [];
 	const handle = backend.follow('s-1', event => seen.push(event));
 	const socket = FakeWebSocket.instances[0];
 	socket.open();
-	const open = socket.sent[0] as { endpoint: string; payload: { args: { request: Record<string, unknown> } } };
-	assert.equal(open.endpoint, 'session/follow');
+	// §8.10.3 缺口②：有绑定会话时两条流都开——$events（waterfall 入口）+ session/follow（会话内容）。
+	const opened = socket.sent as { endpoint: string; streamId: string; payload?: { args?: Record<string, unknown> } }[];
+	assert.deepEqual(opened.map(s => s.endpoint), ['$events', 'session/follow']);
+	const content = opened[1]!;
 	// follow(request, signal)：形参名是 request
-	assert.deepEqual(open.payload.args.request, { address: { kind: 'session', sessionId: 's-1' }, assistantStream: true });
+	assert.deepEqual(content.payload?.args?.['request'], { address: { kind: 'session', sessionId: 's-1' }, assistantStream: true });
 
-	const streamId = (socket.sent[0] as { streamId: string }).streamId;
-	socket.deliver({ type: 'item', streamId, value: { type: 'event', event: { type: 'user/message', seq: 1 } } });
+	socket.deliver({ type: 'item', streamId: content.streamId, value: { type: 'event', event: { type: 'user/message', seq: 1 } } });
 	assert.equal(seen.length, 1);
+	// $events 转发的 waterfall 帧同样进入同一条回调（审批 / 问卷到达 IDE 的唯一入口）。
+	socket.deliver({ type: 'item', streamId: opened[0]!.streamId, value: { type: 'waterfall', eventId: 'e1', event: 'approval/request', agentId: 's-1', request: {} } });
+	assert.equal(seen.length, 2);
 
 	handle.dispose();
-	assert.deepEqual(socket.sent.at(-1), { type: 'cancel', streamId });
+	const cancels = (socket.sent as { type: string }[]).filter(s => s.type === 'cancel');
+	assert.equal(cancels.length, 2, 'dispose must close both streams');
 	transport.dispose();
 });
 
