@@ -319,3 +319,35 @@ test('round-24 listen event surface stays snapshot-only until the contract chang
 	// 实现里不得出现第二个 listen 事件名常量。
 	assert.equal((channel.match(/DSH_IDE_[A-Z_]*EVENT\s*=/g) ?? []).length, 1, 'only one listen event-name constant may exist');
 });
+
+// ---------------------------------------------------------------------------
+// 第 26 轮：D15 前置——官方语音服务的就绪语义核实（§8.10.13）。
+// 钉住「只读核对结论已固化、DSH-IDE 仍无语音入口、未自建第二套识别后端」。
+// ---------------------------------------------------------------------------
+
+test('round-26 speech readiness findings are documented and no dictation backend exists', () => {
+	const dev = read('docs/DEVELOPMENT.md');
+	assert.match(dev, /#### 8\.10\.13[^\n]*DSH 实验语音服务的就绪语义/, '§8.10.13 must exist');
+	// 关键源码事实与含义。
+	for (const token of ['speechToText', 'experimental-speech-to-text-sensevoice', 'host-local', 'activation performs no downloads or model loading']) {
+		assert.ok(dev.includes(token), `§8.10.13 must record ${token}`);
+	}
+	assert.match(dev, /不是接线完成声明/, '§8.10.13 must not claim wiring is done');
+	assert.match(dev, /不得自建第二套识别后端/, '§8.10.13 must forbid a second recognizer backend');
+	assert.match(dev, /§0\.2 U15/, '§8.10.13 must point at the user ruling for the entry decision');
+
+	// DSH-IDE 现状：contrib/dsh 与 platform/dshClient 零语音/听写代码（未私自加后端）。
+	const roots = ['src/vs/workbench/contrib/dsh', 'src/vs/platform/dshClient'];
+	const pattern = /dictation|speechToText|speech-to-text|SenseVoice/i;
+	const offenders: string[] = [];
+	const walk = (dir: string): void => {
+		for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+			const full = path.join(dir, entry.name);
+			if (entry.isDirectory()) { walk(full); continue; }
+			if (!/\.(ts|js|mjs)$/.test(entry.name)) { continue; }
+			if (pattern.test(fs.readFileSync(full, 'utf8'))) { offenders.push(full); }
+		}
+	};
+	for (const root of roots) { walk(path.join(repoRoot, root)); }
+	assert.deepEqual(offenders, [], `no dictation backend may exist until the user rules on the entry: ${offenders.join(', ')}`);
+});
