@@ -29,6 +29,7 @@
 
 import type { DshIdeBackend, DshIdeMethod, DshIdeOpenSpec, IDshIdeSessionSummary } from '../common/dshIdeProtocol.js';
 import { projectDshIdeSessionList } from '../common/dshIdeSessionList.js';
+import { projectDshIdeCommandList } from '../common/dshIdeCommandList.js';
 import { safeErrorText } from '../common/dshIdeAuthRedaction.js';
 
 /** 通道 id：由 Host 侧绑定生成，这里只做透传。 */
@@ -518,6 +519,17 @@ export class DshIdeTransportBackend implements DshIdeBackend {
 				}
 				return models;
 			}
+			case 'listCommands': {
+				// D13（第 32 轮）：`commands/list` 是 agent-scoped remote，wire 形状
+				// 由 §8.10.9 第 31 轮核实——args 精确为 { agentId: sessionId }，
+				// `agentId` = 绑定 sessionId（core/agent 的 agent Context identity）。
+				// 无绑定会话时不发请求，返回空列表（与 listSessions 的 fail-closed 口径一致）。
+				if (this.sessionId === undefined) {
+					return [];
+				}
+				const descriptors = await this.transport.call('commands', 'list', { agentId: this.sessionId });
+				return projectDshIdeCommandList(descriptors);
+			}
 			case 'fetchRowDetail':
 				return null;
 			case 'accountGetState':
@@ -537,7 +549,6 @@ export class DshIdeTransportBackend implements DshIdeBackend {
 			case 'loadOlder':
 			case 'setPermissionPreset':
 			case 'runCommand':
-			case 'listCommands':
 				throw new DshIdeTransportError('dsh-ide/feature-unavailable', `DSH-IDE capability "${method}" has no verified DSH endpoint yet`, { capability: method });
 			default:
 				throw new DshIdeTransportError('dsh-ide/feature-unavailable', `DSH-IDE method ${JSON.stringify(method)} is not mapped`);

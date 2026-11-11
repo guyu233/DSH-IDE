@@ -688,6 +688,7 @@ BUILD_TARGETS.forEach(buildTarget => {
 					[path.join(dshClientOut, 'common', 'env.js'), path.join('common', 'env.js')],
 					[path.join(dshClientOut, 'common', 'dshIdeAuthRedaction.js'), path.join('common', 'dshIdeAuthRedaction.js')],
 					[path.join(dshClientOut, 'common', 'dshIdeSessionList.js'), path.join('common', 'dshIdeSessionList.js')],
+					[path.join(dshClientOut, 'common', 'dshIdeCommandList.js'), path.join('common', 'dshIdeCommandList.js')],
 				];
 				for (const [from, to] of copyList) {
 					await fs.promises.cp(from, path.join(stagingRoot, to), { recursive: true });

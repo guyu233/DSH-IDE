@@ -351,7 +351,7 @@ test('backend maps submit/interrupt/setModel to verified session endpoints', asy
 
 test('backend refuses unverified capabilities with feature-unavailable', async () => {
 	const { backend, transport, requests } = backendWithHost(OK);
-	const refusing: DshIdeMethod[] = ['rewind', 'loadOlder', 'setPermissionPreset', 'runCommand', 'listCommands'];
+	const refusing: DshIdeMethod[] = ['rewind', 'loadOlder', 'setPermissionPreset', 'runCommand'];
 	for (const method of refusing) {
 		await assert.rejects(
 			() => backend.invoke(method, {}),
@@ -859,4 +859,50 @@ test('openStream never sends before the socket is connected', () => {
 	} finally {
 		FakeWebSocket.prototype.send = realSend;
 	}
+});
+
+// ---------------------------------------------------------------------------
+// D13（第 32 轮）：listCommands 接线——`commands/list` args 精确为
+// { agentId: sessionId }（§8.10.9 第 31 轮 wire 结论），返回中立投影。
+// ---------------------------------------------------------------------------
+
+test('backend maps listCommands to commands/list with agentId and neutral projection', async () => {
+	const { backend, transport, requests } = backendWithHost((url, body) => {
+		const rpcId = (body as { rpcId: string }).rpcId;
+		if (url.endsWith('/api/commands/list')) {
+			return { json: { type: 'server-response', rpcId, result: { ok: true, value: [
+				{ definitionId: 'internal', name: 'plan', description: 'Plan a task', input: { hint: 'topic' } },
+				{ name: 'clear', description: '' },
+			] } } };
+		}
+		return OK(url, body);
+	});
+	const value = await backend.invoke('listCommands', {});
+	assert.equal(requests.length, 1);
+	assert.equal(requests[0]!.url.split('/api/')[1], 'commands/list');
+	const body = requests[0]!.body as { payload: { args: Record<string, unknown> } };
+	assert.deepEqual(body.payload.args, { agentId: 's-1' });
+	assert.deepEqual(value, [{ name: 'plan', description: 'Plan a task' }, { name: 'clear', description: '' }]);
+	// 官方内部结构（definitionId / input）不得透传到 IDE 侧。
+	assert.ok(!JSON.stringify(value).includes('internal') && !JSON.stringify(value).includes('hint'));
+	transport.dispose();
+});
+
+test('backend listCommands sends nothing and returns an empty list without a binding', async () => {
+	// 直接构造一个 open 时不带 sessionId 的 backend；不复用已绑定的 backendWithHost。
+	const host = fakeHost(OK);
+	const transport = new DshIdeTransport({ origin: 'http://127.0.0.1:9', cookie: 'c', primitives: host.primitives });
+	const backend = new DshIdeTransportBackend(transport);
+	backend.open({ view: 'chat' });
+	assert.deepEqual(await backend.invoke('listCommands', {}), []);
+	assert.equal(host.requests.length, 0, 'an unbound listCommands must not query the Host');
+	transport.dispose();
+});
+
+test('backend listCommands projects a malformed Host reply to an empty list', async () => {
+	const { backend, transport } = backendWithHost((_url, body) => (
+		{ json: { type: 'server-response', rpcId: (body as { rpcId: string }).rpcId, result: { ok: true, value: 'not-an-array' } } }
+	));
+	assert.deepEqual(await backend.invoke('listCommands', {}), []);
+	transport.dispose();
 });

@@ -16,6 +16,7 @@
 
 import { randomUUID } from 'node:crypto';
 import { projectDshIdeSessionList } from '../common/dshIdeSessionList.js';
+import { projectDshIdeCommandList } from '../common/dshIdeCommandList.js';
 import { safeErrorText } from '../common/dshIdeAuthRedaction.js';
 
 /** 与 common/dshIdeProtocol.ts 同值的错误码（Host 半身为纯 JS，不跨层 import TS）。 */
@@ -413,7 +414,23 @@ function createMethodHandlers(bridge) {
 			}
 			return models;
 		},
-		listCommands: missing('listCommands'),
+		async listCommands() {
+			// D13（第 32 轮）：官方 `commands.list(agent)` 是 agent-scoped remote
+			// （§8.10.9 第 31 轮核实的 wire 形状）。Host 半身进程内经官方 `agents`
+			// 服务把绑定 sessionId 解析为 Agent，再调 `commands.list`，只投影中立字段。
+			const sessionId = requireSession();
+			const agents = service(bridge.ctx, 'agents');
+			const agent = typeof agents.get === 'function' ? agents.get(sessionId) : undefined;
+			if (agent === undefined || agent === null) {
+				// 绑定会话没有 live Agent 时无法列出该 agent 的命令：明确拒绝，不伪造全局列表。
+				throw coded(FEATURE_UNAVAILABLE, `no live agent for bound session ${sessionId}`, { capability: 'listCommands' });
+			}
+			const commands = service(bridge.ctx, 'commands');
+			if (typeof commands.list !== 'function') {
+				throw coded(FEATURE_UNAVAILABLE, 'DSH commands service has no list()', { capability: 'listCommands' });
+			}
+			return projectDshIdeCommandList(commands.list(agent));
+		},
 		async fetchRowDetail() {
 			// 折叠行全文由 IDE 侧投影器缓存（第 2 章 E9）；Host 侧不持有第二份全文。
 			return null;

@@ -774,3 +774,56 @@ test('setEffort refuses when the session has no current model selection', async 
 	bridge.open({ view: 'chat', params: { sessionId: 's-1' } });
 	await assert.rejects(() => bridge.invoke('setEffort', { effort: 'high' }), error => error.code === FEATURE_UNAVAILABLE);
 });
+
+// ---------------------------------------------------------------------------
+// D13（第 32 轮）：listCommands 接线——Host 侧经 agents.get(sessionId) 解析 Agent，
+// 再调 commands.list(agent)，只投影中立 name/description（§8.10.9 第 31 轮 wire 结论）。
+// ---------------------------------------------------------------------------
+
+function commandServices(overrides = {}) {
+	return {
+		agents: { get: id => (id === 's-1' ? { id: 's-1' } : undefined) },
+		commands: {
+			list: agent => [
+				{ definitionId: 'official-id', name: 'plan', description: 'Plan a task', input: { hint: 'topic' } },
+				{ name: 'clear', description: '' },
+				{ name: 'status', description: 'Show status' },
+			].filter(() => agent !== undefined),
+		},
+		...overrides,
+	};
+}
+
+test('listCommands resolves the bound agent and projects only neutral command fields', async () => {
+	let seenAgent;
+	const services = commandServices({
+		commands: { list: agent => { seenAgent = agent; return [
+			{ definitionId: 'internal', name: 'plan', description: 'Plan a task', input: { hint: 'topic' } },
+			{ name: 'clear', description: '' },
+			{ name: 'status', description: 'Show status' },
+		]; } },
+	});
+	const { bridge } = bridgeWith(services);
+	bridge.open({ view: 'chat', params: { sessionId: 's-1' } });
+	const result = await bridge.invoke('listCommands', {});
+	assert.deepEqual(seenAgent, { id: 's-1' });
+	assert.deepEqual(result, [
+		{ name: 'plan', description: 'Plan a task' },
+		{ name: 'clear', description: '' },
+		{ name: 'status', description: 'Show status' },
+	]);
+	// 官方内部结构（definitionId / input）不得透传到 IDE 侧。
+	assert.ok(!JSON.stringify(result).includes('internal') && !JSON.stringify(result).includes('hint'));
+});
+
+test('listCommands refuses when the DSH commands service is unavailable', async () => {
+	const { bridge } = bridgeWith({ agents: { get: () => ({ id: 's-1' }) } });
+	bridge.open({ view: 'chat', params: { sessionId: 's-1' } });
+	await assert.rejects(() => bridge.invoke('listCommands', {}), error => error.code === FEATURE_UNAVAILABLE && /commands/.test(error.message));
+});
+
+test('listCommands refuses when the bound session has no live agent', async () => {
+	const { bridge } = bridgeWith(commandServices({ agents: { get: () => undefined } }));
+	bridge.open({ view: 'chat', params: { sessionId: 's-1' } });
+	await assert.rejects(() => bridge.invoke('listCommands', {}), error => error.code === FEATURE_UNAVAILABLE && /no live agent/.test(error.message));
+});
