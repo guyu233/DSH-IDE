@@ -121,8 +121,9 @@ test('DSH bundle: sidecar target path matches the seam constant', () => {
 	assert.match(gulp, /path\.join\('vs', 'workbench', 'contrib', 'dsh', 'browser', 'chatRender'\)/);
 });
 
-test('DSH bundle: only common/env.js is staged (transport modules stay in the app)', () => {
+test('DSH bundle: only the Host common dependencies are staged (transport modules stay in the app)', () => {
 	const gulp = fs.readFileSync(path.join(vscodeRoot, 'build/gulpfile.vscode.ts'), 'utf8');
 	assert.match(gulp, /path\.join\(dshClientOut, 'common', 'env\.js'\)/, 'common/env.js must be staged as a single file');
+	assert.match(gulp, /path\.join\(dshClientOut, 'common', 'dshIdeSessionList\.js'\)/, 'shared session projection must be shipped with the Host bridge');
 	assert.doesNotMatch(gulp, /path\.join\(dshClientOut, 'common'\), 'common'/, 'common/ must not be staged as a whole directory');
 });

@@ -59,7 +59,7 @@ function protocolSingleSource() {
 	const symbols = [
 		'DSH_IDE_CHANNEL', 'DSH_IDE_API_VERSION', 'DSH_IDE_WIRE_REVISION',
 		'DSH_IDE_FEATURE_UNAVAILABLE', 'DSH_IDE_INVALID_ARGUMENT',
-		'DshRemoteError', 'DshIdeViewState', 'DshIdeSnapshot',
+		'DshRemoteError', 'IDshIdeSessionSummary', 'DshIdeViewState', 'DshIdeSnapshot',
 		'DshIdeMethodArgs', 'DshIdeMethod', 'IdeViewHost',
 		'exactRecord', 'jsonValue', 'validateDshIdeInput',
 		'validateDshIdeInvokeOutput', 'validateDshIdeSnapshot',

@@ -15,6 +15,7 @@
 //   approval/request 结果值：'allowed-once' | 'rejected' | 'cancelled' | 'unavailable'
 
 import { randomUUID } from 'node:crypto';
+import { projectDshIdeSessionList } from '../common/dshIdeSessionList.js';
 
 /** 与 common/dshIdeProtocol.ts 同值的错误码（Host 半身为纯 JS，不跨层 import TS）。 */
 export const FEATURE_UNAVAILABLE = 'dsh-ide/feature-unavailable';
@@ -24,10 +25,9 @@ export const SESSION_SWITCHED = 'SESSION_SWITCHED';
 
 /**
  * 本桥接依赖的官方服务（缺任一即按 feature-unavailable 拒绝）。
- * 必须与插件入口 `index.js` 的 `export const inject` 完全一致，
- * 否则会出现「inject 等到了但桥接仍自检失败」或反之的漂移。
+ * 入口的顶层 inject 与延迟 ctx.inject 共同满足本表；延迟注入直接复用本表，避免清单漂移。
  */
-export const REQUIRED_SERVICES = Object.freeze(['sessions', 'sessionController']);
+export const REQUIRED_SERVICES = Object.freeze(['sessions', 'sessionController', 'workspaceRegistry']);
 
 function coded(code, message, details) {
 	const error = new Error(message);
@@ -115,6 +115,7 @@ export class DshIdeHostBridge {
 		this.disposers = [];
 		this.seq = 0;
 		this.methods = createMethodHandlers(this);
+		this._sessionReads = new Set();
 	}
 
 	open(spec) {
@@ -211,6 +212,10 @@ export class DshIdeHostBridge {
 	}
 
 	close() {
+		for (const cancel of this._sessionReads) {
+			cancel();
+		}
+		this._sessionReads.clear();
 		this.disposeSubscriptions();
 		this.pending.entries.clear();
 		this.channelId = undefined;
@@ -342,12 +347,35 @@ function createMethodHandlers(bridge) {
 		setPermissionPreset: missing('setPermissionPreset'),
 		runCommand: missing('runCommand'),
 		async listSessions() {
-			const value = await controller().list({});
-			const items = Array.isArray(value && value.items) ? value.items : [];
-			return items.map(item => ({
-				sessionId: String(item.sessionId ?? ''),
-				...(typeof item.title === 'string' ? { title: item.title } : {}),
-			}));
+			const sessionId = bridge.sessionId;
+			const channelId = bridge.channelId;
+			if (sessionId === undefined || sessionId === '') {
+				return [];
+			}
+			const abort = new AbortController();
+			let cancel;
+			const cancelled = new Promise((_, reject) => {
+				cancel = () => {
+					const error = coded(SESSION_SWITCHED, 'DSH-IDE view closed while listing sessions');
+					abort.abort(error);
+					reject(error);
+				};
+			});
+			bridge._sessionReads.add(cancel);
+			try {
+				// 复用官方可见名单，不绕过 controller 直读持久层；Host 本机调用沿用官方 owner 语义。
+				// 同时结算取消 Promise，即使上游未及时响应 signal，关闭视图也不会留下待定调用。
+				const value = await Promise.race([Promise.resolve().then(() => {
+					abort.signal.throwIfAborted();
+					return controller().list({}, abort.signal);
+				}), cancelled]);
+				if (bridge.sessionId !== sessionId || bridge.channelId !== channelId) {
+					throw coded(SESSION_SWITCHED, 'DSH-IDE session changed while listing sessions');
+				}
+				return projectDshIdeSessionList(sessionId, service(bridge.ctx, 'workspaceRegistry').list(), value.items);
+			} finally {
+				bridge._sessionReads.delete(cancel);
+			}
 		},
 		async listModels() {
 			const catalog = await controller().modelCatalog();

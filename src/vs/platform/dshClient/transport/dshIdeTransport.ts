@@ -27,7 +27,8 @@
 // 要传 `{ request: {...} }`。`signal` 由 Host 侧注入，客户端不传。真机实测：
 // 传自由字段会得到 `gateway/arguments-invalid: missing "_request"`。
 
-import type { DshIdeBackend, DshIdeMethod, DshIdeOpenSpec } from '../common/dshIdeProtocol.js';
+import type { DshIdeBackend, DshIdeMethod, DshIdeOpenSpec, IDshIdeSessionSummary } from '../common/dshIdeProtocol.js';
+import { projectDshIdeSessionList } from '../common/dshIdeSessionList.js';
 
 /** 通道 id：由 Host 侧绑定生成，这里只做透传。 */
 type ChannelBinding = { readonly channelId: string; readonly sessionId?: string };
@@ -90,11 +91,12 @@ export async function authenticateHost(origin: string, launchUrl: string, primit
 }
 
 /**
- * 事件流帧：`session/follow` 的 item，或 Gateway 转发的 waterfall / 取消帧。
+ * 事件流帧：`session/follow`、`workspace/follow` 的 item，或 Gateway 转发的 waterfall / 取消帧。
  * 全部 shape 按线上原样保留（翻译在 common/translator.ts）。
  */
 export type DshIdeStreamFrame =
 	| { readonly type: 'snapshot' | 'event' | 'assistant-stream'; readonly [key: string]: unknown }
+	| { readonly type: 'baseline'; readonly value: { readonly items: readonly { readonly workspaceId: string; readonly sessionIds: readonly string[] }[] } }
 	| { readonly type: 'waterfall'; readonly eventId: string; readonly event: string; readonly agentId: string; readonly request: Readonly<Record<string, unknown>> }
 	| { readonly type: 'cancel'; readonly eventId: string }
 	| { readonly type: 'ready'; readonly clientId: string; readonly host?: Readonly<Record<string, unknown>> };
@@ -114,7 +116,9 @@ export class DshIdeTransport {
 	/** socket 已 open 前暂存的出站帧：`send()` 在 CONNECTING 状态会抛 InvalidStateError。 */
 	private outbox: string[] = [];
 	/** 每个 streamId 的下行回调。 */
-	private readonly streams = new Map<string, { onFrame: (frame: DshIdeStreamFrame) => void; onError: (error: DshIdeTransportError) => void }>();
+	private readonly streams = new Map<string, { onFrame: (frame: DshIdeStreamFrame) => void; onError: (error: DshIdeTransportError) => void; onEnd?: () => void }>();
+	/** 显式可取消的读取；断线或释放时连同未完成的响应读取一起结算。 */
+	private readonly _pendingCalls = new Set<AbortController>();
 	/** `$events` 流的 clientId（waterfall 决议要用它回投）。 */
 	private eventClientId: string | undefined;
 
@@ -131,7 +135,29 @@ export class DshIdeTransport {
 	 * 一元调用：官方 `client-request` 信封 + cookie，返回 `result.value`。
 	 * @param args - **形参名 → 值**的映射（不是自由字段）；见文件头说明。
 	 */
-	async call(namespace: string, method: string, args: Record<string, unknown>): Promise<unknown> {
+	async call(namespace: string, method: string, args: Record<string, unknown>, signal?: AbortSignal): Promise<unknown> {
+		if (signal === undefined) {
+			return this._callRemote(namespace, method, args);
+		}
+		signal.throwIfAborted();
+		const controller = new AbortController();
+		const cancel = () => controller.abort(signal.reason);
+		let rejectCancellation: (reason: unknown) => void = () => undefined;
+		const cancellation = new Promise<never>((_resolve, reject) => { rejectCancellation = reject; });
+		const onAbort = () => rejectCancellation(controller.signal.reason);
+		controller.signal.addEventListener('abort', onAbort, { once: true });
+		signal.addEventListener('abort', cancel, { once: true });
+		this._pendingCalls.add(controller);
+		try {
+			return await Promise.race([this._callRemote(namespace, method, args, controller.signal), cancellation]);
+		} finally {
+			this._pendingCalls.delete(controller);
+			signal.removeEventListener('abort', cancel);
+			controller.signal.removeEventListener('abort', onAbort);
+		}
+	}
+
+	private async _callRemote(namespace: string, method: string, args: Record<string, unknown>, signal?: AbortSignal): Promise<unknown> {
 		const endpoint = `${namespace}/${method}`;
 		const rpcId = crypto.randomUUID();
 		const body = JSON.stringify({ type: 'client-request', rpcId, method: endpoint, payload: { args } });
@@ -139,6 +165,7 @@ export class DshIdeTransport {
 			method: 'POST',
 			headers: { 'content-type': 'application/json', cookie: this.cookie },
 			body,
+			signal,
 		});
 		if (!response.ok) {
 			throw new DshIdeTransportError('dsh-ide/transport-failure', `transport failure for ${endpoint}: HTTP ${response.status}`);
@@ -154,12 +181,17 @@ export class DshIdeTransport {
 	}
 
 	/** 打开一条逻辑流（`session/follow` 等），帧经 `onFrame` 原样回调。 */
-	openStream(endpoint: string, args: Record<string, unknown>, onFrame: (frame: DshIdeStreamFrame) => void, onError?: (error: DshIdeTransportError) => void): { streamId: string; close(): void } {
+	openStream(endpoint: string, args: Record<string, unknown>, onFrame: (frame: DshIdeStreamFrame) => void, onError?: (error: DshIdeTransportError) => void, onEnd?: () => void): { streamId: string; close(): void } {
 		const streamId = crypto.randomUUID();
 		// 建立 socket（若尚未建立）；具体发送由 sendWhenOpen 排队，不直接用返回值。
 		this.ensureSocket();
-		this.streams.set(streamId, { onFrame, onError: onError ?? (() => undefined) });
-		this.sendWhenOpen(JSON.stringify({ type: 'open', streamId, endpoint, payload: { args } }));
+		this.streams.set(streamId, { onFrame, onError: onError ?? (() => undefined), onEnd });
+		try {
+			this.sendWhenOpen(JSON.stringify({ type: 'open', streamId, endpoint, payload: { args } }));
+		} catch (error) {
+			this.streams.delete(streamId);
+			throw error;
+		}
 		return {
 			streamId,
 			close: () => {
@@ -185,29 +217,58 @@ export class DshIdeTransport {
 
 	/** 关闭全部逻辑流与物理 socket。 */
 	dispose(): void {
-		this.streams.clear();
-		this.socket?.close(1000, 'dsh-ide transport disposed');
+		const socket = this.socket;
 		this.socket = undefined;
+		this._failPending(new DshIdeTransportError('dsh-ide/stream-closed', 'DSH-IDE transport disposed'));
+		socket?.close(1000, 'dsh-ide transport disposed');
+	}
+
+	private _failPending(error: DshIdeTransportError): void {
+		const streams = [...this.streams.values()];
+		this.streams.clear();
 		this.outbox = [];
 		this.eventClientId = undefined;
+		for (const controller of this._pendingCalls) {
+			controller.abort(error);
+		}
+		for (const sink of streams) {
+			sink.onError(error);
+		}
 	}
 
 	private ensureSocket(): DshIdeWebSocket {
 		if (this.socket !== undefined && this.socket.readyState <= 1) {
 			return this.socket;
 		}
+		if (this.socket !== undefined) {
+			// 关闭事件可能尚未送达；替换前先结算旧代，避免旧流被新 socket 遗留。
+			this.socket = undefined;
+			this._failPending(new DshIdeTransportError('dsh-ide/stream-closed', 'Remote stream socket is no longer open'));
+		}
 		const url = `${this.origin.replace(/^http/, 'ws')}/api/remote.mux`;
 		const socket = new this.primitives.WebSocket(url, { headers: { cookie: this.cookie } });
-		socket.addEventListener('open', () => this.flushOutbox());
-		socket.addEventListener('message', payload => this.receive(payload.data));
-		socket.addEventListener('close', () => {
-			for (const [, sink] of this.streams) {
-				sink.onError(new DshIdeTransportError('dsh-ide/stream-closed', 'Remote stream socket closed'));
+		const disconnect = (error: DshIdeTransportError) => {
+			if (this.socket !== socket) {
+				return;
 			}
-			this.streams.clear();
-			this.outbox = [];
 			this.socket = undefined;
+			this._failPending(error);
+		};
+		socket.addEventListener('open', () => {
+			if (this.socket === socket) {
+				this.flushOutbox();
+			}
 		});
+		socket.addEventListener('message', payload => {
+			if (this.socket === socket) {
+				this.receive(payload.data);
+			}
+		});
+		socket.addEventListener('error', () => {
+			disconnect(new DshIdeTransportError('dsh-ide/stream-error', 'Remote stream socket failed'));
+			socket.close();
+		});
+		socket.addEventListener('close', () => disconnect(new DshIdeTransportError('dsh-ide/stream-closed', 'Remote stream socket closed')));
 		this.socket = socket;
 		return socket;
 	}
@@ -264,6 +325,7 @@ export class DshIdeTransport {
 		}
 		if (message['type'] === 'end') {
 			this.streams.delete(streamId);
+			sink.onEnd?.();
 			return;
 		}
 		if (message['type'] === 'error') {
@@ -271,7 +333,7 @@ export class DshIdeTransport {
 			const error = message['error'];
 			const code = isRecord(error) && typeof error['code'] === 'string' ? error['code'] : 'dsh-ide/stream-error';
 			const text = isRecord(error) && typeof error['message'] === 'string' ? error['message'] : 'Remote stream failed';
-			sink.onError(new DshIdeTransportError(code, text));
+			sink.onError(new DshIdeTransportError(code, text, isRecord(error) ? error['details'] : undefined));
 		}
 	}
 }
@@ -305,6 +367,7 @@ export class DshIdeTransportBackend implements DshIdeBackend {
 	private channelId: string | undefined;
 	private sessionId: string | undefined;
 	private stream: { streamId: string; close(): void } | undefined;
+	private readonly _sessionListReads = new Set<AbortController>();
 
 	constructor(transport: DshIdeTransport) {
 		this.transport = transport;
@@ -394,16 +457,8 @@ export class DshIdeTransportBackend implements DshIdeBackend {
 				const [provider, model] = splitModel(String(record['model'] ?? ''));
 				return this.transport.call('session', 'selectModel', { request: { sessionId, provider, model } });
 			}
-			case 'listSessions': {
-				// `list(_request, signal)`：形参名是 `_request`（真机实测，不是 `request`）。
-				// 契约要求列表类返回数组，Host 给的是 `{ items: [...] }`，这里只投影中立字段。
-				const value = await this.transport.call('session', 'list', { _request: {} });
-				const items = isRecord(value) && Array.isArray(value['items']) ? value['items'] : [];
-				return items.filter(isRecord).map(item => ({
-					sessionId: String(item['sessionId'] ?? ''),
-					...(typeof item['title'] === 'string' ? { title: item['title'] } : {}),
-				}));
-			}
+			case 'listSessions':
+				return this._listSessions();
 			case 'listModels': {
 				// `modelCatalog()` 无参数；Host 给 `{ groups: [{ id, models: [...] }] }`。
 				const catalog = await this.transport.call('session', 'modelCatalog', {});
@@ -454,6 +509,49 @@ export class DshIdeTransportBackend implements DshIdeBackend {
 		}
 	}
 
+	/** P4：每次读取官方可见会话与工作区首帧，归属和字段映射复用共享投影。 */
+	private async _listSessions(): Promise<readonly IDshIdeSessionSummary[]> {
+		const sessionId = this.sessionId;
+		const channelId = this.channelId;
+		if (channelId === undefined || sessionId === undefined || sessionId === '') {
+			return [];
+		}
+		const read = new AbortController();
+		this._sessionListReads.add(read);
+		let stream: ReturnType<DshIdeTransport['openStream']> | undefined;
+		let cancelBaseline: () => void = () => undefined;
+		try {
+			const baseline = new Promise<Extract<DshIdeStreamFrame, { type: 'baseline' }>['value']['items']>((resolve, reject) => {
+				cancelBaseline = () => reject(read.signal.reason);
+				read.signal.addEventListener('abort', cancelBaseline, { once: true });
+				stream = this.transport.openStream('workspace/follow', {}, frame => {
+					if (frame.type !== 'baseline') {
+						reject(new DshIdeTransportError('dsh-ide/transport-corrupt', 'Workspace stream did not begin with a baseline'));
+						return;
+					}
+					resolve(frame.value.items);
+				}, reject, () => reject(new DshIdeTransportError('dsh-ide/stream-ended', 'Workspace stream ended before its baseline')));
+			}).finally(() => stream?.close());
+			// 两个官方端点各自保留 Gateway ACL；临时流不占用 Chat 的 this.stream。
+			const [value, workspaces] = await Promise.all([
+				this.transport.call('session', 'list', { _request: {} }, read.signal),
+				baseline,
+			]);
+			read.signal.throwIfAborted();
+			if (this.channelId !== channelId || this.sessionId !== sessionId) {
+				throw new DshIdeTransportError('SESSION_SWITCHED', 'Session list binding changed during the read');
+			}
+			// 版本绑定承担官方载荷兼容性，不在这里另建运行时 schema。
+			const { items } = value as { readonly items: Parameters<typeof projectDshIdeSessionList>[2] };
+			return projectDshIdeSessionList(sessionId, workspaces.map(workspace => ({ id: workspace.workspaceId, sessionIds: workspace.sessionIds })), items);
+		} finally {
+			this._sessionListReads.delete(read);
+			read.signal.removeEventListener('abort', cancelBaseline);
+			read.abort();
+			stream?.close();
+		}
+	}
+
 	/**
 	 * 调用社区插件暴露的删除端点，并把「插件缺失 / 方法不可用」映射为契约错误码。
 	 *
@@ -486,11 +584,15 @@ export class DshIdeTransportBackend implements DshIdeBackend {
 	}
 
 	close(): void {
+		this.channelId = undefined;
+		this.sessionId = undefined;
+		for (const read of this._sessionListReads) {
+			read.abort(new DshIdeTransportError('SESSION_SWITCHED', 'Session list binding closed during the read'));
+		}
+		this._sessionListReads.clear();
 		this.stream?.close();
 		this.stream = undefined;
 		this.transport.dispose();
-		this.channelId = undefined;
-		this.sessionId = undefined;
 	}
 }
 

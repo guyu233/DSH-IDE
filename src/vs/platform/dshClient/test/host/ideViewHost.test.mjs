@@ -55,7 +55,10 @@ function sessionControllerStub(overrides = {}) {
 	const record = name => async request => { calls.push({ name, request }); return {}; };
 	return {
 		calls,
-		list: async () => ({ items: [{ sessionId: 's-1', title: 'one' }, { sessionId: 's-2' }] }),
+		list: async () => ({ items: [
+			{ sessionId: 's-1', updatedAt: 2, running: true, blank: false, agentAvailable: true, projections: { values: { title: 'one' } } },
+			{ sessionId: 's-2', updatedAt: 1, running: false, blank: false, agentAvailable: false },
+		] }),
 		modelCatalog: async () => ({ groups: [{ id: 'deepseek', models: [{ id: 'chat', name: 'DeepSeek Chat' }] }] }),
 		create: async request => { calls.push({ name: 'create', request }); return { sessionId: 's-new' }; },
 		prompt: record('prompt'),
@@ -74,14 +77,15 @@ function bridgeWith(services = {}) {
 	const ctx = fakeCtx({
 		sessions: { get: id => live.get(id) },
 		sessionController: sessionControllerStub(),
+		workspaceRegistry: { list: () => [{ id: 'w-1', sessionIds: ['s-1', 's-2'] }] },
 		...services,
 	});
 	const bridge = new DshIdeHostBridge(ctx, {});
 	return { ctx, bridge, live };
 }
 
-test('required services are the verified pair', () => {
-	assert.deepEqual([...REQUIRED_SERVICES], ['sessions', 'sessionController']);
+test('required services include the workspace ownership source', () => {
+	assert.deepEqual([...REQUIRED_SERVICES], ['sessions', 'sessionController', 'workspaceRegistry']);
 });
 
 test('createDshIdeHostBridge rejects when a required service is missing', () => {
@@ -202,9 +206,108 @@ test('submit and interrupt use the verified sessionController shapes', async () 
 
 test('list methods project only neutral fields', async () => {
 	const { bridge } = bridgeWith();
-	assert.deepEqual(await bridge.invoke('listSessions', {}), [{ sessionId: 's-1', title: 'one' }, { sessionId: 's-2' }]);
+	bridge.open({ view: 'chat', params: { sessionId: 's-1' } });
+	assert.deepEqual(await bridge.invoke('listSessions', {}), [
+		{ sessionId: 's-1', workspaceId: 'w-1', title: 'one', updatedAt: 2, running: true, blank: false, agentAvailable: true },
+		{ sessionId: 's-2', workspaceId: 'w-1', updatedAt: 1, running: false, blank: false, agentAvailable: false },
+	]);
 	assert.deepEqual(await bridge.invoke('listModels', {}), [{ provider: 'deepseek', model: 'chat', name: 'DeepSeek Chat' }]);
 	assert.equal(await bridge.invoke('fetchRowDetail', { rowId: 'row:1' }), null);
+});
+
+test('session listing returns no data and makes no reads without a binding', async () => {
+	const unexpected = () => { assert.fail('an unbound list must not query the Host'); };
+	const { bridge } = bridgeWith({ sessionController: { list: unexpected }, workspaceRegistry: { list: unexpected } });
+	assert.deepEqual(await bridge.invoke('listSessions', {}), []);
+});
+
+test('session listing intersects workspace membership with visible summaries and keeps order', async () => {
+	const summary = sessionId => ({ sessionId, updatedAt: 3, running: false, blank: false, agentAvailable: false });
+	const { bridge } = bridgeWith({
+		sessionController: { list: async () => ({ items: [summary('outside'), summary('s-2'), summary('s-1'), summary('unregistered')] }) },
+		workspaceRegistry: { list: () => [
+			{ id: 'w-1', sessionIds: ['s-1', 'hidden-by-acl', 's-2'] },
+			{ id: 'w-2', sessionIds: ['outside'] },
+		] },
+	});
+	bridge.open({ view: 'chat', params: { sessionId: 's-1' } });
+	const rows = await bridge.invoke('listSessions', {});
+	assert.deepEqual(rows.map(row => row.sessionId), ['s-2', 's-1']);
+	assert.ok(rows.every(row => row.workspaceId === 'w-1'));
+});
+
+test('session listing fails closed for absent, ambiguous or invisible ownership', async () => {
+	for (const workspaces of [[], [{ id: 'other', sessionIds: ['s-2'] }], [{ id: 'a', sessionIds: ['s-1'] }, { id: 'b', sessionIds: ['s-1'] }]]) {
+		const { bridge } = bridgeWith({ workspaceRegistry: { list: () => workspaces } });
+		bridge.open({ view: 'chat', params: { sessionId: 's-1' } });
+		assert.deepEqual(await bridge.invoke('listSessions', {}), []);
+	}
+	const { bridge } = bridgeWith({ sessionController: { list: async () => ({ items: [{ sessionId: 's-2' }] }) } });
+	bridge.open({ view: 'chat', params: { sessionId: 's-1' } });
+	assert.deepEqual(await bridge.invoke('listSessions', {}), []);
+});
+
+test('session listing retains cold-session metadata without leaking projections or inventing titles', async () => {
+	const item = {
+		sessionId: 's-1', updatedAt: 15, running: false, blank: true, agentAvailable: false,
+		formatStatus: 'migration-required', cwd: 'E:/work', parentSessionId: 'parent', origin: 'subagent',
+		title: 'wrong top-level title', projections: { values: { title: null, privateState: 'must not cross the channel' } },
+	};
+	const { bridge } = bridgeWith({ sessionController: { list: async () => ({ items: [item] }) } });
+	bridge.open({ view: 'chat', params: { sessionId: 's-1' } });
+	assert.deepEqual(await bridge.invoke('listSessions', {}), [{
+		sessionId: 's-1', workspaceId: 'w-1', updatedAt: 15, running: false, blank: true, agentAvailable: false,
+		formatStatus: 'migration-required', cwd: 'E:/work', parentSessionId: 'parent', origin: 'subagent',
+	}]);
+});
+
+test('session listing propagates source failures instead of reporting an empty workspace', async () => {
+	const failure = new Error('list unavailable');
+	for (const services of [
+		{ sessionController: { list: async () => { throw failure; } } },
+		{ workspaceRegistry: { list: () => { throw failure; } } },
+	]) {
+		const { bridge } = bridgeWith(services);
+		bridge.open({ view: 'chat', params: { sessionId: 's-1' } });
+		await assert.rejects(() => bridge.invoke('listSessions', {}), error => error === failure);
+	}
+});
+
+test('session listing rejects results from a closed or replaced binding', async () => {
+	for (const reopen of [false, true]) {
+		let finish;
+		const { bridge } = bridgeWith({ sessionController: { list: () => new Promise(resolve => { finish = resolve; }) } });
+		bridge.open({ view: 'chat', params: { sessionId: 's-1' } });
+		const listing = bridge.invoke('listSessions', {});
+		await tick();
+		bridge.close();
+		if (reopen) {
+			bridge.open({ view: 'chat', params: { sessionId: 's-1' } });
+		}
+		finish({ items: [] });
+		await assert.rejects(listing, error => error.code === SESSION_SWITCHED);
+	}
+});
+
+test('closing the Host view cancels a session read even when its source ignores cancellation', async () => {
+	let receivedSignal;
+	const { bridge } = bridgeWith({ sessionController: { list: (_request, signal) => {
+		receivedSignal = signal;
+		return new Promise(() => undefined);
+	} } });
+	bridge.open({ view: 'chat', params: { sessionId: 's-1' } });
+	const listing = bridge.invoke('listSessions', {});
+	await tick();
+	bridge.close();
+	await assert.rejects(listing, error => error.code === SESSION_SWITCHED);
+	assert.equal(receivedSignal.aborted, true);
+});
+
+test('bridge startup waits for workspaceRegistry', () => {
+	assert.throws(
+		() => createDshIdeHostBridge(fakeCtx({ sessions: {}, sessionController: sessionControllerStub() })),
+		error => error.code === FEATURE_UNAVAILABLE && error.details.missing.includes('workspaceRegistry'),
+	);
 });
 
 test('unverified capabilities and unbound sessions are refused, not faked', async () => {
@@ -487,10 +590,8 @@ test('plugin entry inject matches REQUIRED_SERVICES', async () => {
 	// inject 只放内核级、启动即有的服务；sessionController 由 ctx.inject 延迟等待，
 	// 放进顶层 inject 会让整插件一直等它（真机实测）。
 	assert.deepEqual(declared, ['sessions'], 'top-level inject must only wait for the kernel service');
-	assert.ok(source.includes("ctx.inject(['sessionController']"), 'sessionController must be awaited via ctx.inject before building the bridge');
-	for (const service of REQUIRED_SERVICES) {
-		assert.ok(source.includes(`'${service}'`), `plugin entry must reference required service ${service}`);
-	}
+	assert.ok(source.includes('ctx.inject(REQUIRED_SERVICES,'), 'bridge injection must use the same service list as bridge construction');
+	assert.match(source, /import \{ REQUIRED_SERVICES,.*\} from '\.\/host\/ide-view-host\.js'/);
 });
 
 

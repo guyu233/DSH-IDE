@@ -683,9 +683,10 @@ BUILD_TARGETS.forEach(buildTarget => {
 					[path.join(dshClientOut, 'client', 'client.js'), 'client.js'],
 					// host/ 现仅 ide-service.js（P5 终端流 runner 已移除，终端回归原生 node-pty），整目录 stage 即可。
 					[path.join(dshClientOut, 'host'), 'host'],
-					// common/ 里还有 IDE 主进程用的 dshClient{Channel,Protocol,Service}.js，Host 插件只 import env.js，
+					// common/ 只 stage Host 直接依赖的环境常量与中立会话投影；IDE 主进程模块留在 app 内。
 					// 因此按文件 stage，避免把传输层误打进 bundle。
 					[path.join(dshClientOut, 'common', 'env.js'), path.join('common', 'env.js')],
+					[path.join(dshClientOut, 'common', 'dshIdeSessionList.js'), path.join('common', 'dshIdeSessionList.js')],
 				];
 				for (const [from, to] of copyList) {
 					await fs.promises.cp(from, path.join(stagingRoot, to), { recursive: true });

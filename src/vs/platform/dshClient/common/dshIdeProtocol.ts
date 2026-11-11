@@ -59,6 +59,25 @@ export interface DshRemoteError {
 	readonly details?: unknown;
 }
 
+/**
+ * 当前绑定工作区的会话列表项（P4，DSH_IDE_API_VERSION 绑定官方 SessionSummary）。
+ * 只取 sessionController.list 与 workspaceRegistry 交集；标题取 projections.values.title。
+ * 不增加独立运行时校验器，兼容性由版本绑定与两套 backend 的契约单测守护。
+ */
+export interface IDshIdeSessionSummary {
+	readonly sessionId: string;
+	readonly workspaceId: string;
+	readonly title?: string;
+	readonly updatedAt: number;
+	readonly running: boolean;
+	readonly blank: boolean;
+	readonly agentAvailable: boolean;
+	readonly formatStatus?: 'current' | 'migration-required';
+	readonly cwd?: string;
+	readonly parentSessionId?: string;
+	readonly origin?: 'subagent';
+}
+
 /** 单行类别（中立 DTO；投影器决定行类别，通道快照跨进程只带字符串）。 */
 export type DshIdeRowKind = 'user' | 'assistant' | 'tool' | 'system' | 'notice';
 
@@ -129,7 +148,7 @@ export interface DshIdeMethodArgs {
 	setPermissionPreset: { preset: string };
 	/** 运行斜杠命令。 */
 	runCommand: { command: string; args?: readonly string[] };
-	/** 列出会话。 */
+	/** 列出绑定工作区的可见会话，返回 readonly IDshIdeSessionSummary[]；未绑定或归属不明返回空数组。 */
 	listSessions: Record<string, never>;
 	/** 删除会话（直接删除，不入回收站）。 */
 	deleteSession: { sessionId: string };

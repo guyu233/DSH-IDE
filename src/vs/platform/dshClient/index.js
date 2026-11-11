@@ -13,7 +13,7 @@
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { IdeRemoteService } from './host/ide-service.js';
-import { createDshIdeHostBridge, publishHostEndpointWhenListening } from './host/ide-view-host.js';
+import { REQUIRED_SERVICES, createDshIdeHostBridge, publishHostEndpointWhenListening } from './host/ide-view-host.js';
 
 export const name = 'dsh-ide';
 // 只硬依赖 `sessions`（内核级、必然存在）。`sessionController` 是 API 层服务，
@@ -49,9 +49,8 @@ export function apply(ctx, config = {}) {
 	});
 
 	// Host 半身：订阅四类官方事件 + 唯一 answerer。
-	// 用 ctx.inject 等 `sessionController` 就绪（它有 init 生命周期，比 apply 晚），
-	// 就绪后建立桥接；不等它会导致桥接在启动早期自检失败并被静默跳过（真机实测踩过）。
-	ctx.inject(['sessionController'], bridgeCtx => {
+	// 等会话 API 与工作区记账均就绪再建桥接；复用桥接自检清单，避免启动次序与声明漂移。
+	ctx.inject(REQUIRED_SERVICES, bridgeCtx => {
 		try {
 			const bridge = createDshIdeHostBridge(bridgeCtx, config && config.transport ? { transport: config.transport } : {});
 			bridge.follow(undefined, () => undefined);

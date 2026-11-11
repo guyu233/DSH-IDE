@@ -16,8 +16,10 @@
 
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import { setImmediate } from 'node:timers/promises';
 import {
 	DSH_IDE_FEATURE_UNAVAILABLE,
+	DSH_IDE_SESSION_SWITCHED,
 	type DshIdeMethod,
 } from '../../../src/vs/platform/dshClient/common/dshIdeProtocol.ts';
 import {
@@ -34,15 +36,21 @@ interface RecordedRequest {
 	readonly body: unknown;
 }
 
+interface FakeHostResponse {
+	readonly status?: number;
+	readonly json?: unknown;
+	readonly headers?: Record<string, string>;
+}
+
 /** 假 Host：按路由返回预设响应，并记录每个请求。 */
-function fakeHost(routes: (url: string, body: unknown) => { status?: number; json?: unknown; headers?: Record<string, string> }) {
+function fakeHost(routes: (url: string, body: unknown) => FakeHostResponse | Promise<FakeHostResponse>) {
 	const requests: RecordedRequest[] = [];
 	const primitives = {
 		fetch: async (input: string | URL, init: RequestInit) => {
 			const url = String(input);
 			const body = typeof init.body === 'string' ? JSON.parse(init.body) : undefined;
 			requests.push({ url, init, body });
-			const answer = routes(url, body);
+			const answer = await routes(url, body);
 			const status = answer.status ?? 200;
 			const headers = new Headers(answer.headers ?? {});
 			return new Response(answer.json === undefined ? null : JSON.stringify(answer.json), { status, headers });
@@ -80,6 +88,13 @@ class FakeWebSocket {
 		const bucket = this.listeners.get(event) ?? [];
 		bucket.push(listener);
 		this.listeners.set(event, bucket);
+	}
+
+	/** 模拟只有 error 事件、尚未收到 close 的网络故障。 */
+	fail(): void {
+		for (const listener of this.listeners.get('error') ?? []) {
+			listener({});
+		}
 	}
 
 	/** 模拟 Host 下行一条文本帧。 */
@@ -280,7 +295,7 @@ test('waterfall decision before ready fails with a defined code', async () => {
 // DshIdeBackend 适配：method → 官方端点映射
 // ---------------------------------------------------------------------------
 
-function backendWithHost(handler: (url: string, body: unknown) => { status?: number; json?: unknown }) {
+function backendWithHost(handler: (url: string, body: unknown) => FakeHostResponse | Promise<FakeHostResponse>) {
 	resetSockets();
 	const host = fakeHost(handler);
 	const transport = new DshIdeTransport({ origin: 'http://127.0.0.1:9', cookie: 'c', primitives: host.primitives });
@@ -327,6 +342,332 @@ test('backend refuses unverified capabilities with feature-unavailable', async (
 		);
 	}
 	assert.equal(requests.length, 0, 'refused capabilities must not hit the Host at all');
+	transport.dispose();
+});
+
+// ---------------------------------------------------------------------------
+// P4 会话列表：官方工作区首帧、可见名单交集与读取生命周期
+// ---------------------------------------------------------------------------
+
+function sessionItem(sessionId: string, fields: Record<string, unknown> = {}) {
+	return { sessionId, updatedAt: 123, running: false, blank: false, agentAvailable: true, ...fields };
+}
+
+function listReply(body: unknown, items: unknown[]): FakeHostResponse {
+	return { json: { type: 'server-response', rpcId: (body as { rpcId: string }).rpcId, result: { ok: true, value: { items } } } };
+}
+
+function workspaceOpen(socket: FakeWebSocket, index = 0): { streamId: string; payload: { args: unknown } } {
+	const frames = socket.sent.filter(frame => (frame as { type: string; endpoint?: string }).type === 'open' && (frame as { endpoint?: string }).endpoint === 'workspace/follow');
+	assert.ok(frames[index], 'listSessions must open the official workspace/follow endpoint');
+	return frames[index] as { streamId: string; payload: { args: unknown } };
+}
+
+function deliverWorkspaceBaseline(socket: FakeWebSocket, streamId: string, items = [{ workspaceId: 'w-1', sessionIds: ['s-1'] }]): void {
+	socket.deliver({ type: 'item', streamId, value: { type: 'baseline', value: { items, archivedSessionIds: [], pinnedSessionIds: [] } } });
+}
+
+/** 可控响应故意不自行响应 abort，用于确认关闭不依赖晚到的网络结果。 */
+function deferredListBackend() {
+	let release!: (value: FakeHostResponse) => void;
+	const reply = new Promise<FakeHostResponse>(resolve => { release = resolve; });
+	const fixture = backendWithHost(() => reply);
+	return { ...fixture, release: (items: unknown[]) => release(listReply(fixture.requests[0].body, items)) };
+}
+
+test('listSessions projects official fields and the visible workspace intersection without disturbing Chat', async () => {
+	const { backend, requests } = backendWithHost((_url, body) => listReply(body, [
+		sessionItem('foreign', { cwd: '/same' }),
+		sessionItem('s-1', { title: 'ignored legacy title', projections: { values: { title: 'Official title' } }, cwd: '/same', formatStatus: 'current' }),
+		sessionItem('s-2', { updatedAt: 456, running: true, blank: true, agentAvailable: false, formatStatus: 'migration-required', parentSessionId: 's-1', origin: 'subagent', projections: { values: { title: '' } } }),
+		sessionItem('untitled'),
+		sessionItem('null-title', { projections: { values: { title: null } } }),
+		sessionItem('unregistered', { cwd: '/same' }),
+	]));
+	const seen: unknown[] = [];
+	const chat = backend.follow('s-1', frame => seen.push(frame));
+	const socket = FakeWebSocket.instances[0];
+	socket.open();
+	const chatId = (socket.sent[0] as { streamId: string }).streamId;
+	const result = backend.invoke('listSessions', {});
+	const open = workspaceOpen(socket);
+	assert.deepEqual(open.payload, { args: {} }, 'follow has no caller-supplied signal or request argument');
+	assert.equal(requests.length, 1);
+	assert.ok(requests[0].url.endsWith('/api/session/list'));
+	assert.deepEqual((requests[0].body as { payload: unknown }).payload, { args: { _request: {} } });
+	deliverWorkspaceBaseline(socket, open.streamId, [
+		{ workspaceId: 'w-1', sessionIds: ['s-1', 's-2', 'untitled', 'null-title', 'acl-denied', 'removed'] },
+		{ workspaceId: 'w-2', sessionIds: ['foreign'] },
+	]);
+	assert.deepEqual(await result, [
+		{ sessionId: 's-1', workspaceId: 'w-1', title: 'Official title', updatedAt: 123, running: false, blank: false, agentAvailable: true, cwd: '/same', formatStatus: 'current' },
+		{ sessionId: 's-2', workspaceId: 'w-1', title: '', updatedAt: 456, running: true, blank: true, agentAvailable: false, formatStatus: 'migration-required', parentSessionId: 's-1', origin: 'subagent' },
+		{ sessionId: 'untitled', workspaceId: 'w-1', updatedAt: 123, running: false, blank: false, agentAvailable: true },
+		{ sessionId: 'null-title', workspaceId: 'w-1', updatedAt: 123, running: false, blank: false, agentAvailable: true },
+	]);
+	assert.deepEqual(socket.sent.filter(frame => (frame as { type: string }).type === 'cancel'), [{ type: 'cancel', streamId: open.streamId }]);
+	assert.equal(socket.readyState, 1, 'reading the baseline must not close the shared socket');
+	socket.deliver({ type: 'item', streamId: open.streamId, value: { type: 'upsert', workspace: { workspaceId: 'w-1', sessionIds: ['foreign'] } } });
+	socket.deliver({ type: 'item', streamId: chatId, value: { type: 'event', event: { type: 'user/message', seq: 4 } } });
+	assert.equal(seen.length, 1, 'the Chat stream remains active and never receives workspace frames');
+	chat.dispose();
+	assert.deepEqual(socket.sent.at(-1), { type: 'cancel', streamId: chatId });
+	backend.close();
+});
+
+test('listSessions does not request the Host when no session is bound', async () => {
+	for (const sessionId of [undefined, '']) {
+		resetSockets();
+		const host = fakeHost(() => { throw new Error('unexpected request'); });
+		const transport = new DshIdeTransport({ origin: 'http://127.0.0.1:9', cookie: 'c', primitives: host.primitives });
+		const backend = new DshIdeTransportBackend(transport);
+		assert.deepEqual(await backend.invoke('listSessions', {}), []);
+		backend.open({ view: 'chat', params: sessionId === undefined ? {} : { sessionId } });
+		assert.deepEqual(await backend.invoke('listSessions', {}), []);
+		backend.close();
+		assert.deepEqual(await backend.invoke('listSessions', {}), []);
+		assert.equal(host.requests.length, 0);
+		assert.equal(FakeWebSocket.instances.length, 0);
+	}
+});
+
+for (const scope of ['missing-workspace', 'multiple-owners', 'bound-session-not-visible', 'workspace-membership-not-visible'] as const) {
+	test(`listSessions fails closed for ${scope}`, async () => {
+		const items = scope === 'bound-session-not-visible' ? [sessionItem('s-2')] : [sessionItem('s-1'), sessionItem('s-2')];
+		const { backend } = backendWithHost((_url, body) => listReply(body, items));
+		const result = backend.invoke('listSessions', {});
+		const socket = FakeWebSocket.instances[0];
+		socket.open();
+		const workspaces = scope === 'missing-workspace' ? [] : scope === 'workspace-membership-not-visible'
+			? [{ workspaceId: 'w-1', sessionIds: ['s-2'] }]
+			: [{ workspaceId: 'w-1', sessionIds: ['s-1', 's-2'] }];
+		if (scope === 'multiple-owners') {
+			workspaces.push({ workspaceId: 'w-2', sessionIds: ['s-1'] });
+		}
+		deliverWorkspaceBaseline(socket, workspaceOpen(socket).streamId, workspaces);
+		assert.deepEqual(await result, []);
+		backend.close();
+	});
+}
+
+test('listSessions refreshes both official sources and never serves a prior membership', async () => {
+	let items = [sessionItem('s-1'), sessionItem('s-2')];
+	const { backend, requests } = backendWithHost((_url, body) => listReply(body, items));
+	const first = backend.invoke('listSessions', {});
+	const socket = FakeWebSocket.instances[0];
+	socket.open();
+	deliverWorkspaceBaseline(socket, workspaceOpen(socket).streamId, [{ workspaceId: 'w-1', sessionIds: ['s-1', 's-2'] }]);
+	assert.equal((await first as unknown[]).length, 2);
+	items = [sessionItem('s-1', { updatedAt: 999 }), sessionItem('s-2')];
+	const second = backend.invoke('listSessions', {});
+	deliverWorkspaceBaseline(socket, workspaceOpen(socket, 1).streamId);
+	assert.deepEqual(await second, [{ sessionId: 's-1', workspaceId: 'w-1', updatedAt: 999, running: false, blank: false, agentAvailable: true }]);
+	assert.equal(requests.length, 2);
+	assert.equal(socket.sent.filter(frame => (frame as { type: string }).type === 'cancel').length, 2);
+	backend.close();
+});
+
+test('listSessions releases its baseline before the unary response finishes', async () => {
+	const { backend, release } = deferredListBackend();
+	const result = backend.invoke('listSessions', {});
+	const socket = FakeWebSocket.instances[0];
+	socket.open();
+	const { streamId } = workspaceOpen(socket);
+	deliverWorkspaceBaseline(socket, streamId);
+	await Promise.resolve();
+	assert.deepEqual(socket.sent.at(-1), { type: 'cancel', streamId });
+	release([sessionItem('s-1')]);
+	assert.equal((await result as unknown[]).length, 1);
+	assert.equal(socket.sent.filter(frame => (frame as { type: string }).type === 'cancel').length, 1);
+	backend.close();
+});
+
+test('listSessions cancels the temporary stream on unary failure and leaves Chat running', async () => {
+	const { backend } = backendWithHost((_url, body) => ({
+		json: { type: 'server-response', rpcId: (body as { rpcId: string }).rpcId, result: { ok: false, error: { code: 'session/list-failed', message: 'read failed', details: { retry: false } } } },
+	}));
+	const seen: unknown[] = [];
+	backend.follow('s-1', frame => seen.push(frame));
+	const socket = FakeWebSocket.instances[0];
+	socket.open();
+	const chatId = (socket.sent[0] as { streamId: string }).streamId;
+	const result = backend.invoke('listSessions', {});
+	const { streamId } = workspaceOpen(socket);
+	await assert.rejects(result, (error: DshIdeTransportError) => error.code === 'session/list-failed' && (error.details as { retry: boolean }).retry === false);
+	assert.deepEqual(socket.sent.at(-1), { type: 'cancel', streamId });
+	socket.deliver({ type: 'item', streamId: chatId, value: { type: 'event', event: { type: 'user/message', seq: 1 } } });
+	assert.equal(seen.length, 1);
+	backend.close();
+});
+
+for (const outcome of ['error', 'end', 'increment-before-baseline'] as const) {
+	test(`listSessions rejects ${outcome} and cancels an unfinished unary read`, async () => {
+		const { backend, requests, release } = deferredListBackend();
+		const result = backend.invoke('listSessions', {});
+		const socket = FakeWebSocket.instances[0];
+		socket.open();
+		const { streamId } = workspaceOpen(socket);
+		const code = outcome === 'error' ? 'gateway/invocation-unavailable' : outcome === 'end' ? 'dsh-ide/stream-ended' : 'dsh-ide/transport-corrupt';
+		const rejected = assert.rejects(result, (error: DshIdeTransportError) => error.code === code && (outcome !== 'error' || (error.details as { endpoint: string }).endpoint === 'workspace/follow'));
+		if (outcome === 'error') {
+			socket.deliver({ type: 'error', streamId, error: { code, message: 'unavailable', details: { endpoint: 'workspace/follow' } } });
+		} else if (outcome === 'end') {
+			socket.deliver({ type: 'end', streamId });
+		} else {
+			socket.deliver({ type: 'item', streamId, value: { type: 'order', workspaceIds: [] } });
+		}
+		await rejected;
+		assert.equal(requests[0].init.signal?.aborted, true);
+		assert.equal(socket.readyState, 1, 'a logical stream failure must not close the Chat socket');
+		release([sessionItem('s-1')]);
+		backend.close();
+	});
+}
+
+for (const action of ['socket-close', 'socket-error', 'transport-dispose', 'backend-close'] as const) {
+	for (const phase of ['before-baseline', 'after-baseline'] as const) {
+		test(`listSessions settles ${action} ${phase} while the unary response is pending`, async () => {
+			const { backend, transport, requests, release } = deferredListBackend();
+			const result = backend.invoke('listSessions', {});
+			const socket = FakeWebSocket.instances[0];
+			socket.open();
+			const { streamId } = workspaceOpen(socket);
+			if (phase === 'after-baseline') {
+				deliverWorkspaceBaseline(socket, streamId);
+				await Promise.resolve();
+				assert.deepEqual(socket.sent.at(-1), { type: 'cancel', streamId });
+			}
+			const code = action === 'socket-error' ? 'dsh-ide/stream-error' : action === 'backend-close' ? DSH_IDE_SESSION_SWITCHED : 'dsh-ide/stream-closed';
+			const rejected = assert.rejects(result, (error: DshIdeTransportError) => error.code === code);
+			switch (action) {
+				case 'socket-close': socket.close(); break;
+				case 'socket-error': socket.fail(); break;
+				case 'transport-dispose': transport.dispose(); break;
+				case 'backend-close': backend.close(); break;
+			}
+			await rejected;
+			assert.equal(requests[0].init.signal?.aborted, true, 'the HTTP read must be cancelled even after its baseline stream is gone');
+			release([sessionItem('s-1')]);
+			backend.close();
+		});
+	}
+}
+
+test('listSessions settles a close before the socket opens', async () => {
+	const { backend, requests, release } = deferredListBackend();
+	const result = backend.invoke('listSessions', {});
+	const socket = FakeWebSocket.instances[0];
+	const rejected = assert.rejects(result, (error: DshIdeTransportError) => error.code === DSH_IDE_SESSION_SWITCHED);
+	backend.close();
+	await rejected;
+	assert.equal(requests[0].init.signal?.aborted, true);
+	socket.open();
+	assert.deepEqual(socket.sent, [], 'a retired socket cannot flush queued streams');
+	release([sessionItem('s-1')]);
+});
+
+test('listSessions rejects an old binding and ignores its late socket events after reopening', async () => {
+	let release!: (value: FakeHostResponse) => void;
+	const firstReply = new Promise<FakeHostResponse>(resolve => { release = resolve; });
+	let count = 0;
+	const { backend, requests } = backendWithHost((_url, body) => ++count === 1 ? firstReply : listReply(body, [sessionItem('s-2')]));
+	const oldBinding = backend.open({ view: 'chat' });
+	const first = backend.invoke('listSessions', {});
+	const oldSocket = FakeWebSocket.instances[0];
+	oldSocket.open();
+	const oldStreamId = workspaceOpen(oldSocket).streamId;
+	deliverWorkspaceBaseline(oldSocket, oldStreamId);
+	await Promise.resolve();
+	const rejected = assert.rejects(first, (error: DshIdeTransportError) => error.code === DSH_IDE_SESSION_SWITCHED);
+	backend.close();
+	const newBinding = backend.open({ view: 'chat', params: { sessionId: 's-2' } });
+	assert.notEqual(newBinding.channelId, oldBinding.channelId);
+	const second = backend.invoke('listSessions', {});
+	const socket = FakeWebSocket.instances[1];
+	socket.open();
+	const { streamId } = workspaceOpen(socket);
+	oldSocket.close();
+	oldSocket.fail();
+	oldSocket.deliver({ type: 'end', streamId });
+	release(listReply(requests[0].body, [sessionItem('s-1')]));
+	deliverWorkspaceBaseline(socket, streamId, [{ workspaceId: 'w-2', sessionIds: ['s-2'] }]);
+	await rejected;
+	assert.deepEqual(await second, [{ sessionId: 's-2', workspaceId: 'w-2', updatedAt: 123, running: false, blank: false, agentAvailable: true }]);
+	assert.equal(socket.readyState, 1);
+	backend.close();
+});
+
+test('listSessions reports SESSION_SWITCHED when closed after the unary response but before the baseline', async () => {
+	const { backend } = backendWithHost((_url, body) => listReply(body, [sessionItem('s-1')]));
+	const result = backend.invoke('listSessions', {});
+	const socket = FakeWebSocket.instances[0];
+	socket.open();
+	// 让 HTTP 与 JSON 读取先完成，关闭只能通过 baseline 的读取生命周期结算。
+	await setImmediate();
+	const rejected = assert.rejects(result, (error: DshIdeTransportError) => error.code === DSH_IDE_SESSION_SWITCHED);
+	backend.close();
+	await rejected;
+});
+
+for (const readyState of [2, 3]) {
+	test(`listSessions settles the retired socket at readyState ${readyState} before its close event arrives`, async () => {
+		const { backend, requests } = backendWithHost((_url, body) => listReply(body, [sessionItem('s-1')]));
+		const first = backend.invoke('listSessions', {});
+		const rejected = assert.rejects(first, (error: DshIdeTransportError) => error.code === 'dsh-ide/stream-closed');
+		const oldSocket = FakeWebSocket.instances[0];
+		oldSocket.open();
+		await setImmediate();
+		oldSocket.readyState = readyState;
+		const second = backend.invoke('listSessions', {});
+		const socket = FakeWebSocket.instances[1];
+		socket.open();
+		const { streamId } = workspaceOpen(socket);
+		await rejected;
+		assert.equal(requests[1].init.signal?.aborted, false, 'replacing the socket must not cancel the new read');
+		oldSocket.close();
+		oldSocket.fail();
+		oldSocket.deliver({ type: 'end', streamId });
+		deliverWorkspaceBaseline(socket, streamId);
+		assert.deepEqual(await second, [{ sessionId: 's-1', workspaceId: 'w-1', updatedAt: 123, running: false, blank: false, agentAvailable: true }]);
+		assert.equal(socket.readyState, 1, 'retired events must not close the replacement socket');
+		backend.close();
+	});
+}
+
+test('a list stream disconnect does not cancel an ordinary in-flight submit', async () => {
+	let release!: (value: FakeHostResponse) => void;
+	const reply = new Promise<FakeHostResponse>(resolve => { release = resolve; });
+	const { backend, requests } = backendWithHost((url, body) => url.endsWith('/api/session/prompt') ? reply : listReply(body, [sessionItem('s-1')]));
+	const submitted = backend.invoke('submit', { text: 'pending prompt' });
+	const listed = backend.invoke('listSessions', {});
+	const rejected = assert.rejects(listed, (error: DshIdeTransportError) => error.code === 'dsh-ide/stream-closed');
+	const socket = FakeWebSocket.instances[0];
+	socket.open();
+	socket.close();
+	await rejected;
+	assert.equal(requests[0].init.signal, undefined, 'ordinary writes keep their own response lifecycle');
+	release(OK(requests[0].url, requests[0].body));
+	assert.deepEqual(await submitted, { accepted: true });
+	backend.close();
+});
+
+test('openStream notifies normal end once and does not affect another stream', () => {
+	resetSockets();
+	const { primitives } = fakeHost(() => ({ json: null }));
+	const transport = new DshIdeTransport({ origin: 'http://127.0.0.1:9', cookie: 'c', primitives });
+	let ended = 0;
+	const frames: DshIdeStreamFrame[] = [];
+	const first = transport.openStream('workspace/follow', {}, () => undefined, undefined, () => ended++);
+	const second = transport.openStream('session/follow', {}, frame => frames.push(frame));
+	const socket = FakeWebSocket.instances[0];
+	socket.open();
+	socket.deliver({ type: 'end', streamId: first.streamId });
+	socket.deliver({ type: 'end', streamId: first.streamId });
+	first.close();
+	assert.equal(ended, 1);
+	assert.equal(socket.sent.length, 2, 'an ended stream needs no cancellation');
+	socket.deliver({ type: 'item', streamId: second.streamId, value: { type: 'snapshot' } });
+	assert.equal(frames.length, 1);
 	transport.dispose();
 });
 
