@@ -445,3 +445,32 @@ test('D54 U3 probes were executed locally and recorded without overclaiming', ()
 	// 不得把 D54 或 U3 标为全部完成。
 	assert.match(dev, /D54 保持未完成/, 'D54 must stay unfinished because U3-4 is not executed');
 });
+
+// ---------------------------------------------------------------------------
+// D62 第 58 轮：加载时序耦合的**静态可判定部分**已核实（§8.10.12 之后的 D62 段落）。
+// 三个关键事实必须可复核：workspaceRegistry 是官方服务、DSH-IDE 用 ctx.inject
+// 等它就绪（故无装载顺序依赖）、客户端可见性走 journal 的 direct 直调。
+// ---------------------------------------------------------------------------
+
+test('D62 workspaceRegistry is an official service and DSH-IDE waits for it via ctx.inject', () => {
+	const host = read('src/vs/platform/dshClient/host/ide-view-host.js');
+	const index = read('src/vs/platform/dshClient/index.js');
+
+	// REQUIRED_SERVICES 必须含 workspaceRegistry：桥接以它为前提。
+	assert.match(host, /REQUIRED_SERVICES = Object\.freeze\(\[[^\]]*'workspaceRegistry'/, 'workspaceRegistry must be a required service');
+
+	// 必须用 ctx.inject 等依赖就绪后建桥（这正是「无装载顺序依赖」的依据）。
+	assert.match(index, /ctx\.inject\(REQUIRED_SERVICES,/, 'the bridge must be built inside ctx.inject(REQUIRED_SERVICES, …)');
+
+	// 服务缺失路径必须已 fail-closed。
+	assert.match(host, /FEATURE_UNAVAILABLE/, 'a missing service must fail closed with FEATURE_UNAVAILABLE');
+});
+
+test('D62 findings are recorded with the three decided sub-questions', () => {
+	const dev = read('docs/DEVELOPMENT.md');
+	assert.match(dev, /D62 实证结论（第 58 轮/, '§8.10.12 must record the round-58 D62 findings');
+	assert.match(dev, /官方服务，非插件 overlay/, 'workspaceRegistry ownership must be recorded as official');
+	assert.match(dev, /无顺序依赖/, 'the absence of load-order dependency must be recorded');
+	assert.match(dev, /进程内直调（`direct`）/, 'the direct-invocation decision must be recorded');
+	assert.match(dev, /D62 保持未完成/, 'D62 must stay unfinished (UI copy + optional remote work remain)');
+});
