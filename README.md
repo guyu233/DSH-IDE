@@ -86,6 +86,10 @@ npx gulp dsh-ide-pack
 
 **想做成什么效果**：把整个 IDE 改造成 DeepSeekHarness 的插件——整个 DSH-IDE 项目打包后就是**一个** DSH bundle 插件（`dsh-ide@2.0.0`，产物 `dist/dsh-ide-2.0.0.tgz`），由 DSH 加载后提供原生 VS Code 的编辑、终端、Git、调试、扩展与远程体验；AI 侧栏由 DSH 驱动，能基于真实工作区上下文调用工具、走审批、多会话并行。不存在独立的 IDE 安装包，也不存在第二套 AI 会话或协议。
 
+**一致性的边界（交付态口径）**：IDE 侧不持有第二份会话表，会话列表与删除都经 `dshIde` 通道向 DSH 内核取用；DSH 桌面端与 IDE 窗口之间是**有边界的最终一致性**，不是实时镜像——不宣称完全同步，不以本地缓存代替内核状态，也不做定时轮询或推送通知。列表在开窗、窗口聚焦与手动刷新时主动重查。该口径的唯一定义与判据见 [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md) 第 8 章 §8.2.4，本文只引用不复制。
+
+**已登记的第三方依赖例外（仅一个端点）**：DSH 0.2.2-rc.1 官方没有会话删除入口；经用户批准，`deleteSession` 这一**唯一**端点改为调用社区插件 `@michengai/dsh-archive-manager@1.3.1` 在官方 `workspaceRegistry` 实例上 overlay 的公开方法（或等价的 `workspaceRegistry/deleteSession` Typert remote）。这是全仓唯一的第三方插件依赖例外，适用范围**仅限该端点**；其余架构不变量（唯一 Cordis 根、唯一通道、renderer 零官方包）不变。插件未安装或方法不可用时返回 `FEATURE_UNAVAILABLE`，不伪造成功、不回退到 `rmSync`、不用隐藏列表行冒充删除。批准范围与前置条件见 [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md) 第 8 章 §8.10.8。
+
 DSH-IDE 是把整个 VS Code 桌面运行时改造成 DeepSeekHarness 插件的实现：以 **DeepSeek Harness**（下称 **DSH**）为唯一 AI 内核、以 VS Code 1.143.1 源码树（仓库根，已扁平化）为 IDE 载体，整体作为 DSH 的单一 bundle 插件 `dsh-ide@2.0.0` 交付。改造后的形态满足：DSH-IDE 作为 DSH 应用内的拓展，与 DSH 具**天然一体**关系并共享**唯一一个 Cordis 根** `dshCtx`（它位于 DSH Host 进程，IDE 侧不持有、不复制；见 `docs/DEVELOPMENT.md` 不变量 I1）；IDE 窗口只经**唯一一条 `IServerChannel`**（token `dshIde`）消费 DTO；会话、模型、工具、权限、审批、问卷、设置与语音全部由 DSH 决定。
 
 仓库只有一棵代码树（仓库根；原 `vscode-1.143.1/` 已扁平化到根）。所有 DSH-IDE 源码、资源、构建与验证脚本都落在这棵树的 VS Code 原生分层中，不存在第二个子工程。
