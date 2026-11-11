@@ -237,3 +237,30 @@ test('D17 deleteSession calls the approved physical-delete endpoint, never a clo
 	assert.match(host, /if \(!\(await sessionExists\(bridge\.ctx, args\.sessionId\)\)\)/,
 		'Host deleteSession must verify the session exists before calling the plugin');
 });
+
+// ---------------------------------------------------------------------------
+// 第 38 轮：D59 的官方端点核对结论（§8.10.11）。
+// 钉住「归档 / 置顶是官方公开 remote、当前契约仍是 22 method、尚未接线」，
+// 防止下一轮凭记忆新增端点，或误以为它们和 deleteSession 一样依赖第三方插件。
+// ---------------------------------------------------------------------------
+
+test('D59 archive/pin endpoints are official remotes and remain unwired in the 22-method contract', () => {
+	const dev = read('docs/DEVELOPMENT.md');
+	// 结论落下且带源码证据。
+	assert.match(dev, /#### 8\.10\.11[^\n]*会话管理扩展的官方端点/, '§8.10.11 must exist');
+	for (const endpoint of ['archiveSession', 'unarchiveSession', 'pinSession', 'unpinSession']) {
+		assert.ok(dev.includes(endpoint), `§8.10.11 must name ${endpoint}`);
+	}
+	assert.match(dev, /api\/workspace-controller\/src\/index\.ts:159-162/, '§8.10.11 must cite the archiveSession remote');
+	assert.match(dev, /stopActivity/, '§8.10.11 must record the stopActivity semantics');
+	assert.match(dev, /workspace\/session-active/, '§8.10.11 must record the active-session rejection code');
+	assert.match(dev, /不是接线完成声明/, '§8.10.11 must not claim wiring is done');
+	// 契约仍是 22 项，且两套 backend 都没有这些端点的调用。
+	const block = /const DSH_IDE_METHOD_KEYS[\s\S]*?\n\};/.exec(protocol);
+	assert.ok(block !== null);
+	assert.equal([...block[0].matchAll(/^\s*([a-zA-Z]+):/gm)].length, 22, 'contract must stay at 22 methods until §2 §9 is followed');
+	for (const endpoint of ['archiveSession', 'unarchiveSession', 'pinSession', 'unpinSession']) {
+		assert.ok(!protocol.includes(`${endpoint}:`), `${endpoint} must not be declared as a contract method yet`);
+		assert.ok(!transport.includes(`'${endpoint}'`), `${endpoint} must not be called by the transport yet`);
+	}
+});
