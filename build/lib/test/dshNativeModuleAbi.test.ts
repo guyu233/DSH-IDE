@@ -99,6 +99,40 @@ test('D23 on win32 the node-pty binding is conpty (not pty)', () => {
 });
 
 // ---------------------------------------------------------------------------
+// 第 52 轮（D56 静态部分）：NAPI 模块**不依赖** `NODE_MODULE_VERSION`。
+//
+// D56 原文要求「逐模块记录 … 构建参数、`NODE_MODULE_VERSION` 与实际加载结果」。
+// 但对 NAPI 模块这一项**不适用**：它们通过 `napi_register_module_v1` 注册，
+// 二进制里**不含** `NODE_MODULE_VERSION` 字符串/常量，因此不会因宿主 Electron
+// 的 ABI 版本不同而失配——这正是第 38 轮「五者全是 NAPI」结论能成立的原因。
+//
+// 本测试把这条技术事实钉住：任何「NAPI 模块却内嵌 NODE_MODULE_VERSION」的情况
+// 都会失败（那意味着它其实是 ABI 模块，ABI 校验将重新变成必需项）。
+// ---------------------------------------------------------------------------
+
+test('D56 NAPI modules register via napi_register_module_v1 and carry no NODE_MODULE_VERSION', () => {
+	const checked = [];
+
+	for (const mod of NATIVE_MODULES) {
+		const pkgDir = path.join(nodeModules, mod.pkg);
+		if (!fs.existsSync(pkgDir)) { continue; }
+		for (const binding of findBindings(pkgDir)) {
+			const content = fs.readFileSync(binding).toString('latin1');
+			const name = `${mod.pkg}:${path.basename(binding)}`;
+			// NAPI 的注册入口存在（第 38 轮已断言 napi_* 符号；这里再钉注册函数本身）。
+			assert.match(content, /napi_register_module_v1/,
+				`${name} must register via napi_register_module_v1`);
+			// 且不含 ABI 版本串——有它说明不是纯 NAPI，ABI 校验会成为必需。
+			assert.doesNotMatch(content, /NODE_MODULE_VERSION/,
+				`${name} must not embed NODE_MODULE_VERSION; a NAPI build has no such dependency`);
+			checked.push(name);
+		}
+	}
+
+	assert.ok(checked.length >= 5, `expected at least five NAPI bindings checked, got ${checked.length}`);
+});
+
+// ---------------------------------------------------------------------------
 // 第 39 轮：5 个原生模块必须由**生产依赖**随包，否则打包后运行时找不到。
 //
 // 发现的真实缺陷：`node-pty` 原先声明在 `devDependencies`，而打包用
