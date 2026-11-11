@@ -1033,3 +1033,34 @@ test('searchSessions propagates the official unavailable-provider failure', asyn
 	// 不把「未挂载检索 provider」伪造成空结果。
 	await assert.rejects(() => bridge.invoke('searchSessions', { query: 'x' }), error => /session search is unavailable/.test(error.message));
 });
+
+// ---------------------------------------------------------------------------
+// U05 验收口径补强：取消请求与双窗口决议的关系。
+// `cancelRequest` 此前只有形状校验、没有行为测试；这里钉住
+// 「取消使请求结算为 cancelled、且后续决议必须得到 ALREADY_RESOLVED」。
+// ---------------------------------------------------------------------------
+
+test('cancelRequest settles the request as cancelled and blocks a later decision', async () => {
+	const ctx = fakeCtx({ sessions: {}, sessionController: sessionControllerStub() });
+	const bridge = new DshIdeHostBridge(ctx, { transport: { post: () => undefined } });
+	bridge.follow('s-1', () => undefined);
+
+	const handler = ctx.listeners.get('approval/request')[0];
+	const pending = handler({ requestId: 'c-1', toolName: 'bash' }, () => 'rejected');
+
+	// 取消即结算：settle 原样 resolve，所以 DSH 侧收到明确的 'cancelled'（不是批准、也不是 handler 默认值）。
+	assert.deepEqual(await bridge.invoke('cancelRequest', { requestId: 'c-1' }), { accepted: true });
+	assert.equal(await pending, 'cancelled', 'cancelling must settle the request with an explicit cancelled value');
+	assert.equal(bridge.pending.size(), 0, 'cancelling must leave no pending entry');
+
+	// 取消后再决议：同一个 requestId 必须得到 ALREADY_RESOLVED，且不改变结果。
+	await assert.rejects(
+		() => bridge.invoke('answerApproval', { requestId: 'c-1', decision: 'approve' }),
+		error => error.code === ALREADY_RESOLVED,
+	);
+	// 未知 requestId 同样按 ALREADY_RESOLVED 处理（不静默成功）。
+	await assert.rejects(
+		() => bridge.invoke('cancelRequest', { requestId: 'nope' }),
+		error => error.code === ALREADY_RESOLVED,
+	);
+});
