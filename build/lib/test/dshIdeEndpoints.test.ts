@@ -643,3 +643,48 @@ test('every project dsh test file is registered in test-dsh:all', async () => {
 	assert.deepEqual(missing, [],
 		`these test files exist but never run (add them to test-dsh:all): ${missing.join(', ')}`);
 });
+
+// ---------------------------------------------------------------------------
+// 第 66 轮：手册里的**体积口径**必须与真实产物一致。
+//
+// 发现的过时表述：P7 状态行与 D29 依据都还写着「仍含 map」「119,704,107 B」，
+// 但第 46 轮已用 `CI=1` 实测剔除（78,912,417 B、out/**/*.js.map = 0）。
+// 同一份文档里前后矛盾，会让读者以为 D29 的 map 子项没做。
+//
+// 本测试把「§0.1 声明的分发体积 == 磁盘上 tgz 的实际字节数」变成不变量；产物
+// 重打后若忘记回写，测试即失败。
+// ---------------------------------------------------------------------------
+
+test('the documented distribution size matches the actual tgz on disk', async () => {
+	const fsMod = await import('node:fs');
+	const tgz = path.join(repoRoot, 'dist/dsh-ide-2.0.0.tgz');
+	if (!fsMod.existsSync(tgz)) { return; } // 未打包时跳过（CI 的打包步骤尚未产出）
+
+	const actual = fsMod.statSync(tgz).size;
+	const dev = read('docs/DEVELOPMENT.md');
+	// §0.1 的分发行以「第 NN 轮 … 实测 <bytes> B」陈述当前体积。
+	const claimed = /第 \d+ 轮[^|\n]*?实测 ([\d,]+) B/.exec(dev)?.[1];
+	assert.ok(claimed !== undefined, '§0.1 must state the measured distribution size');
+	assert.equal(Number(claimed.replaceAll(',', '')), actual,
+		`documented size ${claimed} B must equal the actual tgz ${actual} B（重打后请回写 §0.1）`);
+});
+
+test('no stale "still contains map" claims remain in the handbook', () => {
+	const dev = read('docs/DEVELOPMENT.md');
+
+	// 注意（第 66 轮踩到的第三次同类坑）：不能扫全文——§7.7 的每轮记录会**引用**被修正
+	// 的过时表述作为证据（「P7 状态行仍写『仍含 map』」），那是有意保留的历史叙述。
+	// 因此只检查 §7.7 之外的正文；第 42 轮（注释含被检查字符串）、第 64 轮（正则字面量）
+	// 都是同一类「守护被自己的说明文字触发」的错误。
+	// 只在**状态断言区**检查：`| P7 ` 状态行与 `| D29 ` 待办行必须不再声称「仍含 map」。
+	//
+	// 不扫全文的原因（第 66 轮第三次踩到同类坑）：§7.7 的每轮记录、以及 §0.1 的
+	// 「最近一轮改动」摘要，都会**引用**被修正的旧表述作为证据；把那些也算过时是错的。
+	// 第 42 轮（注释含被检查字符串）、第 64 轮（正则字面量）都是同一类自指错误。
+	const stateRows = dev.split(/\r?\n/)
+		.filter(line => line.startsWith('| P7 ') || line.startsWith('| D29 '));
+
+	const offenders = stateRows.filter(line => line.includes('仍含 map') || line.includes('`*.js.map` 仍随包'));
+	assert.deepEqual(offenders, [],
+		'the P7 status row and D29 row must not claim maps are still shipped (found ' + offenders.length + ')');
+});
