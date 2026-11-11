@@ -33,6 +33,17 @@ export interface VSCodePatchPoint {
 	readonly file: string;
 	readonly symbol: string;
 	readonly note: string;
+	/**
+	 * 该文件在**本仓库基线时刻**的 sha256 前 16 位。
+	 *
+	 * 用途（D26）：上游升版时，若注入点的实际内容与基线不一致，说明上游改动过这个
+	 * 文件、`patch` 可能需要重放调整——`verify:dsh-ide-contract` 据此做**失败断言**，
+	 * 而不是只在日志里打印一串无人比对的哈希。
+	 *
+	 * 维护方式（见第 5 章 §7）：上游核对确认改动已被本仓库吸收后再更新此值，
+	 * 并在第 7 章 §7.7 记录更新原因与新的上游 commit。
+	 */
+	readonly sha256: string;
 }
 export const VSCODE_PATCH_POINTS = Object.freeze([
 	{
@@ -40,24 +51,28 @@ export const VSCODE_PATCH_POINTS = Object.freeze([
 		file: 'src/vs/workbench/contrib/chat/browser/chat.contribution.ts',
 		symbol: 'ChatViewPane',
 		note: 'DSH Chat 视图接入点（鲸鱼按钮 / 面板骨架）',
+		sha256: 'efce7729d4bbe245',
 	},
 	{
 		id: 'inline-completion',
 		file: 'src/vs/editor/contrib/inlineCompletions/browser/controller/inlineCompletionsController.ts',
 		symbol: 'InlineCompletionsController',
 		note: 'DSH 行内补全接入点',
+		sha256: 'f192395c09b631ab',
 	},
 	{
 		id: 'terminal',
 		file: 'src/vs/platform/terminal/common/terminal.ts',
 		symbol: 'ITerminalService',
 		note: '原生 node-pty 终端接入点（按宿主 Electron ABI 重编）',
+		sha256: '4bc444eea27988a3',
 	},
 	{
 		id: 'command-palette',
 		file: 'src/vs/workbench/browser/quickaccess.ts',
 		symbol: 'QuickAccessController',
 		note: 'DSH 命令入口接入点',
+		sha256: 'd7babb3efa906bdd',
 	},
 ] as readonly VSCodePatchPoint[]);
 

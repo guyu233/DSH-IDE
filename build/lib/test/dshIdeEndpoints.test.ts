@@ -539,3 +539,36 @@ test('D21 static precheck is recorded without claiming any acceptance item passe
 	assert.match(dev, /ptyHostMain\.js`\s*\*\*在产物中\*\*|ptyHostMain.*在产物中/, 'item 6 must record ptyHostMain presence');
 	assert.match(dev, /5 个必需模块的 `\.node` \*\*全部随包\*\*/, 'item 6 must record all five native modules shipped');
 });
+
+// ---------------------------------------------------------------------------
+// D26 第 62 轮：`contract` 门禁启用**指纹失败断言**。
+// 第 61 轮及以前，门禁只把 4 个注入点的 sha256 打印出来、没有任何基线可比，
+// 因此永远停在 PENDING 且无法发现漂移。现在契约里带 `sha256` 基线，门禁逐点比对，
+// 不一致/缺失即 FAIL。本测试钉住「基线与实际一致」这一不变量。
+// ---------------------------------------------------------------------------
+
+test('D26 every patch point carries a sha256 baseline matching the actual file', async () => {
+	const crypto = await import('node:crypto');
+	const fsMod = await import('node:fs');
+	const contract = read('src/vs/platform/dshClient/common/dshIdeContract.ts');
+
+	const files = [...contract.matchAll(/\bfile:\s*'([^']+)'/g)].map(m => m[1]);
+	const baselines = [...contract.matchAll(/\bsha256:\s*'([0-9a-f]{16})'/g)].map(m => m[1]);
+
+	assert.equal(files.length, 4, 'four injection points must be declared');
+	assert.equal(baselines.length, 4, 'each injection point must carry a sha256 baseline');
+
+	for (let i = 0; i < files.length; i++) {
+		const abs = path.join(repoRoot, files[i]);
+		assert.ok(fsMod.existsSync(abs), `injection point file must exist: ${files[i]}`);
+		const actual = crypto.createHash('sha256').update(fsMod.readFileSync(abs)).digest('hex').slice(0, 16);
+		assert.equal(actual, baselines[i],
+			`${files[i]} drifted from its baseline — update the contract baseline deliberately (see §5 §7)`);
+	}
+});
+
+test('D26 the contract gate fails on fingerprint mismatch instead of only printing', () => {
+	const gate = read('build/lib/dsh/verify/dshIdeVerify.mjs');
+	assert.match(gate, /VSCODE_PATCH_POINTS 指纹与基线不符/, 'the gate must throw on drift');
+	assert.match(gate, /mismatches\.push/, 'the gate must collect mismatches');
+});

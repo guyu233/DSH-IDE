@@ -243,19 +243,46 @@ function contract() {
 		assert.match(text, new RegExp(`export\\s+(?:const|function|interface)\\s+${symbol}\\b`), `dshIdeContract.ts must export ${symbol}`);
 	}
 
-	// VSCODE_PATCH_POINTS 指纹：4 个注入点，记录目标文件 sha256（上游升级时与基线比对）。
+	// VSCODE_PATCH_POINTS 指纹（第 62 轮启用失败断言，D26）。
+	//
+	// 每个注入点在契约里带 `sha256`（基线，前 16 位）。这里对实际文件重算并**逐点比对**：
+	//   - 不一致 → 说明该文件内容已偏离基线（上游改动或本仓库误改），注入点需要重新核对；
+	//   - 缺失   → 文件被移走/改名，注入点已失效。
+	// 二者都会让门禁 FAIL，而不是只打印一串无人比对的哈希。
+	//
+	// 关于「上游未升级时是否该 FAIL」：`UPSTREAM_VALIDATED_VERSION` 记录的是**已核对过的**
+	// 上游版本。基线指纹即在该版本下确立，因此本地不匹配就是真实的漂移，应当失败。
 	const files = [...text.matchAll(/\bfile:\s*'([^']+)'/g)].map(m => m[1]);
 	assert.equal(files.length, 4, `VSCODE_PATCH_POINTS must contain 4 injection points, got ${files.length}`);
-	const fingerprints = files.map(f => {
+
+	const baselines = [...text.matchAll(/\bsha256:\s*'([0-9a-f]{16})'/g)].map(m => m[1]);
+	assert.equal(baselines.length, 4, `VSCODE_PATCH_POINTS must carry 4 sha256 baselines, got ${baselines.length}`);
+
+	const mismatches = [];
+	const report = files.map((f, i) => {
 		const abs = path.join(repoRoot, f);
-		const hash = fs.existsSync(abs)
-			? createHash('sha256').update(fs.readFileSync(abs)).digest('hex').slice(0, 16)
-			: 'MISSING';
-		return `  ${f}  ${hash}`;
+		if (!fs.existsSync(abs)) {
+			mismatches.push(`${f}: 文件缺失`);
+			return `  ${f}  MISSING`;
+		}
+		const actual = createHash('sha256').update(fs.readFileSync(abs)).digest('hex').slice(0, 16);
+		const expected = baselines[i];
+		if (actual !== expected) {
+			mismatches.push(`${f}: 基线 ${expected} ≠ 实际 ${actual}`);
+		}
+		return `  ${f}  ${actual}${actual === expected ? '' : '  <-- 与基线不符'}`;
 	});
-	console.log('PENDING(上游升级) contract: 脚手架就位，以下为首次指纹基线（升级时做失败门禁）：');
+
 	console.log(`  validated=${/UPSTREAM_VALIDATED_VERSION\s*=\s*'([^']+)'/.exec(text)?.[1] ?? '?'}`);
-	console.log(fingerprints.join('\n'));
+	console.log(report.join('\n'));
+
+	if (mismatches.length > 0) {
+		throw new Error(`VSCODE_PATCH_POINTS 指纹与基线不符（${mismatches.length} 处）：\n    ${mismatches.join('\n    ')}\n  处置：按第 5 章 §7 核对上游改动，确认后更新契约里的 sha256 基线并记录原因。`);
+	}
+
+	// 指纹全部一致后仍返回 PENDING：`contract` 的**完整**语义还包含「上游升版后
+	// 四条门禁状态符合 §9」这一未来事件，那部分只能在升版时判定。
+	console.log('PENDING(上游升级) contract: 4 个注入点指纹与基线一致；升版后须重跑并核对 §9 门禁状态');
 	return 'PENDING';
 }
 
