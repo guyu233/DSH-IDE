@@ -794,6 +794,13 @@ test('D69 projection-golden asserts real-sample P95 instead of only printing a n
 	// 必须有真实的度量函数与断言，而不是一句 PENDING 说明。
 	assert.match(gate, /function probeRealSessionP95/, 'the gate must define the real-sample P95 probe');
 	assert.match(gate, /真实样本 P95 \$\{p95\} B 超出阈值/, 'the gate must throw when P95 exceeds the limit');
+
+	// 第 74 轮补强：光有文本还不够——**阈值必须真的参与判定**。
+	// guard-negative 的「P95 阈值断言守护」用例会把 `const limit = 512 * 1024;` 改成
+	// `1`，若本测试只做文本匹配就不会失败（实测确认过这个漏洞）。因此这里断言
+	// 「limit 必须来自那个可被破坏的常量」，使改动常量能被抓住。
+	assert.match(gate, /const limit = 512 \* 1024;/, 'the P95 limit must be the 512 KiB constant (guard-negative breaks it)');
+	assert.match(gate, /p95 > limit/, 'the limit must actually be compared against p95');
 	// 只禁止**代码行**里的旧说明；注释中保留「此前只有一行 console.log(...)」作为历史
 	// 记录是有意的（第 42 / 64 / 66 / 67 轮反复踩到的自指陷阱：守护不能扫自己的说明文字）。
 	const codeLines = gate.split(/\r?\n/).filter(line => !line.trimStart().startsWith('//'));

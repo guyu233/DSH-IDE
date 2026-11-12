@@ -92,6 +92,37 @@ const CASES = [
 		},
 	},
 	{
+		// 第 74 轮补：第 68 轮让 contract 能按版本判 PASS/FAIL。若有人把它改回
+		// 「无条件 PENDING」，本用例会失败（说明守护失效）。
+		name: 'contract 版本断言守护（第 68 轮）',
+		files: ['src/vs/platform/dshClient/common/dshIdeContract.ts'],
+		test: 'build/lib/test/dshIdeEndpoints.test.ts',
+		break() {
+			const rel = 'src/vs/platform/dshClient/common/dshIdeContract.ts';
+			const abs = path.join(repoRoot, rel);
+			const raw = fs.readFileSync(abs, 'utf8');
+			// 把首个注入点的基线指纹改成明显错误的值 → 门禁与测试都应失败。
+			const patched = raw.replace(/sha256: '[0-9a-f]{16}'/, "sha256: '0000000000000000'");
+			if (patched === raw) { throw new Error('fingerprint anchor miss'); }
+			fs.writeFileSync(abs, patched, 'utf8');
+		},
+	},
+	{
+		// 第 74 轮补：第 69 轮让 projection-golden 内置 P95 断言。破坏阈值常量
+		// （改成 1 B）后，门禁必须失败；若仍 PASS 说明断言是假的。
+		name: 'P95 阈值断言守护（第 69 轮）',
+		files: ['build/lib/dsh/verify/dshIdeVerify.mjs'],
+		test: 'build/lib/test/dshIdeEndpoints.test.ts',
+		break() {
+			const rel = 'build/lib/dsh/verify/dshIdeVerify.mjs';
+			const abs = path.join(repoRoot, rel);
+			const raw = fs.readFileSync(abs, 'utf8');
+			const patched = raw.replace('const limit = 512 * 1024;', 'const limit = 1;');
+			if (patched === raw) { throw new Error('limit anchor miss'); }
+			fs.writeFileSync(abs, patched, 'utf8');
+		},
+	},
+	{
 		name: '手册交叉引用守护（第 32 轮）',
 		files: ['docs/DEVELOPMENT.md'],
 		test: 'build/lib/test/dshDocsCrossRefs.test.ts',
