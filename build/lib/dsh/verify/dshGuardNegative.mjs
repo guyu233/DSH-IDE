@@ -37,6 +37,25 @@ function testFails(file) {
 	}
 }
 
+/**
+ * 跑一条 **verify 脚本**（不是 --test 文件），返回它是否失败（期望 true）。
+ *
+ * 第 75 轮新增：`docs-graph` 这类脚本以退出码表达成败，不是 node:test 用例，
+ * 因此需要另一种调用方式。传 `env` 便于有的用例调整环境。
+ */
+function scriptFails(script, extraEnv = {}) {
+	try {
+		execFileSync(process.execPath, ['--experimental-strip-types', script], {
+			cwd: repoRoot,
+			stdio: 'ignore',
+			env: { ...process.env, ...extraEnv, NODE_OPTIONS: '' },
+		});
+		return false;
+	} catch {
+		return true;
+	}
+}
+
 /** 备份若干文件，返回还原函数。 */
 function snapshot(paths) {
 	const saved = new Map();
@@ -123,6 +142,22 @@ const CASES = [
 		},
 	},
 	{
+		// 第 75 轮补：`docs-graph` 有 30 处断言（定义依赖图 0 环、术语唯一、
+		// 唯一定义不冲突、状态单一性、待办/用户动作计数），是项目最核心的文档
+		// 一致性检查，但此前**完全未纳入反向验证**。这里注入一条断链（指向不存在
+		// 的文件）与一处非法待办状态，确认它真的会失败。
+		name: 'docs-graph 断链与状态守护（第 75 轮）',
+		files: ['docs/DEVELOPMENT.md'],
+		script: 'build/lib/dsh/verify/dshDocsGraph.mjs',
+		break() {
+			const abs = path.join(repoRoot, 'docs/DEVELOPMENT.md');
+			const raw = fs.readFileSync(abs, 'utf8');
+			// 1) 追加一条指向不存在文件的相对链接 → 断链检查应失败。
+			const patched = `${raw}\n\n[断链探针](./__no_such_file__.md)\n`;
+			fs.writeFileSync(abs, patched, 'utf8');
+		},
+	},
+	{
 		name: '手册交叉引用守护（第 32 轮）',
 		files: ['docs/DEVELOPMENT.md'],
 		test: 'build/lib/test/dshDocsCrossRefs.test.ts',
@@ -152,7 +187,10 @@ for (const testCase of CASES) {
 	let failed;
 	try {
 		testCase.break();
-		failed = testFails(testCase.test);
+		// 第 75 轮：支持两种被测对象——node:test 文件（`test`）与 verify 脚本（`script`）。
+		failed = testCase.script === undefined
+			? testFails(testCase.test)
+			: scriptFails(testCase.script);
 	} catch (error) {
 		failed = null;
 		console.error(`  ${testCase.name}: 注入失败 — ${error.message}`);

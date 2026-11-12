@@ -313,7 +313,27 @@ function main() {
 	const state = stateViolations();
 	assert.deepEqual(state.violations, [], `state single-source violations:\n${state.violations.join('\n')}`);
 
-	console.log(`PASS  docs-graph: ${DOCS.length} nodes / ${edges.length} edges / 0 cycles; navigation links excluded (${navigation.length}); term table unique; ${claims.length} unique-owner claims deduped; state single-source ok (8 phases); snapshot ${state.snapshot}; todos ${state.todoStats.done} done / ${state.todoStats.open} open / ${state.todoStats.verify} to-verify; user actions ${state.userStats.ready} ready / ${state.userStats.done} done / ${state.userStats.blocked} blocked; ${state.rounds} rounds`);
+	// 5. 相对链接有效性（第 75 轮新增）。
+	//
+	// 此前「断链检查」只出现在提交信息里——由一条**手工**脚本临时跑出，从未纳入
+	// 任何自动门禁（`grep existsSync` 在旧版本命中 0）。这意味着断链可以在无人
+	// 察觉的情况下积累。第 75 轮把它并入 docs-graph，并纳入 `verify:dsh-guard-negative`
+	// 反向验证（注入一条指向不存在文件的链接，本检查必须失败）。
+	const brokenLinks = [];
+	let relativeLinks = 0;
+	for (const file of DOCS) {
+		const text = fs.readFileSync(path.join(repoRoot, file), 'utf8');
+		for (const match of text.matchAll(/\[[^\]]*\]\(([^)]+)\)/g)) {
+			const rawTarget = match[1].split('#')[0].trim();
+			if (rawTarget === '' || /^(https?:|mailto:|data:)/i.test(rawTarget)) { continue; }
+			relativeLinks++;
+			const abs = path.resolve(path.dirname(path.join(repoRoot, file)), rawTarget);
+			if (!fs.existsSync(abs)) { brokenLinks.push(`${file} -> ${rawTarget}`); }
+		}
+	}
+	assert.deepEqual(brokenLinks, [], `broken relative links:\n${brokenLinks.join('\n')}`);
+
+	console.log(`PASS  docs-graph: ${DOCS.length} nodes / ${edges.length} edges / 0 cycles; navigation links excluded (${navigation.length}); term table unique; ${claims.length} unique-owner claims deduped; state single-source ok (8 phases); snapshot ${state.snapshot}; todos ${state.todoStats.done} done / ${state.todoStats.open} open / ${state.todoStats.verify} to-verify; user actions ${state.userStats.ready} ready / ${state.userStats.done} done / ${state.userStats.blocked} blocked; ${state.rounds} rounds; relative links ${relativeLinks} all resolve`);
 }
 
 try {
