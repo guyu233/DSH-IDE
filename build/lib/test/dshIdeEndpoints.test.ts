@@ -871,7 +871,19 @@ test('D76 manual-only checkers stay out of CI and say so in the handbook', () =>
 	const dev = read('docs/DEVELOPMENT.md');
 	const ci = read('build/lib/dsh/verify/dshIdeCi.mjs');
 
-	const manualOnly = ['verify:dsh-artifact', 'verify:dsh-install-drift', 'verify:dsh-real-p95'];
+	// 第 77 轮扩充：覆盖矩阵显示共有 **5 个** 脚本不在 CI、也不在 test-dsh:all 里。
+	// 三个依赖本机状态（artifact / install-drift / real-p95），另有两个：
+	//   - guard-negative：会临时改写源文件后还原，CI 中途崩溃会留脏工作区；
+	//   - release-gate：判定逻辑与 CI 聚合等价（都要求 code===0 && status==='PASS'），
+	//     CI 已等价拒绝，它是独立复核入口。
+	// 五者的「不纳入」都必须写明理由，否则接入者会以为 CI 覆盖了全部检查。
+	const manualOnly = [
+		'verify:dsh-artifact',
+		'verify:dsh-install-drift',
+		'verify:dsh-real-p95',
+		'verify:dsh-guard-negative',
+		'verify:dsh-ide-release-gate',
+	];
 	for (const script of manualOnly) {
 		// ① 不在 CI 聚合的步骤表里。
 		assert.ok(!ci.includes(script),
@@ -881,10 +893,25 @@ test('D76 manual-only checkers stay out of CI and say so in the handbook', () =>
 		// 注意：不能取「第一个包含脚本名的行」——§0.1 的分发体积行也提到
 		// verify:dsh-artifact（作为证据引用），会先被匹配到。故要求该行以
 		// 「| <中文标题>（第 NN 轮」开头，即命令表的行形态。
+		// 命令表行的形态不统一：多数是「| <标题>（第 NN 轮…」，但 release-gate 那行是
+		// 「| 发布聚合（§9.4，D57，…」。故只要求「以 | 开头、第二格含 `npm run <script>`」，
+		// 用后者精确定位，避免误命中 §0.1 等处的证据性引用。
+		// 直接找「**同时**含该命令与手动核对标注」的行——因为脚本名也可能出现在别处
+		// （§0.1 的分发体积行就把 verify:dsh-artifact 当证据引用）。这正是第 42 / 64 /
+		// 66 / 67 / 74 / 76 轮反复踩到的自指陷阱：**匹配条件必须精确到目标行**。
+		// 排除 §7.7 的轮次记录行（形如「| 90 | 2026-11-12 / `hash` | …」）——那里也会
+		// **引用**脚本名与「手动核对，不纳入」作为该轮证据，若纳入匹配就会掩盖真问题。
+		// 这是本仓库第七次遇到同类自指陷阱（42 / 64 / 66 / 67 / 74 / 76 / 77），
+		// 因此这里同时排除「第二格是纯数字轮次号」与「含日期 + commit」的行。
+		const isRoundRecord = line => {
+			const cells = line.split('|');
+			const second = (cells[1] ?? '').trim();
+			return /^\d+$/.test(second);
+		};
 		const row = dev.split(/\r?\n/).find(line =>
-			/^\| [^|]*（第 \d+ 轮/.test(line) && line.includes(script));
-		assert.ok(row !== undefined, `${script} must be listed in the command table`);
-		assert.ok(row.includes('手动核对，不纳入'),
-			`${script} row must state it is manual-only, got: ${row?.slice(0, 120)}`);
+			line.startsWith('| ') && !isRoundRecord(line) &&
+			line.includes(script) && line.includes('手动核对，不纳入'));
+		assert.ok(row !== undefined,
+			`${script} must appear on a command-table row that states 手动核对，不纳入`);
 	}
 });
