@@ -856,3 +856,35 @@ test('D27 §7.4 onboarding checklist matches the CI entry script behaviour', () 
 	assert.match(ci, /dir: 'out'[\s\S]{0,60}hint: 'npm run build-dsh-tests'/, 'script must check out and hint the build');
 	assert.match(ci, /step\.script\.startsWith\('verify:'\)/, 'script must scope STATUS parsing');
 });
+
+// ---------------------------------------------------------------------------
+// 第 76 轮：三个「手动核对」脚本**不得**被塞进 CI 聚合，且手册必须标明其性质。
+//
+// 背景：`verify:dsh-artifact` / `verify:dsh-install-drift` / `verify:dsh-real-p95`
+// 分别依赖 `dist/*.tgz`、`DSH_PROFILE_DIR`、`~/.dsh/sessions`——干净 checkout 里
+// 三者皆无，因此**不放进 CI 是正确设计**（放进去也只会被跳过，制造「已覆盖」的错觉）。
+// 但这个「有意不纳入」若不写明，接入者会以为 CI 已覆盖全部检查。
+// 本测试同时钉住两侧：CI 里确实没有它们；手册里确实标注了「手动核对」。
+// ---------------------------------------------------------------------------
+
+test('D76 manual-only checkers stay out of CI and say so in the handbook', () => {
+	const dev = read('docs/DEVELOPMENT.md');
+	const ci = read('build/lib/dsh/verify/dshIdeCi.mjs');
+
+	const manualOnly = ['verify:dsh-artifact', 'verify:dsh-install-drift', 'verify:dsh-real-p95'];
+	for (const script of manualOnly) {
+		// ① 不在 CI 聚合的步骤表里。
+		assert.ok(!ci.includes(script),
+			`${script} depends on local state and must not be a CI step`);
+		// ② 手册**命令表**里那一行带「手动核对，不纳入 verify:dsh-ide-ci」标注。
+		//
+		// 注意：不能取「第一个包含脚本名的行」——§0.1 的分发体积行也提到
+		// verify:dsh-artifact（作为证据引用），会先被匹配到。故要求该行以
+		// 「| <中文标题>（第 NN 轮」开头，即命令表的行形态。
+		const row = dev.split(/\r?\n/).find(line =>
+			/^\| [^|]*（第 \d+ 轮/.test(line) && line.includes(script));
+		assert.ok(row !== undefined, `${script} must be listed in the command table`);
+		assert.ok(row.includes('手动核对，不纳入'),
+			`${script} row must state it is manual-only, got: ${row?.slice(0, 120)}`);
+	}
+});
