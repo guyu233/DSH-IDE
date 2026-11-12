@@ -801,3 +801,27 @@ test('D69 projection-golden asserts real-sample P95 instead of only printing a n
 		codeLines.filter(line => line.includes("PENDING(P6): 真实事件流 P95 字节数校准")).length, 0,
 		'the old print-only note must not survive in executable code');
 });
+
+// ---------------------------------------------------------------------------
+// 第 70 轮：CI 聚合器的两处修正。
+//
+// ① `contract` 的 PASS 路径若 CI 不传 `DSH_INSTALLED_VERSION` 就永远用不到 →
+//    CI 现在透传该变量，未传时明确提示「本次将以 PENDING 结束」。
+// ② 原实现对所有步骤都用 `/^STATUS:/m` 抓状态，于是 `test-dsh:all` 里任何测试
+//    打印过 `STATUS: FAIL`（例如「版本过低应 FAIL」的子进程测试）就会被误判为
+//    失败——**实际测试全通过、退出码 0**。现改为只对 `verify:` 门禁解析。
+// ---------------------------------------------------------------------------
+
+test('D70 CI forwards DSH_INSTALLED_VERSION and only parses STATUS for gate steps', () => {
+	const ci = read('build/lib/dsh/verify/dshIdeCi.mjs');
+
+	// ① 透传并提示
+	assert.match(ci, /DSH_INSTALLED_VERSION/, 'CI must consider DSH_INSTALLED_VERSION');
+	assert.match(ci, /未设置 DSH_INSTALLED_VERSION —— `contract` 将以 PENDING 结束/,
+		'CI must explain the consequence of not setting the version');
+
+	// ② 只对门禁解析 STATUS
+	assert.match(ci, /const isGate = step\.script\.startsWith\('verify:'\)/,
+		'CI must scope STATUS parsing to gate steps');
+	assert.match(ci, /isGate \? \/\^STATUS:/, 'the STATUS regex must be gated by isGate');
+});

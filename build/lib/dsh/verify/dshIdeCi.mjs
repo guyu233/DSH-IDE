@@ -87,10 +87,37 @@ function run(script) {
 const failures = [];
 const results = [];
 
+// ---------------------------------------------------------------------------
+// 第 70 轮：把 `DSH_INSTALLED_VERSION` 透传给 `contract`（否则 PASS 路径在 CI 里
+// 永远用不到）。
+//
+// 背景：第 68 轮让 `contract` 能按「已安装版本 ≥ 经校验版本」判 PASS / FAIL，
+// 但版本取自 `DSH_INSTALLED_VERSION`。CI 若不设这个变量，`contract` 就永远是
+// `PENDING`、`release-gate` 永远拒绝——**那条 PASS 路径形同虚设**。
+//
+// CI 无法凭空知道宿主版本，因此这里不猜：只要调用方传入（例如在 workflow 里
+// `env: { DSH_INSTALLED_VERSION: 0.2.2-rc.1 }`），就原样透传；未传则明确提示
+// 「本次将以 PENDING 结束」，让结果可预期而不是让人以为门禁坏了。
+// ---------------------------------------------------------------------------
+const installedVersion = process.env['DSH_INSTALLED_VERSION'];
+if (installedVersion === undefined || installedVersion === '') {
+	console.log('注意: 未设置 DSH_INSTALLED_VERSION —— `contract` 将以 PENDING 结束（发布聚合会拒绝）。');
+	console.log('      如需完整判定，请在 CI 环境里设置该变量（值应为宿主 DSH 版本，如 0.2.2-rc.1）。');
+} else {
+	console.log(`DSH_INSTALLED_VERSION=${installedVersion}（将透传给 contract 做版本比对）`);
+}
+
 for (const step of STEPS) {
 	const { code, out } = run(step.script);
-	// 门禁类步骤的输出里有 `STATUS: <PASS|PENDING|FAIL>`；测试类步骤看退出码。
-	const status = /^STATUS:\s*(\S+)/m.exec(out)?.[1];
+
+	// 第 70 轮修正：只有**门禁类**步骤才解析 `STATUS:`。
+	//
+	// 原实现对所有步骤都做正则抓取，于是 `test-dsh:all` 里任何测试若打印过
+	// `STATUS: FAIL`（例如我自己那项「版本过低应 FAIL」的子进程测试），就会
+	// 被误判为一步失败——**实际测试全通过、退出码 0**。
+	// 判据改为：`verify:` 开头的脚本才是门禁；其余看退出码。
+	const isGate = step.script.startsWith('verify:');
+	const status = isGate ? /^STATUS:\s*(\S+)/m.exec(out)?.[1] : undefined;
 	const passed = code === 0 && (status === undefined || status === 'PASS');
 	results.push({ name: step.name, code, status, passed });
 	if (!passed) {
