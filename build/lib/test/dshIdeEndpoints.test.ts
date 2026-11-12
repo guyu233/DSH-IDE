@@ -825,3 +825,27 @@ test('D70 CI forwards DSH_INSTALLED_VERSION and only parses STATUS for gate step
 		'CI must scope STATUS parsing to gate steps');
 	assert.match(ci, /isGate \? \/\^STATUS:/, 'the STATUS regex must be gated by isGate');
 });
+
+// ---------------------------------------------------------------------------
+// 第 71 轮：§7.4「CI 接入清单」必须与入口脚本的真实行为一致。
+//
+// 这条清单是 U16 裁定后**任何平台**照抄即用的说明；它若与实际行为不符，
+// 接入者会按错的步骤配 CI。因此把三步写成断言：前置两项 + 版本变量 + 判定口径。
+// ---------------------------------------------------------------------------
+
+test('D27 §7.4 onboarding checklist matches the CI entry script behaviour', () => {
+	const dev = read('docs/DEVELOPMENT.md');
+	const ci = read('build/lib/dsh/verify/dshIdeCi.mjs');
+
+	// 文档三步必须都在。
+	assert.match(dev, /接入清单（第 70 轮补全，任何平台通用）/, 'the checklist must exist');
+	assert.match(dev, /`npm ci`（需要 `node_modules\/`）/i, 'step 1 must name npm ci');
+	assert.match(dev, /`npm run build-dsh-tests`[\s\S]{0,40}`out\/`/, 'step 1 must name the build command for out/');
+	assert.match(dev, /设 `DSH_INSTALLED_VERSION`/, 'step 2 must name the version variable');
+	assert.match(dev, /只有 `verify:` 开头的步骤才解析 `STATUS:`/, 'step 3 must state the STATUS-parsing scope');
+
+	// 文档承诺的行为必须在脚本里成立（否则清单是空话）。
+	assert.match(ci, /dir: 'node_modules'[\s\S]{0,40}hint: 'npm ci'/, 'script must check node_modules and hint npm ci');
+	assert.match(ci, /dir: 'out'[\s\S]{0,60}hint: 'npm run build-dsh-tests'/, 'script must check out and hint the build');
+	assert.match(ci, /step\.script\.startsWith\('verify:'\)/, 'script must scope STATUS parsing');
+});
