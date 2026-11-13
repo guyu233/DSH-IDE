@@ -144,5 +144,7 @@ test('dispose stops the loop', async () => {
 	const before = caller.calls.length;
 	listener.dispose();
 	await wait(DSH_IDE_LAUNCH_POLL_MS * 2);
-	assert.equal(caller.calls.length, before, 'no calls may happen after dispose');
+	const after = caller.calls.slice(before);
+	// dispose 会立刻向 Host 注销（避免死登记项等心跳超时）；除这次注销外不得再有轮询。
+	assert.deepEqual(after.map(call => call.method), ['unregisterIdeClient'], 'no polling may happen after dispose');
 });

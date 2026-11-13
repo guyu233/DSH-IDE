@@ -18,11 +18,9 @@ import { IAgentConnection, IAgentHostService } from '../../../../../../../platfo
 import { deriveLocalModelReadiness, ILocalModelConsent, ILocalModelErrorV1, ILocalModelFamilyV1, ILocalModelLoadV1, ILocalModelStatusV1, LOCAL_MODEL_SENTINEL_PROVIDER_NAME, LocalModelEnabledSettingId, LocalModelReadiness } from '../../../../../../../platform/chatContracts/common/localModel.js';
 import { ICommandService } from '../../../../../../../platform/commands/common/commands.js';
 import { IConfigurationService } from '../../../../../../../platform/configuration/common/configuration.js';
-import { IContextKeyService } from '../../../../../../../platform/contextkey/common/contextkey.js';
 import { IOpenerService } from '../../../../../../../platform/opener/common/opener.js';
 import { ITelemetryService } from '../../../../../../../platform/telemetry/common/telemetry.js';
 import { getLocalModelStopNowId, ILocalModelService } from '../../../../../../services/agentHost/common/localModelService.js';
-import { ChatContextKeys } from '../../../../common/actions/chatContextKeys.js';
 import { SessionType } from '../../../../common/chatSessionsService.js';
 import { ILanguageModelChatMetadataAndIdentifier } from '../../../../common/languageModels.js';
 import { runLocalModelErrorAction } from '../../../agentSessions/agentHost/localModelErrorActions.js';
@@ -751,7 +749,6 @@ export class ModelPickerLocalModels extends Disposable {
 		@ILocalModelService private readonly _localModelService: ILocalModelService,
 		@IAgentHostService agentHostService: IAgentHostService,
 		@IConfigurationService private readonly _configurationService: IConfigurationService,
-		@IContextKeyService private readonly _contextKeyService: IContextKeyService,
 		@ICommandService private readonly _commandService: ICommandService,
 		@IOpenerService private readonly _openerService: IOpenerService,
 		@ITelemetryService private readonly _telemetryService: ITelemetryService,
@@ -789,17 +786,12 @@ export class ModelPickerLocalModels extends Disposable {
 				this._onDidChange.fire();
 			}
 		}));
-		const enabledKey = new Set([ChatContextKeys.enabled.key]);
-		this._register(this._contextKeyService.onDidChangeContext(e => {
-			if (e.affectsSome(enabledKey)) {
-				this._onDidChange.fire();
-			}
-		}));
 	}
 
 	/** The status to show, or `undefined` when the rows are hidden. */
 	private _getVisibleStatus(): ILocalModelStatusV1 | undefined {
-		if (this._configurationService.getValue<boolean>(LocalModelEnabledSettingId) !== true || !this._contextKeyService.contextMatchesRules(ChatContextKeys.enabled)) {
+		// chatIsEnabled 开关已删除，只看本地模型设置项。
+		if (this._configurationService.getValue<boolean>(LocalModelEnabledSettingId) !== true) {
 			return undefined;
 		}
 		const status = this._status.get();

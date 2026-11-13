@@ -39,7 +39,7 @@ export class OpenAgentHostFolderPickerAction extends Action2 {
 			// The working directory is an argument to session creation and is
 			// fixed once the session has started (its first request), so the
 			// chip stays visible afterwards but is disabled.
-			precondition: ContextKeyExpr.and(ChatContextKeys.enabled, ChatContextKeys.chatSessionIsEmpty),
+			precondition: ContextKeyExpr.and(ChatContextKeys.chatSessionIsEmpty),
 			menu: [{
 				id: MenuId.ChatInputSecondary,
 				group: 'navigation',
@@ -70,9 +70,7 @@ export class OpenAgentHostModePickerAction extends Action2 {
 		super({
 			id: OpenAgentHostModePickerAction.ID,
 			title: localize2('agentHost.modePicker', "Agent Mode"),
-			f1: false,
-			precondition: ChatContextKeys.enabled,
-			menu: [{
+			f1: false,			menu: [{
 				id: MenuId.ChatInputSecondary,
 				group: 'navigation',
 				order: 0.7,
@@ -89,9 +87,7 @@ export class OpenAgentHostAutoApprovePickerAction extends Action2 {
 		super({
 			id: OpenAgentHostAutoApprovePickerAction.ID,
 			title: localize2('agentHost.autoApprovePicker', "Auto-Approve"),
-			f1: false,
-			precondition: ChatContextKeys.enabled,
-			menu: [{
+			f1: false,			menu: [{
 				id: MenuId.ChatInputSecondary,
 				group: 'navigation',
 				order: 0.8,
@@ -108,9 +104,7 @@ export class OpenAgentHostPermissionModePickerAction extends Action2 {
 		super({
 			id: OpenAgentHostPermissionModePickerAction.ID,
 			title: localize2('agentHost.permissionModePicker', "Approvals"),
-			f1: false,
-			precondition: ChatContextKeys.enabled,
-			menu: [{
+			f1: false,			menu: [{
 				id: MenuId.ChatInputSecondary,
 				group: 'navigation',
 				order: 0.9,

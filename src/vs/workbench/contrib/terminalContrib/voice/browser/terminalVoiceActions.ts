@@ -29,7 +29,7 @@ export function registerTerminalVoiceActions() {
 		precondition: ContextKeyExpr.and(
 			ContextKeyExpr.or(
 				HasSpeechProvider,
-				ContextKeyExpr.and(ChatContextKeys.enabled, ChatContextKeys.speechToTextConfigured)
+				ContextKeyExpr.and(ChatContextKeys.speechToTextConfigured)
 			),
 			// Keep the toggle available for terminal dictation, but not unrelated speech-to-text sessions.
 			ContextKeyExpr.or(SpeechToTextInProgress.toNegated(), TerminalContextKeys.terminalDictationInProgress),

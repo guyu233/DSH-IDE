@@ -28,7 +28,6 @@ class AnnounceChatConfirmationAction extends Action2 {
 			id: ACTION_ID_FOCUS_CHAT_CONFIRMATION,
 			title: { value: localize('focusChatConfirmation', 'Focus Chat Confirmation'), original: 'Focus Chat Confirmation' },
 			category: { value: localize('chat.category', 'Chat'), original: 'Chat' },
-			precondition: ChatContextKeys.enabled,
 			f1: true,
 			keybinding: {
 				weight: KeybindingWeight.WorkbenchContrib,
@@ -93,7 +92,6 @@ class ToggleThinkingContentAccessibleViewAction extends Action2 {
 			id: ACTION_ID_TOGGLE_THINKING_CONTENT_ACCESSIBLE_VIEW,
 			title: { value: localize('toggleThinkingContentAccessibleView', 'Toggle Thinking Content in Accessible View'), original: 'Toggle Thinking Content in Accessible View' },
 			category: { value: localize('chat.category', 'Chat'), original: 'Chat' },
-			precondition: ChatContextKeys.enabled,
 			f1: true,
 			keybinding: {
 				primary: KeyMod.Alt | KeyCode.KeyT,

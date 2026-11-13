@@ -6,3 +6,6 @@ export const DSH_IDE_ENDPOINT_ENV = 'DSH_IDE_ENDPOINT';   // Host Web origin，�
 export const DSH_IDE_COOKIE_ENV = 'DSH_IDE_COOKIE';       // 已换取的 host cookie（name=value）
 export const DSH_IDE_LAUNCH_URL_ENV = 'DSH_IDE_LAUNCH_URL'; // 官方 launch URL（origin/?token=…）
 export const DSH_IDE_SESSION_ENV = 'DSH_IDE_SESSION';     // 本窗口要跟随的 DSH 会话 id（由开窗方决定）
+// 开窗时由 Host 预先取好的 `composerState` 快照（JSON）。IDE 第一帧就直接用它渲染
+// 模型 / 推理档 / 权限 / 预设，不再「先空着、等一次往返再变出来」。
+export const DSH_IDE_COMPOSER_ENV = 'DSH_IDE_COMPOSER';

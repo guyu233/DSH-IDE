@@ -444,10 +444,10 @@ export class ConfigureToolSets extends Action2 {
 			shortTitle: localize('chat.configureToolSets.short', "Tool Sets"),
 			category: CHAT_CATEGORY,
 			f1: true,
-			precondition: ContextKeyExpr.and(ChatContextKeys.enabled, ChatContextKeys.Tools.toolsCount.greater(0)),
+			precondition: ContextKeyExpr.and(ChatContextKeys.Tools.toolsCount.greater(0)),
 			menu: [{
 				id: MenuId.ViewTitle,
-				when: ContextKeyExpr.and(ChatContextKeys.enabled, ContextKeyExpr.equals('view', ChatViewId)),
+				when: ContextKeyExpr.and(ContextKeyExpr.equals('view', ChatViewId)),
 				order: 11,
 				group: '2_level'
 			}],

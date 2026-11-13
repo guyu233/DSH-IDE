@@ -148,7 +148,7 @@ export function getCommentCommandInfo(keybindingService: IKeybindingService, con
 }
 
 export function getChatCommandInfo(keybindingService: IKeybindingService, contextKeyService: IContextKeyService): string | undefined {
-	if (ChatContextKeys.enabled.getValue(contextKeyService)) {
+	if (true) {
 		return [AccessibilityHelpNLS.quickChat, AccessibilityHelpNLS.startInlineChat].join('\n');
 	}
 	return;
@@ -166,7 +166,7 @@ export function getChatEditInfo(keybindingService: IKeybindingService, contextKe
 
 export function getDictationInfo(contextKeyService: IContextKeyService): string | undefined {
 	if (HasSpeechProvider.getValue(contextKeyService) ||
-		(ChatContextKeys.enabled.getValue(contextKeyService) && ChatContextKeys.speechToTextConfigured.getValue(contextKeyService))) {
+		(true && ChatContextKeys.speechToTextConfigured.getValue(contextKeyService))) {
 		return AccessibilityHelpNLS.editorDictation;
 	}
 	return;

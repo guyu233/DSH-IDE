@@ -40,8 +40,17 @@ export interface IDshIdeSessionsService {
 	refresh(): Promise<void>;
 	/** 删除会话；成功后由状态机主动重查，失败保留列表。 */
 	deleteSession(sessionId: string): Promise<{ readonly ok: true } | { readonly ok: false; readonly error: string }>;
+	/** 新建会话，成功后切过去。 */
+	createSession(): Promise<{ readonly ok: true; readonly sessionId?: string } | { readonly ok: false; readonly error: string }>;
+	/** 归档 / 取消归档。 */
+	archiveSession(sessionId: string): Promise<{ readonly ok: true } | { readonly ok: false; readonly error: string }>;
+	unarchiveSession(sessionId: string): Promise<{ readonly ok: true } | { readonly ok: false; readonly error: string }>;
+	/** 检索会话（标题 / 正文）。 */
+	search(query: string | undefined): Promise<{ readonly ok: true; readonly items: readonly { readonly sessionId: string; readonly snippet: string }[] } | { readonly ok: false; readonly error: string }>;
 	/** 切换绑定会话（开窗参数变化时）；重绑会作废在途旧读。 */
 	bind(sessionId: string | undefined): void;
+	/** 当前绑定的会话 id。 */
+	readonly boundSessionId: string | undefined;
 }
 
 export class DshIdeSessionsService extends Disposable implements IDshIdeSessionsService {
@@ -50,13 +59,13 @@ export class DshIdeSessionsService extends Disposable implements IDshIdeSessions
 	private readonly _model: DshIdeSessionListModel;
 
 	constructor(
-		@IDshClientService client: IDshClientService,
+		@IDshClientService private readonly _client: IDshClientService,
 		@IHostService hostService: IHostService,
 	) {
 		super();
 		const bound = env[DSH_IDE_SESSION_ENV];
 		this._model = this._register(new DshIdeSessionListModel(
-			new DshClientSessionListSource(client),
+			new DshClientSessionListSource(this._client),
 			typeof bound === 'string' && bound !== '' ? bound : undefined,
 		));
 		// 窗口聚焦重查（§8.10.2：不造通知机制、不定时轮询）。失焦不取数。
@@ -86,7 +95,54 @@ export class DshIdeSessionsService extends Disposable implements IDshIdeSessions
 		return this._model.deleteSession(sessionId);
 	}
 
+	/** 新建会话：交给内核，成功后绑定到新会话并重查列表。 */
+	async createSession(): Promise<{ readonly ok: true; readonly sessionId?: string } | { readonly ok: false; readonly error: string }> {
+		const result = await this._client.call<{ readonly sessionId?: string }>('newSession', {});
+		if (!result.ok) {
+			return { ok: false, error: result.error.message };
+		}
+		const sessionId = result.value?.sessionId;
+		if (typeof sessionId === 'string') {
+			this.bind(sessionId);
+		}
+		await this.refresh();
+		return { ok: true, sessionId };
+	}
+
+	async archiveSession(sessionId: string): Promise<{ readonly ok: true } | { readonly ok: false; readonly error: string }> {
+		const result = await this._client.call('archiveSession', { sessionId });
+		if (!result.ok) {
+			return { ok: false, error: result.error.message };
+		}
+		await this.refresh();
+		return { ok: true };
+	}
+
+	async unarchiveSession(sessionId: string): Promise<{ readonly ok: true } | { readonly ok: false; readonly error: string }> {
+		const result = await this._client.call('unarchiveSession', { sessionId });
+		if (!result.ok) {
+			return { ok: false, error: result.error.message };
+		}
+		await this.refresh();
+		return { ok: true };
+	}
+
+	async search(query: string | undefined): Promise<{ readonly ok: true; readonly items: readonly { readonly sessionId: string; readonly snippet: string }[] } | { readonly ok: false; readonly error: string }> {
+		if (typeof query !== 'string' || query.trim() === '') {
+			return { ok: true, items: [] };
+		}
+		const result = await this._client.call<{ readonly items?: readonly { readonly sessionId: string; readonly snippet: string }[] }>('searchSessions', { query });
+		if (!result.ok) {
+			return { ok: false, error: result.error.message };
+		}
+		return { ok: true, items: result.value?.items ?? [] };
+	}
+
 	bind(sessionId: string | undefined): void {
 		this._model.bind(sessionId);
+	}
+
+	get boundSessionId(): string | undefined {
+		return this._model.boundSessionId;
 	}
 }

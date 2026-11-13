@@ -3,51 +3,14 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { CHAT_CATEGORY } from '../actions/chatActions.js';
-import { Codicon } from '../../../../../base/common/codicons.js';
-import { ChatContextKeys } from '../../common/actions/chatContextKeys.js';
-import { localize, localize2 } from '../../../../../nls.js';
-import { ServicesAccessor } from '../../../../../editor/browser/editorExtensions.js';
-import { Action2, MenuId, registerAction2 } from '../../../../../platform/actions/common/actions.js';
-import { ContextKeyExpr } from '../../../../../platform/contextkey/common/contextkey.js';
-import { AICustomizationManagementCommands, AICustomizationManagementSection } from '../aiCustomization/aiCustomizationManagement.js';
-import { ICommandService } from '../../../../../platform/commands/common/commands.js';
-
-abstract class ConfigAgentActionImpl extends Action2 {
-	public override async run(accessor: ServicesAccessor): Promise<void> {
-		await accessor.get(ICommandService).executeCommand(AICustomizationManagementCommands.OpenEditor, AICustomizationManagementSection.Agents);
-	}
-}
+// DSH-IDE：原来这里注册两个「Configure Custom Agents…」动作，点开的是 VS Code 的
+// Agent 自定义编辑器。本产品的智能体预设由 DSH 管理，只在 DSH 主窗口里改，所以整段
+// 删除，不留死代码，也不给用户第二个不生效的入口。调用方仍保留 `registerAgentActions()`
+// 这个空函数，避免改动无关的启动序列。
 
 /**
- * Action ID for the `Configure Custom Agents` action.
- */
-const CONFIGURE_AGENTS_ACTION_ID = 'workbench.action.chat.configure.customagents';
-
-function createConfigureAgentsActionConfig(disabled: boolean) {
-	const agentModeDisabledByPolicy = ChatContextKeys.Modes.agentModeDisabledByPolicy;
-	const base = {
-		id: disabled ? CONFIGURE_AGENTS_ACTION_ID + '.disabled' : CONFIGURE_AGENTS_ACTION_ID,
-		title: localize2('configure-agents', "Configure Custom Agents..."),
-		category: CHAT_CATEGORY,
-		f1: !disabled,
-		precondition: disabled ? ContextKeyExpr.false() : ContextKeyExpr.and(ChatContextKeys.enabled, agentModeDisabledByPolicy.negate()),
-		menu: {
-			id: MenuId.ChatModePicker,
-			when: ContextKeyExpr.and(ChatContextKeys.enabled, disabled ? agentModeDisabledByPolicy : agentModeDisabledByPolicy.negate()),
-		},
-	};
-	return disabled ? { ...base, icon: Codicon.lock, tooltip: localize('managedByOrganization', "Managed by your organization") } : base;
-}
-
-class ConfigureAgentsAction extends ConfigAgentActionImpl { constructor() { super(createConfigureAgentsActionConfig(false)); } }
-class ConfigureAgentsActionDisabled extends ConfigAgentActionImpl { constructor() { super(createConfigureAgentsActionConfig(true)); } }
-
-
-/**
- * Helper to register all the `Configure Custom Agents` actions.
+ * 兼容入口：DSH-IDE 不提供「Configure Custom Agents…」，因此什么也不注册。
  */
 export function registerAgentActions(): void {
-	registerAction2(ConfigureAgentsAction);
-	registerAction2(ConfigureAgentsActionDisabled);
+	// 有意为空：见上方说明。
 }

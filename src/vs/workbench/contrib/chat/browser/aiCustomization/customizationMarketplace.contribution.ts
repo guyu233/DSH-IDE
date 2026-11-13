@@ -52,9 +52,7 @@ registerWorkbenchContribution2(
 class CustomizationDiscoveryAccessibleView implements IAccessibleViewImplementation {
 	readonly priority = 110;
 	readonly name = 'customization-discovery';
-	readonly when = ContextKeyExpr.and(
-		ChatContextKeys.enabled,
-		CONTEXT_AI_CUSTOMIZATION_MANAGEMENT_EDITOR,
+	readonly when = ContextKeyExpr.and(		CONTEXT_AI_CUSTOMIZATION_MANAGEMENT_EDITOR,
 		CONTEXT_AI_CUSTOMIZATION_MANAGEMENT_SECTION.isEqualTo(''),
 	);
 

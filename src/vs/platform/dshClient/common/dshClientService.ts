@@ -25,6 +25,7 @@ import {
 	DSH_IDE_FEATURE_UNAVAILABLE,
 	DSH_IDE_INVALID_ARGUMENT,
 	type DshIdeSnapshot,
+	type DshIdeWaterfallNotice,
 	type DshRemoteError,
 } from './dshIdeProtocol.js';
 
@@ -60,8 +61,12 @@ export interface IDshClientService {
 	readonly onDidStreamFrame: Event<IDshStreamFrame>;
 	/** 唯一快照流：`listen('snapshot')` 的原样转发（校验由 DshIdeConsumer 负责）。 */
 	readonly onDidSnapshot: Event<DshIdeSnapshot>;
+	/** waterfall 流：`listen('waterfall')` 的原样转发（校验由独立消费者负责，不进快照）。 */
+	readonly onDidWaterfall: Event<DshIdeWaterfallNotice>;
 	/** 建立连接（控制命令 `open`），返回首帧；失败返回错误而非伪造状态。 */
 	openView(spec: { view: string; params?: Record<string, unknown> }): Promise<DshClientCallResult<DshIdeSnapshot>>;
+	/** 换一个会话继续跟（停旧流、按新地址重开）。 */
+	rebindView(sessionId: string): Promise<DshClientCallResult<DshIdeSnapshot>>;
 	/** 释放连接（控制命令 `close`）；不取消 DSH 会话。 */
 	closeView(): Promise<void>;
 	getStatus(): Promise<{ connected: boolean; endpoint?: string }>;
@@ -95,6 +100,7 @@ export class DshClientService extends Disposable implements IDshStreamClient {
 	private readonly _onDidChangeState = this._register(new Emitter<{ connected: boolean }>());
 	private readonly _onDidStreamFrame = this._register(new Emitter<IDshStreamFrame>());
 	private readonly _onDidSnapshot = this._register(new Emitter<DshIdeSnapshot>());
+	private readonly _onDidWaterfall = this._register(new Emitter<DshIdeWaterfallNotice>());
 
 	constructor(@IMainProcessService mainProcessService: IMainProcessService) {
 		super();
@@ -105,9 +111,15 @@ export class DshClientService extends Disposable implements IDshStreamClient {
 			this.markConnected();
 			this._onDidSnapshot.fire(snapshot);
 		}));
+		// 事件名与通道常量 DSH_IDE_WATERFALL_EVENT 同值。common 不引用 electron-main。
+		this._register(this.channel.listen<DshIdeWaterfallNotice>('waterfall')(notice => {
+			this.markConnected();
+			this._onDidWaterfall.fire(notice);
+		}));
 	}
 
 	readonly onDidSnapshot: Event<DshIdeSnapshot> = this._onDidSnapshot.event;
+	readonly onDidWaterfall: Event<DshIdeWaterfallNotice> = this._onDidWaterfall.event;
 
 	async getStatus(): Promise<{ connected: boolean; endpoint?: string }> {
 		// 连接态 = 已经有过一次成功的 `open`（宿主回了首帧快照）。
@@ -119,6 +131,16 @@ export class DshClientService extends Disposable implements IDshStreamClient {
 	async openView(spec: { view: string; params?: Record<string, unknown> }): Promise<DshClientCallResult<DshIdeSnapshot>> {
 		try {
 			const snapshot = await this.channel.call<DshIdeSnapshot>('open', spec);
+			this.markConnected();
+			return { ok: true, value: snapshot };
+		} catch (error) {
+			return { ok: false, error: toRemoteError(error, DSH_IDE_INVALID_ARGUMENT) };
+		}
+	}
+
+	async rebindView(sessionId: string): Promise<DshClientCallResult<DshIdeSnapshot>> {
+		try {
+			const snapshot = await this.channel.call<DshIdeSnapshot>('rebind', { sessionId });
 			this.markConnected();
 			return { ok: true, value: snapshot };
 		} catch (error) {

@@ -3,7 +3,7 @@
  *  Licensed under the MIT License.
  *--------------------------------------------------------------------------------------------*/
 
-// P5 收尾：Electron 主页物化的单测（docs/DEVELOPMENT.md 第 7 章 §3、第 5 章 §4）。
+// P5 收尾：Electron 主页物化的单测。
 //
 // 只测 host/electron-home.js（纯 Node 实现，不引 @deepseek-ai/*），因此能直接由
 // `node --experimental-strip-types --test` 执行。Windows-only 的建链用例在其它平台跳过，

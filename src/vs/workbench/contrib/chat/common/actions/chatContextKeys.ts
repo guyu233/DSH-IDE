@@ -74,7 +74,8 @@ export namespace ChatContextKeys {
 	export const speechToTextUsesMai = new RawContextKey<boolean>('chatSpeechToTextUsesMai', false, { type: 'boolean', description: localize('chatSpeechToTextUsesMai', "True when dictation uses the MAI cloud transcription backend.") });
 
 	export const supported = ContextKeyExpr.or(IsWebContext.negate(), RemoteNameContext.notEqualsTo(''), ContextKeyExpr.has('config.chat.experimental.serverlessWebEnabled'));
-	export const enabled = new RawContextKey<boolean>('chatIsEnabled', false, { type: 'boolean', description: localize('chatIsEnabled', "True when chat is enabled because a default chat participant is activated with an implementation.") });
+	// `chatIsEnabled` 已删除：上游用它判断「有没有按需激活的聊天 Agent」（Copilot 可能没装），
+	// DSH 只有一个常驻 Agent，这个门禁恒真，留着只会让输入框第一帧短暂缺控件。
 	export const accountPolicyGateActive = ChatAccountPolicyGateActiveContext;
 
 	/**

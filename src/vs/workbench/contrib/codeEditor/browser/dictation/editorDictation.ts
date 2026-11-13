@@ -45,7 +45,7 @@ const VOICE_CATEGORY = localize2('voiceCategory', "Voice");
  * gate so editor dictation can run through the built-in engine even when the
  * `ms-vscode.vscode-speech` extension is not installed.
  */
-const BuiltinDictationConfigured = ContextKeyExpr.and(ChatContextKeys.enabled, ChatContextKeys.speechToTextConfigured);
+const BuiltinDictationConfigured = ContextKeyExpr.and(ChatContextKeys.speechToTextConfigured);
 
 export class EditorDictationStartAction extends EditorAction2 {
 

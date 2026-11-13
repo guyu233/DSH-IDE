@@ -1,21 +1,19 @@
 /*---------------------------------------------------------------------------------------------
  *  Copyright (c) DSH-IDE contributors. All rights reserved.
- *  Licensed under the MIT License.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
 // P3：`IdeViewHost` 的真实实现（`DshIdeViewService`）。
 //
-// 职责边界（第 1 章 §3）：本类只做「窄接口 + 投影 + 版本计数」，不认识 DSH 内部模型，
-// 也不直连 electron 或插件宿主的服务容器；DSH 能力经 `DshIdeBackend` 端口注入。端口由插件
-// Host 层（插件入口 apply 拿到的上下文）实现，因此本文件不出现 `@deepseek-ai/*`、`ctx.on`
-// 或 electron API。
+// 职责边界（第 1 章 §3）：本类只做「窄接口 + 帧转发 + 版本计数」，不认识 DSH 内部模型，
+// 也不直连 electron 或插件宿主的服务容器；DSH 能力经 `DshIdeBackend` 端口注入。
 //
-// 快照纪律（第 2 章 §2）：`channelId` 一次打开内守恒；`version` 从 1 起严格 +1；
-// 首帧 `starting`，收到第一条真实事件后转为 `ready` 并携带 `IdeViewSnapshot`。
+// 帧纪律（第 2 章 §2）：`channelId` 一次打开内守恒；`version` 从 1 起严格 +1；
+// 首帧 `starting`，收到第一帧跟会话结果后转为 `ready` 并携带该帧。
+// 本类**不再**把帧翻译成另一套行：帧就是 `sessionController.follow` 给出的形状。
 
 import { Disposable } from '../../../base/common/lifecycle.js';
-import { createIdeViewProjector, type IdeViewProjector } from '../common/ide-view-projector.js';
-import { translateDshEvent } from '../common/translator.js';
+import { projectDshIdeWaterfallNotice } from '../common/dshIdeWaterfallNotice.js';
 import {
 	DSH_IDE_FEATURE_UNAVAILABLE,
 	DSH_IDE_WIRE_REVISION,
@@ -23,6 +21,8 @@ import {
 	type DshIdeMethod,
 	type DshIdeOpenSpec,
 	type DshIdeSnapshot,
+	type DshIdeViewSnapshot,
+	type DshIdeWaterfallNotice,
 	type IdeViewHost,
 } from '../common/dshIdeProtocol.js';
 
@@ -46,16 +46,14 @@ export class UnavailableDshIdeBackend implements DshIdeBackend {
 
 export class DshIdeViewService extends Disposable implements IdeViewHost {
 	private readonly _listeners = new Set<(snapshot: DshIdeSnapshot) => void>();
-	private projector: IdeViewProjector | undefined;
+	private readonly _waterfall = new Set<(notice: DshIdeWaterfallNotice) => void>();
 	private subscription: { dispose(): void } | undefined;
 	private channelId: string | undefined;
 	private sessionId: string | undefined;
 	/** 已发布帧数：首帧 `starting` 为 1，此后每帧 +1。 */
 	private version = 0;
 	private last: DshIdeSnapshot | undefined;
-	/** 待发布事件缓冲：合并同一宏任务内的连续增量，避免逐 token 推帧。 */
-	private pending: unknown[] = [];
-	private flushScheduled = false;
+	private _boundSessionId: string | undefined;
 
 	private readonly backend: DshIdeBackend;
 
@@ -72,7 +70,6 @@ export class DshIdeViewService extends Disposable implements IdeViewHost {
 		const binding = this.backend.open(spec as unknown as DshIdeOpenSpec);
 		this.channelId = binding.channelId;
 		this.sessionId = binding.sessionId;
-		this.projector = createIdeViewProjector();
 		this.subscription = this.backend.follow(binding.sessionId, raw => this.receive(raw));
 		const first: DshIdeSnapshot = {
 			wireRevision: DSH_IDE_WIRE_REVISION,
@@ -85,9 +82,41 @@ export class DshIdeViewService extends Disposable implements IdeViewHost {
 		return first;
 	}
 
+	/** 换一个会话继续跟：停掉旧流，按新地址重开。同一个会话不会被听两遍。 */
+	rebind(sessionId: string): DshIdeSnapshot {
+		if (this.channelId === undefined) {
+			return this.open({ view: 'chat', params: { sessionId } });
+		}
+		if (sessionId === this.sessionId) {
+			return this.last!;
+		}
+		this.subscription?.dispose();
+		this.subscription = undefined;
+		this.sessionId = sessionId;
+		this._boundSessionId = sessionId;
+		this.subscription = this.backend.follow(sessionId, raw => this.receive(raw));
+		this.version += 1;
+		const next: DshIdeSnapshot = {
+			wireRevision: DSH_IDE_WIRE_REVISION,
+			channelId: this.channelId,
+			version: this.version,
+			state: { state: 'starting' },
+		};
+		this.last = next;
+		for (const listener of [...this._listeners]) {
+			listener(next);
+		}
+		return next;
+	}
+
 	subscribe(onSnapshot: (snapshot: DshIdeSnapshot) => void): { dispose(): void } {
 		this._listeners.add(onSnapshot);
 		return { dispose: () => { this._listeners.delete(onSnapshot); } };
+	}
+
+	subscribeWaterfall(onNotice: (notice: DshIdeWaterfallNotice) => void): { dispose(): void } {
+		this._waterfall.add(onNotice);
+		return { dispose: () => { this._waterfall.delete(onNotice); } };
 	}
 
 	async invoke(method: string, args?: unknown): Promise<unknown> {
@@ -95,9 +124,12 @@ export class DshIdeViewService extends Disposable implements IdeViewHost {
 			throw { code: DSH_IDE_FEATURE_UNAVAILABLE, message: 'DSH-IDE view is not open' };
 		}
 		const value = await this.backend.invoke(method as DshIdeMethod, args);
-		if (method === 'refreshSnapshot') {
-			// 全量重发：version 仍严格 +1，不重置计数。
-			this.publish(true);
+		// 新建 / 分叉成功后，画面跟着新会话走。
+		const nextSessionId = value !== null && typeof value === 'object' && typeof (value as Record<string, unknown>)['sessionId'] === 'string'
+			? (value as Record<string, unknown>)['sessionId'] as string
+			: undefined;
+		if ((method === 'newSession' || method === 'fork') && nextSessionId !== undefined) {
+			this.rebind(nextSessionId);
 		}
 		return value;
 	}
@@ -106,64 +138,35 @@ export class DshIdeViewService extends Disposable implements IdeViewHost {
 		this.subscription?.dispose();
 		this.subscription = undefined;
 		this.backend.close();
-		this.projector = undefined;
 		this.channelId = undefined;
 		this.sessionId = undefined;
+		this._boundSessionId = undefined;
 		this.last = undefined;
-		this.pending = [];
 		this.version = 0;
 		return { closed: true };
 	}
 
-	/**
-	 * 收一条原始帧。
-	 *
-	 * `session/follow` 的帧有两种形状（第 2 章 §2.2.1）：
-	 *   - `{ type:'snapshot', records:[{type:'event', event:{...}}, ...] }` —— 回放历史；
-	 *   - `{ type:'event', event:{...} }` —— 增量。
-	 * 两者都必须**解包到单条 SessionEvent** 再交给 translator；直接把整帧塞进去会被
-	 * 「未知类型」全部丢弃（真机实测：绑定成功但一帧都发不出）。
-	 */
+	/** 收一帧跟会话结果：内容帧直接发布，批准 / 问卷帧交给独立订阅者。 */
 	private receive(raw: unknown): void {
-		for (const event of unwrapFollowFrame(raw)) {
-			this.pending.push(event);
-		}
-		if (this.pending.length === 0) {
+		if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) {
 			return;
 		}
-		if (this.flushScheduled) {
+		const notice = projectDshIdeWaterfallNotice(raw);
+		if (notice !== undefined) {
+			for (const listener of [...this._waterfall]) {
+				listener(notice);
+			}
 			return;
 		}
-		this.flushScheduled = true;
-		queueMicrotask(() => {
-			this.flushScheduled = false;
-			const batch = this.pending;
-			this.pending = [];
-			if (this.projector === undefined) {
-				return;
-			}
-			let applied = 0;
-			batch.forEach((event, index) => {
-				const translated = translateDshEvent(event, index);
-				if (translated === undefined) {
-					return;
-				}
-				this.projector!.apply(translated);
-				applied += 1;
-			});
-			if (applied > 0) {
-				this.publish(false);
-			}
-		});
+		if ((raw as Record<string, unknown>)['type'] === 'waterfall') {
+			// 形状不合的批准 / 问卷帧丢弃，不能混进会话内容流。
+			return;
+		}
+		this.publish({ frame: raw as Record<string, unknown> });
 	}
 
-	private publish(forceFull: boolean): void {
-		if (this.channelId === undefined || this.projector === undefined) {
-			return;
-		}
-		const view = this.projector.snapshot();
-		if (!forceFull && this.last !== undefined && this.last.state.state === 'ready' && this.last.state.view !== undefined && this.last.state.view.version === view.version) {
-			// 没有新投影版本时不制造空帧，保证消费者看到的 version 严格 +1。
+	private publish(view: DshIdeViewSnapshot): void {
+		if (this.channelId === undefined) {
 			return;
 		}
 		this.version += 1;
@@ -181,98 +184,6 @@ export class DshIdeViewService extends Disposable implements IdeViewHost {
 
 	/** 当前绑定会话（Host 侧归属校验用；未打开时为 undefined）。 */
 	get boundSessionId(): string | undefined {
-		return this.sessionId;
+		return this._boundSessionId ?? this.sessionId;
 	}
-}
-
-/**
- * 把 `session/follow` 的帧解包成一条或多条可交给 translator 的事件。
- *
- * 不认识的形状返回空数组（丢弃，不猜）。
- *
- * 瞬时流帧（`assistant-stream`）在这里就**归一成 translator 认的中立形状**，而不是只把文本
- * 拽出来：线上帧没有会话 `seq`（它不进日志），也带着 attempt 身份与 revision。丢掉这两项会让
- * 「每个批次重新编号」的增量互相吞掉、并让流式文本与结算文本重复出现——实测两者都发生过。
- *
- * 依据 `E:/deepseek-harness-0.2.2-rc.1`：`SessionFollowFrame` 的 `assistant-stream` 分支为
- * `{ type:'assistant-stream', frame: AssistantStreamFrame }`，
- * `AssistantStreamFrame` = `{ type:'start', attemptId, revision, turn, step }`
- * | `{ type:'chunk', attemptId, revision, index, time, chunk }`
- * | `{ type:'end', attemptId, revision, index, outcome }`
- * （`packages/api/session-controller/src/types.ts`、`packages/llm/assistant-stream`）。
- */
-export function unwrapFollowFrame(raw: unknown): readonly unknown[] {
-	if (typeof raw !== 'object' || raw === null) {
-		return [];
-	}
-	const frame = raw as Record<string, unknown>;
-	const type = frame['type'];
-	if (type === 'snapshot') {
-		const records = frame['records'];
-		if (!Array.isArray(records)) {
-			return [];
-		}
-		const events: unknown[] = [];
-		for (const record of records) {
-			if (typeof record !== 'object' || record === null) {
-				continue;
-			}
-			const entry = record as Record<string, unknown>;
-			// SessionEventEntry = { type:'event', event: SessionWireEvent }
-			const event = entry['type'] === 'event' ? entry['event'] : entry;
-			if (event !== undefined) {
-				events.push(event);
-			}
-		}
-		return events;
-	}
-	if (type === 'event') {
-		const event = frame['event'];
-		return event === undefined ? [] : [event];
-	}
-	if (type === 'assistant-stream') {
-		const inner = frame['frame'];
-		if (typeof inner !== 'object' || inner === null) {
-			return [];
-		}
-		const streamFrame = inner as Record<string, unknown>;
-		const attemptId = streamFrame['attemptId'];
-		const revision = streamFrame['revision'];
-		if (typeof attemptId !== 'string' || attemptId === '' || typeof revision !== 'number' || !Number.isSafeInteger(revision)) {
-			// 没有 attempt 身份就无法做幂等与归并：明确丢弃，不猜一个伪造的身份。
-			return [];
-		}
-		const identity = { attemptId, streamRevision: revision };
-		const turn = typeof streamFrame['turn'] === 'number' ? streamFrame['turn'] : undefined;
-		const step = typeof streamFrame['step'] === 'number' ? streamFrame['step'] : undefined;
-		if (streamFrame['type'] === 'start') {
-			return [{ type: 'assistant.attempt.start', ...identity, ...(turn === undefined ? {} : { turn }), ...(step === undefined ? {} : { step }) }];
-		}
-		if (streamFrame['type'] === 'end') {
-			// 结局必须带出去：失败 / 取消 / 结算为 `assistant/attempt` 的尝试没有可见消息，
-			// 它的临时行必须由投影器丢弃（与 dsh-TUI `translateFrame` 的 discarded 判定一致）。
-			const rawOutcome = streamFrame['outcome'];
-			const discarded = typeof rawOutcome === 'object' && rawOutcome !== null
-				&& ((rawOutcome as Record<string, unknown>)['kind'] === 'abandoned'
-					|| (rawOutcome as Record<string, unknown>)['eventType'] === 'assistant/attempt');
-			return [{ type: 'assistant.attempt.end', ...identity, ...(turn === undefined ? {} : { turn }), ...(step === undefined ? {} : { step }), outcome: discarded ? 'abandoned' : 'committed' }];
-		}
-		const chunk = streamFrame['chunk'];
-		if (typeof chunk !== 'object' || chunk === null) {
-			return [];
-		}
-		const text = (chunk as Record<string, unknown>)['text'];
-		if (typeof text !== 'string') {
-			return [];
-		}
-		// `chunk.type` 只区分 text-delta 与 reasoning 增量；当前投影器只呈现正文，
-		// 非文本增量明确丢弃（不把思考文本混进回答行）。
-		const chunkType = (chunk as Record<string, unknown>)['type'];
-		if (chunkType !== undefined && chunkType !== 'text-delta') {
-			return [];
-		}
-		return [{ type: 'assistant.delta', ...identity, ...(turn === undefined ? {} : { turn }), ...(step === undefined ? {} : { step }), text }];
-	}
-	// waterfall / ready / cancel 等不属于会话内容，交回调用方（当前视图不消费）。
-	return [];
 }

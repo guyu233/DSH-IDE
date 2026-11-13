@@ -3,7 +3,7 @@
  *
  * This is a SIDECAR THEME BRIDGE, not a copy of DSH's theme package: DSH's
  * real token sheet lives in dsh-client-ui-primitives (127 files, deliberately
- * excluded — see docs/DEVELOPMENT.md 第 1 章 §3). The copied ui-chat CSS
+ * excluded — see 本仓库架构说明). The copied ui-chat CSS
  * only reads custom properties, so mapping them here keeps the ORIGINAL CSS
  * byte-for-byte while making it render with the surrounding VS Code theme.
  *

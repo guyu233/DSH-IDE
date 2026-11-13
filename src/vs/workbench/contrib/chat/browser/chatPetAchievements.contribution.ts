@@ -51,7 +51,7 @@ registerAction2(class extends Action2 {
 		super({
 			id: CHAT_PET_OPEN_ACHIEVEMENTS_COMMAND_ID,
 			title: localize2('chatPet.achievements.open', "Open Achievements"),
-			precondition: ContextKeyExpr.and(ChatContextKeys.enabled, ChatPetContextKeys.enabled),
+			precondition: ContextKeyExpr.and(ChatPetContextKeys.enabled),
 		});
 
 		registerAction2(class extends Action2 {
@@ -60,7 +60,7 @@ registerAction2(class extends Action2 {
 					id: 'chat.pet.developer.unlockAllAchievements',
 					title: localize2('chatPet.achievements.developer.unlockAll', "Unlock All Pet Achievements"),
 					category: Categories.Developer,
-					precondition: ContextKeyExpr.and(ChatContextKeys.enabled, ChatPetContextKeys.enabled),
+					precondition: ContextKeyExpr.and(ChatPetContextKeys.enabled),
 					f1: true,
 				});
 			}
@@ -80,7 +80,6 @@ registerAction2(class extends Action2 {
 					id: 'chat.pet.developer.resetAchievements',
 					title: localize2('chatPet.achievements.developer.reset', "Reset Pet Achievements"),
 					category: Categories.Developer,
-					precondition: ChatContextKeys.enabled,
 					f1: true,
 				});
 			}
@@ -107,7 +106,6 @@ registerAction2(class extends Action2 {
 			id: 'chat.pet.developer.resetSize',
 			title: localize2('chatPet.developer.resetSize', "Reset Pet Size"),
 			category: Categories.Developer,
-			precondition: ChatContextKeys.enabled,
 			f1: true,
 		});
 	}
@@ -141,7 +139,7 @@ registerAction2(class extends Action2 {
 		super({
 			id: CHAT_PET_BLOBBY_COMMAND_ID,
 			title: localize2('chatPet.blobby', "Customize Blobby"),
-			precondition: ContextKeyExpr.and(ChatContextKeys.enabled, ChatContextKeys.Setup.hidden.negate()),
+			precondition: ContextKeyExpr.and(ChatContextKeys.Setup.hidden.negate()),
 		});
 	}
 
@@ -166,7 +164,7 @@ registerAction2(class extends Action2 {
 		super({
 			id: CHAT_PET_CHANGE_COLOR_COMMAND_ID,
 			title: localize2('chatPet.changeColor', "Change Blobby's Color"),
-			precondition: ContextKeyExpr.and(ChatContextKeys.enabled, ChatContextKeys.Setup.hidden.negate(), ChatPetContextKeys.enabled),
+			precondition: ContextKeyExpr.and(ChatContextKeys.Setup.hidden.negate(), ChatPetContextKeys.enabled),
 			f1: true,
 		});
 	}

@@ -53,7 +53,7 @@ class CheckForPluginUpdatesCommand extends Action2 {
 			title: localize2('agentPlugins.checkForUpdates', "Update Plugins"),
 			category: localize2('chat.category', "Chat"),
 			icon: Codicon.refresh,
-			precondition: ContextKeyExpr.and(ChatContextKeys.enabled, UpdatingAgentPluginsContext.negate()),
+			precondition: ContextKeyExpr.and(UpdatingAgentPluginsContext.negate()),
 			f1: true,
 			menu: [{
 				id: MenuId.ViewTitle,
@@ -85,7 +85,7 @@ class ForceUpdatePluginsCommand extends Action2 {
 			title: localize2('agentPlugins.forceUpdate', "Update Plugins (Force)"),
 			category: localize2('chat.category', "Chat"),
 			icon: Codicon.refresh,
-			precondition: ContextKeyExpr.and(ChatContextKeys.enabled, UpdatingAgentPluginsContext.negate()),
+			precondition: ContextKeyExpr.and(UpdatingAgentPluginsContext.negate()),
 			f1: true,
 		});
 	}

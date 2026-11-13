@@ -74,7 +74,7 @@ suite('OpenDelegationPickerAction', () => {
 	}
 
 	const context = {
-		[ChatContextKeys.enabled.key]: true,
+		'chatIsEnabled': true,
 		[ChatContextKeys.location.key]: ChatAgentLocation.Chat,
 		[ChatContextKeys.chatSessionIsEmpty.key]: false,
 		[ChatContextKeys.chatSessionSupportsDelegation.key]: false,
@@ -155,7 +155,7 @@ suite('OpenDelegationPickerAction', () => {
 			[AGENT_HOST_EXISTING_SESSION_HARNESS_PICKER_ENABLED_CONTEXT_KEY.key]: true,
 		};
 		assert.deepStrictEqual({
-			aiDisabled: getState({ ...values, [ChatContextKeys.enabled.key]: false }).visible,
+			aiDisabled: getState({ ...values, 'chatIsEnabled': false }).visible,
 			quickChat: getState({ ...values, [ChatContextKeys.inQuickChat.key]: true }).visible,
 			editorInline: getState({ ...values, [ChatContextKeys.location.key]: ChatAgentLocation.EditorInline }).visible,
 			emptySession: getState({ ...values, [ChatContextKeys.chatSessionIsEmpty.key]: true }).visible,

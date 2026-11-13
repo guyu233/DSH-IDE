@@ -13,7 +13,6 @@ import { InstantiationType, registerSingleton } from '../../../../../platform/in
 import { createDecorator } from '../../../../../platform/instantiation/common/instantiation.js';
 import { IStorageService, StorageScope, StorageTarget } from '../../../../../platform/storage/common/storage.js';
 import { AgentsVoiceSettingId, AGENTS_VOICE_ENTITLED } from '../../../agentsVoice/common/agentsVoice.js';
-import { ChatContextKeys } from '../../common/actions/chatContextKeys.js';
 import { DictationSettingId, IChatSpeechToTextService } from '../speechToText/chatSpeechToTextService.js';
 
 /**
@@ -141,7 +140,7 @@ export class VoiceInputModeService extends Disposable implements IVoiceInputMode
 		this.voiceAvailable = observableFromEvent(this,
 			Event.any(configurationService.onDidChangeConfiguration, contextKeyService.onDidChangeContext),
 			() => configurationService.getValue<boolean>('agents.voice.enabled') === true
-				&& ChatContextKeys.enabled.getValue(contextKeyService) === true
+				&& true
 				&& AGENTS_VOICE_ENTITLED.evaluate({ getValue: key => contextKeyService.getContextKeyValue(key) })
 				&& configurationService.getValue<boolean>(AgentsVoiceSettingId.ShowButton) !== false);
 

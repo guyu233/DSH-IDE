@@ -53,14 +53,12 @@ class AbstractNewPromptFileAction extends Action2 {
 			id,
 			title,
 			f1: false,
-			precondition: ChatContextKeys.enabled,
 			category: CHAT_CATEGORY,
 			keybinding: {
 				weight: KeybindingWeight.WorkbenchContrib
 			},
 			menu: {
 				id: MenuId.CommandPalette,
-				when: ChatContextKeys.enabled
 			}
 		});
 	}
@@ -282,14 +280,12 @@ class NewSkillFileAction extends Action2 {
 			id: NEW_SKILL_COMMAND_ID,
 			title: localize('commands.new.skill.local.title', "New Skill File..."),
 			f1: false,
-			precondition: ChatContextKeys.enabled,
 			category: CHAT_CATEGORY,
 			keybinding: {
 				weight: KeybindingWeight.WorkbenchContrib
 			},
 			menu: {
 				id: MenuId.CommandPalette,
-				when: ChatContextKeys.enabled
 			}
 		});
 	}
@@ -375,7 +371,6 @@ class NewUntitledPromptFileAction extends Action2 {
 			id: 'workbench.command.new.untitled.prompt',
 			title: localize2('commands.new.untitled.prompt.title', "New Untitled Prompt File"),
 			f1: true,
-			precondition: ChatContextKeys.enabled,
 			category: CHAT_CATEGORY,
 			keybinding: {
 				weight: KeybindingWeight.WorkbenchContrib

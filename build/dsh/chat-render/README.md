@@ -3,7 +3,7 @@
 给 **Lead** 直接接 `vscode-1.143.1/src/vs/workbench/contrib/chat/browser/chatListRenderer.ts` 的接入契约。
 本目录是「**单接缝**改 VS Code 现有聊天侧栏 + **按源码颗粒度**复用 DSH `ui-chat` 渲染件 + **只带一份 React**」的渲染资产与旁挂编译阶段；**不是**搬整套 DSH React/Cordis/插件图/boot/`__DSH_BOOT__`，**不是**另建独立壳/接待层。
 
-权威依据：`docs/DEVELOPMENT.md` 第 1 章 §3 / §6；`AGENTS.md`（资源与代码复用优先）。
+权威依据：`AGENTS.md`；`AGENTS.md`（资源与代码复用优先）。
 来源、版本、逐文件 sha256、MIT 许可见 [`PROVENANCE.md`](./PROVENANCE.md) 与 [`LICENSE-DSH`](./LICENSE-DSH)。
 
 ---

@@ -1,5 +1,5 @@
 // src/vs/platform/dshClient/host/electron-home.js
-// DSH-IDE「Electron 主页」物化（术语见 README §2，承载裁定见 docs/DEVELOPMENT.md §0 R1 修订）。
+// DSH-IDE「Electron 主页」物化。
 //
 // 为什么需要它：Electron 按**自身所在目录**解析 `resources`；直接运行 DSH 安装目录的 exe
 // 只会加载 DSH 自己的 `resources/app.asar`。因此把 DSH 的 Electron 以硬链接（文件）/

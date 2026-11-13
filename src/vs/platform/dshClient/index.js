@@ -3,12 +3,9 @@
 //
 // 两个职责：
 //   1. 注册官方 @Remote IDE 扩展服务（`ctx.remote.ide.*`，命名空间 `ide`）；
-//   2. 创建 DSH-IDE Host 半身桥接 `DshIdeHostBridge`，在插件上下文上订阅
-//      `session/event` / `agent/assistant-stream` / `approval/request` / `user-questions/request`
-//      并注册唯一的交互式 answerer（第 4 章 T3）。
-//
-// 传输端口（IDE 主进程 ↔ Host 半身）由 P5 真机接线注入；未接线时桥接不伪造事件，
-// answerer 一律 `next()` 委托给 DSH 自己的 answerer。
+//   2. 创建 DSH-IDE Host 半身桥接 `DshIdeHostBridge`，把它交给 IDE 服务：
+//      会话内容只由桥接调用一次 `sessionController.follow` 得到，窗口不再自己开流。
+//      批准与问卷也由桥接接住，IDE 与桌面都能答，先到的生效。
 
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -57,8 +54,16 @@ export function apply(ctx, config = {}) {
 	ctx.inject(REQUIRED_SERVICES, bridgeCtx => {
 		try {
 			const bridge = createDshIdeHostBridge(bridgeCtx, config && config.transport ? { transport: config.transport } : {});
-			bridge.follow(undefined, () => undefined);
-			bridgeCtx.effect(() => () => bridge.close(), 'dsh-ide.host-bridge');
+			const ide = typeof bridgeCtx.get === 'function' ? bridgeCtx.get('ide') : undefined;
+			if (ide !== undefined && ide !== null && typeof ide.attachBridge === 'function') {
+				ide.attachBridge(bridge);
+			}
+			bridgeCtx.effect(() => () => {
+				if (ide !== undefined && ide !== null && typeof ide.attachBridge === 'function') {
+					ide.attachBridge(undefined);
+				}
+				bridge.close();
+			}, 'dsh-ide.host-bridge');
 			console.log('[dsh-ide] host bridge attached');
 		} catch (error) {
 			console.warn(`[dsh-ide] host bridge is not available: ${error && error.message ? error.message : String(error)}`);

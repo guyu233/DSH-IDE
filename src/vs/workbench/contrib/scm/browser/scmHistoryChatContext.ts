@@ -261,7 +261,6 @@ registerAction2(class extends Action2 {
 				id: MenuId.SCMHistoryItemContext,
 				group: 'z_chat',
 				order: 1,
-				when: ChatContextKeys.enabled
 			}
 		});
 	}
@@ -287,7 +286,6 @@ registerAction2(class extends Action2 {
 				id: MenuId.SCMHistoryItemContext,
 				group: 'z_chat',
 				order: 2,
-				when: ChatContextKeys.enabled
 			}
 		});
 	}
@@ -314,7 +312,6 @@ registerAction2(class extends Action2 {
 				id: MenuId.SCMHistoryItemChangeContext,
 				group: 'z_chat',
 				order: 1,
-				when: ChatContextKeys.enabled
 			}
 		});
 	}

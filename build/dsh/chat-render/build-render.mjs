@@ -7,7 +7,7 @@
  * `src/vs/workbench/contrib/dsh/browser/dshChatSeam.ts` (called from
  * `chatListRenderer.ts`). Upstream `src/tsconfig.json` has no `jsx`,
  * includes only `*.ts`, and lacks @types/react — that is exactly why this
- * sidecar stage exists (docs/DEVELOPMENT.md 第 1 章 §3 能力域与数据流分层).
+ * sidecar stage exists (本仓库架构说明).
  *
  * React/ReactDOM are aliased to the ONE installed copy at
  *   ../node_modules/{react,react-dom}  (18.3.1, MIT)

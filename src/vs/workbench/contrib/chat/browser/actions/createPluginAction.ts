@@ -116,7 +116,6 @@ class CreatePluginAction extends Action2 {
 			title: localize2('chat.createPlugin', "Create Plugin"),
 			category: CHAT_CATEGORY,
 			f1: true,
-			precondition: ChatContextKeys.enabled,
 			icon: Codicon.save,
 			menu: [{
 				id: MenuId.ViewTitle,

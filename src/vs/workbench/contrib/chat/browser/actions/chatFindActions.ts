@@ -58,7 +58,7 @@ export function registerChatFindActions(): void {
 				title: localize2('chat.find', "Find in Chat"),
 				category: CHAT_CATEGORY,
 				f1: true,
-				precondition: ContextKeyExpr.and(ChatContextKeys.enabled, ChatContextKeys.findSupported),
+				precondition: ContextKeyExpr.and(ChatContextKeys.findSupported),
 				keybinding: {
 					when: ContextKeyExpr.and(ChatContextKeys.findSupported, ChatContextKeys.inChatSession, EditorContextKeys.focus.toNegated()),
 					primary: KeyMod.CtrlCmd | KeyCode.KeyF,

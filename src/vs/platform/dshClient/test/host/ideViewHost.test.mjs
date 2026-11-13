@@ -71,6 +71,7 @@ function sessionControllerStub(overrides = {}) {
 		state: async request => { calls.push({ name: 'state', request }); return { running: false }; },
 		selectModel: record('selectModel'),
 		projections: record('projections'),
+		async *follow() {},
 		...overrides,
 	};
 }
@@ -107,38 +108,92 @@ test('open reuses the channel id and binds the requested session', () => {
 	assert.equal(again.sessionId, 's-1', 'repeated open keeps the original binding');
 });
 
-test('follow subscribes all four official sources and filters by session', () => {
-	const { ctx, bridge } = bridgeWith();
-	const seen = [];
-	bridge.follow('s-1', event => seen.push(event));
-	assert.equal(ctx.count('session/event'), 1);
-	assert.equal(ctx.count('agent/assistant-stream'), 1);
-	assert.equal(ctx.count('approval/request'), 1);
-	assert.equal(ctx.count('user-questions/request'), 1);
-
-	ctx.emit('session/event', { id: 's-1' }, { type: 'user.message', seq: 1 });
-	ctx.emit('session/event', { id: 's-2' }, { type: 'user.message', seq: 2 });
-	assert.deepEqual(seen.map(event => event.seq), [1], 'other sessions must not leak into this view');
+test('follow calls sessionController.follow once per session and fans the same frames out', async () => {
+	const requests = [];
+	let push = () => undefined;
+	const queue = [];
+	const { bridge } = bridgeWith({
+		sessionController: {
+			...sessionControllerStub(),
+			follow(request, signal) {
+				requests.push(request);
+				return (async function* () {
+					while (signal.aborted !== true) {
+						const frame = await new Promise(resolve => { push = resolve; });
+						if (frame === undefined || signal.aborted === true) {
+							return;
+						}
+						yield frame;
+					}
+				})();
+			},
+		},
+	});
+	const first = [];
+	const second = [];
+	const a = bridge.follow('s-1', frame => first.push(frame));
+	const b = bridge.follow('s-1', frame => second.push(frame));
+	assert.equal(requests.length, 1, 'one session is one follow');
+	assert.deepEqual(requests[0], { address: { kind: 'session', sessionId: 's-1' }, assistantStream: true });
+	push({ type: 'event', event: { type: 'user/message', seq: 1 } });
+	await new Promise(resolve => setImmediate(resolve));
+	assert.equal(first.length, 1);
+	assert.equal(second.length, 1);
+	assert.equal(first[0].event.seq, 1);
+	a.dispose();
+	b.dispose();
+	void queue;
 });
 
-test('follow forwards assistant-stream text deltas only', () => {
-	const { ctx, bridge } = bridgeWith();
-	const seen = [];
-	bridge.follow('s-1', event => seen.push(event));
-	ctx.emit('agent/assistant-stream', { agent: { session: { id: 's-1' } }, frame: { type: 'chunk', chunk: { type: 'text-delta', text: 'hi' } } });
-	ctx.emit('agent/assistant-stream', { agent: { session: { id: 's-1' } }, frame: { type: 'start' } });
-	ctx.emit('agent/assistant-stream', { agent: { session: { id: 's-2' } }, frame: { type: 'chunk', chunk: { type: 'text-delta', text: 'no' } } });
-	assert.deepEqual(seen, [{ type: 'assistant.delta', text: 'hi' }]);
-});
-
-test('dispose only removes this view subscriptions', () => {
-	const { ctx, bridge } = bridgeWith();
-	const handle = bridge.follow('s-1', () => undefined);
-	assert.equal(ctx.count('session/event'), 1);
+test('follow without a session address does not call sessionController.follow', () => {
+	let calls = 0;
+	const { bridge } = bridgeWith({
+		sessionController: { ...sessionControllerStub(), follow() { calls += 1; return (async function* () {})(); } },
+	});
+	const handle = bridge.follow(undefined, () => undefined);
 	handle.dispose();
-	for (const name of ['session/event', 'agent/assistant-stream', 'approval/request', 'user-questions/request']) {
-		assert.equal(ctx.count(name), 0, `${name} listener must be released`);
-	}
+	assert.equal(calls, 0);
+});
+
+test('dispose of the last listener stops that session follow', () => {
+	let aborted = false;
+	const { bridge } = bridgeWith({
+		sessionController: {
+			...sessionControllerStub(),
+			follow(_request, signal) {
+				signal.addEventListener('abort', () => { aborted = true; });
+				return (async function* () { await new Promise(() => undefined); })();
+			},
+		},
+	});
+	const handle = bridge.follow('s-1', () => undefined);
+	assert.equal(aborted, false);
+	handle.dispose();
+	assert.equal(aborted, true);
+});
+
+test('followSession delivers frames until aborted and then returns', async () => {
+	const { bridge } = bridgeWith({
+		sessionController: {
+			...sessionControllerStub(),
+			follow() { return (async function* () { await new Promise(() => undefined); })(); },
+		},
+	});
+	const abort = new AbortController();
+	const seen = [];
+	const reading = (async () => {
+		for await (const frame of bridge.followSession('s-1', abort.signal)) {
+			seen.push(frame);
+		}
+	})();
+	// 流在等待时也必须能被 abort 唤醒，否则关窗会挂住。
+	await new Promise(resolve => setImmediate(resolve));
+	abort.abort();
+	await Promise.race([
+		reading,
+		new Promise((_resolve, reject) => setTimeout(() => reject(new Error('abort did not wake the stream')), 1000)),
+	]);
+	assert.deepEqual(seen, []);
 });
 
 test('answerer delegates with next() when no transport is wired', async () => {
@@ -165,7 +220,7 @@ test('answerer waits for the UI decision when transport is wired', async () => {
 	const promise = handler({ requestId: 'r2', toolName: 'bash', reason: 'needs write' }, () => { delegated += 1; });
 	await tick();
 
-	assert.equal(delegated, 0, 'the UI answerer must be the one that resolves');
+	assert.equal(delegated, 1, 'desktop is offered the same request');
 	assert.deepEqual(posts.at(-1), { type: 'request', kind: 'approval', requestId: 'r2', request: { toolName: 'bash', reason: 'needs write' } });
 	assert.deepEqual(await bridge.invoke('answerApproval', { requestId: 'r2', decision: 'approve' }), { accepted: true });
 	assert.equal(await promise, 'allowed-once');
@@ -1063,4 +1118,50 @@ test('cancelRequest settles the request as cancelled and blocks a later decision
 		() => bridge.invoke('cancelRequest', { requestId: 'nope' }),
 		error => error.code === ALREADY_RESOLVED,
 	);
+});
+
+test('composerState keeps only the fields the input bar renders', async () => {
+	const controller = sessionControllerStub({
+		projections: async () => ({ values: {
+			modelSelection: { next: { provider: 'xai', model: 'grok-4.7', reasoningEffort: 'xhigh' }, lastUsed: { provider: 'xai' } },
+			permissions: { currentValue: 'workspace-write' },
+			agentTeam: { enabled: true, tasks: [{ id: 'hidden' }] },
+			agentPreset: 'create',
+		} }),
+		modelCatalog: async () => ({ groups: [{
+			id: 'xai',
+			name: 'xAI',
+			models: [{ id: 'grok-4.7', name: 'grok-4.7', reasoning: { efforts: [{ id: 'xhigh', name: 'Xhigh' }], defaultEffort: 'xhigh' }, badge: 'secret' }],
+		}] }),
+	});
+	const { bridge } = bridgeWith({
+		sessionController: controller,
+		permissionPresets: { catalog: () => ({ options: [{ value: 'workspace-write', name: '工作区写入' }, { value: 'custom', name: '自定义' }] }) },
+		agentPresets: { list: async () => [{ id: 'create', name: '创造模式' }, { id: 'bad', name: '坏的', broken: 'no' }] },
+	});
+	bridge.open({ view: 'chat', params: { sessionId: 's-1' } });
+	assert.deepEqual(await bridge.invoke('composerState', {}), {
+		model: {
+			current: { provider: 'xai', model: 'grok-4.7', effort: 'xhigh' },
+			groups: [{ id: 'xai', name: 'xAI', models: [{ id: 'grok-4.7', name: 'grok-4.7', efforts: [{ id: 'xhigh', name: 'Xhigh' }], defaultEffort: 'xhigh' }] }],
+		},
+		permission: { current: 'workspace-write', options: [{ value: 'workspace-write', name: '工作区写入' }] },
+		team: { enabled: true, confirmDisable: true },
+		preset: { current: 'create', options: [{ id: 'create', name: '创造模式' }] },
+	});
+});
+
+test('setTeamEnabled and setAgentPreset call the official services on the live agent', async () => {
+	const agent = { id: 's-1' };
+	const calls = [];
+	const { bridge } = bridgeWith({
+		agents: { get: id => id === 's-1' ? agent : undefined },
+		agentTeams: { setEnabled: async (who, enabled) => { calls.push(['team', who, enabled]); } },
+		agentPresets: { select: async (who, preset) => { calls.push(['preset', who, preset]); return preset; } },
+	});
+	bridge.open({ view: 'chat', params: { sessionId: 's-1' } });
+	assert.deepEqual(await bridge.invoke('setTeamEnabled', { enabled: true }), { accepted: true });
+	assert.deepEqual(await bridge.invoke('setAgentPreset', { preset: 'create' }), { accepted: true });
+	assert.deepEqual(calls, [['team', agent, true], ['preset', agent, 'create']]);
+	await assert.rejects(() => bridge.invoke('setAgentPreset', { preset: 'has space' }), error => error.code === INVALID_ARGUMENT);
 });

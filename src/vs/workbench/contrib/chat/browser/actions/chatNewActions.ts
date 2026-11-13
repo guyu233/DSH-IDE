@@ -72,7 +72,7 @@ export class NewChatAction extends Action2 {
 			title: localize2('chat.newEdits.label', "New Chat"),
 			category: CHAT_CATEGORY,
 			icon: Codicon.plus,
-			precondition: ContextKeyExpr.and(ChatContextKeys.enabled, ChatContextKeys.location.isEqualTo(ChatAgentLocation.Chat)),
+			precondition: ContextKeyExpr.and(ChatContextKeys.location.isEqualTo(ChatAgentLocation.Chat)),
 			f1: true,
 			menu: [
 				{
@@ -133,7 +133,6 @@ export function registerNewChatActions() {
 				title: localize2('chat.newChat.label', "New Chat"),
 				icon: Codicon.plus,
 				f1: false,
-				precondition: ChatContextKeys.enabled,
 			});
 		}
 		async run(accessor: ServicesAccessor, ...args: unknown[]) {
@@ -157,7 +156,7 @@ export function registerNewChatActions() {
 					title: localize2('chat.newEdits.label', "New Chat"),
 					category: CHAT_CATEGORY,
 					icon: variant.icon,
-					precondition: ContextKeyExpr.and(ChatContextKeys.enabled, ChatContextKeys.location.isEqualTo(ChatAgentLocation.Chat)),
+					precondition: ContextKeyExpr.and(ChatContextKeys.location.isEqualTo(ChatAgentLocation.Chat)),
 					f1: false,
 					menu: [{
 						id: MenuId.ChatNewMenu,
@@ -185,7 +184,7 @@ export function registerNewChatActions() {
 				title: localize2('chat.newLocalChat.label', "New Local Chat"),
 				category: CHAT_CATEGORY,
 				icon: Codicon.plus,
-				precondition: ContextKeyExpr.and(ChatContextKeys.enabled, ChatContextKeys.location.isEqualTo(ChatAgentLocation.Chat)),
+				precondition: ContextKeyExpr.and(ChatContextKeys.location.isEqualTo(ChatAgentLocation.Chat)),
 				f1: false,
 			});
 		}
@@ -228,7 +227,6 @@ export function registerNewChatActions() {
 			id: ACTION_ID_NEW_CHAT,
 			title: localize2('chat.newEdits.label', "New Chat"),
 		},
-		when: ChatContextKeys.enabled,
 		group: 'b_new',
 		order: -1,
 	});
@@ -240,7 +238,7 @@ export function registerNewChatActions() {
 				title: localize2('chat.undoEdit.label', "Undo Last Edit"),
 				category: CHAT_CATEGORY,
 				icon: Codicon.discard,
-				precondition: ContextKeyExpr.and(ChatContextKeys.chatEditingCanUndo, ChatContextKeys.enabled),
+				precondition: ContextKeyExpr.and(ChatContextKeys.chatEditingCanUndo),
 				f1: true,
 				menu: [{
 					id: MenuId.ViewTitle,
@@ -264,7 +262,7 @@ export function registerNewChatActions() {
 				title: localize2('chat.redoEdit.label', "Redo Last Edit"),
 				category: CHAT_CATEGORY,
 				icon: Codicon.redo,
-				precondition: ContextKeyExpr.and(ChatContextKeys.chatEditingCanRedo, ChatContextKeys.enabled),
+				precondition: ContextKeyExpr.and(ChatContextKeys.chatEditingCanRedo),
 				f1: true,
 				menu: [
 					{
@@ -292,7 +290,7 @@ export function registerNewChatActions() {
 				title: localize2('chat.redoEdit.label2', "Redo"),
 				tooltip: localize2('chat.redoEdit.tooltip', "Reapply discarded workspace changes and chat"),
 				category: CHAT_CATEGORY,
-				precondition: ContextKeyExpr.and(ChatContextKeys.chatEditingCanRedo, ChatContextKeys.enabled),
+				precondition: ContextKeyExpr.and(ChatContextKeys.chatEditingCanRedo),
 				f1: true,
 				menu: [{
 					id: MenuId.ChatMessageRestoreCheckpoint,

@@ -9,7 +9,7 @@ import { ChatContextKeys } from '../../common/actions/chatContextKeys.js';
 
 const VoiceModeButtonShown = ContextKeyExpr.notEquals('config.agents.voice.showButton', false);
 /** Mirrors `ChatSpeechToTextConfigured` (built-in on-device dictation available). */
-const DictationConfigured = ContextKeyExpr.and(ChatContextKeys.enabled, ContextKeyExpr.has(ChatContextKeys.speechToTextConfigured.key))!;
+const DictationConfigured = ContextKeyExpr.and(ContextKeyExpr.has(ChatContextKeys.speechToTextConfigured.key))!;
 const DictationButtonShown = ContextKeyExpr.notEquals('config.dictation.showButton', false);
 const VisibleVoiceMode = ContextKeyExpr.and(AGENTS_VOICE_ENABLED, VoiceModeButtonShown)!;
 const VisibleDictation = ContextKeyExpr.and(DictationConfigured, DictationButtonShown)!;

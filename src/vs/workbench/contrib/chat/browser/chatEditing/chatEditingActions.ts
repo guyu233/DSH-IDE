@@ -864,7 +864,7 @@ export class ViewPreviousEditsAction extends EditingSessionAction {
 			tooltip: ViewPreviousEditsAction.Label,
 			f1: true,
 			icon: Codicon.diffMultiple,
-			precondition: ContextKeyExpr.and(ChatContextKeys.enabled, hasUndecidedChatEditingResourceContextKey.negate()),
+			precondition: ContextKeyExpr.and(hasUndecidedChatEditingResourceContextKey.negate()),
 			menu: [
 				{
 					id: MenuId.ChatEditingWidgetToolbar,

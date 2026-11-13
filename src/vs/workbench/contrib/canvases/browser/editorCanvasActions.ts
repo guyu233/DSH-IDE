@@ -14,7 +14,6 @@ import { CommandsRegistry } from '../../../../platform/commands/common/commands.
 import { ILogService } from '../../../../platform/log/common/log.js';
 import { INotificationService } from '../../../../platform/notification/common/notification.js';
 import { ChatViewId, IChatWidget, IChatWidgetService, isIChatViewViewContext } from '../../chat/browser/chat.js';
-import { ChatContextKeys } from '../../chat/common/actions/chatContextKeys.js';
 import { canvasOwnerKey, getCanvasDefinitionInstanceId, getCanvasDefinitionLabels, getCanvasInstanceLabels, getCanvasReferenceKey, ICanvasContext, ICanvasDefinition, ICanvasOwner, ICanvasReference, ICanvasService, isCanvasOwner } from '../common/canvas.js';
 import { CanvasDefinitionStore } from '../common/canvasDefinitionStore.js';
 
@@ -52,11 +51,9 @@ class CanvasMenuActionRegistration extends Disposable {
 				id: this.commandId,
 				title,
 				icon: Codicon.preview,
-				precondition: ChatContextKeys.enabled,
 			},
 			group,
 			order,
-			when: ChatContextKeys.enabled,
 		});
 	}
 }
@@ -161,7 +158,6 @@ export function registerEditorCanvasActions(
 				icon: Codicon.preview,
 				group: 'z_canvas',
 				order: 1,
-				when: ChatContextKeys.enabled,
 			})
 			: undefined;
 	}));

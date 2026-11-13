@@ -33,6 +33,7 @@ import { IChatEditorOptions } from './widgetHosts/editor/chatEditor.js';
 import { ChatInputPart } from './widget/input/chatInputPart.js';
 import { IChatWidgetContrib } from './widget/chatWidget.js';
 import { ICodeBlockActionContext, ICodeBlockRenderOptions } from './widget/chatContentParts/codeBlockPart.js';
+import type { IDshComposerSource } from '../../dsh/browser/dshComposerSource.js';
 import { AgentSessionTarget } from './agentSessions/agentSessions.js';
 
 export { ChatOutline } from './chatOutline.js';
@@ -340,6 +341,12 @@ export interface IChatWidgetViewOptions {
 	 * the user wants to send a request to a specific workspace.
 	 */
 	workspacePickerDelegate?: IWorkspacePickerDelegate;
+
+	/**
+	 * DSH 集成：模型 / 模式 / 权限三个选择器的数据源。给出时选择器读 DSH 的
+	 * 会话目录与预设，而不是 VS Code 自带的模型表、模式表和权限三档。
+	 */
+	dshComposer?: IDshComposerSource;
 
 	/**
 	 * Optional handler for chat submission.

@@ -23,15 +23,14 @@ import {
 	validateDshIdeSnapshot,
 	type DshIdeMethod,
 	type DshIdeSnapshot,
+	type DshIdeWaterfallNotice,
 } from '../../../src/vs/platform/dshClient/common/dshIdeProtocol.ts';
-import {
-	unwrapFollowFrame,
-} from '../../../out/vs/platform/dshClient/electron-main/ide-view-service.js';
 import {
 	DSH_IDE_CONTROL_CLOSE,
 	DSH_IDE_CONTROL_LAUNCH,
 	DSH_IDE_CONTROL_OPEN,
 	DSH_IDE_SNAPSHOT_EVENT,
+	DSH_IDE_WATERFALL_EVENT,
 	DshIdeChannel,
 	type DshIdeLauncher,
 } from '../../../out/vs/platform/dshClient/electron-main/dshIdeChannel.js';
@@ -48,6 +47,7 @@ const ALL_METHODS: DshIdeMethod[] = [
 	'listCommands', 'fetchRowDetail', 'refreshSnapshot',
 	'accountGetState', 'accountGetProfile',
 	'archiveSession', 'unarchiveSession', 'searchSessions',
+	'composerState', 'setTeamEnabled', 'setAgentPreset',
 ];
 
 interface FakeBackend extends DshIdeBackend {
@@ -85,7 +85,7 @@ test('P3 error codes are declared and distinct', () => {
 	const all = [DSH_IDE_FEATURE_UNAVAILABLE, DSH_IDE_INVALID_ARGUMENT, DSH_IDE_ALREADY_RESOLVED, DSH_IDE_SESSION_SWITCHED, DSH_IDE_SNAPSHOT_STALE];
 	assert.equal(new Set(all).size, all.length);
 	assert.equal(DSH_IDE_CHANNEL, 'dshIde');
-	assert.equal(DSH_IDE_WIRE_REVISION, 2, 'projection payload merged into state.view bumps wireRevision to 2');
+	assert.equal(DSH_IDE_WIRE_REVISION, 3, 'follow frames replace the projected rows');
 });
 
 // ---------------------------------------------------------------------------
@@ -100,26 +100,20 @@ test('validateDshIdeSnapshot accepts starting without view', () => {
 	assert.doesNotThrow(() => validateDshIdeSnapshot(starting()));
 });
 
-test('validateDshIdeSnapshot requires a valid view when ready', () => {
+test('validateDshIdeSnapshot requires a valid frame when ready', () => {
 	assert.throws(() => validateDshIdeSnapshot({ ...starting(), state: { state: 'ready' } }), /must be an object/);
 	assert.throws(
-		() => validateDshIdeSnapshot({ ...starting(), state: { state: 'ready', view: { rows: [{ id: 'row:1' }], version: 1 } } }),
-		/revision must be a non-negative integer/,
+		() => validateDshIdeSnapshot({ ...starting(), state: { state: 'ready', view: { frame: { seq: 1 } } } }),
+		/frame.type must be a non-empty string/,
 	);
-	const view = { rows: [{ id: 'row:1', revision: 1, kind: 'user', text: 'hi', folded: false, seq: 1 }], version: 1 };
+	const view = { frame: { type: 'event', event: { type: 'user/message', seq: 1, time: 1, data: { content: [{ type: 'text', text: 'hi' }] } } } };
 	assert.doesNotThrow(() => validateDshIdeSnapshot({ ...starting(), state: { state: 'ready', view } }));
 });
 
-test('validateDshIdeSnapshot rejects view on non-ready states and bad row kinds', () => {
-	const view = { rows: [], version: 0 };
+test('validateDshIdeSnapshot rejects view on non-ready states and a frame without type', () => {
+	const view = { frame: { type: 'event' } };
 	assert.throws(() => validateDshIdeSnapshot({ ...starting(), state: { state: 'rebuild', view } }), /only allowed when state is ready/);
-	const bad = { rows: [{ id: 'row:1', revision: 1, kind: 'mystery', text: 'x', folded: false }], version: 1 };
-	assert.throws(() => validateDshIdeSnapshot({ ...starting(), state: { state: 'ready', view: bad } }), /kind must be/);
-});
-
-test('validateDshIdeSnapshot rejects rows without text or preview', () => {
-	const bad = { rows: [{ id: 'row:1', revision: 1, kind: 'user', folded: false }], version: 1 };
-	assert.throws(() => validateDshIdeSnapshot({ ...starting(), state: { state: 'ready', view: bad } }), /must carry text or preview/);
+	assert.throws(() => validateDshIdeSnapshot({ ...starting(), state: { state: 'ready', view: { frame: [] } } }), /frame must be an object/);
 });
 
 // ---------------------------------------------------------------------------
@@ -159,8 +153,7 @@ test('view service publishes ready snapshots with strictly increasing versions',
 	assert.equal(ready.state.state, 'ready');
 	assert.equal(ready.wireRevision, DSH_IDE_WIRE_REVISION);
 	assert.ok(ready.state.view !== undefined);
-	assert.equal(ready.state.view.rows.length, 2);
-	assert.deepEqual(ready.state.view.rows.map(r => r.id), ['row:1', 'row:2']);
+	assert.deepEqual(ready.state.view.frame, { type: 'event', event: { type: 'custom', seq: 2, text: 'done' } });
 
 	let prev: DshIdeSnapshot | undefined;
 	for (const frame of frames) {
@@ -183,8 +176,8 @@ test('view service batches multiple events into one published frame', async () =
 	backend.emit({ type: 'event', event: { type: 'user.message', seq: 3, text: 'c' } });
 	await microtasks();
 
-	assert.equal(frames.length, 1, 'a microtask batch publishes a single frame');
-	assert.equal(frames[0].state.view?.rows.length, 3);
+	assert.equal(frames.length, 3, 'frames are published as they arrive');
+	assert.deepEqual(frames.map(frame => (frame.state.view?.frame as { event?: { seq?: number } }).event?.seq), [1, 2, 3]);
 	view.close();
 });
 
@@ -228,6 +221,9 @@ const VALID: Record<DshIdeMethod, unknown> = {
 	archiveSession: { sessionId: 's-1' },
 	unarchiveSession: { sessionId: 's-1' },
 	searchSessions: { query: 'hello' },
+	composerState: {},
+	setTeamEnabled: { enabled: false },
+	setAgentPreset: { preset: 'create' },
 };
 
 async function openedChannel(backend = fakeBackend()) {
@@ -237,7 +233,7 @@ async function openedChannel(backend = fakeBackend()) {
 	return { view, channel, backend, first };
 }
 
-test('channel dispatches all 25 DTO methods through validateDshIdeInput', async () => {
+test('channel dispatches all 28 DTO methods through validateDshIdeInput', async () => {
 	const { channel, backend } = await openedChannel();
 	for (const method of ALL_METHODS) {
 		const output = await channel.call<{ value: unknown }>('ctx-a', method, VALID[method]);
@@ -263,15 +259,60 @@ test('channel requires an open connection for DTO calls', async () => {
 // listen 三层过滤：事件名白名单 / 连接归属 / version 严格递增
 // ---------------------------------------------------------------------------
 
-test('listen ignores non-snapshot event names', async () => {
+test('listen ignores names outside the snapshot and waterfall whitelist', async () => {
 	const { channel, backend } = await openedChannel();
 	const seen: DshIdeSnapshot[] = [];
 	channel.listen<DshIdeSnapshot>('ctx-a', 'state')(snapshot => seen.push(snapshot));
 	backend.emit({ type: 'event', event: { type: 'user.message', seq: 1, text: 'a' } });
 	await microtasks();
-	assert.equal(seen.length, 0, 'only the snapshot event name is forwarded');
+	assert.equal(seen.length, 0, 'names outside the whitelist are not forwarded');
 });
 
+test('waterfall frames stay off the snapshot stream', async () => {
+	const { channel, backend, view } = await openedChannel();
+	const notices: DshIdeWaterfallNotice[] = [];
+	const direct: DshIdeWaterfallNotice[] = [];
+	const snapshots: DshIdeSnapshot[] = [];
+	channel.listen<DshIdeWaterfallNotice>('ctx-a', DSH_IDE_WATERFALL_EVENT)(notice => notices.push(notice));
+	channel.listen<DshIdeSnapshot>('ctx-a', DSH_IDE_SNAPSHOT_EVENT)(snapshot => snapshots.push(snapshot));
+	view.subscribeWaterfall(notice => direct.push(notice));
+
+	backend.emit({
+		type: 'waterfall',
+		kind: 'request',
+		eventId: 'e1',
+		event: 'approval/request',
+		agentId: 'agent-1',
+		request: { toolName: 'shell', reason: 'run', agent: { id: 'do-not-leak' }, signal: {} },
+	});
+	backend.emit({ type: 'waterfall', kind: 'request', eventId: '', event: 'approval/request', agentId: 'agent-1', request: { toolName: 'shell' } });
+	backend.emit({ type: 'waterfall', kind: 'cancel', eventId: 'e1' });
+	await microtasks();
+
+	assert.equal(snapshots.length, 0, 'waterfall frames must not publish a snapshot');
+	assert.equal(notices.length, 2);
+	assert.equal(notices[0].kind, 'request');
+	if (notices[0].kind === 'request') {
+		assert.equal(notices[0].event, 'approval/request');
+		assert.deepEqual(notices[0].request, { toolName: 'shell', reason: 'run' });
+	}
+	assert.deepEqual(notices[1], { kind: 'cancel', eventId: 'e1' });
+	assert.equal(direct.length, 2);
+});
+
+test('fetchRowDetail falls through to the backend now that no local projector exists', async () => {
+	const calls: string[] = [];
+	const backend = fakeBackend({
+		invoke: async (method: string) => {
+			calls.push(String(method));
+			return null;
+		},
+	});
+	const { channel } = await openedChannel(backend);
+	const miss = await channel.call<{ value: null }>('ctx-a', 'fetchRowDetail', { rowId: 'row:1' });
+	assert.equal(miss.value, null);
+	assert.deepEqual(calls, ['fetchRowDetail']);
+});
 test('listen filters frames by owning connection and drops non-advancing versions', async () => {
 	const { channel, backend } = await openedChannel();
 	const mine: DshIdeSnapshot[] = [];
@@ -409,87 +450,3 @@ test('openView binds the session id it is given (and only then can follow a sess
 // 直接整帧喂给 translator 会被「未知类型」全部丢弃 → 绑定成功但一帧都发不出（FRAMES=0）。
 // ---------------------------------------------------------------------------
 
-test('unwrapFollowFrame expands a snapshot into its session events', () => {
-	const frame = {
-		type: 'snapshot',
-		records: [
-			{ type: 'event', event: { type: 'user/message', seq: 1, data: { content: [{ type: 'text', text: 'hi' }] } } },
-			{ type: 'event', event: { type: 'assistant/message', seq: 2, data: { message: { content: [] } } } },
-		],
-	};
-	const events = unwrapFollowFrame(frame);
-	assert.equal(events.length, 2);
-	assert.deepEqual(events.map(e => (e as { type: string }).type), ['user/message', 'assistant/message']);
-});
-
-test('unwrapFollowFrame expands a single incremental event frame', () => {
-	const events = unwrapFollowFrame({ type: 'event', event: { type: 'tool/call', seq: 3, data: {} } });
-	assert.deepEqual(events.map(e => (e as { type: string }).type), ['tool/call']);
-});
-
-test('unwrapFollowFrame turns assistant-stream chunks into neutral deltas', () => {
-	// 线上形状（packages/llm/assistant-stream）：chunk 帧带 attempt 身份与 attempt 内 revision。
-	// 两者必须一路带到中立事件里：瞬时帧没有会话 seq，幂等与合并只能靠它们。
-	const events = unwrapFollowFrame({
-		type: 'assistant-stream',
-		frame: { type: 'chunk', attemptId: 'a1', revision: 3, index: 1, time: 20, chunk: { type: 'text-delta', index: 0, text: 'abc' } },
-	});
-	assert.deepEqual(events, [{ type: 'assistant.delta', attemptId: 'a1', streamRevision: 3, text: 'abc' }]);
-});
-
-test('unwrapFollowFrame keeps attempt identity on stream start and end frames', () => {
-	assert.deepEqual(
-		unwrapFollowFrame({ type: 'assistant-stream', frame: { type: 'start', attemptId: 'a1', revision: 1, turn: 2, step: 3 } }),
-		[{ type: 'assistant.attempt.start', attemptId: 'a1', streamRevision: 1, turn: 2, step: 3 }],
-	);
-	assert.deepEqual(
-		unwrapFollowFrame({ type: 'assistant-stream', frame: { type: 'end', attemptId: 'a1', revision: 5, index: 3, outcome: { kind: 'committed', eventType: 'assistant/message', seq: 7 } } }),
-		[{ type: 'assistant.attempt.end', attemptId: 'a1', streamRevision: 5, outcome: 'committed' }],
-	);
-});
-
-test('unwrapFollowFrame marks an end frame as abandoned unless a visible message settled it', () => {
-	// 上游 end.outcome：`abandoned` 或结算为 `assistant/attempt` 都表示这次尝试没有可见消息；
-	// 投影器要靠这个结局丢弃临时行，否则失败尝试会留下半截回答。
-	assert.deepEqual(
-		unwrapFollowFrame({ type: 'assistant-stream', frame: { type: 'end', attemptId: 'a1', revision: 5, index: 3, outcome: { kind: 'abandoned' } } }),
-		[{ type: 'assistant.attempt.end', attemptId: 'a1', streamRevision: 5, outcome: 'abandoned' }],
-	);
-	assert.deepEqual(
-		unwrapFollowFrame({ type: 'assistant-stream', frame: { type: 'end', attemptId: 'a2', revision: 9, index: 1, outcome: { kind: 'committed', eventType: 'assistant/attempt', seq: 8 } } }),
-		[{ type: 'assistant.attempt.end', attemptId: 'a2', streamRevision: 9, outcome: 'abandoned' }],
-	);
-	// 结局缺失时按「已结算」处理：不凭空丢弃可能有正文的行。
-	assert.deepEqual(
-		unwrapFollowFrame({ type: 'assistant-stream', frame: { type: 'end', attemptId: 'a3', revision: 2, index: 0 } }),
-		[{ type: 'assistant.attempt.end', attemptId: 'a3', streamRevision: 2, outcome: 'committed' }],
-	);
-});
-
-test('unwrapFollowFrame drops stream frames without attempt identity instead of guessing one', () => {
-	// 没有 attemptId / revision 就无法做幂等与归并；伪造一个身份会让重放双写。
-	assert.deepEqual(unwrapFollowFrame({ type: 'assistant-stream', frame: { type: 'chunk', chunk: { type: 'text-delta', text: 'abc' } } }), []);
-	assert.deepEqual(unwrapFollowFrame({ type: 'assistant-stream', frame: { type: 'start' } }), []);
-});
-
-test('unwrapFollowFrame drops non-text stream chunks so reasoning never mixes into the answer row', () => {
-	assert.equal(unwrapFollowFrame({ type: 'assistant-stream', frame: { type: 'chunk', attemptId: 'a1', revision: 1, chunk: { type: 'text-delta', text: 'x' } } }).length, 1);
-	assert.deepEqual(
-		unwrapFollowFrame({ type: 'assistant-stream', frame: { type: 'chunk', attemptId: 'a1', revision: 2, chunk: { type: 'reasoning-delta', text: 'thinking' } } }),
-		[],
-	);
-});
-
-test('unwrapFollowFrame drops frames that carry no session content', () => {
-	for (const frame of [
-		{ type: 'waterfall', eventId: 'e1', event: 'approval/request' },
-		{ type: 'ready', clientId: 'c1' },
-		{ type: 'cancel', eventId: 'e1' },
-		{ type: 'snapshot' },
-		{},
-		null,
-		'not-a-frame',
-	]) {
-		assert.deepEqual(unwrapFollowFrame(frame), [], `frame ${JSON.stringify(frame)} must yield no events`);
-	}
-});

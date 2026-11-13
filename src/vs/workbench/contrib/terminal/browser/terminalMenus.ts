@@ -47,7 +47,7 @@ export const enum TerminalMenuBarGroup {
  */
 const TerminalDictationAvailable = ContextKeyExpr.or(
 	HasSpeechProvider,
-	ContextKeyExpr.and(ChatContextKeys.enabled, ChatContextKeys.speechToTextConfigured)
+	ContextKeyExpr.and(ChatContextKeys.speechToTextConfigured)
 );
 
 export function setupTerminalMenus(): void {

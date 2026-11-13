@@ -740,9 +740,7 @@ export class ExportAgentHostDebugLogsAction extends Action2 {
 			title: localize2('exportAgentHostDebugLogs', "Export Agent Host Debug Logs..."),
 			f1: true,
 			category: Categories.Developer,
-			precondition: ContextKeyExpr.and(
-				ChatContextKeys.enabled,
-				IsWebContext.negate(),
+			precondition: ContextKeyExpr.and(				IsWebContext.negate(),
 				AGENT_HOST_ENABLED_CONTEXT_KEY,
 			),
 		});

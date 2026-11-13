@@ -37,7 +37,7 @@ import { IExtensionsWorkbenchService } from '../../../extensions/common/extensio
 
 const languageModelsOpenSettingsIcon = registerIcon('language-models-open-settings', Codicon.goToFile, localize('languageModelsOpenSettings', 'Icon for open language models settings commands.'));
 
-const LANGUAGE_MODELS_ENTITLEMENT_PRECONDITION = ContextKeyExpr.and(ChatContextKeys.enabled, ContextKeyExpr.or(
+const LANGUAGE_MODELS_ENTITLEMENT_PRECONDITION = ContextKeyExpr.and(ContextKeyExpr.or(
 	ChatContextKeys.Entitlement.planFree,
 	ChatContextKeys.Entitlement.planEdu,
 	ChatContextKeys.Entitlement.planPro,

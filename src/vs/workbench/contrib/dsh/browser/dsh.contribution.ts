@@ -1,12 +1,15 @@
 /*---------------------------------------------------------------------------------------------
  *  Copyright (c) DSH-IDE contributors. All rights reserved.
- *  Licensed under the MIT License.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
 // Workbench 集成。
 //
-// 旧官方客户端连接层已整删，唯一的 `dshIde` 通道由主进程分发（P3）。本文件保留行内补全注册
-// （通道未接线时优雅降级为无补全，不报错），并显式告知用户 AI 连接层尚未接线。
+// 唯一 `dshIde` 通道由主进程分发（P3）。本文件注册两样东西：
+//   1. DSH 聊天面板（`workbench.view.dshIdeChat`）：聊天视图容器里的主内容区，
+//      画面是 DSH 自己的（抄来的 `build/dsh/chat-render` 单接缝），帧来自内核那一次 follow；
+//   2. DSH 会话面板（`workbench.view.dshIdeSessions`）：列表 / 点开 / 新建 / 归档 / 搜索 / 删除。
+// 另外保留行内补全注册（通道未接线时优雅降级为无补全，不报错）。
 
 import { localize, localize2 } from '../../../../nls.js';
 import { Registry } from '../../../../platform/registry/common/platform.js';
@@ -15,8 +18,7 @@ import { SyncDescriptor } from '../../../../platform/instantiation/common/descri
 import { INotificationService } from '../../../../platform/notification/common/notification.js';
 import { IDshClientService, DshClientService } from '../../../../platform/dshClient/common/dshClientService.js';
 import { ILanguageFeaturesService } from '../../../../editor/common/services/languageFeatures.js';
-import { IWorkbenchContribution, registerWorkbenchContribution2, WorkbenchPhase } from '../../../common/contributions.js';
-import { DSH_IDE_SESSION_ENV } from '../../../../platform/dshClient/common/env.js';
+import { IWorkbenchContribution, registerWorkbenchContribution2, WorkbenchPhase } from '../../../common/contributions.js';import { DSH_IDE_SESSION_ENV, DSH_IDE_COMPOSER_ENV } from '../../../../platform/dshClient/common/env.js';
 import { env } from '../../../../base/common/process.js';
 import { Action2, MenuId, registerAction2 } from '../../../../platform/actions/common/actions.js';
 import { ServicesAccessor } from '../../../../platform/instantiation/common/instantiation.js';
@@ -32,10 +34,14 @@ import {
 } from '../../../common/views.js';
 import { ViewPaneContainer } from '../../../browser/parts/views/viewPaneContainer.js';
 import { registerDshInlineCompletions } from './inlineCompletion.js';
-import { DshIdeConsumer, type DshIdeConsumerState } from './dshIdeConsumer.js';
-import { setDshChatRenderEnabled } from './dshChatSeam.js';
-import { registerDshChatAgent } from './dshChatAgent.js';
-import { IChatAgentService } from '../../chat/common/participants/chatAgents.js';
+import { DshIdeConsumer } from './dshIdeConsumer.js';
+import { DshChatSession } from './dshChatSession.js';
+import { DshChatPanel, dshChatSessionFor } from './dshChatPanel.js';
+import { registerDshLanguageModelProvider } from './dshLanguageModelProvider.js';
+import { DshComposerSource } from './dshComposerSource.js';
+import { setDshComposerSource } from './dshComposerRegistry.js';
+import { ILanguageModelsService } from '../../chat/common/languageModels.js';
+import { ILogService } from '../../../../platform/log/common/log.js';
 import { Disposable } from '../../../../base/common/lifecycle.js';
 import { DshIdeSessionsService, IDshIdeSessionsService } from './dshIdeSessionsService.js';
 import { DshIdeSessionsView } from './dshIdeSessionsView.js';
@@ -43,7 +49,6 @@ import { DshIdeSessionsView } from './dshIdeSessionsView.js';
 registerSingleton(IDshClientService, DshClientService, InstantiationType.Delayed);
 registerSingleton(IDshIdeSessionsService, DshIdeSessionsService, InstantiationType.Delayed);
 
-// D49：会话列表视图容器（§8.10.2 两态）。自带容器，不改 contrib/chat/**、不接 AgentHost 会话服务。
 const DSH_IDE_SESSIONS_CONTAINER_ID = 'workbench.view.dshIdeSessions';
 const DSH_IDE_SESSIONS_VIEW_ID = 'workbench.view.dshIdeSessions.list';
 const sessionsViewIcon = registerIcon('dsh-ide-sessions-view-icon', Codicon.listTree, localize('dsh.sessions.viewIcon', 'View icon of the DSH-IDE sessions view.'));
@@ -67,7 +72,31 @@ Registry.as<IViewsRegistry>(ViewExtensions.ViewsRegistry).registerViews([{
 	ctorDescriptor: new SyncDescriptor(DshIdeSessionsView),
 }], sessionsViewContainer);
 
-// 手动刷新 / 删除：命令经服务单一入口，不另建第二套取数或删除路径（§8.10.2）。
+// 聊天面板与会话面板是 DSH-IDE 自己的两个面板（各自独立容器，不改原生 Chat）。
+// 面板里的元素与消息流渲染抄 DSH 的聊天页；聊天内容来自内核那一次 follow。
+const DSH_IDE_CHAT_CONTAINER_ID = 'workbench.view.dshIdeChat';
+const DSH_IDE_CHAT_VIEW_ID = 'workbench.view.dshIdeChat.panel';
+const chatViewIcon = registerIcon('dsh-ide-chat-view-icon', Codicon.commentDiscussion, localize('dsh.chat.viewIcon', 'View icon of the DSH-IDE chat view.'));
+
+const chatViewContainer: ViewContainer = Registry.as<IViewContainersRegistry>(ViewExtensions.ViewContainersRegistry).registerViewContainer({
+	id: DSH_IDE_CHAT_CONTAINER_ID,
+	title: localize2('dsh.chat.container', "DSH 聊天"),
+	icon: chatViewIcon,
+	ctorDescriptor: new SyncDescriptor(ViewPaneContainer, [DSH_IDE_CHAT_CONTAINER_ID, { mergeViewWithContainerWhenSingleView: true }]),
+	storageId: DSH_IDE_CHAT_CONTAINER_ID,
+	hideIfEmpty: false,
+	order: 1,
+}, ViewContainerLocation.AuxiliaryBar, { doNotRegisterOpenCommand: true });
+
+Registry.as<IViewsRegistry>(ViewExtensions.ViewsRegistry).registerViews([{
+	id: DSH_IDE_CHAT_VIEW_ID,
+	name: localize2('dsh.chat.view', "聊天"),
+	containerIcon: chatViewIcon,
+	canToggleVisibility: false,
+	canMoveView: false,
+	ctorDescriptor: new SyncDescriptor(DshChatPanel),
+}], chatViewContainer);
+// 手动刷新 / 删除：命令经服务单一入口，不另建第二套取数或删除路径。
 registerAction2(class extends Action2 {
 	constructor() {
 		super({
@@ -80,6 +109,36 @@ registerAction2(class extends Action2 {
 	}
 	run(accessor: ServicesAccessor): void {
 		void accessor.get(IDshIdeSessionsService).refresh();
+	}
+});
+
+registerAction2(class extends Action2 {
+	constructor() {
+		super({
+			id: 'dshIde.sessions.new',
+			title: localize2('dsh.sessions.new', "新建 DSH 会话"),
+			icon: Codicon.add,
+			f1: true,
+			menu: { id: MenuId.ViewTitle, when: ContextKeyExpr.equals('view', DSH_IDE_SESSIONS_VIEW_ID), group: 'navigation' },
+		});
+	}
+	async run(accessor: ServicesAccessor): Promise<void> {
+		await accessor.get(IDshIdeSessionsService).createSession();
+	}
+});
+
+registerAction2(class extends Action2 {
+	constructor() {
+		super({
+			id: 'dshIde.sessions.search',
+			title: localize2('dsh.sessions.search', "搜索 DSH 会话"),
+			icon: Codicon.search,
+			f1: true,
+			menu: { id: MenuId.ViewTitle, when: ContextKeyExpr.equals('view', DSH_IDE_SESSIONS_VIEW_ID), group: 'navigation' },
+		});
+	}
+	async run(accessor: ServicesAccessor, query: unknown): Promise<void> {
+		await accessor.get(IDshIdeSessionsService).search(typeof query === 'string' ? query : undefined);
 	}
 });
 
@@ -103,78 +162,84 @@ registerAction2(class extends Action2 {
 });
 
 /** 消费 `dshIde` 通道的唯一快照流：`DshIdeConsumer` 负责校验与 fail-closed，
- * 本贡献点负责「开视图 → 订阅 → 把行交给渲染方」，并把失败如实提示给用户。
- *
- * 无论是否配置了远端端点都要注册：`DshClientService` 在未接线时会明确返回
- * `feature-unavailable`（不伪造状态），用户应看到确定提示而不是「什么都没有」。
+ * 本贡献点负责把帧交给 DSH 聊天面板，并把失败如实提示给用户。
  */
 class DshClientContribution extends Disposable implements IWorkbenchContribution {
 	constructor(
 		@IDshClientService client: IDshClientService,
 		@INotificationService private readonly notifications: INotificationService,
 		@ILanguageFeaturesService languageFeatures: ILanguageFeaturesService,
-		@IChatAgentService chatAgents: IChatAgentService,
+		@ILanguageModelsService languageModels: ILanguageModelsService,
+		@ILogService logService: ILogService,
 		@IDshIdeSessionsService sessions: IDshIdeSessionsService,
 	) {
 		super();
-		// 会话服务是 Delayed 单例：由本贡献点（AfterRestored 时创建）主动取一次，
-		// 保证首次取数与窗口聚焦重拉接线不依赖用户是否打开会话视图（§8.10.2）。
+		// 会话服务是 Delayed 单例：由本贡献点主动取一次，保证首次取数接线不依赖用户是否打开会话视图。
 		void sessions;
-		// 行内补全（DSH 后端；未接线时优雅降级为无补全，不报错）。
+		// 把 DSH 模型目录注册成 Chat 的模型提供方。
+		this._register({ dispose: registerDshLanguageModelProvider(languageModels, client, logService).dispose });
+		const preset = readComposerPreset();
+		const composer = this._register(new DshComposerSource(client, logService, preset));
+		setDshComposerSource(composer);
+		this._register({ dispose: () => setDshComposerSource(undefined) });
+		this._register(client.onDidSnapshot(() => { void composer.refresh(); }));
+		if (preset === undefined) {
+			void composer.refresh();
+		}
 		registerDshInlineCompletions(languageFeatures, client);
 
-		// 启用单接缝：只有在收到第一份来自 dshIde 的 ready 快照后才打开，
-		// 保证纯净 VS Code 窗口（无 DSH 快照）的渲染行为零变化（第 8 章 §8.3.2）。
-		// 历史上 `setDshChatRenderEnabled` 全仓无调用方，接缝恒休眠——这是 P4 要修的实质缺陷。
 		const consumer = this._register(new DshIdeConsumer());
-
-		// 唯一 Chat Agent：Chat 面板只在真实 request 的 response 里渲染内容，
-		// 没有 Agent 就没有 request，面板必然空白。用户消息交给 DSH，回显只来自 DTO 快照。
-		const agentRegistration = this._register(registerDshChatAgent(chatAgents, client, () => this._rows.map(row => row)));
-		void agentRegistration;
 		this._register(consumer.onDidFail((error: { readonly code: string }) => {
-			// 连续性失败必须让用户知道，不能静默丢弃帧（第 2 章 E4 / E7）。
 			this.notifications.warn(localize(
 				'dsh.snapshotFailed',
-				"DSH-IDE 快照被拒绝（{0}），界面保持上一次一致状态。",
+				"DSH-IDE 帧被拒绝（{0}），界面保持上一次一致状态。",
 				error.code,
 			));
 		}));
-		this._register(consumer.onDidChangeRows(({ state }: { state: DshIdeConsumerState }) => {
-			if (state.phase === 'ready' && state.rows.length > 0) {
-				// 有真实 DTO 投影内容时才启用接缝，避免空面板也走 DSH 渲染件。
-				setDshChatRenderEnabled(true);
-			}
-			// 这里只维护可读快照，不直接写 Chat 模型：DSH-IDE 的 Chat 容器没有 DSH 会话，
-			// 伪造一个 request 往模型里塞 progress 会让会话状态与 DSH 真源不一致（第 1 章 §4.5）。
-			this._lastState = state;
-			this._rows = state.rows;
-		}));
+		// 帧直接交给聊天面板的会话状态；批准 / 问卷帧也走同一处，不弹通知。
+		this._chat = dshChatSessionFor(client);
+		this._register(consumer.onDidChangeFrame(({ state }) => this._chat.accept(state.frame)));
 		this._register(client.onDidSnapshot(snapshot => consumer.accept(snapshot)));
+		this._register(client.onDidWaterfall(notice => this._chat.acceptWaterfall(notice)));
 
-		// 打开视图：必须带要跟随的会话 id，否则后端只订阅 `$events`（拿不到会话内容），
-		// Chat 面板永远没有行。会话由 DSH 决定，经开窗方的 `userEnv` 传进来，IDE 不自己猜。
 		const sessionId = env[DSH_IDE_SESSION_ENV];
-		void client.openView({ view: 'chat', params: sessionId === undefined || sessionId === '' ? {} : { sessionId } }).then(result => {
+		const boundSessionId = sessionId === undefined || sessionId === '' ? undefined : sessionId;
+		void client.openView({ view: 'chat', params: boundSessionId === undefined ? {} : { sessionId: boundSessionId } }).then(result => {
 			if (!result.ok) {
 				this.notifications.info(localize(
 					'dsh.connectionUnavailable',
-					"DSH-IDE AI 连接层尚未就绪（{0}），Chat 暂不可用。",
+					"DSH-IDE AI 连接层尚未就绪（{0}），聊天暂不可用。",
 					result.error.code,
 				));
+				return;
 			}
+			// 连接已按开窗参数建好：登记绑定并补读输入框目录，不重开流。
+			void this._chat.attach(boundSessionId);
 		});
-
-		// 会话列表绑定由服务构造时经开窗参数自行完成，绑定值不在贡献点重复推断。
 	}
 
-	private _lastState: DshIdeConsumerState | undefined;
-	private _rows: readonly import('../../../../platform/dshClient/common/dshIdeProtocol.js').DshIdeRow[] = [];
+	private readonly _chat: DshChatSession;
 
-	/** 最近一次被接受的渲染状态。 */
-	get lastState(): DshIdeConsumerState | undefined {
-		return this._lastState;
+	get chat(): DshChatSession {
+		return this._chat;
 	}
 }
 
-registerWorkbenchContribution2('workbench.contrib.dshClient', DshClientContribution, WorkbenchPhase.AfterRestored);
+registerWorkbenchContribution2(DshClientContribution.name, DshClientContribution, WorkbenchPhase.AfterRestored);
+
+/**
+ * 读取开窗时由 Host 预置的输入框目录（`DSH_IDE_COMPOSER`）。
+ *
+ * 解析失败一律当作没有：宁可退回正常读取，也不能因为一段坏 JSON 让输入框不可用。
+ */
+function readComposerPreset(): unknown {
+	const raw = env[DSH_IDE_COMPOSER_ENV];
+	if (typeof raw !== 'string' || raw === '') {
+		return undefined;
+	}
+	try {
+		return JSON.parse(raw);
+	} catch {
+		return undefined;
+	}
+}

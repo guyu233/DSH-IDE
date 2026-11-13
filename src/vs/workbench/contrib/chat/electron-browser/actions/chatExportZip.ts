@@ -28,7 +28,7 @@ export function registerChatExportZipAction() {
 				id: 'workbench.action.chat.exportAsZip',
 				category: CHAT_CATEGORY,
 				title: localize2('chat.exportAsZip.label', "Export Chat as Zip..."),
-				precondition: ContextKeyExpr.and(ChatContextKeys.enabled, ChatEntitlementContextKeys.Entitlement.internal),
+				precondition: ContextKeyExpr.and(ChatEntitlementContextKeys.Entitlement.internal),
 				f1: true,
 			});
 		}

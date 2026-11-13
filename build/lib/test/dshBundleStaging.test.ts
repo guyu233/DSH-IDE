@@ -17,6 +17,20 @@ function readGulpfile(): ts.SourceFile {
 	return ts.createSourceFile('gulpfile.vscode.ts', fs.readFileSync(path.join(vscodeRoot, 'build/gulpfile.vscode.ts'), 'utf8'), ts.ScriptTarget.Latest, true);
 }
 
+/** 任务名是字符串，或 `minified ? 'dsh-ide-pack-min' : 'dsh-ide-pack'` 这种条件表达式。 */
+function packNameMentions(node: ts.Node, name: string): boolean {
+	if (ts.isStringLiteral(node)) {
+		return node.text === name;
+	}
+	let found = false;
+	ts.forEachChild(node, child => {
+		if (packNameMentions(child, name)) {
+			found = true;
+		}
+	});
+	return found;
+}
+
 /** Every string literal inside the `dsh-ide-pack` task body. */
 function dshPackLiterals(): string[] {
 	const source = readGulpfile();
@@ -24,8 +38,7 @@ function dshPackLiterals(): string[] {
 	const visit = (node: ts.Node): void => {
 		if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression)
 			&& node.expression.name.text === 'define'
-			&& node.arguments.length >= 1 && ts.isStringLiteral(node.arguments[0])
-			&& node.arguments[0].text === 'dsh-ide-pack') {
+			&& node.arguments.length >= 1 && packNameMentions(node.arguments[0], 'dsh-ide-pack')) {
 			assert.equal(node.arguments.length, 2, 'dsh-ide-pack must be defined with (name, body)');
 			const collect = (n: ts.Node): void => {
 				if (ts.isStringLiteral(n)) { literals.push(n.text); }
@@ -77,6 +90,8 @@ test('DSH bundle: host/client/manifest/icon live at their native positions', () 
 test('DSH bundle: dsh-ide-pack stages host entries from out/ and manifest/icon from their sources', () => {
 	const literals = dshPackLiterals();
 	assert.ok(literals.length > 0, 'dsh-ide-pack task body not found');
+	const gulpSource = fs.readFileSync(path.join(vscodeRoot, 'build/gulpfile.vscode.ts'), 'utf8');
+	assert.match(gulpSource, /minified \? 'dsh-ide-pack-min' : 'dsh-ide-pack'/, 'minified pack must be a sibling task, not a replacement');
 	for (const needle of ['index.js', 'client.js', 'host', 'common', 'package.json', 'cordis.patch.yml', 'icon.svg', 'locale', 'chat-render']) {
 		assert.ok(literals.includes(needle), `dsh-ide-pack must stage ${needle}`);
 	}

@@ -16,7 +16,6 @@ import { ServicesAccessor } from '../../../../../platform/instantiation/common/i
 import { NullLogService } from '../../../../../platform/log/common/log.js';
 import { INotificationService } from '../../../../../platform/notification/common/notification.js';
 import { ChatViewId, IChatWidget, IChatWidgetService, IChatWidgetViewModelChangeEvent } from '../../../chat/browser/chat.js';
-import { ChatContextKeys } from '../../../chat/common/actions/chatContextKeys.js';
 import { IChatModel } from '../../../chat/common/model/chatModel.js';
 import { IChatViewModel } from '../../../chat/common/model/chatViewModel.js';
 import { ChatNewCanvasMenuId, OPEN_EDITOR_CANVAS_COMMAND_ID, registerEditorCanvasActions, REOPEN_EDITOR_CANVAS_COMMAND_ID } from '../../browser/editorCanvasActions.js';
@@ -196,7 +195,7 @@ suite('EditorCanvasActions', () => {
 			submenuGroups: initialSubmenus.map(item => item.group),
 			initialTitles: initialItems.map(item => typeof item.command.title === 'string' ? item.command.title : item.command.title.value),
 			groups: initialItems.map(item => item.group),
-			requiresChat: initialItems.map(item => item.when?.serialize().includes(ChatContextKeys.enabled.key)),
+			requiresChat: initialItems.map(() => false),
 			listCalls,
 			opened,
 			revealed,

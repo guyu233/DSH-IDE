@@ -2,9 +2,9 @@
 // DSH-IDE Host 半身：在 DSH Host 进程内把官方事件与官方服务桥接给 IDE 主进程。
 //
 // 职责边界（第 1 章 §3）：本文件是唯一允许持有插件上下文、订阅 DSH 官方事件的插件侧代码。
-// 它只做三件事：订阅四类官方事件并原样转发、注册唯一的交互式 answerer、把 22 个 DTO method
-// 映射到已核对的官方服务调用。投影与快照版本计数在 electron-main 的 `DshIdeViewService`
-// （两者共用 common/ 的 translator + projector，与 golden 门禁同一份实现）。
+// 它只做三件事：跟随会话（`sessionController.follow`，同一会话只跟一次）、接住批准 / 问卷
+// 并让 IDE 与桌面都能答（先到的生效）、把 DTO method 映射到已核对的官方服务调用。
+// 帧原样送到窗口，不翻译成另一套行；快照版本计数在 electron-main 的 `DshIdeViewService`。
 //
 // 传输端口：`transport` 由 P5 真机接线提供。未注入时本文件不伪造任何事件或决议：
 // `follow` 只登记监听，answerer 一律 `next()` 委托给 DSH 自己的 answerer。
@@ -20,6 +20,7 @@ import { projectDshIdeCommandList } from '../common/dshIdeCommandList.js';
 import { buildDshIdeCommandLine, mapDshIdeCommandExecution } from '../common/dshIdeCommandLine.js';
 import { projectDshIdeArchiveSet } from '../common/dshIdeArchiveSet.js';
 import { projectDshIdeSessionSearch } from '../common/dshIdeSessionSearch.js';
+import { projectDshIdeComposer } from '../common/dshIdeComposer.js';
 import { safeErrorText } from '../common/dshIdeAuthRedaction.js';
 
 /** 与 common/dshIdeProtocol.ts 同值的错误码（Host 半身为纯 JS，不跨层 import TS）。 */
@@ -49,6 +50,36 @@ function service(ctx, name) {
 		throw coded(FEATURE_UNAVAILABLE, `DSH service "${name}" is not available`, { service: name });
 	}
 	return value;
+}
+
+/** 可选服务：没挂上就当没有，不把输入框的其余控件一起藏掉。 */
+function optionalService(ctx, name) {
+	const value = typeof ctx.get === 'function' ? ctx.get(name) : undefined;
+	return value === undefined || value === null ? undefined : value;
+}
+
+function optionalCall(ctx, name, method) {
+	const target = optionalService(ctx, name);
+	if (target === undefined || typeof target[method] !== 'function') {
+		return null;
+	}
+	try {
+		return target[method]();
+	} catch {
+		return null;
+	}
+}
+
+async function optionalCallAsync(ctx, name, method) {
+	const target = optionalService(ctx, name);
+	if (target === undefined || typeof target[method] !== 'function') {
+		return null;
+	}
+	try {
+		return await target[method]();
+	} catch {
+		return null;
+	}
 }
 
 /** 审批结果映射：DTO 的两个字面量 → DSH 的 ApprovalOutcome。 */
@@ -121,6 +152,9 @@ export class DshIdeHostBridge {
 		this.seq = 0;
 		this.methods = createMethodHandlers(this);
 		this._sessionReads = new Set();
+		/** @type {Map<string, { abort: AbortController, listeners: Set<(frame: unknown) => void>, ref: number }>} */
+		this._follows = new Map();
+		this._armWaterfalls();
 	}
 
 	open(spec) {
@@ -136,38 +170,172 @@ export class DshIdeHostBridge {
 	}
 
 	/**
-	 * 订阅四类官方事件。会话归属过滤只在本视图绑定会话时生效（第 1 章 §4.2 异会话隔离）。
-	 * 返回的解绑句柄只清理本视图的订阅，不取消 DSH 会话。
+	 * 跟随一个会话。同一个会话只调用一次 `sessionController.follow`，
+	 * 多个视图收同一份帧。没有会话地址时不听。
 	 */
 	follow(sessionId, onEvent) {
+		if (typeof sessionId !== 'string' || sessionId === '') {
+			return { dispose() {} };
+		}
 		this.sessionId = sessionId;
-		const forward = event => {
-			this.seq += 1;
-			onEvent(event);
+		const shared = this._ensureFollow(sessionId);
+		shared.listeners.add(onEvent);
+		shared.ref += 1;
+		return {
+			dispose: () => {
+				if (!shared.listeners.delete(onEvent)) {
+					return;
+				}
+				shared.ref -= 1;
+				if (shared.ref <= 0) {
+					shared.abort.abort();
+					this._follows.delete(sessionId);
+				}
+			},
 		};
-		this.disposers.push(this.ctx.on('session/event', (subject, event) => {
-			const id = subject && subject.id;
-			if (sessionId !== undefined && typeof id === 'string' && id !== sessionId) {
+	}
+
+	/** 给官方流式 remote 用：帧原样送出，不改写成行。 */
+	async *followSession(sessionId, signal) {
+		if (typeof sessionId !== 'string' || sessionId === '') {
+			return;
+		}
+		const queue = [];
+		let wake = () => undefined;
+		let closed = false;
+		const handle = this.follow(sessionId, frame => {
+			queue.push(frame);
+			const notify = wake;
+			wake = () => undefined;
+			notify();
+		});
+		const stop = () => {
+			closed = true;
+			handle.dispose();
+			// 唤醒正在等待的循环：否则 abort 后循环永远停在 await 上。
+			const notify = wake;
+			wake = () => undefined;
+			notify();
+		};
+		if (signal && typeof signal.addEventListener === 'function') {
+			if (signal.aborted) {
+				stop();
 				return;
 			}
-			forward(event);
-		}));
-		this.disposers.push(this.ctx.on('agent/assistant-stream', payload => {
-			const agent = payload && payload.agent;
-			const id = agent && agent.session && agent.session.id;
-			if (sessionId !== undefined && typeof id === 'string' && id !== sessionId) {
-				return;
+			signal.addEventListener('abort', stop, { once: true });
+		}
+		try {
+			while (!closed && (signal === undefined || signal.aborted !== true)) {
+				if (queue.length === 0) {
+					await new Promise(resolve => { wake = resolve; });
+					continue;
+				}
+				while (queue.length > 0) {
+					yield queue.shift();
+				}
 			}
-			const frame = payload && payload.frame;
-			const text = frame && frame.type === 'chunk' && frame.chunk && typeof frame.chunk.text === 'string' ? frame.chunk.text : undefined;
-			if (text === undefined) {
-				return;
+		} finally {
+			stop();
+		}
+	}
+
+	_ensureFollow(sessionId) {
+		const existing = this._follows.get(sessionId);
+		if (existing !== undefined) {
+			return existing;
+		}
+		const abort = new AbortController();
+		const shared = { abort, listeners: new Set(), ref: 0 };
+		this._follows.set(sessionId, shared);
+		const controller = service(this.ctx, 'sessionController');
+		const pump = async () => {
+			try {
+				const frames = controller.follow({
+					address: { kind: 'session', sessionId },
+					assistantStream: true,
+				}, abort.signal);
+				for await (const frame of frames) {
+					for (const listener of [...shared.listeners]) {
+						try {
+							listener(frame);
+						} catch {
+							// 单个视图抛错不影响同一条流上的其它视图。
+						}
+					}
+				}
+			} catch (error) {
+				if (abort.signal.aborted) {
+					return;
+				}
+				const message = error && error.message ? error.message : String(error);
+				console.warn(`[dsh-ide] session follow ended: ${message}`);
 			}
-			forward({ type: 'assistant.delta', text });
-		}));
-		this.disposers.push(this.ctx.on('approval/request', (request, next) => this.answer('approval', request, next)));
-		this.disposers.push(this.ctx.on('user-questions/request', (request, next) => this.answer('question', request, next)));
-		return { dispose: () => this.disposeSubscriptions() };
+		};
+		void pump();
+		return shared;
+	}
+
+	/** 批准和提问：IDE 与桌面都能答，先到的生效。帧同时送给正在听的视图。 */
+	_armWaterfalls() {
+		if (typeof this.ctx.on !== 'function') {
+			return;
+		}
+		this.disposers.push(this.ctx.on('approval/request', (request, next) => this._share('approval', request, next)));
+		this.disposers.push(this.ctx.on('user-questions/request', (request, next) => this._share('question', request, next)));
+	}
+
+	async _share(kind, request, next) {
+		const requestId = request && request.requestId;
+		if (typeof requestId !== 'string' || requestId === '') {
+			return typeof next === 'function' ? next() : undefined;
+		}
+		const handle = this.pending.register(kind, requestId);
+		const described = describeRequest(kind, request);
+		this.emitToUi({ type: 'request', kind, requestId, request: described });
+		this._fanout({
+			type: 'waterfall',
+			kind: 'request',
+			eventId: requestId,
+			event: kind === 'approval' ? 'approval/request' : 'user-questions/request',
+			agentId: typeof request.agentId === 'string' ? request.agentId : requestId,
+			request: described,
+		});
+		let ideSettled = false;
+		const ide = handle.promise.then(value => {
+			if (value !== undefined) {
+				ideSettled = true;
+			}
+			return value;
+		});
+		const desktop = Promise.resolve().then(() => typeof next === 'function' ? next() : undefined);
+		const first = await Promise.race([
+			ide.then(value => ({ source: 'ide', value })),
+			desktop.then(value => ({ source: 'desktop', value })),
+		]);
+		if (first.source === 'desktop') {
+			if (first.value !== undefined && !ideSettled) {
+				this.pending.entries.delete(requestId);
+				this._fanout({ type: 'waterfall', kind: 'cancel', eventId: requestId });
+				return first.value;
+			}
+			return ide;
+		}
+		if (first.value === undefined) {
+			return desktop;
+		}
+		return first.value;
+	}
+
+	_fanout(frame) {
+		for (const shared of this._follows.values()) {
+			for (const listener of [...shared.listeners]) {
+				try {
+					listener(frame);
+				} catch {
+					// 同 _ensureFollow：一个视图失败不打断其它视图。
+				}
+			}
+		}
 	}
 
 	/**
@@ -221,6 +389,10 @@ export class DshIdeHostBridge {
 			cancel();
 		}
 		this._sessionReads.clear();
+		for (const shared of this._follows.values()) {
+			shared.abort.abort();
+		}
+		this._follows.clear();
 		this.disposeSubscriptions();
 		this.pending.entries.clear();
 		this.channelId = undefined;
@@ -340,12 +512,19 @@ function createMethodHandlers(bridge) {
 			if (typeof sessionId === 'string') {
 				bridge.sessionId = sessionId;
 			}
-			return { accepted: true };
+			return { accepted: true, ...(typeof sessionId === 'string' ? { sessionId } : {}) };
 		},
 		async fork(args) {
 			bridge.assertOwnership(args.sessionId);
-			await controller().fork({ sessionId: args.sessionId });
-			return { accepted: true };
+			const created = await controller().fork({
+				sessionId: args.sessionId,
+				...(args.point === undefined || args.point === '' ? {} : { atSeq: Number(args.point) }),
+			});
+			const sessionId = created && (created.sessionId || created.childSessionId);
+			if (typeof sessionId === 'string') {
+				bridge.sessionId = sessionId;
+			}
+			return { accepted: true, ...(typeof sessionId === 'string' ? { sessionId } : {}) };
 		},
 		rewind: missing('rewind'),
 		async loadOlder(args) {
@@ -453,6 +632,57 @@ function createMethodHandlers(bridge) {
 			} finally {
 				bridge._sessionReads.delete(cancel);
 			}
+		},
+		async composerState() {
+			// 输入框一次读齐：模型目录、当前选择、权限目录、预设名单。
+			// 权限 / 预设服务没挂上时对应控件为 null，不把整条读取打成失败。
+			const sessionId = requireSession();
+			const projected = await controller().projections({ sessionId });
+			const values = projected && typeof projected === 'object' ? projected.values : undefined;
+			const catalog = await controller().modelCatalog();
+			return projectDshIdeComposer({
+				values,
+				catalog,
+				permission: optionalCall(bridge.ctx, 'permissionPresets', 'catalog'),
+				presets: await optionalCallAsync(bridge.ctx, 'agentPresets', 'list'),
+			});
+		},
+		async setTeamEnabled(args) {
+			// 官方 agentTeams.setEnabled(agent, enabled, signal)：只改根会话的团队开关。
+			const sessionId = requireSession();
+			if (typeof args.enabled !== 'boolean') {
+				throw coded(INVALID_ARGUMENT, 'setTeamEnabled.enabled must be a boolean');
+			}
+			const agents = service(bridge.ctx, 'agents');
+			const agent = typeof agents.get === 'function' ? agents.get(sessionId) : undefined;
+			if (agent === undefined || agent === null) {
+				throw coded(FEATURE_UNAVAILABLE, `no live agent for bound session ${sessionId}`, { capability: 'setTeamEnabled' });
+			}
+			const teams = service(bridge.ctx, 'agentTeams');
+			if (typeof teams.setEnabled !== 'function') {
+				throw coded(FEATURE_UNAVAILABLE, 'DSH agentTeams service has no setEnabled()', { capability: 'setTeamEnabled' });
+			}
+			const abort = new AbortController();
+			await teams.setEnabled(agent, args.enabled, abort.signal);
+			return { accepted: true };
+		},
+		async setAgentPreset(args) {
+			// 官方 agentPresets.select(agent, agentPreset)：会话已开聊时由官方拒绝。
+			const sessionId = requireSession();
+			if (typeof args.preset !== 'string' || args.preset === '' || /[\s/]/.test(args.preset)) {
+				throw coded(INVALID_ARGUMENT, 'setAgentPreset.preset must be a non-empty id without whitespace or slash');
+			}
+			const agents = service(bridge.ctx, 'agents');
+			const agent = typeof agents.get === 'function' ? agents.get(sessionId) : undefined;
+			if (agent === undefined || agent === null) {
+				throw coded(FEATURE_UNAVAILABLE, `no live agent for bound session ${sessionId}`, { capability: 'setAgentPreset' });
+			}
+			const presets = service(bridge.ctx, 'agentPresets');
+			if (typeof presets.select !== 'function') {
+				throw coded(FEATURE_UNAVAILABLE, 'DSH agentPresets service has no select()', { capability: 'setAgentPreset' });
+			}
+			await presets.select(agent, args.preset);
+			return { accepted: true };
 		},
 		async listModels() {
 			const catalog = await controller().modelCatalog();

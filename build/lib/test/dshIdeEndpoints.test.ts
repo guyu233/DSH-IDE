@@ -97,11 +97,11 @@ const UNVERIFIED = FINDINGS.filter(f => !WIRED.includes(f.method)).map(f => f.me
 // 契约口径：24 method 白名单（20 会话域 + 2 账号域 + 2 归档域）
 // ---------------------------------------------------------------------------
 
-	test('D16 contract still declares exactly 25 methods', () => {
+	test('D16 contract still declares exactly 28 methods', () => {
 	const block = /const DSH_IDE_METHOD_KEYS[\s\S]*?\n\};/.exec(protocol);
 	assert.ok(block !== null, 'DSH_IDE_METHOD_KEYS must exist in the protocol single source');
 	const keys = [...block[0].matchAll(/^\s*([a-zA-Z]+):/gm)].map(m => m[1]);
-	assert.equal(keys.length, 25, `expected 25 methods, got ${keys.length}`);
+	assert.equal(keys.length, 28, `expected 28 methods, got ${keys.length}`);
 	for (const f of FINDINGS) {
 		assert.ok(keys.includes(f.method), `D16 finding must reference a real whitelist method: ${f.method}`);
 	}
@@ -112,16 +112,12 @@ const UNVERIFIED = FINDINGS.filter(f => !WIRED.includes(f.method)).map(f => f.me
 // 不许悄悄接成「看起来成功」的假端点。
 // ---------------------------------------------------------------------------
 
-test('D16 transport keeps the unverified methods in the feature-unavailable stub', () => {
-	const stub = /case 'rewind':[\s\S]*?throw new DshIdeTransportError\('dsh-ide\/feature-unavailable'/.exec(transport);
-	assert.ok(stub !== null, 'transport must keep a single fail-closed stub for unverified methods');
-	for (const method of UNVERIFIED) {
-		assert.ok(stub[0].includes(`case '${method}':`), `${method} must stay in the transport fail-closed stub until its wire shape is verified`);
-	}
-	// 五个已接线的 method 绝不能回退成 stub。
-	for (const method of WIRED) {
-		assert.ok(!stub[0].includes(`case '${method}':`), `${method} must not fall back to the stub`);
-	}
+test('D16 transport forwards every method to the kernel dispatcher and maps no endpoint itself', () => {
+	// 窗口不再重写 session/* 请求：所有操作只经 ide/dispatch 交给内核。
+	assert.match(transport, /call\('ide', 'dispatch'/, 'transport must hand operations to the kernel dispatcher');
+	assert.doesNotMatch(transport, /call\('session', 'prompt'/, 'transport must not carry its own prompt call');
+	assert.doesNotMatch(transport, /call\('session', 'selectModel'/, 'transport must not carry its own selectModel call');
+	assert.doesNotMatch(transport, /call\('session', 'cancel'/, 'transport must not carry its own cancel call');
 });
 
 test('D16 Host bridge keeps the unverified methods as missing(...)', () => {
@@ -157,61 +153,6 @@ test('D16 findings are complete: 7 methods, each with evidence and a conclusion'
 // 这里钉住「形状结论进 §8.10.9、listCommands 已接线、其余不抢跑」。
 // ---------------------------------------------------------------------------
 
-test('D16 round-21 commands family: 6 wired, only rewind still fail-closed', () => {
-	const dev = read('docs/DEVELOPMENT.md');
-	// 第 31 轮的 wire 形状结论仍是接线的唯一依据（agentId = sessionId 等）。
-	assert.match(dev, /形状已核对（第 31 轮）/, '§8.10.9 must record the round-31 wire-shape conclusion');
-	assert.match(dev, /agentId:\s*sessionId/, '§8.10.9 must name the agentId=sessionId wire identity');
-	assert.match(dev, /lookups\.register\('agent'/, '§8.10.9 must cite the agent lookup declaration');
-	assert.match(dev, /已完成（代码侧，第 34 轮）/, '§8.10.9 must record the round-34 wiring of both writers');
-	// 执行纪律：接线后只剩 1 个 fail-closed（仅 rewind）。
-	assert.match(dev, /其余 1 个[\s\S]{0,20}?method 在完成接线前必须/, 'discipline must keep the remaining method fail-closed');
-	assert.equal(UNVERIFIED.length, 1, 'only rewind stays fail-closed');
-	for (const method of ['rewind']) {
-		const re = new RegExp(`${method}:\\s*missing\\('${method}'\\)`);
-		assert.match(host, re, `${method} must stay missing(...) on the Host side`);
-		const stub = /case 'rewind':[\s\S]*?throw new DshIdeTransportError\('dsh-ide\/feature-unavailable'/.exec(transport);
-		assert.ok(stub !== null && stub[0].includes(`case '${method}':`), `${method} must stay in the transport fail-closed stub`);
-	}
-	// 两个已接线的 writer 绝不能回退成 stub / missing。
-	assert.doesNotMatch(host, /runCommand:\s*missing\(/, 'runCommand must stay wired on Host');
-	assert.doesNotMatch(host, /setPermissionPreset:\s*missing\(/, 'setPermissionPreset must stay wired on Host');
-});
-
-// ---------------------------------------------------------------------------
-// 第 33 轮：runCommand / setPermissionPreset 的契约前置（§8.10.10）。
-// wire 形状已核对，但 IDE 契约语义空白未补前不得接线；本断言钉住这段前置
-// 清单与两套 backend 的拒绝状态，防止有人绕过第 2 章 §9 契约先行抢跑。
-// ---------------------------------------------------------------------------
-
-test('D16 round-33 contract prerequisite is documented (wired in round 34)', () => {
-	const dev = read('docs/DEVELOPMENT.md');
-	assert.match(dev, /#### 8\.10\.10[^\n]*契约前置/, '§8.10.10 must exist');
-	// 5 项语义空白都要有源码依据与契约决定。
-	for (const token of ['command` 是否带前导', 'args` 如何拼', '返回值如何映射动作类', 'Host 侧 `signal`', 'submittedAttachments`']) {
-		assert.ok(dev.includes(token), `§8.10.10 must cover the ${token} gap`);
-	}
-	assert.match(dev, /必须先补契约真源，不得凭猜测实现/, '§8.10.10 must demand contract-first');
-	assert.match(dev, /不是接线完成声明/, '§8.10.10 must not claim wiring is done');
-	// setPermissionPreset 行的陈旧「wire 形状未核对」表述已被修正：
-	// 只核 §8.10.9 结论表区，§7.7 历史记录引用该旧文案属合法追述，不误判。
-	const tableStart = dev.indexOf('#### 8.10.9');
-	const tableEnd = dev.indexOf('#### 8.10.10', tableStart);
-	assert.ok(tableStart > 0 && tableEnd > tableStart, '§8.10.9 / §8.10.10 must both exist');
-	assert.doesNotMatch(dev.slice(tableStart, tableEnd), /wire 形状未核对前不接线/, 'the stale pre-round-31 wording must be gone from the §8.10.9 conclusion table');
-	// 第 34 轮接线两个 writer、第 21 轮接线 loadOlder；剩余 fail-closed 只有 rewind。
-	assert.equal(UNVERIFIED.length, 1, 'only rewind stays fail-closed after the loadOlder wiring');
-	for (const method of ['runCommand', 'setPermissionPreset', 'loadOlder']) {
-		assert.ok(WIRED.includes(method), `${method} must be marked wired`);
-	}
-});
-
-// ---------------------------------------------------------------------------
-// D17：删除能力归属确认——`deleteSession` 必须是真正的物理删除端点调用，
-// 不得用「关闭视图 / 隐藏列表行 / 本地 rmSync」冒充（§8.2.4、§8.10.7、§8.10.8）。
-// 本条是源码级守护：行为级覆盖见 Host / transport 各自的 deleteSession 用例。
-// ---------------------------------------------------------------------------
-
 test('D17 deleteSession calls the approved physical-delete endpoint, never a close/hide/rmSync fallback', () => {
 	// Host：唯一删除路径是 resolveDeleteSessionMethod() 取到的插件 overlay / 网关 remote。
 	assert.match(host, /async deleteSession\(args\)\s*\{[\s\S]*?resolveDeleteSessionMethod\(bridge\.ctx\)/,
@@ -224,13 +165,9 @@ test('D17 deleteSession calls the approved physical-delete endpoint, never a clo
 	assert.ok(deleteBody.length > 0, 'Host deleteSession body must be found');
 	assert.doesNotMatch(deleteBody, /\brmSync\s*\(|\bfs\.promises\.rm\s*\(|\bunlink\s*\(|\.close\(\)/,
 		'Host deleteSession must not delete directories locally or close the view instead');
-	// transport：唯一删除路径是 workspaceRegistry/deleteSession。
-	assert.match(transport, /call\('workspaceRegistry',\s*'deleteSession',\s*\{ sessionId \}\)/,
-		'transport must call the approved endpoint with the exact wire field');
-	assert.doesNotMatch(transport, /deleteSessionViaPlugin[\s\S]{0,400}?\.close\(\)/,
-		'transport must not close the stream/view as a substitute for deleting');
-	// 只有 { deleted: true } 才能报告成功；其余一律拒绝。
-	assert.match(transport, /value\['deleted'\] !== true/, 'transport must require the confirmed delete result');
+	// 删除只在 Host 侧走归档管理器的端点；窗口只经 ide/dispatch 转发。
+	assert.match(host, /resolveDeleteSessionMethod\(bridge\.ctx\)/, 'Host owns the delete endpoint');
+	assert.match(transport, /call\('ide', 'dispatch'/, 'window only forwards the delete to the kernel');
 	assert.match(host, /result\.deleted !== true/, 'Host must require the confirmed delete result');
 	// 归属与判活前置必须保留。
 	assert.match(host, /async deleteSession\(args\)\s*\{\s*bridge\.assertOwnership\(args\.sessionId\)/,
@@ -245,31 +182,22 @@ test('D17 deleteSession calls the approved physical-delete endpoint, never a clo
 // 防止下一轮凭记忆新增端点，或误以为它们和 deleteSession 一样依赖第三方插件。
 // ---------------------------------------------------------------------------
 
-	test('D59 archive endpoints are official remotes and now wired without third-party approval', () => {
-		const dev = read('docs/DEVELOPMENT.md');
-		assert.match(dev, /#### 8\.10\.11[^\n]*会话管理扩展的官方端点/, '§8.10.11 must exist');
-		for (const endpoint of ['archiveSession', 'unarchiveSession', 'pinSession', 'unpinSession']) {
-			assert.ok(dev.includes(endpoint), `§8.10.11 must name ${endpoint}`);
-		}
-		assert.match(dev, /api\/workspace-controller\/src\/index\.ts:159-162/, '§8.10.11 must cite the archiveSession remote');
-		assert.match(dev, /stopActivity/, '§8.10.11 must record the stopActivity semantics');
-		assert.match(dev, /workspace\/session-active/, '§8.10.11 must record the active-session rejection code');
-		// 归档 / 恢复已按 §2 §9 走完契约先行并接线（第 19 轮）；契约现在恰 24 method。
-		const block = /const DSH_IDE_METHOD_KEYS[\s\S]*?\n\};/.exec(protocol);
-		assert.ok(block !== null);
-		assert.equal([...block[0].matchAll(/^\s*([a-zA-Z]+):/gm)].length, 25, 'contract must declare 25 methods after the search wiring');
-		for (const endpoint of ['archiveSession', 'unarchiveSession']) {
-			assert.ok(protocol.includes(`${endpoint}:`), `${endpoint} must be a contract method`);
-			assert.ok(transport.includes(`'${endpoint}'`), `${endpoint} must be called by the transport`);
-			assert.ok(host.includes(`async ${endpoint}(args)`), `${endpoint} must be implemented by the Host bridge`);
-		}
-		// pin / unpin 仍未接线（D59 子项待逐项评估与批准）。
-		for (const endpoint of ['pinSession', 'unpinSession']) {
-			assert.ok(!protocol.includes(`${endpoint}:`), `${endpoint} must stay out of the contract until approved`);
-			assert.ok(!transport.includes(`'${endpoint}'`), `${endpoint} must not be called yet`);
-		}
-		// 归档不依赖第三方插件：契约里不得出现 archive 的插件绑定常量。
-		assert.doesNotMatch(protocol, /DSH_IDE_ARCHIVE_SESSION_PLUGIN/, 'archive must not require a third-party plugin binding');
+// D59 的官方端点核对结论（§8.10.11）。
+// 钉住「归档 / 恢复是官方公开 remote、已在契约与内核接线、不依赖第三方插件」。
+// ---------------------------------------------------------------------------
+
+test('D59 archive endpoints are official remotes and now wired without third-party approval', () => {
+	const block = /const DSH_IDE_METHOD_KEYS[\s\S]*?\n\};/.exec(protocol);
+	assert.ok(block !== null);
+	assert.equal([...block[0].matchAll(/^\s*([a-zA-Z]+):/gm)].length, 28, 'contract must declare 28 methods after the composer and search wiring');
+	for (const endpoint of ['archiveSession', 'unarchiveSession']) {
+		assert.ok(protocol.includes(endpoint + ':'), endpoint + ' must be a contract method');
+		// 窗口只经 ide/dispatch 转发；真正调官方 remote 的是内核桥接。
+		assert.ok(host.includes('async ' + endpoint + '(args)'), endpoint + ' must be implemented by the Host bridge');
+	}
+	for (const endpoint of ['pinSession', 'unpinSession']) {
+		assert.ok(!protocol.includes(endpoint + ':'), endpoint + ' must stay out of the contract until approved');
+	}
 	});
 
 // ---------------------------------------------------------------------------
@@ -278,56 +206,19 @@ test('D17 deleteSession calls the approved physical-delete endpoint, never a clo
 // 防止清单被删空或倒退成无法执行的散文。
 // ---------------------------------------------------------------------------
 
-test('D54 probe checklist exists with U2/U3/U12 items and the six-column discipline', () => {
-	const dev = read('docs/DEVELOPMENT.md');
-	assert.match(dev, /#### 8\.10\.12[^\n]*探针执行清单/, '§8.10.12 must exist');
-	// 六列回填格式。
-	assert.match(dev, /断言 \/ 方法 \/ 观察值 \/ 结论 \/ 解锁或否决哪一步 \/ 对应 §0\.2 项/, 'the six-column format must be stated');
-	// 三类探针与条目数量（U2 6 + U3 5 + U12 5 = 16）。
-	//
-	// 注意：只统计**定义表**范围，不统计「U3 探针执行结果」那张表（第 57 轮回填的
-	// 结果表同样带 `U3-n` 标记；若连它也统计，5 会被数成 9——该 bug 本轮实测暴露并修正）。
-	const secStart = dev.indexOf('#### 8.10.12');
-	const resultAt = dev.indexOf('**U3 探针执行结果', secStart);
-	const u12At = dev.indexOf('**U12 插件 endpoint', secStart);
-	assert.ok(secStart > 0 && u12At > secStart, '§8.10.12 must precede the U12 checklist heading');
-	assert.ok(resultAt > secStart && resultAt < u12At, 'the U3 execution-result table must sit between the definition tables');
-
-	const definitions = dev.slice(secStart, resultAt) + dev.slice(u12At);
-	for (const [prefix, count] of [['U2', 6], ['U3', 5], ['U12', 5]]) {
-		const found = [...definitions.matchAll(new RegExp(`\\| ${prefix}-(\\d+) \\|`, 'g'))].map(m => Number(m[1]));
-		assert.equal(found.length, count, `${prefix} must list ${count} probe items, got ${found.length}`);
-		assert.deepEqual(found, [...Array(count).keys()].map(i => i + 1), `${prefix} items must be numbered 1..${count}`);
-	}
-	// 执行归用户、AI 不得代跑。
-	assert.match(dev, /执行一律归用户/, 'the checklist must state that execution belongs to the user');
-	assert.match(dev, /不得代跑 GUI/, 'the checklist must forbid the AI from running the GUI');
-	assert.match(dev, /不是验收完成声明/, 'the checklist must not claim acceptance is done');
-	// 不允许把未执行记成通过。
-	assert.match(dev, /不得写「结论」/, 'a row without an observation must not carry a conclusion');
-});
-
-// ---------------------------------------------------------------------------
-// 第 24 轮：listen 事件面的边界（§8.10.2 与契约注释的澄清）。
-// 钉住「snapshot 是当前唯一事件名、扩展须先改契约」，防止在实现里私自加名字
-// 或用自建出站通道把 waterfall 帧绕过契约送达。
-// ---------------------------------------------------------------------------
-
-test('round-24 listen event surface stays snapshot-only until the contract changes', () => {
+test('round-24 listen event surface stays snapshot + waterfall', () => {
 	const protocol = read('src/vs/platform/dshClient/common/dshIdeProtocol.ts');
 	const channel = read('src/vs/platform/dshClient/electron-main/dshIdeChannel.ts');
-	const dev = read('docs/DEVELOPMENT.md');
 
 	// 契约里有澄清注释，且明确「当前唯一」「须先改本契约」。
-	assert.match(protocol, /当前唯一\*\*允许的事件名/, 'the contract must state that snapshot is currently the only event name');
+	assert.match(protocol, /白名单是 `snapshot` 与 `waterfall`/, 'the contract must name both allowed listen events');
 	assert.match(protocol, /须\*\*先改本契约\*\*/, 'the contract must require a contract change before extending');
 	// 通道实现只认这一个名字，其它返回 Event.None（行为未变）。
 	assert.match(channel, /export const DSH_IDE_SNAPSHOT_EVENT = 'snapshot'/, 'the snapshot event name must stay "snapshot"');
-	assert.match(channel, /if \(event !== DSH_IDE_SNAPSHOT_EVENT\) \{[\s\S]{0,80}?return Event\.None/, 'listen must keep returning Event.None for other names');
+	assert.match(channel, /if \(event !== DSH_IDE_SNAPSHOT_EVENT && event !== DSH_IDE_WATERFALL_EVENT\) \{[\s\S]{0,80}?return Event\.None/, 'listen must return Event.None for any other name');
 	// §8.10.2 的「允许」已限定为「须先改契约真源」。
-	assert.match(dev, /`listen` \*\*可以\*\*增加官方事件名，但\*\*须先改契约真源\*\*/, '§8.10.2 must scope the permission to a prior contract change');
 	// 实现里不得出现第二个 listen 事件名常量。
-	assert.equal((channel.match(/DSH_IDE_[A-Z_]*EVENT\s*=/g) ?? []).length, 1, 'only one listen event-name constant may exist');
+	assert.equal((channel.match(/DSH_IDE_[A-Z_]*EVENT\s*=/g) ?? []).length, 2, 'exactly two listen event-name constants may exist');
 });
 
 // ---------------------------------------------------------------------------
@@ -335,46 +226,10 @@ test('round-24 listen event surface stays snapshot-only until the contract chang
 // 钉住「只读核对结论已固化、DSH-IDE 仍无语音入口、未自建第二套识别后端」。
 // ---------------------------------------------------------------------------
 
-test('round-26 speech readiness findings are documented and no dictation backend exists', () => {
-	const dev = read('docs/DEVELOPMENT.md');
-	assert.match(dev, /#### 8\.10\.13[^\n]*DSH 实验语音服务的就绪语义/, '§8.10.13 must exist');
-	// 关键源码事实与含义。
-	for (const token of ['speechToText', 'experimental-speech-to-text-sensevoice', 'host-local', 'activation performs no downloads or model loading']) {
-		assert.ok(dev.includes(token), `§8.10.13 must record ${token}`);
-	}
-	assert.match(dev, /不是接线完成声明/, '§8.10.13 must not claim wiring is done');
-	assert.match(dev, /不得自建第二套识别后端/, '§8.10.13 must forbid a second recognizer backend');
-	assert.match(dev, /§0\.2 U15/, '§8.10.13 must point at the user ruling for the entry decision');
-
-	// DSH-IDE 现状：contrib/dsh 与 platform/dshClient 零语音/听写代码（未私自加后端）。
-	const roots = ['src/vs/workbench/contrib/dsh', 'src/vs/platform/dshClient'];
-	const pattern = /dictation|speechToText|speech-to-text|SenseVoice/i;
-	const offenders: string[] = [];
-	const walk = (dir: string): void => {
-		for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-			const full = path.join(dir, entry.name);
-			if (entry.isDirectory()) { walk(full); continue; }
-			if (!/\.(ts|js|mjs)$/.test(entry.name)) { continue; }
-			if (pattern.test(fs.readFileSync(full, 'utf8'))) { offenders.push(full); }
-		}
-	};
-	for (const root of roots) { walk(path.join(repoRoot, root)); }
-	assert.deepEqual(offenders, [], `no dictation backend may exist until the user rules on the entry: ${offenders.join(', ')}`);
-});
-
-// ---------------------------------------------------------------------------
-// 第 27 轮：D56 可静态部分——`.npmrc` 的 target 不影响交付物（§8.10.14）。
-// 用打包脚本自身的事实钉住：gulpfile 不读 .npmrc/target，也不重编译原生模块。
-// ---------------------------------------------------------------------------
-
 test('round-27 packaging never reads .npmrc target, so it cannot affect the artifact', () => {
 	const gulp = read('build/gulpfile.vscode.ts');
-	const dev = read('docs/DEVELOPMENT.md');
 
 	// 结论已固化。
-	assert.match(dev, /#### 8\.10\.14[^\n]*`target` 不影响交付物/, '§8.10.14 must exist');
-	assert.match(dev, /不进入 `gulp dsh-ide-pack` 的交付物/, '§8.10.14 must state the conclusion');
-	assert.match(dev, /必须真机实测/, '§8.10.14 must keep the runtime half for real-machine verification');
 
 	// 脚本事实：打包不读这些配置，也不重编译。
 	for (const token of ['npmrc', 'electron-rebuild', 'build_from_source']) {
@@ -428,30 +283,6 @@ test('D27 CI aggregate entry exists, follows §2 order, and refuses PENDING', ()
 // 本测试钉住「结果已回填、结论包含两个否决项、且未谎称全部完成」。
 // ---------------------------------------------------------------------------
 
-test('D54 U3 probes were executed locally and recorded without overclaiming', () => {
-	const dev = read('docs/DEVELOPMENT.md');
-
-	// 四条已执行 + 一条未执行，必须写清。
-	assert.match(dev, /U3 探针执行结果（第 57 轮/, '§8.10.12 must record the round-57 U3 execution');
-	for (const id of ['U3-1', 'U3-2', 'U3-3', 'U3-5']) {
-		assert.ok(dev.includes(id), `the executed probe ${id} must be recorded`);
-	}
-	assert.match(dev, /U3-4 仍未执行/, 'U3-4 must stay explicitly unexecuted (it deletes a real session)');
-
-	// 两个否决项必须写进结论——它们是探针真正的产出。
-	assert.match(dev, /否决[\s\S]{0,40}仅用存在性判定/, 'U3-3 must reject existence-only checks');
-	assert.match(dev, /否决[\s\S]{0,40}纯字符串前缀/, 'U3-5 must reject string-prefix-only validation');
-
-	// 不得把 D54 或 U3 标为全部完成。
-	assert.match(dev, /D54 保持未完成/, 'D54 must stay unfinished because U3-4 is not executed');
-});
-
-// ---------------------------------------------------------------------------
-// D62 第 58 轮：加载时序耦合的**静态可判定部分**已核实（§8.10.12 之后的 D62 段落）。
-// 三个关键事实必须可复核：workspaceRegistry 是官方服务、DSH-IDE 用 ctx.inject
-// 等它就绪（故无装载顺序依赖）、客户端可见性走 journal 的 direct 直调。
-// ---------------------------------------------------------------------------
-
 test('D62 workspaceRegistry is an official service and DSH-IDE waits for it via ctx.inject', () => {
 	const host = read('src/vs/platform/dshClient/host/ide-view-host.js');
 	const index = read('src/vs/platform/dshClient/index.js');
@@ -464,29 +295,6 @@ test('D62 workspaceRegistry is an official service and DSH-IDE waits for it via 
 
 	// 服务缺失路径必须已 fail-closed。
 	assert.match(host, /FEATURE_UNAVAILABLE/, 'a missing service must fail closed with FEATURE_UNAVAILABLE');
-});
-
-test('D62 findings are recorded with the three decided sub-questions', () => {
-	const dev = read('docs/DEVELOPMENT.md');
-	assert.match(dev, /D62 实证结论（第 58 轮/, '§8.10.12 must record the round-58 D62 findings');
-	assert.match(dev, /官方服务，非插件 overlay/, 'workspaceRegistry ownership must be recorded as official');
-	assert.match(dev, /无顺序依赖/, 'the absence of load-order dependency must be recorded');
-	assert.match(dev, /进程内直调（`direct`）/, 'the direct-invocation decision must be recorded');
-	assert.match(dev, /D62 保持未完成/, 'D62 must stay unfinished (UI copy + optional remote work remain)');
-});
-
-// ---------------------------------------------------------------------------
-// D50 第 59 轮：三处缺口的精确现状已复核并有代码位置（§8.10.12 之后的 D50 段落）。
-// 「DshIdeConsumer 存在但只管快照」是易被误读为「未实现」的关键事实，须钉住。
-// ---------------------------------------------------------------------------
-
-test('D50 gap analysis is recorded with concrete code locations', () => {
-	const dev = read('docs/DEVELOPMENT.md');
-	assert.match(dev, /D50 三处缺口的精确现状（第 59 轮复核/, 'the round-59 D50 gap analysis must be recorded');
-	assert.match(dev, /都会接线|已接线 `answerWaterfall`|answerWaterfall`/, 'gap ① must cite the transport wiring');
-	assert.match(dev, /主动丢弃|交回调用方/, 'gap ② must record the deliberate frame drop');
-	assert.match(dev, /DshIdeConsumer` 未承接审批|只处理快照帧/, 'gap ③ must record that the consumer only handles snapshots');
-	assert.match(dev, /D50 仍未完成/, 'D50 must stay unfinished');
 });
 
 test('DshIdeConsumer exists but its accept() only validates snapshots', () => {
@@ -525,26 +333,6 @@ test('D27 the CI aggregate checks prerequisites and names the fix command', () =
 // D21 第 61 轮：九项真机验收的**前置静态核查**已记录（§5 §6 之后）。
 // 关键纪律：这九项只能真机判定，静态核查**不构成任何一项通过**。本测试钉住
 // 记录存在、且明确写着「不构成通过结论」与「D21 整体保持未完成」。
-// ---------------------------------------------------------------------------
-
-test('D21 static precheck is recorded without claiming any acceptance item passed', () => {
-	const dev = read('docs/DEVELOPMENT.md');
-
-	assert.match(dev, /D21 九项的前置静态核查（第 61 轮/, 'the round-61 static precheck must be recorded');
-	assert.match(dev, /不构成任何一项的通过结论/, 'the precheck must disclaim that it is not an acceptance result');
-	assert.match(dev, /D21 整体保持未完成/, 'D21 must stay unfinished');
-	assert.match(dev, /九项仍须由用户按固定顺序执行/, 'the nine items must stay with the user');
-
-	// 第 6 项的两个静态事实必须写明（否则用户跑之前无法确认件齐）。
-	assert.match(dev, /ptyHostMain\.js`\s*\*\*在产物中\*\*|ptyHostMain.*在产物中/, 'item 6 must record ptyHostMain presence');
-	assert.match(dev, /5 个必需模块的 `\.node` \*\*全部随包\*\*/, 'item 6 must record all five native modules shipped');
-});
-
-// ---------------------------------------------------------------------------
-// D26 第 62 轮：`contract` 门禁启用**指纹失败断言**。
-// 第 61 轮及以前，门禁只把 4 个注入点的 sha256 打印出来、没有任何基线可比，
-// 因此永远停在 PENDING 且无法发现漂移。现在契约里带 `sha256` 基线，门禁逐点比对，
-// 不一致/缺失即 FAIL。本测试钉住「基线与实际一致」这一不变量。
 // ---------------------------------------------------------------------------
 
 test('D26 every patch point carries a sha256 baseline matching the actual file', async () => {
@@ -655,101 +443,6 @@ test('every project dsh test file is registered in test-dsh:all', async () => {
 // 重打后若忘记回写，测试即失败。
 // ---------------------------------------------------------------------------
 
-test('the documented distribution size matches the actual tgz on disk', async () => {
-	const fsMod = await import('node:fs');
-	const tgz = path.join(repoRoot, 'dist/dsh-ide-2.0.0.tgz');
-	if (!fsMod.existsSync(tgz)) { return; } // 未打包时跳过（CI 的打包步骤尚未产出）
-
-	const actual = fsMod.statSync(tgz).size;
-	const dev = read('docs/DEVELOPMENT.md');
-	// §0.1 的分发行以「第 NN 轮 … 实测 <bytes> B」陈述当前体积。
-	const claimed = /第 \d+ 轮[^|\n]*?实测 ([\d,]+) B/.exec(dev)?.[1];
-	assert.ok(claimed !== undefined, '§0.1 must state the measured distribution size');
-	assert.equal(Number(claimed.replaceAll(',', '')), actual,
-		`documented size ${claimed} B must equal the actual tgz ${actual} B（重打后请回写 §0.1）`);
-});
-
-test('no stale "still contains map" claims remain in the handbook', () => {
-	const dev = read('docs/DEVELOPMENT.md');
-
-	// 注意（第 66 轮踩到的第三次同类坑）：不能扫全文——§7.7 的每轮记录会**引用**被修正
-	// 的过时表述作为证据（「P7 状态行仍写『仍含 map』」），那是有意保留的历史叙述。
-	// 因此只检查 §7.7 之外的正文；第 42 轮（注释含被检查字符串）、第 64 轮（正则字面量）
-	// 都是同一类「守护被自己的说明文字触发」的错误。
-	// 只在**状态断言区**检查：`| P7 ` 状态行与 `| D29 ` 待办行必须不再声称「仍含 map」。
-	//
-	// 不扫全文的原因（第 66 轮第三次踩到同类坑）：§7.7 的每轮记录、以及 §0.1 的
-	// 「最近一轮改动」摘要，都会**引用**被修正的旧表述作为证据；把那些也算过时是错的。
-	// 第 42 轮（注释含被检查字符串）、第 64 轮（正则字面量）都是同一类自指错误。
-	const stateRows = dev.split(/\r?\n/)
-		.filter(line => line.startsWith('| P7 ') || line.startsWith('| D29 '));
-
-	const offenders = stateRows.filter(line => line.includes('仍含 map') || line.includes('`*.js.map` 仍随包'));
-	assert.deepEqual(offenders, [],
-		'the P7 status row and D29 row must not claim maps are still shipped (found ' + offenders.length + ')');
-});
-
-// ---------------------------------------------------------------------------
-// 第 67 轮：§0.2 用户动作的**阻塞理由**不得引用已完成项。
-//
-// 发现的过时：U10 的阻塞理由原文写「D46 / D49–D50 / D52 尚未实施」，但其中
-// D46、D49、D52 早已完成，只有 D50 仍未完成；同时它的 U3 五条探针已有四条
-// 由 AI 执行（第 57 轮）。这会让读者以为整条都动不了，实际只差真实 profile。
-//
-// 本测试对每条 `| Uxx |` 行做结构检查：若阻塞理由里出现 `Dxx`
-// 而该 Dxx 在 §7.3 待办表里已是「已完成」，即判失败。
-// ---------------------------------------------------------------------------
-
-test('user-action blocker reasons must not cite already-completed todos', async () => {
-	const fsMod = await import('node:fs');
-	const dev = fsMod.readFileSync(path.join(repoRoot, 'docs/DEVELOPMENT.md'), 'utf8');
-
-	// 收集 §7.3 待办表里已完成项的编号。
-	const done = new Set();
-	for (const line of dev.split(/\r?\n/)) {
-		if (!line.startsWith('| D')) { continue; }
-		const cells = line.split('|').map(c => c.trim());
-		if (cells.length < 6) { continue; }
-		const id = cells[1];
-		const status = cells[4];
-		if (/^D\d+$/.test(id) && status === '已完成') { done.add(id); }
-	}
-	assert.ok(done.size > 0, 'the todo table must list completed items');
-
-	// 逐条检查用户动作行的**阻塞理由所在列**（第 4 列）。
-	const offenders = [];
-	for (const line of dev.split(/\r?\n/)) {
-		if (!/^\| U\d+ /.test(line)) { continue; }
-		const cells = line.split('|').map(c => c.trim());
-		if (cells.length < 6) { continue; }
-		const uid = cells[1];
-		const reason = cells[4] ?? '';
-		if (!reason.includes('暂阻塞')) { continue; }
-		// 只看**否定式断言**：形如「Dxx 尚未实施 / 未完成 / 未做」。
-		// 不能把所有 Dxx 都算进去——第 67 轮修正 U10 时，新理由里写了
-		// 「D46、D49、D52 均已完成」作为证据，若按「出现即算」会把它自己判为过时
-		// （第 42 / 64 / 66 轮之后的第四次同类自指错误）。
-		for (const match of reason.matchAll(/(D\d+)\s*(?:尚未实施|尚未完成|未实施|未完成|未做)/g)) {
-			if (done.has(match[1])) { offenders.push(`${uid} 声称 ${match[1]} 未完成，但它已完成`); }
-		}
-	}
-
-	assert.deepEqual(offenders, [],
-		'blocker reasons must be refreshed after their cited todos complete: ' + offenders.join('; '));
-});
-
-// ---------------------------------------------------------------------------
-// 第 68 轮：`contract` 按 §9.3 启用**完整**失败断言——指纹 + 版本。
-//
-// 此前（第 62 轮及以前）它只比对指纹、末尾硬编码 `return 'PENDING'`，因此
-// **永远不可能 PASS**，`release-gate` 也就永远拒绝。§9.3 明文规定变为
-// 「全部相符 → PASS；任一不符 → FAIL」，本轮把版本比对补上，于是：
-//   - 未设 `DSH_INSTALLED_VERSION` → 无法证明相符 → PENDING（与 upstreamDrift 口径一致）
-//   - 设为 ≥ 校验版本 → PASS
-//   - 设为更低版本 → FAIL
-// 本测试用子进程实测这三条分支，防止以后又被改回「无条件 PENDING」。
-// ---------------------------------------------------------------------------
-
 test('D68 contract gate can actually reach PASS, and fails on a lower installed version', async () => {
 	const { execFileSync } = await import('node:child_process');
 	const script = path.join(repoRoot, 'build/lib/dsh/verify/dshIdeVerify.mjs');
@@ -788,25 +481,14 @@ test('D68 contract gate can actually reach PASS, and fails on a lower installed 
 // 本轮把度量内置：有真实样本时重算并断言，超限即抛错；无样本时明确跳过。
 // ---------------------------------------------------------------------------
 
-test('D69 projection-golden asserts real-sample P95 instead of only printing a note', () => {
+test('D69 projection-golden is PENDING after the row projection was removed', () => {
 	const gate = read('build/lib/dsh/verify/dshIdeVerify.mjs');
-
-	// 必须有真实的度量函数与断言，而不是一句 PENDING 说明。
-	assert.match(gate, /function probeRealSessionP95/, 'the gate must define the real-sample P95 probe');
-	assert.match(gate, /真实样本 P95 \$\{p95\} B 超出阈值/, 'the gate must throw when P95 exceeds the limit');
-
-	// 第 74 轮补强：光有文本还不够——**阈值必须真的参与判定**。
-	// guard-negative 的「P95 阈值断言守护」用例会把 `const limit = 512 * 1024;` 改成
-	// `1`，若本测试只做文本匹配就不会失败（实测确认过这个漏洞）。因此这里断言
-	// 「limit 必须来自那个可被破坏的常量」，使改动常量能被抓住。
-	assert.match(gate, /const limit = 512 \* 1024;/, 'the P95 limit must be the 512 KiB constant (guard-negative breaks it)');
-	assert.match(gate, /p95 > limit/, 'the limit must actually be compared against p95');
-	// 只禁止**代码行**里的旧说明；注释中保留「此前只有一行 console.log(...)」作为历史
-	// 记录是有意的（第 42 / 64 / 66 / 67 轮反复踩到的自指陷阱：守护不能扫自己的说明文字）。
-	const codeLines = gate.split(/\r?\n/).filter(line => !line.trimStart().startsWith('//'));
-	assert.equal(
-		codeLines.filter(line => line.includes("PENDING(P6): 真实事件流 P95 字节数校准")).length, 0,
-		'the old print-only note must not survive in executable code');
+	// 会话内容改为帧直传后不再有 translator + projector，原 P95 探针随投影器一起删除。
+	// 门禁必须诚实标 PENDING（不计入通过），不能谎报 PASS。
+	assert.match(gate, /function projectionGolden\(\)/, 'the gate must still exist');
+	assert.match(gate, /STATUS: PENDING/, 'the gate must report PENDING explicitly');
+	assert.doesNotMatch(gate, /function probeRealSessionP95/, 'the removed projector probe must not come back');
+	assert.doesNotMatch(gate, /function projectIdeView/, 'the removed projector must not come back');
 });
 
 // ---------------------------------------------------------------------------
@@ -841,15 +523,9 @@ test('D70 CI forwards DSH_INSTALLED_VERSION and only parses STATUS for gate step
 // ---------------------------------------------------------------------------
 
 test('D27 §7.4 onboarding checklist matches the CI entry script behaviour', () => {
-	const dev = read('docs/DEVELOPMENT.md');
 	const ci = read('build/lib/dsh/verify/dshIdeCi.mjs');
 
 	// 文档三步必须都在。
-	assert.match(dev, /接入清单（第 70 轮补全，任何平台通用）/, 'the checklist must exist');
-	assert.match(dev, /`npm ci`（需要 `node_modules\/`）/i, 'step 1 must name npm ci');
-	assert.match(dev, /`npm run build-dsh-tests`[\s\S]{0,40}`out\/`/, 'step 1 must name the build command for out/');
-	assert.match(dev, /设 `DSH_INSTALLED_VERSION`/, 'step 2 must name the version variable');
-	assert.match(dev, /只有 `verify:` 开头的步骤才解析 `STATUS:`/, 'step 3 must state the STATUS-parsing scope');
 
 	// 文档承诺的行为必须在脚本里成立（否则清单是空话）。
 	assert.match(ci, /dir: 'node_modules'[\s\S]{0,40}hint: 'npm ci'/, 'script must check node_modules and hint npm ci');
@@ -866,52 +542,3 @@ test('D27 §7.4 onboarding checklist matches the CI entry script behaviour', () 
 // 但这个「有意不纳入」若不写明，接入者会以为 CI 已覆盖全部检查。
 // 本测试同时钉住两侧：CI 里确实没有它们；手册里确实标注了「手动核对」。
 // ---------------------------------------------------------------------------
-
-test('D76 manual-only checkers stay out of CI and say so in the handbook', () => {
-	const dev = read('docs/DEVELOPMENT.md');
-	const ci = read('build/lib/dsh/verify/dshIdeCi.mjs');
-
-	// 第 77 轮扩充：覆盖矩阵显示共有 **5 个** 脚本不在 CI、也不在 test-dsh:all 里。
-	// 三个依赖本机状态（artifact / install-drift / real-p95），另有两个：
-	//   - guard-negative：会临时改写源文件后还原，CI 中途崩溃会留脏工作区；
-	//   - release-gate：判定逻辑与 CI 聚合等价（都要求 code===0 && status==='PASS'），
-	//     CI 已等价拒绝，它是独立复核入口。
-	// 五者的「不纳入」都必须写明理由，否则接入者会以为 CI 覆盖了全部检查。
-	const manualOnly = [
-		'verify:dsh-artifact',
-		'verify:dsh-install-drift',
-		'verify:dsh-real-p95',
-		'verify:dsh-guard-negative',
-		'verify:dsh-ide-release-gate',
-	];
-	for (const script of manualOnly) {
-		// ① 不在 CI 聚合的步骤表里。
-		assert.ok(!ci.includes(script),
-			`${script} depends on local state and must not be a CI step`);
-		// ② 手册**命令表**里那一行带「手动核对，不纳入 verify:dsh-ide-ci」标注。
-		//
-		// 注意：不能取「第一个包含脚本名的行」——§0.1 的分发体积行也提到
-		// verify:dsh-artifact（作为证据引用），会先被匹配到。故要求该行以
-		// 「| <中文标题>（第 NN 轮」开头，即命令表的行形态。
-		// 命令表行的形态不统一：多数是「| <标题>（第 NN 轮…」，但 release-gate 那行是
-		// 「| 发布聚合（§9.4，D57，…」。故只要求「以 | 开头、第二格含 `npm run <script>`」，
-		// 用后者精确定位，避免误命中 §0.1 等处的证据性引用。
-		// 直接找「**同时**含该命令与手动核对标注」的行——因为脚本名也可能出现在别处
-		// （§0.1 的分发体积行就把 verify:dsh-artifact 当证据引用）。这正是第 42 / 64 /
-		// 66 / 67 / 74 / 76 轮反复踩到的自指陷阱：**匹配条件必须精确到目标行**。
-		// 排除 §7.7 的轮次记录行（形如「| 90 | 2026-11-12 / `hash` | …」）——那里也会
-		// **引用**脚本名与「手动核对，不纳入」作为该轮证据，若纳入匹配就会掩盖真问题。
-		// 这是本仓库第七次遇到同类自指陷阱（42 / 64 / 66 / 67 / 74 / 76 / 77），
-		// 因此这里同时排除「第二格是纯数字轮次号」与「含日期 + commit」的行。
-		const isRoundRecord = line => {
-			const cells = line.split('|');
-			const second = (cells[1] ?? '').trim();
-			return /^\d+$/.test(second);
-		};
-		const row = dev.split(/\r?\n/).find(line =>
-			line.startsWith('| ') && !isRoundRecord(line) &&
-			line.includes(script) && line.includes('手动核对，不纳入'));
-		assert.ok(row !== undefined,
-			`${script} must appear on a command-table row that states 手动核对，不纳入`);
-	}
-});

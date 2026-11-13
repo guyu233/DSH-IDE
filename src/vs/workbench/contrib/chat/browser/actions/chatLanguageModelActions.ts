@@ -28,7 +28,6 @@ class ManageLanguageModelAuthenticationAction extends Action2 {
 			id: ManageLanguageModelAuthenticationAction.ID,
 			title: localize2('manageLanguageModelAuthentication', 'Manage Language Model Access...'),
 			category: CHAT_CATEGORY,
-			precondition: ChatContextKeys.enabled,
 			menu: [{
 				id: MenuId.AccountsContext,
 				order: 100,

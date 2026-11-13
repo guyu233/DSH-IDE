@@ -14,10 +14,9 @@ import { IConfigurationService } from '../../../../../../platform/configuration/
 import { IContextKeyService } from '../../../../../../platform/contextkey/common/contextkey.js';
 import { IDialogService } from '../../../../../../platform/dialogs/common/dialogs.js';
 import { Severity } from '../../../../../../platform/notification/common/notification.js';
-import { observableConfigValue, observableContextKey } from '../../../../../../platform/observable/common/platformObservableUtils.js';
+import { observableConfigValue } from '../../../../../../platform/observable/common/platformObservableUtils.js';
 import { ITelemetryService } from '../../../../../../platform/telemetry/common/telemetry.js';
 import { ILocalModelInteractionHandler } from '../../../../../services/agentHost/common/localModelService.js';
-import { ChatContextKeys } from '../../../common/actions/chatContextKeys.js';
 
 /** Opens the most relevant chat input's model picker on the On This Device tab, at the detail page of the family given as the only argument. */
 export const LOCAL_MODEL_SHOW_DETAILS_COMMAND_ID = 'workbench.action.chat.localModel.showDetails';
@@ -27,8 +26,9 @@ export const LOCAL_MODEL_SHOW_DETAILS_COMMAND_ID = 'workbench.action.chat.localM
 /** Whether any on-device model UI may show: the opt-in setting is on and AI features are enabled; each surface adds its own conditions. */
 export function observeLocalModelUiEnabled(configurationService: IConfigurationService, contextKeyService: IContextKeyService): IObservable<boolean> {
 	const setting = observableConfigValue<boolean>(LocalModelEnabledSettingId, false, configurationService);
-	const chatEnabled = observableContextKey<boolean>(ChatContextKeys.enabled.key, contextKeyService);
-	return derived(reader => setting.read(reader) === true && chatEnabled.read(reader) === true);
+	// chatIsEnabled 开关已删除；聊天能力恒在，只看设置项。
+	void contextKeyService;
+	return derived(reader => setting.read(reader) === true);
 }
 
 /** Opens the Settings editor at `chat.copilot.localModel.llamaServerPath`. */

@@ -323,7 +323,6 @@ registerAction2(class AddCellOutputToChatAction extends Action2 {
 			},
 			category: NOTEBOOK_ACTIONS_CATEGORY,
 			icon: icons.copyIcon,
-			precondition: ChatContextKeys.enabled
 		});
 	}
 

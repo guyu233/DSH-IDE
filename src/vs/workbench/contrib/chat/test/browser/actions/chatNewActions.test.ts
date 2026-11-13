@@ -24,7 +24,7 @@ suite('Chat new actions', () => {
 		assert.ok(keybinding?.when);
 
 		const chatContext = {
-			[ChatContextKeys.enabled.key]: true,
+			'chatIsEnabled': true,
 			[ChatContextKeys.inChatSession.key]: true,
 			[ChatContextKeys.location.key]: ChatAgentLocation.Chat,
 		};

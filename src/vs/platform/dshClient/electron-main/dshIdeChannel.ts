@@ -24,6 +24,7 @@ import {
 	validateDshIdeInput,
 	validateDshIdeInvokeOutput,
 	type DshIdeSnapshot,
+	type DshIdeWaterfallNotice,
 	type DshRemoteError,
 	type IdeViewHost,
 } from '../common/dshIdeProtocol.js';
@@ -31,6 +32,8 @@ import {
 /** 通道控制命令：负责建立/释放一条连接，不属于 22 个 DTO method 白名单。 */
 export const DSH_IDE_CONTROL_OPEN = 'open';
 export const DSH_IDE_CONTROL_CLOSE = 'close';
+/** 换会话控制命令：停掉旧流，按新会话重开。 */
+export const DSH_IDE_CONTROL_REBIND = 'rebind';
 /**
  * 开窗控制命令（P5）：由 DSH 主窗口的按钮触发，在本进程内打开/唤起 IDE 窗口。
  *
@@ -48,8 +51,10 @@ export interface DshIdeLauncher {
 	launch(spec: { workspace?: string; sessionId?: string }): Promise<{ ok: true } | { ok: false; message: string }>;
 }
 
-/** 快照事件名（`listen` 唯一允许的事件）。 */
+/** 快照事件名（`listen` 白名单之一）。 */
 export const DSH_IDE_SNAPSHOT_EVENT = 'snapshot';
+/** waterfall 事件名（审批 / 问卷；`listen` 白名单之二）。 */
+export const DSH_IDE_WATERFALL_EVENT = 'waterfall';
 
 interface DshIdeConnection {
 	/** 该连接绑定的窗口级通道 id，守恒。 */
@@ -58,6 +63,8 @@ interface DshIdeConnection {
 	last: DshIdeSnapshot;
 	/** 快照流订阅句柄。 */
 	readonly subscription: { dispose(): void };
+	/** waterfall 订阅句柄。与快照分开，不参与 version 过滤。 */
+	readonly waterfall: { dispose(): void };
 }
 
 function toDshIdeError(error: unknown, code: string): DshRemoteError {
@@ -67,6 +74,7 @@ function toDshIdeError(error: unknown, code: string): DshRemoteError {
 
 export class DshIdeChannel extends Disposable implements IServerChannel<string> {
 	private readonly _onDidSnapshot = this._register(new Emitter<{ readonly ctx: string; readonly snapshot: DshIdeSnapshot }>());
+	private readonly _onDidWaterfall = this._register(new Emitter<{ readonly ctx: string; readonly notice: DshIdeWaterfallNotice }>());
 	private readonly _connections = new Map<string, DshIdeConnection>();
 	/** 每个连接已发出的最大 version：丢弃重复/倒退帧，保证消费者看到严格 +1。 */
 	private readonly _lastSentVersion = new Map<string, number>();
@@ -81,12 +89,19 @@ export class DshIdeChannel extends Disposable implements IServerChannel<string> 
 	}
 
 	/**
-	 * 三层过滤：① 事件名白名单只放行 `snapshot`；② 归属过滤只把本连接（ctx）所属视图的
-	 * 帧发出去；③ 连续性过滤丢弃 `version` 未严格递增的重复/倒退帧。
+	 * 三层过滤：① 事件名白名单只放行 `snapshot` 与 `waterfall`；② 归属过滤只把本连接（ctx）
+	 * 所属视图的帧发出去；③ 快照连续性过滤丢弃 `version` 未严格递增的重复/倒退帧。
+	 * waterfall 没有 version，不做第③层。
 	 */
 	listen<T>(ctx: string, event: string, _arg?: unknown): Event<T> {
-		if (event !== DSH_IDE_SNAPSHOT_EVENT) {
+		if (event !== DSH_IDE_SNAPSHOT_EVENT && event !== DSH_IDE_WATERFALL_EVENT) {
 			return Event.None as Event<T>;
+		}
+		if (event === DSH_IDE_WATERFALL_EVENT) {
+			return Event.map(
+				Event.filter(this._onDidWaterfall.event, emitted => emitted.ctx === ctx),
+				emitted => emitted.notice as unknown as T,
+			);
 		}
 		// 第二代过滤（连接归属）在 listen 上完成，第三代（version 严格递增）在发布侧按 ctx 去重，
 		// 两级都用平台既有的 Event.filter / Event.map，避免自造事件适配层。
@@ -103,6 +118,9 @@ export class DshIdeChannel extends Disposable implements IServerChannel<string> 
 		if (command === DSH_IDE_CONTROL_CLOSE) {
 			this.disposeOwner(ctx);
 			return { closed: true } as unknown as T;
+		}
+		if (command === DSH_IDE_CONTROL_REBIND) {
+			return this.rebind(ctx, arg) as unknown as T;
 		}
 		if (command === DSH_IDE_CONTROL_LAUNCH) {
 			return this.launch(arg) as unknown as T;
@@ -151,6 +169,12 @@ export class DshIdeChannel extends Disposable implements IServerChannel<string> 
 			throw toDshIdeError(new TypeError('DshIdeChannel.open.view must be a non-empty string'), DSH_IDE_INVALID_ARGUMENT);
 		}
 		const first = this.view.open(spec as { view: string; params?: Record<string, unknown> });
+		const waterfall = this.view.subscribeWaterfall(notice => {
+			if (!this._connections.has(ctx)) {
+				return;
+			}
+			this._onDidWaterfall.fire({ ctx, notice });
+		});
 		const subscription = this.view.subscribe(snapshot => {
 			const connection = this._connections.get(ctx);
 			if (connection === undefined || snapshot.channelId !== connection.channelId) {
@@ -166,8 +190,19 @@ export class DshIdeChannel extends Disposable implements IServerChannel<string> 
 			connection.last = snapshot;
 			this._onDidSnapshot.fire({ ctx, snapshot });
 		});
-		this._connections.set(ctx, { channelId: first.channelId, last: first, subscription });
+		this._connections.set(ctx, { channelId: first.channelId, last: first, subscription, waterfall });
 		return first;
+	}
+
+	/** 换会话：同一条连接上停旧流、按新会话重开；channelId 不变。 */
+	private rebind(ctx: string, arg: unknown): DshIdeSnapshot {
+		this.assertOpen(ctx);
+		const spec = exactRecord(arg, ['sessionId'], 'DshIdeChannel.rebind');
+		const sessionId = spec['sessionId'];
+		if (typeof sessionId !== 'string' || sessionId === '') {
+			throw toDshIdeError(new TypeError('DshIdeChannel.rebind.sessionId must be a non-empty string'), DSH_IDE_INVALID_ARGUMENT);
+		}
+		return this.view.rebind(sessionId);
 	}
 
 	/** 22 个 DTO method 的唯一分发路径：入参校验 → 宿主调用 → 出参校验。 */
@@ -210,6 +245,7 @@ export class DshIdeChannel extends Disposable implements IServerChannel<string> 
 		this._connections.delete(ctx);
 		this._lastSentVersion.delete(ctx);
 		connection.subscription.dispose();
+		connection.waterfall.dispose();
 		return 1;
 	}
 

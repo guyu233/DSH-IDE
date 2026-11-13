@@ -850,7 +850,6 @@ class ManageHooksAction extends Action2 {
 			shortTitle: localize2('configure-hooks.short', "Hooks"),
 			icon: Codicon.zap,
 			f1: true,
-			precondition: ChatContextKeys.enabled,
 			category: CHAT_CATEGORY
 		});
 	}

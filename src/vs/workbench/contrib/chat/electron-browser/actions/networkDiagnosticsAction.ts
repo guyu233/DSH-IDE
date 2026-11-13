@@ -213,7 +213,6 @@ class NetworkDiagnosticsAction extends Action2 {
 			icon: Codicon.plug,
 			category: Categories.Developer,
 			f1: true,
-			precondition: ChatContextKeys.enabled
 		});
 	}
 

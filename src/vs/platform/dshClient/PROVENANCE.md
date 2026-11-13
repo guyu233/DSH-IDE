@@ -3,7 +3,7 @@
 本文件记录 DSH-IDE **官方客户端传输层**（Host 侧 Node 传输 + 主进程 bootstrap + 渲染器服务）
 与上游 DeepSeek Harness 源码的对应关系、逐文件 sha256 与 tree digest。
 
-对应 `docs/DEVELOPMENT.md` 第 1 章契约与门禁章节、第 5 章上游核对流程
+对应本仓库的契约与上游核对流程
 （原 R-05 搬用须记来源与 tree digest、R-06 资源复用、T11-05 官方传输复刻改为可溯源搬用）。
 
 > **为什么不是运行时 `require` 宿主包**：DSH 桌面端的 `@deepseek-ai/*` 包位于
@@ -39,7 +39,7 @@
 | `electron-main/dshClientBootstrap.ts` ⚠已删(阶段3第三批) | 1532 | `2a9b6cd5487a6b0bb2bf922d80cd3340ce0ddc91821529456a2f4cf0644ad2f7` |
 | `common/dshClientProtocol.ts` ⚠已删(阶段3第三批) | 4400 | `c648c35d5378771e994662b8b0f27ebf8300290e8c2a1edb4cadb03739364bad` |
 | `common/dshClientChannel.ts` ⚠已删(阶段3第三批) | 10148 | `6fe820480c3e41d792dd714f5b2469fa7a4091ecd10f631e8119d5f64b161eec` |
-| `common/dshClientService.ts` | 9027 | `ea70f9637e6c52aa119290390994362b0f3ebb059f26a58a2812601ccdaa0ff2` |
+| `common/dshClientService.ts` | 9655 | `9839e6b9ca52fefbe4e3b29415a8212e0947f818d55b06ba03c1e5a0a05697ee` |
 | `common/env.js` | 713 | `fed4823221b7c14f620c16368d5bf1da3fa5079559fb2ff4813817d11ef0fdf7` |
 
 ### 完整 sha256（可复算）

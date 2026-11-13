@@ -3,43 +3,29 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-// DSH 聊天渲染「单接缝」适配层。
+// DSH 聊天渲染 sidecar 的加载与挂载。
 //
-// 目标（用户最终锁定）：改造 VS Code 现有 AI 聊天侧边栏，使其按需接待复用的 DSH ui-chat
-// 渲染件；不是另建接待层、独立页面或启动整套 DSH React/Cordis 框架。
+// 画面是 DSH 自己的：部件形状 `DshPartProps` 与 `build/dsh/chat-render/index.tsx` 同名同义。
+// **零 React / JSX import**：React 全部封装在 sidecar（唯一一份 React 18.3.1），运行时动态加载。
+// 每个聊天条目 ⇔ 一个 root；流式增量走 `handle.update(props)`，不重建 root。
 //
-// 本文件是 VS Code src 侧唯一的接缝实现：
-//   - **零 React / JSX import**：上游 src/tsconfig 无 jsx、无 @types/react；React 全部封装在
-//     `build/dsh/chat-render/dist/dsh-chat.js` sidecar（唯一一份 React 18.3.1）里，运行时经
-//     dynamic import() 加载。该制品由官方 gulp `prepare-dsh-chat-render` 任务现编后写入
-//     `out/vs/workbench/contrib/dsh/browser/chatRender/`（见 gulpfile.vscode.ts），不入库。
-//   - 一个 `IChatContentPart` ⇔ 一个 `createRoot`（由 sidecar 的 mountDshChatPart 持有），
-//     `hasSameContent` 命中时走 `handle.update(props)` 增量渲染，绝不每个流式 token 建 root。
-//   - 仅接管 DSH 展示部件（thinking / markdownContent / progressMessage 中的 DSH 前缀 / working）；
-//     其余一切内容返回 undefined 交回原生 renderContentPart，行为与纯净 VS Code 一致。
-//   - 工具调用（toolInvocation）**保留 VS Code 现有渲染件**：DSH ui-chat 的
-//     AssistantMarkdown 明确跳过 tool-call 块，真正的 ToolRow 属于另一个包，不谎称已复用。
-//
-// 数据契约：DSH session/follow 原始事件映射为 `DshTurnPart`。旧映射实现（chatClient 下）已随跨进程连接层删除，由 `dshIde` 通道的投影载荷重建（P4）。
-// 中立回合部件（DshTurnPart），再由本适配层转成 DshPartProps 交给 sidecar 组件。
+// 本文件不做任何 DSH 事件 → 行的翻译：帧的解码在 `dshChatModel.ts`，这里只负责把部件交给
+// 抄来的渲染件。
 
 import { Disposable } from '../../../../base/common/lifecycle.js';
 import { FileAccess } from '../../../../base/common/network.js';
-import { IMarkdownString, MarkdownString } from '../../../../base/common/htmlContent.js';
+import { MarkdownString } from '../../../../base/common/htmlContent.js';
 import { IMarkdownRenderer } from '../../../../platform/markdown/browser/markdownRenderer.js';
-import { IChatContentPart } from '../../chat/browser/widget/chatContentParts/chatContentParts.js';
-import { IChatRendererContent } from '../../chat/common/model/chatViewModel.js';
-import type { ChatTreeItem } from '../../chat/browser/chat.js';
 
 /** sidecar 导出的最小契约（与 build/dsh/chat-render/index.tsx 的 DshPartProps 对齐，结构化避免类型依赖）。 */
-type DshPartProps =
+export type DshPartProps =
 	| { kind: 'reasoning'; text: string; running?: boolean }
-	| { kind: 'markdown'; blocks: readonly unknown[]; streaming?: boolean }
+	| { kind: 'markdown'; blocks: readonly unknown[]; streaming?: boolean; interrupted?: boolean }
 	| { kind: 'user'; content: { text: string } }
 	| { kind: 'stats'; usage: { promptTokens?: number; completionTokens?: number; totalTokens?: number } }
-	| { kind: 'running'; startTime?: number; label?: string };
+	| { kind: 'running'; startTime?: number; label?: string; paused?: boolean };
 
-interface DshChatHandle {
+export interface DshChatHandle {
 	update(props: DshPartProps): void;
 	dispose(): void;
 	readonly domNode: HTMLElement;
@@ -50,16 +36,6 @@ interface DshChatSidecar {
 	setMarkdownDomRenderer(renderer: ((options: { text: string; streaming: boolean }) => Node | string | void) | null): void;
 	setLocale(locale: string): void;
 }
-
-/** DSH progressMessage 的前缀（与历史 dshPartsContract.ts 一致；数据面由 DSH Host 权威提供）。 */
-export const DSH_TOOL_PREFIX = 'dsh-tool:';
-export const DSH_STEP_PREFIX = 'dsh-step:';
-export const DSH_USAGE_ID = 'dsh-usage';
-
-/** 是否处于 DSH 渲染模式（仅当本进程由 DSH Host 拉起且已连上 Host 时由 contribution 打开）。 */
-let dshChatRenderEnabled = false;
-export function setDshChatRenderEnabled(v: boolean): void { dshChatRenderEnabled = v; }
-export function isDshChatRenderEnabled(): boolean { return dshChatRenderEnabled; }
 
 /** VS Code 官方 Markdown 渲染器（由 chatListRenderer 在构造时注入一次）。未注入时 sidecar 降级转义纯文本。 */
 let markdownRenderer: IMarkdownRenderer | undefined;
@@ -75,9 +51,6 @@ function vscodeMarkdownDomRenderer(options: { text: string; streaming: boolean }
 	return rendered.element;
 }
 
-/** sidecar 只加载一次（同一份 React、同一份 CSS 注入）。 */
-let sidecarPromise: Promise<DshChatSidecar | undefined> | undefined;
-
 /**
  * sidecar 相对 `out/` 的资源路径（由官方 gulp `prepare-dsh-chat-render` 任务写入）。
  * 用 FileAccess.asBrowserUri 而不是相对 import()：bundle 后的模块 URL 是
@@ -85,9 +58,12 @@ let sidecarPromise: Promise<DshChatSidecar | undefined> | undefined;
  */
 export const DSH_CHAT_SIDECAR_PATH = 'vs/workbench/contrib/dsh/browser/chatRender/dsh-chat.js';
 
-function loadSidecar(): Promise<DshChatSidecar | undefined> {
+/** sidecar 只加载一次（同一份 React、同一份 CSS 注入）。 */
+let sidecarPromise: Promise<DshChatSidecar | undefined> | undefined;
+
+export function loadDshChatSidecar(): Promise<DshChatSidecar | undefined> {
 	if (!sidecarPromise) {
-		// 加载失败时安全降级（返回 undefined → 交回原生渲染）。
+		// 加载失败时安全降级（返回 undefined → 调用方不挂载）。
 		let sidecarUrl: string;
 		try {
 			sidecarUrl = FileAccess.asBrowserUri(DSH_CHAT_SIDECAR_PATH).toString(true);
@@ -107,46 +83,11 @@ function loadSidecar(): Promise<DshChatSidecar | undefined> {
 	return sidecarPromise;
 }
 
-function markdownText(v: IMarkdownString | string | undefined): string {
-	if (v === undefined || v === null) { return ''; }
-	if (typeof v === 'string') { return v; }
-	return v.value ?? '';
-}
-
 /**
- * 把一个 IChatRendererContent 转成 DshPartProps；返回 undefined 表示该部件不由 DSH 接管。
- * 纯函数、可单测（无需 DOM）。
- */
-export function toDshPartProps(content: IChatRendererContent, isComplete: boolean): DshPartProps | undefined {
-	if (content.kind === 'thinking') {
-		const v = content.value;
-		const text = Array.isArray(v) ? v.join('') : (v ?? '');
-		return { kind: 'reasoning', text, running: !isComplete };
-	}
-	if (content.kind === 'markdownContent') {
-		const text = markdownText(content.content);
-		return { kind: 'markdown', blocks: [{ type: 'text', text }], streaming: !isComplete };
-	}
-	if (content.kind === 'progressMessage') {
-		const id = content.id;
-		const text = markdownText(content.content);
-		if (id === DSH_USAGE_ID || id?.startsWith(DSH_TOOL_PREFIX) || id?.startsWith(DSH_STEP_PREFIX)) {
-			// DSH 工具/步骤/用量：统一折叠成一条 DSH 风格进度行（工具主体仍由 VS Code 原生渲染）。
-			return { kind: 'running', label: text };
-		}
-		return undefined;
-	}
-	if (content.kind === 'working') {
-		return { kind: 'running', startTime: Date.now() };
-	}
-	return undefined;
-}
-
-/**
- * 单接缝 ContentPart：内部持有 sidecar 的一个 React root。
+ * 一个聊天条目的渲染件：内部持有 sidecar 的一个 React root。
  * 加载是异步的；加载完成前 domNode 已存在（空容器），完成后挂载/更新。
  */
-export class DshChatContentPart extends Disposable implements IChatContentPart {
+export class DshChatEntryPart extends Disposable {
 	readonly domNode: HTMLElement;
 	private handle: DshChatHandle | undefined;
 	private props: DshPartProps;
@@ -161,7 +102,7 @@ export class DshChatContentPart extends Disposable implements IChatContentPart {
 	}
 
 	private async mount(): Promise<void> {
-		const sidecar = await loadSidecar();
+		const sidecar = await loadDshChatSidecar();
 		if (this.disposed || !sidecar) { return; }
 		this.handle = sidecar.mountDshChatPart(this.domNode, this.props);
 	}
@@ -170,15 +111,6 @@ export class DshChatContentPart extends Disposable implements IChatContentPart {
 	setProps(props: DshPartProps): void {
 		this.props = props;
 		this.handle?.update(props);
-	}
-
-	hasSameContent(other: IChatRendererContent, _followingContent: IChatRendererContent[], element: ChatTreeItem): boolean {
-		const next = toDshPartProps(other, element.isComplete);
-		if (!next) { return false; }
-		// 同一类部件复用已有 React root；内容变化走 update（避免流式重建）。
-		if (next.kind !== this.props.kind) { return false; }
-		this.setProps(next);
-		return true;
 	}
 
 	override dispose(): void {
@@ -190,20 +122,8 @@ export class DshChatContentPart extends Disposable implements IChatContentPart {
 	}
 }
 
-/**
- * 给 chatListRenderer.renderContentPart 用的**唯一入口**：
- * 返回 DshChatContentPart 时由 DSH 渲染；返回 undefined 时交回原生逻辑。
- */
-export function tryRenderDshChatPart(content: IChatRendererContent, element: ChatTreeItem): IChatContentPart | undefined {
-	if (!dshChatRenderEnabled) { return undefined; }
-	const props = toDshPartProps(content, element.isComplete);
-	if (!props) { return undefined; }
-	return new DshChatContentPart(props);
-}
-
 /** 暴露给单测：重置模块级状态（不影响真实运行）。 */
 export function resetDshChatSeamForTest(): void {
-	dshChatRenderEnabled = false;
 	sidecarPromise = undefined;
 	markdownRenderer = undefined;
 }

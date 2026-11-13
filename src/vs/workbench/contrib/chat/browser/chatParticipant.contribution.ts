@@ -37,9 +37,10 @@ import { MANAGED_SETTINGS_UPDATE_VIEW_ID, ManagedSettingsUpdateRequiredContext }
 // --- Chat Container &  View Registration
 
 // DSH 集成：把右侧 Chat 界面/功能从源码里「断开」（代码完整保留，仅不注册视图）。
-// 设为 true 时，Chat 视图容器与视图都不注册 —— IDE 右侧不再出现聊天面板/相关功能。
+// 设为 true 时，Chat 视图容器与视图都不注册 —— IDE 右侧不再出现原生聊天面板。
+// DSH-IDE 用自己的聊天面板（contrib/dsh）承接 DSH 会话内容，因此这里必须断开原生 Chat。
 // 需要恢复时把它改回 false 即可。注意：const 用作运行期开关，构建器对它不做常量折叠。
-const DSH_DISABLE_CHAT_UI = false;
+const DSH_DISABLE_CHAT_UI = true;
 
 if (!DSH_DISABLE_CHAT_UI) {
 

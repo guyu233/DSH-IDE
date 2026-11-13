@@ -39,7 +39,6 @@ export class ManagePluginsAction extends Action2 {
 			id: ManagePluginsAction.ID,
 			title: localize2('plugins', 'Plugins'),
 			category: CHAT_CATEGORY,
-			precondition: ChatContextKeys.enabled,
 			f1: true
 		});
 	}
@@ -63,7 +62,6 @@ class InstallFromSourceAction extends Action2 {
 			title: localize2('installPluginFromSource', 'Install Plugin from Source'),
 			category: CHAT_CATEGORY,
 			icon: Codicon.add,
-			precondition: ChatContextKeys.enabled,
 			f1: true,
 			menu: [{
 				id: MenuId.ViewTitle,
@@ -213,7 +211,6 @@ export class ManagePluginMarketplacesAction extends Action2 {
 			title: localize2('managePluginMarketplaces', 'Manage Plugin Marketplaces'),
 			icon: Codicon.globe,
 			category: CHAT_CATEGORY,
-			precondition: ChatContextKeys.enabled,
 			f1: true,
 			menu: [{
 				id: MenuId.ViewTitle,

@@ -3,7 +3,7 @@
  *  Licensed under the MIT License.
  *--------------------------------------------------------------------------------------------*/
 
-// P5 收尾：Host 侧 IDE 客户端登记与开窗请求队列的单测（docs/DEVELOPMENT.md 第 7 章 §3 D12）。
+// P5 收尾：Host 侧 IDE 客户端登记与开窗请求队列的单测。
 //
 // 只测 host/ide-launch-queue.js（纯 Node 实现，不引 @deepseek-ai/*），因此能直接由
 // `node --experimental-strip-types --test` 执行。服务类 ide-service.js 的 @Remote 方法

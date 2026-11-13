@@ -67,10 +67,20 @@ export class DshIdeLaunchListener extends Disposable {
 	}
 
 	override dispose(): void {
+		const wasRegistered = this.registered;
 		this.disposed = true;
+		this.registered = false;
 		if (this.timer !== undefined) {
 			clearTimeout(this.timer);
 			this.timer = undefined;
+		}
+		// 关窗时立刻向 Host 注销。不注销的话，旧登记项要等 15s 心跳超时才失效；
+		// 这期间再点入口，Host 会把开窗请求投给已死的回调并返回成功，
+		// 用户看到的就是「点了没反应，要等很久再点一次才打开」。
+		if (wasRegistered) {
+			void this.caller.call('ide', 'unregisterIdeClient', { clientId: this.clientId }).catch(() => {
+				// 注销失败不影响进程退出：Host 侧仍会按心跳超时清理。
+			});
 		}
 		super.dispose();
 	}

@@ -188,6 +188,9 @@ import { matchesSessionType } from '../../../common/promptSyntax/service/prompts
 import { ConfigureToolsAction } from '../../actions/chatToolActions.js';
 import { InlineCompletionsController } from '../../../../../../editor/contrib/inlineCompletions/browser/controller/inlineCompletionsController.js';
 import { PlaceholderTextContribution } from '../../../../../../editor/contrib/placeholderText/browser/placeholderTextContribution.js';
+import type { IDshComposerSource, DshComposerPermissionOption } from '../../../../dsh/browser/dshComposerSource.js';
+import { getDshComposerSource, onDidChangeDshComposerSource } from '../../../../dsh/browser/dshComposerRegistry.js';
+import { toLanguageModel, toChatMode } from '../../../../dsh/browser/dshComposerProjection.js';
 import { SESSIONS_CHAT_CONTENT_HORIZONTAL_PADDING } from '../chatOptions.js';
 
 const $ = dom.$;
@@ -314,6 +317,11 @@ export interface IChatInputPartOptions {
 	 * for their chat request. This is useful for empty window contexts.
 	 */
 	workspacePickerDelegate?: IWorkspacePickerDelegate;
+	/**
+	 * DSH 集成：模型 / 模式 / 权限三个选择器的数据源。给出时，选择器读 DSH 的
+	 * 会话目录与预设，而不是 VS Code 自带的模型表、模式表和权限三档。
+	 */
+	dshComposer?: IDshComposerSource;
 	/**
 	 * Optional action view item provider for host-owned secondary toolbar
 	 * chips registered on {@link MenuId.ChatInputSecondary}. Used by the
@@ -1139,6 +1147,41 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 
 		this.registerChatSessionPickerListeners();
 
+		// DSH 集成：DSH 目录变了就把智能体预设同步成 Chat 的模式表。
+		// 这样模式选择器列出的是 DSH 预设；会话已开聊时只剩当前一项，不能再切。
+		const syncDshModes = () => {
+			const source = this.options.dshComposer ?? getDshComposerSource();
+			if (source === undefined) {
+				return;
+			}
+			const presets = source.state.presets;
+			if (presets === null) {
+				return;
+			}
+			const modes = presets.options.map(option => toChatMode(option.id, option.name));
+			const current = modes.find(mode => mode.id === presets.current) ?? modes[0];
+			const next = {
+				builtin: current === undefined ? [] : [current],
+				custom: source.state.locked ? (current === undefined ? [] : [current]) : modes,
+				findModeById: (id: string) => modes.find(mode => mode.id === id),
+				findModeByName: (name: string) => modes.find(mode => mode.name.get() === name),
+				waitForPendingUpdates: () => Promise.resolve(),
+				onDidChange: this._currentChatModesObservable.get().onDidChange,
+			} as IChatModes;
+			this._currentChatModesObservable.set(next, undefined);
+			if (current !== undefined) {
+				this._currentModeObservable.set(current, undefined);
+			}
+		};
+		this._register(onDidChangeDshComposerSource(source => {
+			if (source === undefined) {
+				return;
+			}
+			syncDshModes();
+			this._register(source.onDidChange(() => syncDshModes()));
+		}));
+		syncDshModes();
+
 		// Listen for session type changes from the welcome page delegate
 		if (this.options.sessionTypePickerDelegate?.onDidChangeActiveSessionProvider) {
 			this._register(this.options.sessionTypePickerDelegate.onDidChangeActiveSessionProvider(async (newSessionType) => {
@@ -1511,6 +1554,12 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 			setModel: (model: ILanguageModelChatMetadataAndIdentifier) => {
 				const previousModelIdentifier = this._currentLanguageModel.get()?.identifier;
 				this.setCurrentLanguageModel(model, true, !this.options.suppressModelPersistence);
+				// DSH 集成：把选择写回 DSH 会话，与桌面端同一个 method。
+				const dsh = this.options.dshComposer ?? getDshComposerSource();
+				if (dsh !== undefined && model.identifier.includes('/')) {
+					const slash = model.identifier.indexOf('/');
+					void dsh.selectModel(model.identifier.slice(0, slash), model.identifier.slice(slash + 1));
+				}
 				if (didExplicitlySwitchChatPetModel(previousModelIdentifier, model.identifier)) {
 					this.chatPetService.unlockAchievement(ChatPetAchievementIds.ModelSwitch);
 				}
@@ -1521,7 +1570,16 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 				this._modelSelectionController.applyEquivalentSelection(model);
 				this.renderAttachedContext();
 			},
-			getModels: () => this.getModels(),
+			getModels: () => {
+				// DSH 集成：只要 DSH 数据源已注册，就只用它的目录，不退回 VS Code 自带模型。
+				// 目录还没拉回来时返回空列表（选择器显示「暂无模型」），
+				// 这样不会出现「先看到 VS Code 模型、一秒后跳成 DSH 模型」的闪变。
+				const dsh = this.options.dshComposer ?? getDshComposerSource();
+				if (dsh !== undefined) {
+					return dsh.state.models.map(toLanguageModel);
+				}
+				return this.getModels();
+			},
 			getChatSessionId: () => {
 				const resource = this._widget?.viewModel?.sessionResource;
 				return resource ? getChatSessionTelemetryContext(resource).chatSessionId : undefined;
@@ -1587,15 +1645,24 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 	}
 
 	private _createModePickerDelegate(): IModePickerDelegate {
+		const dsh = () => this.options.dshComposer ?? getDshComposerSource();
 		return {
 			currentMode: this._currentModeObservable,
+			// DSH 集成：模式列表换成 DSH 的智能体预设。
 			currentChatModes: this._currentChatModesObservable,
 			sessionResource: () => this._widget?.viewModel?.sessionResource,
 			// Direct setter for hosts that embed `ChatInputPart` without
 			// registering an `IChatWidget` (e.g. the automations dialog).
 			// The picker only calls this when `sessionResource()` is
 			// `undefined`; real chat widgets keep the command path.
-			setMode: (mode: IChatMode) => this.setChatMode2(mode, true),
+			setMode: (mode: IChatMode) => {
+				// DSH 集成：选预设写回 DSH。会话已开聊时官方会拒绝，界面保持原值。
+				const source = dsh();
+				if (source !== undefined && !source.state.locked) {
+					void source.selectPreset(mode.id);
+				}
+				this.setChatMode2(mode, true);
+			},
 			customAgentTarget: () => {
 				const sessionResource = this._widget?.viewModel?.model.sessionResource;
 				return (sessionResource && this.chatSessionsService.getCustomAgentTargetForSessionType(getChatSessionType(sessionResource))) ?? Target.Undefined;
@@ -2069,6 +2136,14 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 	 * that bridge startup races when live models haven't loaded yet.
 	 */
 	private getAllMergedModels(): ILanguageModelChatMetadataAndIdentifier[] {
+		// DSH 集成：DSH 目录存在时只用它，不读 VS Code 的已注册模型 + 本地缓存。
+		// 那个缓存是「上次用过的模型」的持久化副本，窗口刚起来时先命中缓存，
+		// 一秒后才被 DSH 目录替换——这正是「先看到 VS Code 模型再跳变」的根因。
+		// DSH 模式下没有缓存这回事：目录从开窗预取或首次读取得来，直接给结果。
+		const dsh = this.options.dshComposer ?? getDshComposerSource();
+		if (dsh !== undefined) {
+			return dsh.state.models.map(toLanguageModel);
+		}
 		const cachedModels = this.storageService.getObject<ILanguageModelChatMetadataAndIdentifier[]>(CachedLanguageModelsKey, StorageScope.APPLICATION, []);
 		const liveModels = this.languageModelsService.getLanguageModelIds()
 			.map(modelId => ({ identifier: modelId, metadata: this.languageModelsService.lookupLanguageModel(modelId)! }));
@@ -2100,6 +2175,11 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 	 * additionally requires an empty model list.
 	 */
 	private _showAutoModel(): boolean {
+		// DSH 集成：模型清单完全来自 DSH 时不再叠加 VS Code 的合成「Auto」模型，
+		// 否则选择器里会多出一个 DSH 根本没有的选项。
+		if ((this.options.dshComposer ?? getDshComposerSource()) !== undefined) {
+			return false;
+		}
 		const sessionType = this.getCurrentSessionType();
 		return !sessionType || this.chatSessionsService.supportsAutoModelForSessionType(sessionType);
 	}
@@ -4129,6 +4209,17 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 								this.setPermissionLevel(level);
 							},
 							getExtensionPermissions: () => {
+								// DSH 集成：权限清单来自 DSH 的权限预设目录；没有目录时退回 VS Code 自带三档。
+								const dsh = this.options.dshComposer ?? getDshComposerSource();
+								const permission = dsh?.state.permission;
+								if (permission !== null && permission !== undefined) {
+									return {
+										sessionType: 'dsh',
+										groupId: 'permission',
+										items: permission.options.map((option: DshComposerPermissionOption) => ({ id: option.value, name: option.name })),
+										selectedId: permission.current ?? undefined,
+									};
+								}
 								const sessionResource = this.getCurrentSessionResource();
 								const group = this.getActiveExtensionPermissionGroup(sessionResource);
 								if (!group) {
@@ -4154,6 +4245,8 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 								if (sessionResource) {
 									this.chatSessionsService.setSessionOption(sessionResource, groupId, item);
 								}
+								// DSH 集成：写回 DSH 的权限预设，与桌面端同一个 method。
+								void (this.options.dshComposer ?? getDshComposerSource())?.selectPermission(item.id);
 								this.permissionWidget?.refresh();
 							},
 							isSandboxToggleApplicable: () => this._localSandboxSupported && this.getEffectiveSessionType(this.getCurrentSessionResource()) === SessionType.Local,

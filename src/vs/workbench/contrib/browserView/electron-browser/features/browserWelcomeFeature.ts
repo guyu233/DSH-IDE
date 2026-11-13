@@ -6,7 +6,6 @@
 import { localize } from '../../../../../nls.js';
 import { DisposableStore } from '../../../../../base/common/lifecycle.js';
 import { IContextKeyService } from '../../../../../platform/contextkey/common/contextkey.js';
-import { ChatContextKeys } from '../../../chat/common/actions/chatContextKeys.js';
 import { createBrowserWelcome } from '../../browser/browserWelcome.js';
 import { IBrowserViewModel } from '../../common/browserView.js';
 import { BrowserEditorInput } from '../../common/browserEditorInput.js';
@@ -32,12 +31,10 @@ export class BrowserWelcomeFeature extends BrowserEditorContribution {
 	) {
 		super(editor);
 
-		const chatEnabled = contextKeyService.getContextKeyValue<boolean>(ChatContextKeys.enabled.key);
+		// chatIsEnabled 开关已删除；DSH 恒定提供聊天能力，这里恒为可用。
 		this._container = createBrowserWelcome(
 			localize('browser.welcomeTitle', "Browser"),
-			chatEnabled
-				? localize('browser.welcomeSubtitleChat', "Use Add Element to Chat to reference UI elements in chat prompts.")
-				: localize('browser.welcomeSubtitle', "Enter a URL above to get started."),
+			localize('browser.welcomeSubtitleChat', "Use Add Element to Chat to reference UI elements in chat prompts."),
 		);
 
 		this._widget = { location: BrowserWidgetLocation.ContentArea, element: this._container, order: 50 };

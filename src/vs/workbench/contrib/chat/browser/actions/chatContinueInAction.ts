@@ -135,9 +135,7 @@ export class ContinueChatInSessionAction extends Action2 {
 			id: ContinueChatInSessionAction.ID,
 			title: localize2('continueChatInSession', "Continue Chat in..."),
 			tooltip: localize('continueChatInSession', "Continue Chat in..."),
-			precondition: ContextKeyExpr.and(
-				ChatContextKeys.enabled,
-				ChatContextKeys.requestInProgress.negate(),
+			precondition: ContextKeyExpr.and(				ChatContextKeys.requestInProgress.negate(),
 				ChatContextKeys.remoteJobCreating.negate(),
 				ChatContextKeys.hasCanDelegateProviders,
 			),
@@ -198,9 +196,7 @@ export class ContinueChatInCopilotAction extends Action2 {
 	constructor() {
 		super({
 			id: CONTINUE_CHAT_IN_COPILOT_ACTION_ID,
-			title: localize2('chat.continueInCopilot', "Move to Copilot"),
-			precondition: ChatContextKeys.enabled,
-			f1: false,
+			title: localize2('chat.continueInCopilot', "Move to Copilot"),			f1: false,
 		});
 	}
 

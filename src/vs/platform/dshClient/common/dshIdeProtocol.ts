@@ -23,7 +23,7 @@ export const DSH_IDE_API_VERSION = '0.2.2-rc.1';
  * 线协议修订号（快照连续性校验依据；wireRevision 不变则协议相容）。
  * P3 把 `IdeViewSnapshot` 并入 `DshIdeViewState.view`，快照形状变化，故由 1 升到 2。
  */
-export const DSH_IDE_WIRE_REVISION = 2;
+export const DSH_IDE_WIRE_REVISION = 3;
 
 /**
  * `deleteSession` 依赖的社区插件版本（§8.10.8（4）版本绑定）。
@@ -78,32 +78,19 @@ export interface IDshIdeSessionSummary {
 	readonly origin?: 'subagent';
 }
 
-/** 单行类别（中立 DTO；投影器决定行类别，通道快照跨进程只带字符串）。 */
-export type DshIdeRowKind = 'user' | 'assistant' | 'tool' | 'system' | 'notice';
-
-/** 单行投影（`IdeRow` 的快照副本；稳定 id + 行级 revision）。 */
-export interface DshIdeRow {
-	readonly id: string;
-	readonly revision: number;
-	readonly kind: DshIdeRowKind;
-	readonly text?: string;
-	readonly preview?: string;
-	readonly folded: boolean;
-	readonly seq?: number;
-	readonly callId?: string;
-}
-
-/** 投影载荷：增量 reducer 的出口，随快照单向发布。 */
+/**
+ * 一帧跟会话的结果。形状就是 `sessionController.follow` 给出的帧，
+ * 或内核转发的批准 / 问卷帧。通道不把它折成另一套行。
+ */
 export interface DshIdeViewSnapshot {
-	readonly rows: readonly DshIdeRow[];
-	readonly version: number;
+	readonly frame: Readonly<Record<string, unknown>>;
 }
 
 /** 渲染器消费的视图状态：骨架状态 + 可选投影载荷。 */
 export interface DshIdeViewState {
 	readonly state: 'starting' | 'ready' | 'rebuild';
 	readonly message?: string;
-	/** 投影载荷；`state === 'ready'` 时必填，`starting` / `rebuild` 时省略。 */
+	/** 跟会话的一帧；`state === 'ready'` 时必填。 */
 	readonly view?: DshIdeViewSnapshot;
 }
 
@@ -177,6 +164,17 @@ export interface DshIdeMethodArgs {
 	 * `gateway/internal`，本契约原样透传该失败，不伪造空结果。
 	 */
 	searchSessions: { query: string };
+	/**
+	 * 读取输入框控件状态（只读）。
+	 *
+	 * 一次取齐模型目录与当前选择、权限预设、团队开关、开聊前的智能体预设。
+	 * 缺哪一项，投影里对应字段就是 `null`，界面藏起该控件，不伪造选项。
+	 */
+	composerState: Record<string, never>;
+	/** 开关当前根会话的智能体团队。`enabled` 必须是布尔值。 */
+	setTeamEnabled: { enabled: boolean };
+	/** 在会话尚未开始前切换智能体预设。已开聊时官方拒绝，原样透传。 */
+	setAgentPreset: { preset: string };
 	/** 列出可用模型。 */
 	listModels: { workspace?: string };
 	/** 列出可用命令。 */
@@ -254,6 +252,9 @@ const DSH_IDE_METHOD_KEYS: Record<DshIdeMethod, readonly string[]> = {
 	archiveSession: ['sessionId'],
 	unarchiveSession: ['sessionId'],
 	searchSessions: ['query'],
+	composerState: [],
+	setTeamEnabled: ['enabled'],
+	setAgentPreset: ['preset'],
 	listModels: ['workspace'],
 	listCommands: ['workspace'],
 	fetchRowDetail: ['rowId'],
@@ -493,6 +494,19 @@ export function validateDshIdeInput<K extends DshIdeMethod>(command: K, args: un
 			// 官方 `search(query)` 只接受一个非空查询串。
 			nonEmptyString(record['query'], 'DshIdeInput.searchSessions.query');
 			break;
+		case 'setTeamEnabled':
+			if (typeof record['enabled'] !== 'boolean') {
+				throw new TypeError('DshIdeInput.setTeamEnabled.enabled must be a boolean');
+			}
+			break;
+		case 'setAgentPreset':
+			// 预设 id 由注册表决定，不套斜杠命令的 token 规则；仍拒绝空白和斜杠。
+			nonEmptyString(record['preset'], 'DshIdeInput.setAgentPreset.preset');
+			if (/[\s/]/.test(String(record['preset']))) {
+				throw new TypeError('DshIdeInput.setAgentPreset.preset must not contain whitespace or slash');
+			}
+			break;
+		case 'composerState':
 		case 'interrupt':
 		case 'listSessions':
 		case 'refreshSnapshot':
@@ -507,16 +521,132 @@ export function validateDshIdeInput<K extends DshIdeMethod>(command: K, args: un
  * 所有状态变化只走 `listen('snapshot')` 一条路。
  * `DshIdeChannel.call()` 组装输出时调用。
  *
- * 关于 `listen` 的事件面（第 24 轮澄清边界，不改行为）：`DSH_IDE_SNAPSHOT_EVENT`
- * 是**当前唯一**允许的事件名，`DshIdeChannel.listen()` 对其它名字返回 `Event.None`。
- * 若将来要把官方 waterfall 帧（审批 / 问卷）送达到 IDE，须**先改本契约**（新增
- * 事件名常量 + 帧形状 + 消费者校验）并按第 2 章 §9 走完手续；在此之前不得在实现里
- * 私自增加事件名，也不得改用自建出站通道（§8.10.2 的「允许增加」以「先改契约」为前提）。
+ * 关于 `listen` 的事件面：白名单是 `snapshot` 与 `waterfall`。
+ * `DshIdeChannel.listen()` 对其它名字返回 `Event.None`。
+ * `waterfall` 承载官方 `$events` 的审批 / 问卷请求与取消，帧形状是
+ * `DshIdeWaterfallNotice`，由独立消费者 `validateDshIdeWaterfallNotice` 校验，
+ * **不**进入 `DshIdeSnapshot`（wireRevision 保持 2）。
+ * 若将来要再增加官方事件名，须**先改本契约**（新增事件名常量 + 帧形状 + 独立消费者）
+ * 并按第 2 章 §9 走完手续；在此之前不得在实现里私自增加事件名，
+ * 也不得改用自建出站通道（§8.10.2 的「允许增加」以「先改契约」为前提）。
  */
 export function validateDshIdeInvokeOutput(value: unknown): { readonly value: unknown } {
 	const output = exactRecord(value, ['value'], 'DshIdeInvokeOutput');
 	jsonValue(output['value'], 'DshIdeInvokeOutput.value', new Set());
 	return output as { readonly value: unknown };
+}
+
+/** 审批请求的中立视图。不含官方 `agent` / `signal`。 */
+export interface DshIdeApprovalRequestView {
+	readonly toolName: string;
+	readonly callId?: string;
+	readonly reason?: string;
+}
+
+/** 问卷选项只保留用户能点的标签。 */
+export interface DshIdeQuestionOptionView {
+	readonly label: string;
+}
+
+/** 一条问卷。`multiSelect` 只在为真时出现。 */
+export interface DshIdeQuestionItemView {
+	readonly id: string;
+	readonly question?: string;
+	readonly options?: readonly DshIdeQuestionOptionView[];
+	readonly multiSelect?: true;
+}
+
+/** 问卷请求的中立视图。 */
+export interface DshIdeQuestionRequestView {
+	readonly questions: readonly DshIdeQuestionItemView[];
+}
+
+/**
+ * `listen('waterfall')` 的帧。请求与取消分开，不并进快照。
+ * `event` 只允许官方两条 waterfall：`approval/request` 与 `user-questions/request`。
+ */
+export type DshIdeWaterfallNotice =
+	| {
+		readonly kind: 'request';
+		readonly eventId: string;
+		readonly event: 'approval/request' | 'user-questions/request';
+		readonly agentId: string;
+		readonly request: DshIdeApprovalRequestView | DshIdeQuestionRequestView;
+	}
+	| {
+		readonly kind: 'cancel';
+		readonly eventId: string;
+	};
+
+/** waterfall 帧校验（独立消费者入口，不复用快照校验）。 */
+export function validateDshIdeWaterfallNotice(value: unknown): DshIdeWaterfallNotice {
+	const notice = exactRecord(value, ['kind', 'eventId', 'event', 'agentId', 'request'], 'DshIdeWaterfallNotice');
+	const eventId = nonEmptyString(notice['eventId'], 'DshIdeWaterfallNotice.eventId');
+	if (notice['kind'] === 'cancel') {
+		const extra = ['event', 'agentId', 'request'].filter(key => notice[key] !== undefined);
+		if (extra.length > 0) {
+			throw new TypeError(`DshIdeWaterfallNotice cancel must omit ${extra[0]}`);
+		}
+		return { kind: 'cancel', eventId };
+	}
+	if (notice['kind'] !== 'request') {
+		throw new TypeError('DshIdeWaterfallNotice.kind must be request or cancel');
+	}
+	const agentId = nonEmptyString(notice['agentId'], 'DshIdeWaterfallNotice.agentId');
+	if (notice['event'] === 'approval/request') {
+		return { kind: 'request', eventId, event: 'approval/request', agentId, request: validateApprovalView(notice['request']) };
+	}
+	if (notice['event'] === 'user-questions/request') {
+		return { kind: 'request', eventId, event: 'user-questions/request', agentId, request: validateQuestionView(notice['request']) };
+	}
+	throw new TypeError('DshIdeWaterfallNotice.event must be approval/request or user-questions/request');
+}
+
+function validateApprovalView(value: unknown): DshIdeApprovalRequestView {
+	const request = exactRecord(value, ['toolName', 'callId', 'reason'], 'DshIdeWaterfallNotice.request');
+	const toolName = nonEmptyString(request['toolName'], 'DshIdeWaterfallNotice.request.toolName');
+	optionalString(request['callId'], 'DshIdeWaterfallNotice.request.callId');
+	optionalString(request['reason'], 'DshIdeWaterfallNotice.request.reason');
+	return {
+		toolName,
+		...(typeof request['callId'] === 'string' ? { callId: request['callId'] } : {}),
+		...(typeof request['reason'] === 'string' ? { reason: request['reason'] } : {}),
+	};
+}
+
+function validateQuestionView(value: unknown): DshIdeQuestionRequestView {
+	const request = exactRecord(value, ['questions'], 'DshIdeWaterfallNotice.request');
+	if (!Array.isArray(request['questions']) || request['questions'].length === 0) {
+		throw new TypeError('DshIdeWaterfallNotice.request.questions must be a non-empty array');
+	}
+	const questions = request['questions'].map((item, index) => validateQuestionItem(item, index));
+	return { questions };
+}
+
+function validateQuestionItem(value: unknown, index: number): DshIdeQuestionItemView {
+	const label = `DshIdeWaterfallNotice.request.questions[${index}]`;
+	const item = exactRecord(value, ['id', 'question', 'options', 'multiSelect'], label);
+	const id = nonEmptyString(item['id'], `${label}.id`);
+	optionalString(item['question'], `${label}.question`);
+	let options: readonly DshIdeQuestionOptionView[] | undefined;
+	if (item['options'] !== undefined) {
+		if (!Array.isArray(item['options'])) {
+			throw new TypeError(`${label}.options must be an array`);
+		}
+		options = item['options'].map((option, optionIndex) => {
+			const record = exactRecord(option, ['label'], `${label}.options[${optionIndex}]`);
+			return { label: nonEmptyString(record['label'], `${label}.options[${optionIndex}].label`) };
+		});
+	}
+	if (item['multiSelect'] !== undefined && item['multiSelect'] !== true) {
+		throw new TypeError(`${label}.multiSelect must be true when present`);
+	}
+	return {
+		id,
+		...(typeof item['question'] === 'string' ? { question: item['question'] } : {}),
+		...(options !== undefined ? { options } : {}),
+		...(item['multiSelect'] === true ? { multiSelect: true as const } : {}),
+	};
 }
 
 /** 快照结构校验（在 `DshIdeConsumer.accept()` 入口使用）。 */
@@ -544,40 +674,15 @@ export function validateDshIdeSnapshot(value: unknown): DshIdeSnapshot {
 	return s as unknown as DshIdeSnapshot;
 }
 
-/** 投影载荷校验：`version` 非负整数；`rows` 为数组，逐行按 `DshIdeRow` 收窄。 */
+/** 跟会话帧校验：必须是带 `type` 字符串的对象，其余字段原样保留。 */
 function validateDshIdeView(value: unknown): asserts value is DshIdeViewSnapshot {
-	const view = exactRecord(value, ['rows', 'version'], 'DshIdeSnapshot.state.view');
-	nonNegativeInteger(view['version'], 'DshIdeSnapshot.state.view.version');
-	const rows = view['rows'];
-	if (!Array.isArray(rows)) {
-		throw new TypeError('DshIdeSnapshot.state.view.rows must be an array');
+	const view = exactRecord(value, ['frame'], 'DshIdeSnapshot.state.view');
+	const frame = view['frame'];
+	if (typeof frame !== 'object' || frame === null || Array.isArray(frame)) {
+		throw new TypeError('DshIdeSnapshot.state.view.frame must be an object');
 	}
-	for (const [index, row] of rows.entries()) {
-		const record = exactRecord(row, ['id', 'revision', 'kind', 'text', 'preview', 'folded', 'seq', 'callId'], `DshIdeSnapshot.state.view.rows[${index}]`);
-		nonEmptyString(record['id'], `DshIdeSnapshot.state.view.rows[${index}].id`);
-		nonNegativeInteger(record['revision'], `DshIdeSnapshot.state.view.rows[${index}].revision`);
-		const kind = record['kind'];
-		if (kind !== 'user' && kind !== 'assistant' && kind !== 'tool' && kind !== 'system' && kind !== 'notice') {
-			throw new TypeError(`DshIdeSnapshot.state.view.rows[${index}].kind must be user|assistant|tool|system|notice`);
-		}
-		if (typeof record['folded'] !== 'boolean') {
-			throw new TypeError(`DshIdeSnapshot.state.view.rows[${index}].folded must be a boolean`);
-		}
-		if (record['text'] !== undefined && typeof record['text'] !== 'string') {
-			throw new TypeError(`DshIdeSnapshot.state.view.rows[${index}].text must be a string`);
-		}
-		if (record['preview'] !== undefined && typeof record['preview'] !== 'string') {
-			throw new TypeError(`DshIdeSnapshot.state.view.rows[${index}].preview must be a string`);
-		}
-		if (record['seq'] !== undefined) {
-			nonNegativeInteger(record['seq'], `DshIdeSnapshot.state.view.rows[${index}].seq`);
-		}
-		if (record['callId'] !== undefined) {
-			nonEmptyString(record['callId'], `DshIdeSnapshot.state.view.rows[${index}].callId`);
-		}
-		if (record['text'] === undefined && record['preview'] === undefined) {
-			throw new TypeError(`DshIdeSnapshot.state.view.rows[${index}] must carry text or preview`);
-		}
+	if (typeof (frame as Record<string, unknown>)['type'] !== 'string' || (frame as Record<string, unknown>)['type'] === '') {
+		throw new TypeError('DshIdeSnapshot.state.view.frame.type must be a non-empty string');
 	}
 }
 
@@ -642,7 +747,11 @@ export interface DshIdeBackend {
  */
 export interface IdeViewHost {
 	open(spec: { view: string; params?: Record<string, unknown> }): DshIdeSnapshot;
+	/** 换一个会话继续跟：停旧流、按新地址重开。 */
+	rebind(sessionId: string): DshIdeSnapshot;
 	subscribe(onSnapshot: (snapshot: DshIdeSnapshot) => void): { dispose(): void };
+	/** 订阅官方 waterfall 通知。与快照流分开，不推进 `version`。 */
+	subscribeWaterfall(onNotice: (notice: DshIdeWaterfallNotice) => void): { dispose(): void };
 	invoke(method: DshIdeMethod | string, args?: unknown): Promise<unknown>;
 	close(): { closed: true };
 }

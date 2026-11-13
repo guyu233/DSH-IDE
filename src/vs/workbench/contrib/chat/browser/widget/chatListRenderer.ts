@@ -96,8 +96,9 @@ import { ChatCommandButtonContentPart } from './chatContentParts/chatCommandCont
 import { ChatConfirmationContentPart } from './chatContentParts/chatConfirmationContentPart.js';
 import { DiffEditorPool, EditorPool } from './chatContentParts/chatContentCodePools.js';
 import { IChatContentPart, IChatContentPartDiffData, IChatContentPartRenderContext, InlineTextModelCollection } from './chatContentParts/chatContentParts.js';
-// DSH 单接缝：仅在 DSH 渲染模式下接管展示部件；其余一律交回原生（详见 dshChatSeam.ts）。
-import { tryRenderDshChatPart, setDshMarkdownRenderer } from '../../../dsh/browser/dshChatSeam.js';
+// DSH 单接缝：只注入 VS Code 官方 Markdown 渲染器，供抄来的 DSH 聊天渲染件使用。
+// 聊天内容由 DSH 聊天面板自己挂载，不再经过本渲染器的内容部件分派。
+import { setDshMarkdownRenderer } from '../../../dsh/browser/dshChatSeam.js';
 import { ChatElicitationContentPart } from './chatContentParts/chatElicitationContentPart.js';
 import { ChatErrorConfirmationContentPart } from './chatContentParts/chatErrorConfirmationPart.js';
 import { ChatErrorContentPart } from './chatContentParts/chatErrorContentPart.js';
@@ -4531,14 +4532,6 @@ export class ChatListItemRenderer extends Disposable implements ITreeRenderer<Ch
 
 	private renderChatContentPart(content: IChatRendererContent, templateData: IChatListItemTemplate, context: IChatContentPartRenderContext, batchedSubagentParts?: Set<ChatSubagentContentPart>, retainedToolParts?: DisposableMap<string, IDisposable>): IChatContentPart | undefined {
 		try {
-			// DSH 单接缝：启用且为 DSH 展示部件（思考/正文/DSH 进度/运行状态）时，改用按源码颗粒
-			// 复用的 ui-chat React 渲染件（唯一一份 React，见 build/dsh/chat-render）。其余部件（工具卡、
-			// 引用、命令…）返回 undefined 交回原生逻辑，行为与纯净 VS Code 一致。
-			const dshPart = tryRenderDshChatPart(content, context.element);
-			if (dshPart) {
-				return dshPart;
-			}
-
 			if (isEmptyThinkingPart(content)) {
 				for (const part of templateData.renderedParts?.slice(0, context.contentIndex) ?? []) {
 					if (part instanceof ChatThinkingContentPart && part.getIsActive()) {

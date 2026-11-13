@@ -218,9 +218,7 @@ class LogChatInputHistoryAction extends Action2 {
 			title: localize2('workbench.action.chat.logInputHistory.label', "Log Chat Input History"),
 			icon: Codicon.attach,
 			category: Categories.Developer,
-			f1: true,
-			precondition: ChatContextKeys.enabled
-		});
+			f1: true,		});
 	}
 
 	override async run(accessor: ServicesAccessor, ...args: unknown[]): Promise<void> {
@@ -238,9 +236,7 @@ class LogChatIndexAction extends Action2 {
 			title: localize2('workbench.action.chat.logChatIndex.label', "Log Chat Index"),
 			icon: Codicon.attach,
 			category: Categories.Developer,
-			f1: true,
-			precondition: ChatContextKeys.enabled
-		});
+			f1: true,		});
 	}
 
 	override async run(accessor: ServicesAccessor, ...args: unknown[]): Promise<void> {
@@ -258,9 +254,7 @@ class InspectChatModelAction extends Action2 {
 			title: localize2('workbench.action.chat.inspectChatModel.label', "Inspect Chat Model"),
 			icon: Codicon.inspect,
 			category: Categories.Developer,
-			f1: true,
-			precondition: ChatContextKeys.enabled
-		});
+			f1: true,		});
 	}
 
 	override async run(accessor: ServicesAccessor, ...args: unknown[]): Promise<void> {
@@ -312,9 +306,7 @@ class InspectChatModelReferencesAction extends Action2 {
 			title: localize2('workbench.action.chat.inspectChatModelReferences.label', "Inspect Chat Model References"),
 			icon: Codicon.inspect,
 			category: Categories.Developer,
-			f1: true,
-			precondition: ChatContextKeys.enabled
-		});
+			f1: true,		});
 	}
 
 	override async run(accessor: ServicesAccessor): Promise<void> {
@@ -423,9 +415,7 @@ class InspectAgentHostSubscriptionsAction extends Action2 {
 			title: localize2('workbench.action.chat.inspectAgentHostSubscriptions.label', "Inspect Agent Host Subscriptions"),
 			icon: Codicon.inspect,
 			category: Categories.Developer,
-			f1: true,
-			precondition: ChatContextKeys.enabled
-		});
+			f1: true,		});
 	}
 
 	override async run(accessor: ServicesAccessor): Promise<void> {
@@ -451,9 +441,7 @@ class ClearRecentlyUsedLanguageModelsAction extends Action2 {
 			id: ClearRecentlyUsedLanguageModelsAction.ID,
 			title: localize2('workbench.action.chat.clearRecentlyUsedLanguageModels.label', "Clear Recently Used Language Models"),
 			category: Categories.Developer,
-			f1: true,
-			precondition: ChatContextKeys.enabled
-		});
+			f1: true,		});
 	}
 
 	override run(accessor: ServicesAccessor): void {
@@ -469,9 +457,7 @@ class ResetChatPermissionWarningDialogsAction extends Action2 {
 			id: ResetChatPermissionWarningDialogsAction.ID,
 			title: localize2('workbench.action.chat.resetPermissionWarningDialogs.label', "Reset Permission Warning Dialogs (Autopilot, Bypass Approvals)"),
 			category: Categories.Developer,
-			f1: true,
-			precondition: ChatContextKeys.enabled
-		});
+			f1: true,		});
 	}
 
 	override run(accessor: ServicesAccessor): void {

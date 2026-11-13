@@ -13,10 +13,10 @@
 // 官方线协议（第 2 章 §2.2.1 冻结的四个形态）手写最小客户端，只依赖 fetch/WebSocket，
 // 不复制业务逻辑、不引入第二套协议。
 //
-// 它只做传输，不做业务：连接 / 一元调用 / 流式调用 / waterfall 决议四条原语，
-// 事件翻译与投影仍由 `common/translator.ts` + `IdeViewProjector` 完成（单一实现）。
+// 它只做传输，不做业务：连接 / 一元调用 / 流式调用。
+// 会话内容与操作都进内核的 `ide/followSession` 与 `ide/dispatch`，这里不再翻译。
 //
-// 线上形态见 docs/DEVELOPMENT.md 第 2 章 §2.2.1：
+// 线上形态：
 //   鉴权   GET /?token=…            → 303 + set-cookie（官方 launch token 交换）
 //   一元   POST /api/<ns>/<method>  → { type:'client-request', rpcId, method, payload:{args} }
 //   流式   WS  /api/remote.mux      → { type:'open', streamId, endpoint, payload:{args} }
@@ -27,12 +27,7 @@
 // 要传 `{ request: {...} }`。`signal` 由 Host 侧注入，客户端不传。真机实测：
 // 传自由字段会得到 `gateway/arguments-invalid: missing "_request"`。
 
-import type { DshIdeBackend, DshIdeMethod, DshIdeOpenSpec, IDshIdeSessionSummary } from '../common/dshIdeProtocol.js';
-import { projectDshIdeSessionList } from '../common/dshIdeSessionList.js';
-import { projectDshIdeCommandList } from '../common/dshIdeCommandList.js';
-import { buildDshIdeCommandLine, mapDshIdeCommandExecution } from '../common/dshIdeCommandLine.js';
-import { projectDshIdeArchiveSet } from '../common/dshIdeArchiveSet.js';
-import { projectDshIdeSessionSearch } from '../common/dshIdeSessionSearch.js';
+import type { DshIdeBackend, DshIdeMethod, DshIdeOpenSpec } from '../common/dshIdeProtocol.js';
 import { safeErrorText } from '../common/dshIdeAuthRedaction.js';
 
 /** 通道 id：由 Host 侧绑定生成，这里只做透传。 */
@@ -106,8 +101,8 @@ export async function authenticateHost(origin: string, launchUrl: string, primit
 }
 
 /**
- * 事件流帧：`session/follow`、`workspace/follow` 的 item，或 Gateway 转发的 waterfall / 取消帧。
- * 全部 shape 按线上原样保留（翻译在 common/translator.ts）。
+ * 事件流帧：内核 `ide/followSession` 送出的会话帧（原样保留），
+ * 或内核转发的批准 / 取消帧。窗口不做二次翻译。
  */
 export type DshIdeStreamFrame =
 	| { readonly type: 'snapshot' | 'event' | 'assistant-stream'; readonly [key: string]: unknown }
@@ -371,19 +366,18 @@ function isFrame(value: unknown): value is DshIdeStreamFrame {
 }
 
 /**
- * 把官方传输包装成 `DshIdeBackend`：`open` 绑定会话、`follow` 打开 `session/follow` 逻辑流、
- * `invoke` 按 method 映射到官方一元端点、`close` 释放本视图的流。
+ * 把官方传输包装成 `DshIdeBackend`：`open` 绑定会话、`follow` 开内核 `ide/followSession` 流、
+ * `invoke` 把操作交给内核 `ide/dispatch`、`close` 释放本视图的流。
  *
- * 映射表与 Host 半身（`host/ide-view-host.js`）保持同一组官方方法名；未核对的 method
- * 明确抛 `dsh-ide/feature-unavailable`，与 Host 侧口径一致，不猜端点。
+ * 会话内容的唯一来源是内核那一次 `sessionController.follow`；窗口不自己开 `session/follow`，
+ * 也不把操作重写成 `session/*` 请求。
  */
 export class DshIdeTransportBackend implements DshIdeBackend {
 	private readonly transport: DshIdeTransport;
 	private channelId: string | undefined;
 	private sessionId: string | undefined;
-	/** 绑定会话期间同时存在的两条逻辑流：`$events`（waterfall 入口）与 `session/follow`（会话内容）。 */
+	/** 内核 followSession 这一条流。 */
 	private readonly streams = new Set<{ streamId: string; close(): void }>();
-	private readonly _sessionListReads = new Set<AbortController>();
 
 	constructor(transport: DshIdeTransport) {
 		this.transport = transport;
@@ -400,335 +394,37 @@ export class DshIdeTransportBackend implements DshIdeBackend {
 	}
 
 	follow(sessionId: string | undefined, onEvent: (raw: unknown) => void): { dispose(): void } {
-		// §8.10.3 缺口②：有绑定会话时**两条流都要开**——`$events` 承载 Gateway 转发的
-		// waterfall（审批 / 问卷）与取消帧，`session/follow` 承载会话内容；只开后者会让
-		// 审批 / 问卷请求永远到不了 IDE。两流各自保留官方 Gateway ACL。
-		const events = this.followEvents(onEvent);
-		if (sessionId === undefined) {
-			return events;
+		// 会话帧和批准帧都由内核的 followSession 送出。窗口不再自己开 session/follow 或 $events。
+		if (sessionId === undefined || sessionId === '') {
+			return { dispose() {} };
 		}
-		// `follow(request, signal)`：形参名是 `request`。
-		const content = this.transport.openStream('session/follow', {
-			request: {
-				address: { kind: 'session', sessionId },
-				assistantStream: true,
-			},
-		}, frame => onEvent(frame));
+		const content = this.transport.openStream('ide/followSession', { sessionId }, frame => onEvent(frame));
 		this.streams.add(content);
 		return {
 			dispose: () => {
 				content.close();
 				this.streams.delete(content);
-				events.dispose();
 			},
 		};
 	}
 
-	/** 只订阅 Gateway 转发的事件（waterfall 决议入口在这里）。 */
-	followEvents(onEvent: (raw: unknown) => void): { dispose(): void } {
-		const stream = this.transport.openStream('$events', {}, frame => onEvent(frame));
-		this.streams.add(stream);
-		return {
-			dispose: () => {
-				stream.close();
-				this.streams.delete(stream);
-			},
-		};
-	}
 
 	async invoke(method: DshIdeMethod, args: unknown): Promise<unknown> {
-		const record = isRecord(args) ? args : {};
-		const sessionId = this.sessionId;
-		// 每个调用的键名 = 服务方法的形参名（见文件头：传自由字段会被 gateway/arguments-invalid 拒绝）。
-		switch (method) {
-			case 'submit':
-				await this.transport.call('session', 'prompt', {
-					request: {
-						requestId: crypto.randomUUID(),
-						sessionId,
-						mode: 'queue',
-						content: [{ type: 'text', text: String(record['text'] ?? '') }],
-					},
-				});
-				return { accepted: true };
-			case 'interrupt':
-				await this.transport.call('session', 'cancel', { request: { sessionId } });
-				return { accepted: true };
-			case 'resume':
-				return this.transport.call('session', 'state', {
-					request: { address: { kind: 'session', sessionId: record['sessionId'] ?? sessionId } },
-				});
-			case 'newSession':
-				return this.transport.call('session', 'create', {
-					request: {
-						...(typeof record['workspace'] === 'string' ? { cwd: record['workspace'] } : {}),
-					},
-				});
-			case 'fork':
-				return this.transport.call('session', 'fork', {
-					request: {
-						sessionId: record['sessionId'] ?? sessionId,
-						...(typeof record['point'] === 'string' && record['point'] !== '' ? { atSeq: Number(record['point']) } : {}),
-					},
-				});
-			case 'answerApproval':
-				await this.transport.answerWaterfall(String(record['requestId']), {
-					kind: 'result',
-					value: record['decision'] === 'approve' ? 'allowed-once' : 'rejected',
-				});
-				return { accepted: true };
-			case 'answerQuestion':
-				await this.transport.answerWaterfall(String(record['requestId']), { kind: 'result', value: record['answer'] });
-				return { accepted: true };
-			case 'cancelRequest':
-				await this.transport.answerWaterfall(String(record['requestId']), { kind: 'next' });
-				return { accepted: true };
-			case 'setModel': {
-				const [provider, model] = splitModel(String(record['model'] ?? ''));
-				return this.transport.call('session', 'selectModel', { request: { sessionId, provider, model } });
-			}
-			case 'setEffort': {
-				// D13/D16：官方无独立 setEffort remote；effort 是 session/selectModel 的
-				// reasoningEffort 字段（§8.10.9）。当前 provider/model 从 session/projections
-				// 的 modelSelection.next wire view 读取，避免凭记忆猜路由。
-				const effort = String(record['effort'] ?? '');
-				if (effort === '') {
-					throw new DshIdeTransportError('dsh-ide/invalid-argument', 'setEffort.effort must be a non-empty string');
-				}
-				const projected = await this.transport.call('session', 'projections', { request: { sessionId } });
-				const values = isRecord(projected) && isRecord(projected['values']) ? projected['values'] : undefined;
-				const modelSelection = values !== undefined && isRecord(values['modelSelection']) ? values['modelSelection'] : undefined;
-				const selection = modelSelection !== undefined && isRecord(modelSelection['next']) ? modelSelection['next'] : undefined;
-				if (selection === undefined || typeof selection['provider'] !== 'string' || typeof selection['model'] !== 'string') {
-					// 无当前模型则无法只改 effort：明确拒绝，不伪造默认路由，不悄悄降级成 setModel。
-					throw new DshIdeTransportError('dsh-ide/feature-unavailable', 'setEffort requires a current model selection');
-				}
-				return this.transport.call('session', 'selectModel', {
-					request: {
-						sessionId,
-						provider: selection['provider'],
-						model: selection['model'],
-						reasoningEffort: effort,
-					},
-				});
-			}
-			case 'searchSessions': {
-				// D59 分批检索：官方 `session/search`（形参名 request）；未挂载
-				// `@deepseek-ai/dsh-session-query` 时官方抛 gateway/internal，原样透传。
-				const found = await this.transport.call('session', 'search', {
-					request: { query: String(record['query'] ?? '') },
-				});
-				return projectDshIdeSessionSearch(found);
-			}
-			case 'listSessions':
-				return this._listSessions();
-			case 'listModels': {
-				// `modelCatalog()` 无参数；Host 给 `{ groups: [{ id, models: [...] }] }`。
-				const catalog = await this.transport.call('session', 'modelCatalog', {});
-				const groups = isRecord(catalog) && Array.isArray(catalog['groups']) ? catalog['groups'] : [];
-				const models: { provider: string; model: string; name?: string }[] = [];
-				for (const group of groups) {
-					if (!isRecord(group)) {
-						continue;
-					}
-					const provider = String(group['id'] ?? '');
-					for (const model of (Array.isArray(group['models']) ? group['models'] : [])) {
-						if (!isRecord(model)) {
-							continue;
-						}
-						models.push({
-							provider,
-							model: String(model['id'] ?? ''),
-							...(typeof model['name'] === 'string' ? { name: model['name'] } : {}),
-						});
-					}
-				}
-				return models;
-			}
-			case 'listCommands': {
-				// D13（第 32 轮）：`commands/list` 是 agent-scoped remote，wire 形状
-				// 由 §8.10.9 第 31 轮核实——args 精确为 { agentId: sessionId }，
-				// `agentId` = 绑定 sessionId（core/agent 的 agent Context identity）。
-				// 无绑定会话时不发请求，返回空列表（与 listSessions 的 fail-closed 口径一致）。
-				if (this.sessionId === undefined) {
-					return [];
-				}
-				const descriptors = await this.transport.call('commands', 'list', { agentId: this.sessionId });
-				return projectDshIdeCommandList(descriptors);
-			}
-			case 'fetchRowDetail':
-				return null;
-			case 'accountGetState':
-				// 官方 `account/getState`：无参，返回 `AccountView`（status/links/attempt）。
-				return this.transport.call('account', 'getState', {});
-			case 'accountGetProfile':
-				// 官方 `account/getProfile(client)`：形参名是 `client`（不是 request）。
-				return this.transport.call('account', 'getProfile', { client: record['client'] });
-			case 'refreshSnapshot':
-				return { accepted: true };
-			case 'deleteSession':
-				// 删除由社区插件 `@michengai/dsh-archive-manager@1.3.1` 注册的
-				// `workspaceRegistry/deleteSession` 承担（§8.10.8 批准范围）；DSH-IDE 只调用，
-				// 不复制其删除链、不直接删 DSH 会话目录。
-				return this.deleteSessionViaPlugin(String(record['sessionId'] ?? ''));
-			case 'loadOlder': {
-				// D13（第 21 轮）：官方 `session/page`，只读分页；动作类只回 { accepted: true }。
-				const sessionIdForPage = String(record['sessionId'] ?? this.sessionId ?? '');
-				if (sessionIdForPage === '') {
-					throw new DshIdeTransportError('dsh-ide/invalid-argument', 'loadOlder requires a session');
-				}
-				await this.transport.call('session', 'page', {
-					request: {
-						address: { kind: 'session', sessionId: sessionIdForPage },
-						...(typeof record['throughSeq'] === 'number' ? { throughSeq: record['throughSeq'] } : {}),
-						...(typeof record['beforeSeq'] === 'number' ? { beforeSeq: record['beforeSeq'] } : {}),
-						...(typeof record['maxMessages'] === 'number' ? { maxMessages: record['maxMessages'] } : {}),
-					},
-				});
-				return { accepted: true };
-			}
-			case 'archiveSession':
-				// §8.10.11：官方 workspace-controller 的公开 remote；不传 stopActivity，
-				// 保留官方 `workspace/session-active` 拒绝并原样透传。
-				return projectDshIdeArchiveSet(await this.transport.call('workspaceRegistry', 'archiveSession', {
-					request: { sessionId: String(record['sessionId'] ?? '') },
-				}));
-			case 'unarchiveSession':
-				return projectDshIdeArchiveSet(await this.transport.call('workspaceRegistry', 'unarchiveSession', {
-					request: { sessionId: String(record['sessionId'] ?? '') },
-				}));
-			case 'setPermissionPreset': {
-				// §8.10.9：官方无独立 setter，`/permission <preset>` 是注册的斜杠命令。
-				return this._runCommandLine(buildDshIdeCommandLine('permission', [String(record['preset'] ?? '')]));
-			}
-			case 'runCommand': {
-				const args = Array.isArray(record['args']) ? record['args'].map(String) : undefined;
-				return this._runCommandLine(buildDshIdeCommandLine(String(record['command'] ?? ''), args));
-			}
-			case 'rewind':
-				throw new DshIdeTransportError('dsh-ide/feature-unavailable', `DSH-IDE capability "${method}" has no verified DSH endpoint yet`, { capability: method });
-			default:
-				throw new DshIdeTransportError('dsh-ide/feature-unavailable', `DSH-IDE method ${JSON.stringify(method)} is not mapped`);
-		}
-	}
-
-	/** P4：每次读取官方可见会话与工作区首帧，归属和字段映射复用共享投影。 */
-	private async _listSessions(): Promise<readonly IDshIdeSessionSummary[]> {
-		const sessionId = this.sessionId;
-		const channelId = this.channelId;
-		if (channelId === undefined || sessionId === undefined || sessionId === '') {
-			return [];
-		}
-		const read = new AbortController();
-		this._sessionListReads.add(read);
-		let stream: ReturnType<DshIdeTransport['openStream']> | undefined;
-		let cancelBaseline: () => void = () => undefined;
-		try {
-			const baseline = new Promise<Extract<DshIdeStreamFrame, { type: 'baseline' }>['value']['items']>((resolve, reject) => {
-				cancelBaseline = () => reject(read.signal.reason);
-				read.signal.addEventListener('abort', cancelBaseline, { once: true });
-				stream = this.transport.openStream('workspace/follow', {}, frame => {
-					if (frame.type !== 'baseline') {
-						reject(new DshIdeTransportError('dsh-ide/transport-corrupt', 'Workspace stream did not begin with a baseline'));
-						return;
-					}
-					resolve(frame.value.items);
-				}, reject, () => reject(new DshIdeTransportError('dsh-ide/stream-ended', 'Workspace stream ended before its baseline')));
-			}).finally(() => stream?.close());
-			// 两个官方端点各自保留 Gateway ACL；临时流不占用 Chat 的 this.stream。
-			const [value, workspaces] = await Promise.all([
-				this.transport.call('session', 'list', { _request: {} }, read.signal),
-				baseline,
-			]);
-			read.signal.throwIfAborted();
-			if (this.channelId !== channelId || this.sessionId !== sessionId) {
-				throw new DshIdeTransportError('SESSION_SWITCHED', 'Session list binding changed during the read');
-			}
-			// 版本绑定承担官方载荷兼容性，不在这里另建运行时 schema。
-			const { items } = value as { readonly items: Parameters<typeof projectDshIdeSessionList>[2] };
-			return projectDshIdeSessionList(sessionId, workspaces.map(workspace => ({ id: workspace.workspaceId, sessionIds: workspace.sessionIds })), items);
-		} finally {
-			this._sessionListReads.delete(read);
-			read.signal.removeEventListener('abort', cancelBaseline);
-			read.abort();
-			stream?.close();
-		}
-	}
-
-	/**
-	 * 调用社区插件暴露的删除端点，并把「插件缺失 / 方法不可用」映射为契约错误码。
-	 *
-	 * 端点名与插件版本以 `common/dshIdeProtocol.ts` 的 `DSH_IDE_DELETE_SESSION_ENDPOINT` /
-	 * `DSH_IDE_DELETE_SESSION_PLUGIN_VERSION` 为真源；本文件只用字面量发起调用，因为
-	 * `transport/` 由 node --experimental-strip-types 直接加载（值导入 `.js` 说明符无法解析），
-	 * 漂移由 `dshIdeProtocol.test.ts` 的端点一致性断言兜住。
-	 *
-	 * 三种降级都不伪造成功：网关报 `gateway/invocation-unavailable`（插件未注册该 endpoint）
-	 * 或结果不是 `{ deleted: true }` 时一律拒绝，由调用方保留列表项并报告原因。
-	 */
-	/**
-	 * D13（第 34 轮）：`runCommand` / `setPermissionPreset` 共用的官方命令执行。
-	 * `commands/execute` 是 agent-scoped remote，wire 形状由 §8.10.9 第 31 轮核实：
-	 * args 精确为 `{ agentId: sessionId, line, submittedAttachments: [] }`，
-	 * `signal` 由 Gateway cancellation 承载、不入 args（§8.10.10 前置④⑤）。
-	 * 结果经共享 `mapDshIdeCommandExecution` 收敛为动作类语义，不静默 accepted。
-	 */
-	private async _runCommandLine(line: string): Promise<{ accepted: true }> {
-		if (this.sessionId === undefined) {
-			throw new DshIdeTransportError('dsh-ide/invalid-argument', 'command execution requires a bound session', { capability: 'runCommand' });
-		}
-		const execution = await this.transport.call('commands', 'execute', {
-			agentId: this.sessionId,
-			line,
-			submittedAttachments: [],
+		// 操作只交给内核桥接。这里不再把 prompt / cancel / selectModel 重写成 session/* 请求。
+		return this.transport.call('ide', 'dispatch', {
+			method,
+			payload: isRecord(args) ? args : {},
 		});
-		const outcome = mapDshIdeCommandExecution(execution);
-		if ('error' in outcome) {
-			throw new DshIdeTransportError(
-				outcome.error === 'invalid-argument' ? 'dsh-ide/invalid-argument' : 'dsh-ide/feature-unavailable',
-				outcome.message,
-				{ capability: 'runCommand' },
-			);
-		}
-		return { accepted: true };
 	}
 
-	private async deleteSessionViaPlugin(sessionId: string): Promise<{ accepted: true }> {
-		let value: unknown;
-		try {
-			value = await this.transport.call('workspaceRegistry', 'deleteSession', { sessionId });
-		} catch (error) {
-			if (error instanceof DshIdeTransportError && error.code.startsWith('gateway/')) {
-				throw new DshIdeTransportError(
-					'dsh-ide/feature-unavailable',
-					'session delete endpoint is unavailable: install and enable @michengai/dsh-archive-manager@1.3.1',
-					{ capability: 'deleteSession', cause: error.code },
-				);
-			}
-			throw error;
-		}
-		if (!isRecord(value) || value['deleted'] !== true) {
-			throw new DshIdeTransportError('dsh-ide/feature-unavailable', `session delete did not confirm deletion for ${sessionId}`, { capability: 'deleteSession' });
-		}
-		return { accepted: true };
-	}
 
 	close(): void {
 		this.channelId = undefined;
 		this.sessionId = undefined;
-		for (const read of this._sessionListReads) {
-			read.abort(new DshIdeTransportError('SESSION_SWITCHED', 'Session list binding closed during the read'));
-		}
-		this._sessionListReads.clear();
 		for (const stream of this.streams) {
 			stream.close();
 		}
 		this.streams.clear();
 		this.transport.dispose();
 	}
-}
-
-function splitModel(model: string): [string, string] {
-	const slash = model.indexOf('/');
-	return slash <= 0 ? ['deepseek', model] : [model.slice(0, slash), model.slice(slash + 1)];
 }

@@ -891,13 +891,12 @@ class AddElementToChatAction extends Action2 {
 			category: BrowserCategory,
 			icon: Codicon.inspect,
 			f1: true,
-			precondition: ContextKeyExpr.and(BROWSER_EDITOR_ACTIVE, CONTEXT_BROWSER_HAS_URL, CONTEXT_BROWSER_HAS_ERROR.negate(), ChatContextKeys.enabled),
+			precondition: ContextKeyExpr.and(BROWSER_EDITOR_ACTIVE, CONTEXT_BROWSER_HAS_URL, CONTEXT_BROWSER_HAS_ERROR.negate()),
 			toggled: CONTEXT_BROWSER_ELEMENT_SELECTION_MODE.isEqualTo(BrowserElementSelectionMode.Select),
 			menu: {
 				id: MenuId.BrowserChatActionsMenu,
 				group: '1_element',
 				order: 1,
-				when: ChatContextKeys.enabled
 			},
 			keybinding: [{
 				weight: KeybindingWeight.WorkbenchContrib + 50, // Priority over terminal
@@ -931,13 +930,12 @@ class AddElementCommentToChatAction extends Action2 {
 			category: BrowserCategory,
 			icon: Codicon.comment,
 			f1: true,
-			precondition: ContextKeyExpr.and(BROWSER_EDITOR_ACTIVE, CONTEXT_BROWSER_HAS_URL, CONTEXT_BROWSER_HAS_ERROR.negate(), ChatContextKeys.enabled),
+			precondition: ContextKeyExpr.and(BROWSER_EDITOR_ACTIVE, CONTEXT_BROWSER_HAS_URL, CONTEXT_BROWSER_HAS_ERROR.negate()),
 			toggled: CONTEXT_BROWSER_ELEMENT_SELECTION_MODE.isEqualTo(BrowserElementSelectionMode.Comment),
 			menu: {
 				id: MenuId.BrowserChatActionsMenu,
 				group: '1_element',
 				order: 2,
-				when: ChatContextKeys.enabled
 			},
 			keybinding: [{
 				weight: KeybindingWeight.WorkbenchContrib + 50,
@@ -993,12 +991,11 @@ class AddConsoleLogsToChatAction extends Action2 {
 			category: BrowserActionCategory,
 			icon: Codicon.output,
 			f1: true,
-			precondition: ContextKeyExpr.and(BROWSER_EDITOR_ACTIVE, CONTEXT_BROWSER_HAS_URL, CONTEXT_BROWSER_HAS_ERROR.negate(), ChatContextKeys.enabled),
+			precondition: ContextKeyExpr.and(BROWSER_EDITOR_ACTIVE, CONTEXT_BROWSER_HAS_URL, CONTEXT_BROWSER_HAS_ERROR.negate()),
 			menu: {
 				id: MenuId.BrowserChatActionsMenu,
 				group: '2_logs',
 				order: 1,
-				when: ChatContextKeys.enabled
 			}
 		});
 	}
@@ -1020,12 +1017,11 @@ class AddScreenshotToChatAction extends Action2 {
 			category: BrowserActionCategory,
 			icon: Codicon.deviceCamera,
 			f1: true,
-			precondition: ContextKeyExpr.and(BROWSER_EDITOR_ACTIVE, CONTEXT_BROWSER_HAS_URL, CONTEXT_BROWSER_HAS_ERROR.negate(), ChatContextKeys.enabled),
+			precondition: ContextKeyExpr.and(BROWSER_EDITOR_ACTIVE, CONTEXT_BROWSER_HAS_URL, CONTEXT_BROWSER_HAS_ERROR.negate()),
 			menu: {
 				id: MenuId.BrowserChatActionsMenu,
 				group: '3_screenshots',
 				order: 1,
-				when: ChatContextKeys.enabled
 			}
 		});
 	}
@@ -1047,13 +1043,12 @@ class AddAreaScreenshotToChatAction extends Action2 {
 			category: BrowserActionCategory,
 			icon: Codicon.screenFull,
 			f1: true,
-			precondition: ContextKeyExpr.and(BROWSER_EDITOR_ACTIVE, CONTEXT_BROWSER_HAS_URL, CONTEXT_BROWSER_HAS_ERROR.negate(), ChatContextKeys.enabled),
+			precondition: ContextKeyExpr.and(BROWSER_EDITOR_ACTIVE, CONTEXT_BROWSER_HAS_URL, CONTEXT_BROWSER_HAS_ERROR.negate()),
 			toggled: CONTEXT_BROWSER_AREA_SELECTION_ACTIVE,
 			menu: {
 				id: MenuId.BrowserChatActionsMenu,
 				group: '3_screenshots',
 				order: 2,
-				when: ChatContextKeys.enabled
 			}
 		});
 	}
@@ -1076,12 +1071,12 @@ class AddFullPageScreenshotToChatAction extends Action2 {
 			category: BrowserActionCategory,
 			icon: Codicon.deviceCamera,
 			f1: true,
-			precondition: ContextKeyExpr.and(BROWSER_EDITOR_ACTIVE, CONTEXT_BROWSER_HAS_URL, CONTEXT_BROWSER_HAS_ERROR.negate(), ChatContextKeys.enabled, enabledSetting),
+			precondition: ContextKeyExpr.and(BROWSER_EDITOR_ACTIVE, CONTEXT_BROWSER_HAS_URL, CONTEXT_BROWSER_HAS_ERROR.negate(), enabledSetting),
 			menu: {
 				id: MenuId.BrowserChatActionsMenu,
 				group: '3_screenshots',
 				order: 3,
-				when: ContextKeyExpr.and(ChatContextKeys.enabled, enabledSetting)
+				when: ContextKeyExpr.and(enabledSetting)
 			}
 		});
 	}
@@ -1109,7 +1104,6 @@ MenuRegistry.appendMenuItem(MenuId.BrowserActionsToolbar, {
 	icon: Codicon.inspect,
 	group: BrowserActionGroup.Tools,
 	order: 1,
-	when: ChatContextKeys.enabled,
 	isSplitButton: {
 		togglePrimaryAction: true,
 		primaryActionIds: [AddElementToChatAction.ID, AddElementCommentToChatAction.ID]

@@ -137,19 +137,17 @@ class AttachFileToChatAction extends AttachResourceAction {
 			title: localize2('workbench.action.chat.attachFile.label', "Add File to Chat"),
 			category: CHAT_CATEGORY,
 			icon: Codicon.attach,
-			precondition: ChatContextKeys.enabled,
 			f1: true,
 			menu: [{
 				id: MenuId.SearchContext,
 				group: 'z_chat',
 				order: 1,
-				when: ContextKeyExpr.and(ChatContextKeys.enabled, SearchContext.FileMatchOrMatchFocusKey, SearchContext.SearchResultHeaderFocused.negate()),
+				when: ContextKeyExpr.and(SearchContext.FileMatchOrMatchFocusKey, SearchContext.SearchResultHeaderFocused.negate()),
 			}, {
 				id: MenuId.ExplorerContext,
 				group: '5_chat',
 				order: 1,
 				when: ContextKeyExpr.and(
-					ChatContextKeys.enabled,
 					ExplorerFolderContext.negate(),
 					ContextKeyExpr.or(
 						ResourceContextKey.Scheme.isEqualTo(Schemas.file),
@@ -161,7 +159,6 @@ class AttachFileToChatAction extends AttachResourceAction {
 				group: '2_chat',
 				order: 1,
 				when: ContextKeyExpr.and(
-					ChatContextKeys.enabled,
 					ContextKeyExpr.or(
 						ResourceContextKey.Scheme.isEqualTo(Schemas.file),
 						ResourceContextKey.Scheme.isEqualTo(Schemas.vscodeRemote)
@@ -172,7 +169,6 @@ class AttachFileToChatAction extends AttachResourceAction {
 				group: '1_chat',
 				order: 2,
 				when: ContextKeyExpr.and(
-					ChatContextKeys.enabled,
 					EditorContextKeys.hasNonEmptySelection.negate(),
 					ContextKeyExpr.or(
 						ResourceContextKey.Scheme.isEqualTo(Schemas.file),
@@ -185,12 +181,12 @@ class AttachFileToChatAction extends AttachResourceAction {
 				id: MenuId.InlineChatEditorAffordance,
 				group: '0_chat',
 				order: 3,
-				when: ContextKeyExpr.and(ChatContextKeys.enabled, EditorContextKeys.hasNonEmptySelection.negate())
+				when: ContextKeyExpr.and(EditorContextKeys.hasNonEmptySelection.negate())
 			}, {
 				id: MenuId.ChatEditorInlineMenu,
 				group: '0_chat',
 				order: 3,
-				when: ContextKeyExpr.and(ChatContextKeys.enabled, EditorContextKeys.hasNonEmptySelection.negate())
+				when: ContextKeyExpr.and(EditorContextKeys.hasNonEmptySelection.negate())
 			}]
 		});
 	}
@@ -224,7 +220,6 @@ class AttachFolderToChatAction extends AttachResourceAction {
 				group: '5_chat',
 				order: 1,
 				when: ContextKeyExpr.and(
-					ChatContextKeys.enabled,
 					ExplorerFolderContext,
 					ContextKeyExpr.or(
 						ResourceContextKey.Scheme.isEqualTo(Schemas.file),
@@ -258,7 +253,6 @@ class AttachPinnedEditorsToChatAction extends Action2 {
 			id: AttachPinnedEditorsToChatAction.ID,
 			title: localize2('workbench.action.chat.attachPinnedEditors.label', "Add Pinned Editors to Chat"),
 			category: CHAT_CATEGORY,
-			precondition: ChatContextKeys.enabled,
 			f1: true,
 		});
 	}
@@ -306,13 +300,11 @@ class AttachSelectionToChatAction extends Action2 {
 			category: CHAT_CATEGORY,
 			icon: Codicon.attach,
 			f1: true,
-			precondition: ChatContextKeys.enabled,
 			menu: [{
 				id: MenuId.EditorContext,
 				group: '1_chat',
 				order: 1,
 				when: ContextKeyExpr.and(
-					ChatContextKeys.enabled,
 					EditorContextKeys.hasNonEmptySelection,
 					ContextKeyExpr.or(
 						ResourceContextKey.Scheme.isEqualTo(Schemas.file),
@@ -325,12 +317,12 @@ class AttachSelectionToChatAction extends Action2 {
 				id: MenuId.InlineChatEditorAffordance,
 				group: '0_chat',
 				order: 2,
-				when: ContextKeyExpr.and(ChatContextKeys.enabled, EditorContextKeys.hasNonEmptySelection)
+				when: ContextKeyExpr.and(EditorContextKeys.hasNonEmptySelection)
 			}, {
 				id: MenuId.ChatEditorInlineMenu,
 				group: '0_chat',
 				order: 2,
-				when: ContextKeyExpr.and(ChatContextKeys.enabled, EditorContextKeys.hasNonEmptySelection)
+				when: ContextKeyExpr.and(EditorContextKeys.hasNonEmptySelection)
 			}]
 		});
 	}
@@ -398,7 +390,6 @@ export class AttachSearchResultAction extends Action2 {
 				group: 'z_chat',
 				order: 3,
 				when: ContextKeyExpr.and(
-					ChatContextKeys.enabled,
 					SearchContext.SearchResultHeaderFocused),
 			}]
 		});

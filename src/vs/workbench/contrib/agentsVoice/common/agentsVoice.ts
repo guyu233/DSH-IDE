@@ -32,7 +32,6 @@ export const AGENTS_VOICE_TOGGLE_MUTE_COMMAND_ID = 'agentsVoice.toggleMute';
  */
 export const AGENTS_VOICE_ENTITLED = new RawContextKey<boolean>('agentsVoiceEntitled', false);
 export const AGENTS_VOICE_ENABLED = ContextKeyExpr.and(
-	ChatContextKeys.enabled,
 	ContextKeyExpr.equals('config.agents.voice.enabled', true),
 	ContextKeyExpr.or(
 		AGENTS_VOICE_ENTITLED,

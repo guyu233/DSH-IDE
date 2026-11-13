@@ -1,0 +1,129 @@
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) DSH-IDE contributors. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+
+/* DSH 聊天面板：结构照 DSH 聊天页，配色跟着 VS Code 主题走（保留 IDE 味道）。 */
+
+.dsh-chat-panel {
+	display: flex;
+	flex-direction: column;
+	height: 100%;
+	box-sizing: border-box;
+	background: var(--vscode-sideBar-background, var(--vscode-editor-background));
+	color: var(--vscode-foreground);
+}
+
+.dsh-chat-list {
+	flex: 1 1 auto;
+	overflow-y: auto;
+	padding: 12px 14px 4px;
+	display: flex;
+	flex-direction: column;
+	gap: 10px;
+}
+
+.dsh-chat-part {
+	min-width: 0;
+}
+
+.dsh-chat-pending-host:empty {
+	display: none;
+}
+
+.dsh-chat-pending {
+	margin: 0 14px 8px;
+	border: 1px solid var(--vscode-inputValidation-warningBorder, var(--vscode-focusBorder));
+	border-radius: 6px;
+	padding: 8px 10px;
+	background: var(--vscode-inputValidation-warningBackground, var(--vscode-editorWidget-background));
+}
+
+.dsh-chat-pending-title {
+	font-size: 12px;
+	line-height: 1.5;
+	margin-bottom: 6px;
+}
+
+.dsh-chat-pending-actions {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 6px;
+}
+
+.dsh-chat-pending-button,
+.dsh-chat-send {
+	border: 1px solid var(--vscode-button-border, transparent);
+	border-radius: 4px;
+	background: var(--vscode-button-background);
+	color: var(--vscode-button-foreground);
+	padding: 3px 10px;
+	font-size: 12px;
+	cursor: pointer;
+}
+
+.dsh-chat-pending-button:hover,
+.dsh-chat-send:hover {
+	background: var(--vscode-button-hoverBackground);
+}
+
+.dsh-chat-composer {
+	flex: 0 0 auto;
+	margin: 8px 10px 10px;
+	border: 1px solid var(--vscode-input-border, var(--vscode-widget-border));
+	border-radius: 6px;
+	background: var(--vscode-input-background);
+	padding: 6px;
+}
+
+.dsh-chat-composer-toolbar {
+	display: flex;
+	align-items: center;
+	justify-content: flex-end;
+	gap: 6px;
+	margin-bottom: 4px;
+}
+
+.dsh-chat-model {
+	max-width: 60%;
+	background: var(--vscode-dropdown-background);
+	color: var(--vscode-dropdown-foreground);
+	border: 1px solid var(--vscode-dropdown-border);
+	border-radius: 4px;
+	font-size: 12px;
+	padding: 2px 4px;
+}
+
+.dsh-chat-stop {
+	background: transparent;
+	border: none;
+	color: var(--vscode-icon-foreground);
+	cursor: pointer;
+	padding: 2px 4px;
+	display: inline-flex;
+	align-items: center;
+}
+
+.dsh-chat-stop:disabled {
+	opacity: 0.4;
+	cursor: default;
+}
+
+.dsh-chat-input {
+	width: 100%;
+	box-sizing: border-box;
+	resize: none;
+	border: none;
+	outline: none;
+	background: transparent;
+	color: var(--vscode-input-foreground);
+	font-family: var(--vscode-font-family);
+	font-size: var(--vscode-font-size);
+	line-height: 1.5;
+}
+
+.dsh-chat-composer .dsh-chat-send {
+	display: block;
+	margin-left: auto;
+	margin-top: 4px;
+}

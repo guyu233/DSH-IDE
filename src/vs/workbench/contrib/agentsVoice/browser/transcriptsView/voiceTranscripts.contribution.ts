@@ -84,7 +84,6 @@ class ShowVoiceTranscriptsAction extends Action2 {
 			title: localize2('agentsVoice.showTranscripts', "Show Voice Transcripts"),
 			f1: true,
 			category: localize2('agentsVoiceCategory', "Agents Voice"),
-			precondition: ChatContextKeys.enabled,
 		});
 	}
 

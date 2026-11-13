@@ -65,12 +65,11 @@ class SubmitPlanReviewFeedbackAction extends Action2 {
 			shortTitle: localize2('planReviewFeedback.submitShort', 'Submit'),
 			icon: Codicon.send,
 			category: CHAT_CATEGORY,
-			precondition: ChatContextKeys.enabled,
 			menu: {
 				id: PlanReviewFeedbackEditorMenu,
 				group: 'a_submit',
 				order: 0,
-				when: ContextKeyExpr.and(ChatContextKeys.enabled, hasPlanReviewFeedback),
+				when: ContextKeyExpr.and(hasPlanReviewFeedback),
 			},
 		});
 	}
@@ -95,12 +94,12 @@ class NavigatePlanReviewFeedbackAction extends Action2 {
 			icon: _next ? Codicon.arrowDown : Codicon.arrowUp,
 			category: CHAT_CATEGORY,
 			f1: true,
-			precondition: ContextKeyExpr.and(ChatContextKeys.enabled, hasPlanReviewFeedback),
+			precondition: ContextKeyExpr.and(hasPlanReviewFeedback),
 			menu: {
 				id: PlanReviewFeedbackEditorMenu,
 				group: 'navigate',
 				order: _next ? 2 : 1,
-				when: ContextKeyExpr.and(ChatContextKeys.enabled, hasPlanReviewFeedback),
+				when: ContextKeyExpr.and(hasPlanReviewFeedback),
 			},
 		});
 	}
@@ -133,12 +132,12 @@ class ClearAllPlanReviewFeedbackAction extends Action2 {
 			icon: Codicon.clearAll,
 			category: CHAT_CATEGORY,
 			f1: true,
-			precondition: ContextKeyExpr.and(ChatContextKeys.enabled, hasPlanReviewFeedback),
+			precondition: ContextKeyExpr.and(hasPlanReviewFeedback),
 			menu: {
 				id: PlanReviewFeedbackEditorMenu,
 				group: 'a_submit',
 				order: 1,
-				when: ContextKeyExpr.and(ChatContextKeys.enabled, hasPlanReviewFeedback),
+				when: ContextKeyExpr.and(hasPlanReviewFeedback),
 			},
 		});
 	}
@@ -263,7 +262,7 @@ MenuRegistry.appendMenuItem(PlanReviewFeedbackEditorMenu, {
 	},
 	group: 'navigate',
 	order: -1,
-	when: ContextKeyExpr.and(ChatContextKeys.enabled, hasPlanReviewFeedback),
+	when: ContextKeyExpr.and(hasPlanReviewFeedback),
 });
 
 registerWorkbenchContribution2(PlanReviewFeedbackEditorOverlay.ID, PlanReviewFeedbackEditorOverlay, WorkbenchPhase.AfterRestored);

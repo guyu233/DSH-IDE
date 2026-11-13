@@ -2713,6 +2713,7 @@ export class ChatWidget extends Disposable implements IChatWidget {
 			defaultMode: this.viewOptions.defaultMode,
 			sessionTypePickerDelegate: this.viewOptions.sessionTypePickerDelegate,
 			workspacePickerDelegate: this.viewOptions.workspacePickerDelegate,
+			dshComposer: this.viewOptions.dshComposer,
 			isSessionsWindow: this.viewOptions.isSessionsWindow,
 		};
 

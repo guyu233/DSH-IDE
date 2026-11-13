@@ -166,9 +166,7 @@ export class CopyChatSessionLinkAction extends Action2 {
 			category: CHAT_CATEGORY,
 			menu: {
 				id: MenuId.EditorTitleContext,
-				when: ContextKeyExpr.and(
-					ChatContextKeys.enabled,
-					ActiveEditorContext.isEqualTo(ChatEditorInput.EditorID),
+				when: ContextKeyExpr.and(					ActiveEditorContext.isEqualTo(ChatEditorInput.EditorID),
 					ContextKeyExpr.regex(ResourceContextKey.Scheme.key, /^(agent-host-|remote-)/),
 				),
 				group: '1_cutcopypaste',

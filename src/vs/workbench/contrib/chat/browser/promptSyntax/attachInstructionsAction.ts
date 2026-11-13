@@ -41,7 +41,6 @@ class ManageInstructionsFilesAction extends Action2 {
 			shortTitle: localize2('configure-instructions.short', "Instructions & Rules"),
 			icon: Codicon.bookmark,
 			f1: true,
-			precondition: ChatContextKeys.enabled,
 			category: CHAT_CATEGORY
 		});
 	}

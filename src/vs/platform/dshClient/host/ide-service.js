@@ -38,6 +38,25 @@ export class IdeRemoteService extends Service {
     /** Electron 主页的物化进行中/已完成 Promise（并发首点只建一次）。 */
     this.electronHomeBuild = undefined;
     this.typertRemote = bindTypertRemote(this, 'ide', { namespace: 'ide' });
+    // DSH-IDE 是 DSH 的插件：插件上下文销毁（DSH 退出 / 插件卸载）时必须关掉
+    // 由本服务拉起的 IDE 窗口。子进程已不再 detached，这里再显式 kill 一次，
+    // 覆盖「用户没关窗口就直接退出 DSH」的情况。
+    ctx.effect(() => () => this.killIdeChild(), 'dsh-ide.ide-child-cleanup');
+  }
+
+  /** 关掉由本服务拉起的 IDE 子进程；没拉起过或已退出时是空操作。 */
+  killIdeChild() {
+    const child = this.ideChild;
+    this.ideChild = undefined;
+    this.spawnedAt = undefined;
+    if (child === undefined || child.exitCode !== null || child.signalCode !== null) {
+      return;
+    }
+    try {
+      child.kill();
+    } catch {
+      // 进程可能已经消失：退出过程不抛错。
+    }
   }
 
   ping() {
@@ -128,17 +147,67 @@ export class IdeRemoteService extends Service {
       if (sessionId !== undefined) {
         env.DSH_IDE_SESSION = sessionId;
       }
+      // 预取 composerState 并随环境变量交给子进程：IDE 第一帧就能直接画出
+      // 模型 / 推理档 / 权限 / 预设，不再「先空着、等一次往返再变出来」。
+      // 取不到时留空，IDE 侧回落到正常读取（不影响开窗）。
+      if (sessionId !== undefined) {
+        const preset = await this.readComposerSnapshot(sessionId);
+        if (preset !== undefined) {
+          env.DSH_IDE_COMPOSER = preset;
+        }
+      }
       // 不传载荷目录作为位置参数：主页的 `resources/app` 已经指向插件载荷。
       // 位置参数只承载「要打开的工作区」，与 VS Code CLI 语义一致（首次点击即打开当前工作区）。
       const args = typeof workspace === 'string' && workspace !== '' ? [workspace] : [];
-      const child = spawn(home.exe, args, { detached: true, stdio: 'ignore', env, cwd: appPath });
-      child.unref();
-      // 保留子进程句柄：防抖必须看进程是否还活着（exitCode 非空 = 已退出）。
+      // DSH-IDE 是 DSH 的插件，IDE 窗口必须随 DSH 进程一起结束。
+      // 因此**不能**用 `detached: true` + `unref()`：那会把子进程从父进程的进程组里摘出去，
+      // DSH 退出后窗口仍留着。这里保持普通子进程，并把句柄登记到插件上下文，
+      // 由 `ctx.effect` 在插件卸载 / Host 退出时显式 kill。
+      const child = spawn(home.exe, args, { stdio: 'ignore', env, cwd: appPath });
       this.ideChild = child;
       this.spawnedAt = now;
+      // 子进程自己退出（用户关窗口）时释放句柄，避免防抖误判仍在运行。
+      child.once('exit', () => {
+        if (this.ideChild === child) {
+          this.ideChild = undefined;
+          this.spawnedAt = undefined;
+        }
+      });
       return { ok: true };
     } catch (error) {
       return { ok: false, message: `failed to spawn IDE process: ${error instanceof Error ? error.message : String(error)}` };
+    }
+  }
+
+  /**
+   * 开窗前预取一次输入框目录，交给 IDE 首帧使用。
+   *
+   * 与 `composerState` 同一个取数路径（projections + modelCatalog + 权限 / 预设目录），
+   * 只是提前到拉起窗口之前执行。任何失败都返回 undefined：宁可让 IDE 走正常读取，
+   * 也不要因为预取失败而打不开窗口。
+   * @param {string} sessionId
+   * @returns {Promise<string | undefined>}
+   */
+  async readComposerSnapshot(sessionId) {
+    try {
+      const composer = this.ctx.get && this.ctx.get('sessionController');
+      if (!composer || typeof composer.projections !== 'function') {
+        return undefined;
+      }
+      const projected = await composer.projections({ sessionId });
+      const values = projected && typeof projected === 'object' ? projected.values : undefined;
+      const catalog = typeof composer.modelCatalog === 'function' ? await composer.modelCatalog() : undefined;
+      const permissionPresets = this.ctx.get && this.ctx.get('permissionPresets');
+      const agentPresets = this.ctx.get && this.ctx.get('agentPresets');
+      const permission = permissionPresets && typeof permissionPresets.catalog === 'function'
+        ? permissionPresets.catalog()
+        : undefined;
+      const presets = agentPresets && typeof agentPresets.list === 'function'
+        ? await agentPresets.list()
+        : undefined;
+      return JSON.stringify({ values, catalog, permission, presets });
+    } catch {
+      return undefined;
     }
   }
 
@@ -186,9 +255,53 @@ export class IdeRemoteService extends Service {
     return this.launchQueue.register(clientId);
   }
 
+  /**
+   * IDE 进程退出时注销登记项。
+   *
+   * 为什么必须显式注销：IDE 进程被关闭时旧实现依赖 15s 心跳超时才清理，
+   * 期间用户再点入口，`dispatch` 会把请求投给一个已死的回调并返回 ok:true，
+   * 表现为「点了没反应，要等很久再点一次才打开」。IDE 侧退出前调用本方法即可立刻清掉。
+   * @param clientId - 报到时使用的标识
+   */
+  unregisterIdeClient(clientId) {
+    return this.launchQueue.unregister(clientId);
+  }
+
   /** IDE 侧轮询待开窗请求（由 `registerIdeClient` 建立的登记项）。 */
   pollLaunch(clientId) {
     return this.launchQueue.poll(clientId);
+  }
+
+  /** 插件入口在会话服务就绪后把 Host 桥接交过来。窗口只调这里，不再自己开 session/follow。 */
+  attachBridge(bridge) {
+    this.bridge = bridge;
+  }
+
+  /**
+   * 跟随一个会话。帧来自桥接里那一次 `sessionController.follow`，原样送出。
+   * @param {string} sessionId
+   * @param {AbortSignal} signal
+   */
+  async *followSession(sessionId, signal) {
+    const bridge = this.bridge;
+    if (bridge === undefined || typeof bridge.followSession !== 'function') {
+      throw Object.assign(new Error('DSH-IDE host bridge is not attached'), { code: 'dsh-ide/feature-unavailable' });
+    }
+    yield* bridge.followSession(sessionId, signal);
+  }
+
+  /**
+   * 窗口上的操作交给桥接已有的调用。`payload` 是该方法的参数对象。
+   * @param {string} method
+   * @param {unknown} payload
+   */
+  dispatch(method, payload) {
+    const bridge = this.bridge;
+    if (bridge === undefined || typeof bridge.invoke !== 'function') {
+      return Promise.reject(Object.assign(new Error('DSH-IDE host bridge is not attached'), { code: 'dsh-ide/feature-unavailable' }));
+    }
+    const args = payload !== null && typeof payload === 'object' && !Array.isArray(payload) ? payload : {};
+    return bridge.invoke(method, args);
   }
 
   /** 读取已发布的 IDE 端点（由 host/ide-view-host.js 的 publishHostEndpoint 写入）。 */
@@ -266,7 +379,10 @@ Object.defineProperty(IdeRemoteService.prototype, REMOTE_METHOD_DESCRIPTOR, {
       { method: 'inlineComplete', invocation: { kind: 'direct' } },
       { method: 'launch', invocation: { kind: 'direct' } },
       { method: 'registerIdeClient', invocation: { kind: 'direct' } },
+      { method: 'unregisterIdeClient', invocation: { kind: 'direct' } },
       { method: 'pollLaunch', invocation: { kind: 'direct' } },
+      { method: 'followSession', mode: 'stream', invocation: { kind: 'direct' } },
+      { method: 'dispatch', invocation: { kind: 'direct' } },
     ],
   },
 });

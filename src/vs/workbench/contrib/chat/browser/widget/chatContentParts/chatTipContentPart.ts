@@ -296,7 +296,6 @@ registerAction2(class ResetDismissedTipsAction extends Action2 {
 			id: 'workbench.action.chat.resetDismissedTips',
 			title: localize2('chatTip.resetDismissedTips', "Reset Dismissed Tips"),
 			f1: true,
-			precondition: ChatContextKeys.enabled,
 		});
 	}
 

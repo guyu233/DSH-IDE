@@ -1,36 +1,171 @@
 {
   "name": "basic-session-mock",
-  "description": "P2 mock 事件流 golden：覆盖 user/assistant delta 合并、callId 关联、重复 seq 幂等、dshEmits=false 丢弃、DSH 私有 payload 不透传；并覆盖 DSH 0.2.2 线上瞬时流帧（attempt 身份 + revision 去重 + 结算替换流式行，见 translator.ts 的 attemptId 注释）。真实事件流样本到位后按 docs/DEVELOPMENT.md 第 5 章 §5 的 P95 校准流程替换并更新本 golden。",
+  "description": "P2 mock 事件流 golden：覆盖 user/assistant delta 合并、callId 关联、重复 seq 幂等、dshEmits=false 丢弃、DSH 私有 payload 不透传；并覆盖 DSH 0.2.2 线上瞬时流帧（attempt 身份 + revision 去重 + 结算替换流式行，见 translator.ts 的 attemptId 注释）。",
   "events": [
-    { "type": "session.status", "seq": 1, "status": "ready", "dshPrivateToken": "must-be-dropped" },
-    { "type": "user.message", "seq": 2, "text": "list files", "attachments": ["secret"] },
-    { "type": "turn.start", "seq": 3 },
-    { "type": "step.start", "seq": 4 },
-    { "type": "assistant.delta", "seq": 5, "text": "Sure, " },
-    { "type": "assistant.delta", "seq": 6, "text": "I will " },
-    { "type": "assistant.delta", "seq": 7, "text": "run ls." },
-    { "type": "assistant.delta", "seq": 7, "text": "DUPLICATE-SEQ" },
-    { "type": "tool.call", "seq": 8, "callId": "c1", "title": "terminal: ls" },
-    { "type": "tool.result", "seq": 9, "callId": "c1", "text": "a.txt\nb.txt" },
-    { "type": "notice", "seq": 10, "text": "dshEmits=false" },
-    { "type": "assistant.attempt.end", "seq": 11 },
-    { "type": "step.end", "seq": 12 },
-    { "type": "turn.end", "seq": 13 },
-    { "type": "custom", "seq": 14, "text": "done" },
-    { "type": "assistant.attempt.start", "attemptId": "a1", "streamRevision": 1, "turn": 2, "step": 1 },
-    { "type": "assistant.delta", "attemptId": "a1", "streamRevision": 2, "turn": 2, "step": 1, "text": "Checking " },
-    { "type": "assistant.delta", "attemptId": "a1", "streamRevision": 3, "turn": 2, "step": 1, "text": "the list." },
-    { "type": "assistant.delta", "attemptId": "a1", "streamRevision": 3, "turn": 2, "step": 1, "text": "the list." },
-    { "type": "assistant.message", "seq": 15, "turn": 2, "step": 1, "text": "Checking the list." },
-    { "type": "assistant.attempt.end", "attemptId": "a1", "streamRevision": 4, "turn": 2, "step": 1 }
+    {
+      "type": "session.status",
+      "seq": 1,
+      "status": "ready",
+      "dshPrivateToken": "must-be-dropped"
+    },
+    {
+      "type": "user.message",
+      "seq": 2,
+      "text": "list files",
+      "attachments": [
+        "secret"
+      ]
+    },
+    {
+      "type": "turn.start",
+      "seq": 3
+    },
+    {
+      "type": "step.start",
+      "seq": 4
+    },
+    {
+      "type": "assistant.delta",
+      "seq": 5,
+      "text": "Sure, "
+    },
+    {
+      "type": "assistant.delta",
+      "seq": 6,
+      "text": "I will "
+    },
+    {
+      "type": "assistant.delta",
+      "seq": 7,
+      "text": "run ls."
+    },
+    {
+      "type": "assistant.delta",
+      "seq": 7,
+      "text": "DUPLICATE-SEQ"
+    },
+    {
+      "type": "tool.call",
+      "seq": 8,
+      "callId": "c1",
+      "title": "terminal: ls"
+    },
+    {
+      "type": "tool.result",
+      "seq": 9,
+      "callId": "c1",
+      "text": "a.txt\nb.txt"
+    },
+    {
+      "type": "notice",
+      "seq": 10,
+      "text": "dshEmits=false"
+    },
+    {
+      "type": "assistant.attempt.end",
+      "seq": 11
+    },
+    {
+      "type": "step.end",
+      "seq": 12
+    },
+    {
+      "type": "turn.end",
+      "seq": 13
+    },
+    {
+      "type": "custom",
+      "seq": 14,
+      "text": "done"
+    },
+    {
+      "type": "assistant.attempt.start",
+      "attemptId": "a1",
+      "streamRevision": 1,
+      "turn": 2,
+      "step": 1
+    },
+    {
+      "type": "assistant.delta",
+      "attemptId": "a1",
+      "streamRevision": 2,
+      "turn": 2,
+      "step": 1,
+      "text": "Checking "
+    },
+    {
+      "type": "assistant.delta",
+      "attemptId": "a1",
+      "streamRevision": 3,
+      "turn": 2,
+      "step": 1,
+      "text": "the list."
+    },
+    {
+      "type": "assistant.delta",
+      "attemptId": "a1",
+      "streamRevision": 3,
+      "turn": 2,
+      "step": 1,
+      "text": "the list."
+    },
+    {
+      "type": "assistant.message",
+      "seq": 15,
+      "turn": 2,
+      "step": 1,
+      "text": "Checking the list."
+    },
+    {
+      "type": "assistant.attempt.end",
+      "attemptId": "a1",
+      "streamRevision": 4,
+      "turn": 2,
+      "step": 1
+    }
   ],
   "expected": {
     "rows": [
-      { "id": "row:2", "revision": 1, "kind": "user", "text": "list files", "folded": false, "seq": 2 },
-      { "id": "row:5", "revision": 3, "kind": "assistant", "text": "Sure, I will run ls.", "folded": false, "seq": 5 },
-      { "id": "call:c1", "revision": 2, "kind": "tool", "text": "a.txt b.txt", "folded": false, "seq": 8, "callId": "c1" },
-      { "id": "row:14", "revision": 1, "kind": "system", "text": "done", "folded": false, "seq": 14 },
-      { "id": "attempt:a1", "revision": 4, "kind": "assistant", "text": "Checking the list.", "folded": false }
+      {
+        "id": "row:2",
+        "revision": 1,
+        "kind": "user",
+        "text": "list files",
+        "folded": false,
+        "seq": 2
+      },
+      {
+        "id": "row:5",
+        "revision": 3,
+        "kind": "assistant",
+        "text": "Sure, I will run ls.",
+        "folded": false,
+        "seq": 5
+      },
+      {
+        "id": "call:c1",
+        "revision": 2,
+        "kind": "tool",
+        "text": "a.txt b.txt",
+        "folded": false,
+        "seq": 8,
+        "callId": "c1"
+      },
+      {
+        "id": "row:14",
+        "revision": 1,
+        "kind": "system",
+        "text": "done",
+        "folded": false,
+        "seq": 14
+      },
+      {
+        "id": "attempt:a1",
+        "revision": 4,
+        "kind": "assistant",
+        "text": "Checking the list.",
+        "folded": false
+      }
     ],
     "version": 11
   }

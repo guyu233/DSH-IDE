@@ -5,7 +5,7 @@
 // 而 ide-service.js 依赖 @deepseek-ai/cordis 与 Typert 协议，仓库内无法直接加载。
 // 本文件只做纯数据与队列，不引任何 @deepseek-ai/* 依赖（boundary 纪律）。
 //
-// 纪律（见 docs/DEVELOPMENT.md 第 7 章 §3.1 裁定）：`dshIde` 是 IDE 自己的 IPC 通道，
+// 纪律：`dshIde` 是 IDE 自己的 IPC 通道，
 // Host 在另一个进程无法跨进程调用它；因此由 IDE 主动报到，Host 只保存回调并在轮询时
 // 交还开窗请求。本文件不引入任何私有管道或第二套传输。
 
@@ -102,6 +102,23 @@ export class IdeLaunchQueue {
 				this.clients.delete(clientId);
 			},
 		};
+	}
+
+	/**
+	 * 注销一个登记项（IDE 进程正常退出时调用）。
+	 *
+	 * 与 `register` 返回的 `dispose` 等价，但按 clientId 寻址：IDE 退出路径拿不到
+	 * 当初返回的闭包，只能用自己的标识注销。已不存在时是空操作。
+	 * @param {string} clientId
+	 * @returns {{ ok: boolean }}
+	 */
+	unregister(clientId) {
+		const client = this.clients.get(clientId);
+		if (client !== undefined) {
+			client.dispose();
+			this.clients.delete(clientId);
+		}
+		return { ok: true };
 	}
 
 	/**

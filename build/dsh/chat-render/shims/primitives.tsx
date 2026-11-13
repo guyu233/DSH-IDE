@@ -3,7 +3,7 @@
  *
  * WHY: the 12 reachable ui-chat leaves import ~14 runtime symbols from
  * dsh-client-ui-primitives, whose barrel pulls 127 files (Markdown/shiki/katex/
- * micromark/icons). docs/DEVELOPMENT.md 第 1 章 §3 forbids copying that
+ * micromark/icons). 本仓库架构说明 forbids copying that
  * barrel. This file provides exactly the 14 symbols with:
  *   - VS Code codicon CSS classes (the workbench already ships the font),
  *   - plain DOM <details>/<pre>,

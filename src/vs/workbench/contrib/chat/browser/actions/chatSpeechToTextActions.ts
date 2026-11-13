@@ -30,10 +30,8 @@ import { ChatSpeechToTextState, DictationSettingId, IChatSpeechToTextService } f
 import { buildMicrophoneOptions, IDictationOnboardingService, RESET_DICTATION_ONBOARDING_COMMAND, SHOW_DICTATION_ONBOARDING_COMMAND } from '../speechToText/dictationOnboarding.js';
 import { cancelDictation, isDictating, startDictation, stopDictation } from '../speechToText/dictationSession.js';
 
-// Gate on `ChatContextKeys.enabled` so the dictation UI and its commands are
-// hidden (not just disabled) when the user has turned AI features off; without
-// it the F1 "Select Microphone" command stays discoverable.
-export const ChatSpeechToTextConfigured = ContextKeyExpr.and(ChatContextKeys.enabled, ContextKeyExpr.has(ChatContextKeys.speechToTextConfigured.key));
+// 听写入口只看语音识别是否配置好；`chatIsEnabled` 开关已删除（DSH 只有一个常驻 Agent）。
+export const ChatSpeechToTextConfigured = ContextKeyExpr.and(ContextKeyExpr.has(ChatContextKeys.speechToTextConfigured.key));
 /** True while the selected dictation backend is preparing. */
 export const ChatSpeechToTextPreparing = ContextKeyExpr.has(ChatContextKeys.speechToTextPreparing.key);
 const ChatSpeechToTextMaiBackend = ContextKeyExpr.has(ChatContextKeys.speechToTextUsesMai.key);

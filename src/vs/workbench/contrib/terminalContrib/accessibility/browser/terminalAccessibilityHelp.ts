@@ -84,7 +84,7 @@ export class TerminalAccessibilityHelpProvider extends Disposable implements IAc
 		}
 
 		if (HasSpeechProvider.getValue(this._contextKeyService) ||
-			(ChatContextKeys.enabled.getValue(this._contextKeyService) && ChatContextKeys.speechToTextConfigured.getValue(this._contextKeyService))) {
+			(true && ChatContextKeys.speechToTextConfigured.getValue(this._contextKeyService))) {
 			content.push(localize('terminalDictation', 'Start or stop dictation in the terminal<keybinding:{0}>.', TerminalCommandId.StartVoice));
 		}
 

@@ -43,7 +43,7 @@ class CanvasesContribution extends Disposable implements IWorkbenchContribution 
 				type,
 				priority: 200,
 				name: `sessionCanvas-${type}`,
-				when: ContextKeyExpr.and(ChatContextKeys.enabled, SessionCanvasFocusedContext),
+				when: ContextKeyExpr.and(SessionCanvasFocusedContext),
 				getProvider: accessor => {
 					const pane = accessor.get(IEditorService).activeEditorPane;
 					return pane instanceof CanvasEditor ? pane.createAccessibleProvider(type) : undefined;

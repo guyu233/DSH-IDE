@@ -132,7 +132,7 @@ function boundary() {
 
 	// 插件侧 TS 生产文件零 electron / DSH 运行时包 / Cordis Context 直接引用。
 	// 范围由**目录扫描**决定，不维护文件名白名单：新增 .ts 自动纳入，避免「新建文件漏检、
-	// 门禁仍绿」——这与 tsc 过滤列表硬编码同族（见 docs/DEVELOPMENT.md 第 7 章）。
+	// 门禁仍绿」——这与 tsc 过滤列表硬编码同族。
 	// 排除：test/（测试可用测试设施）；Host 侧 JS 桥接层（host/ide-service.js、index.js、
 	// client/client.js）合法持有 Cordis 与官方包，且非 .ts，不在本扫描范围。
 	// 目录扫描而非文件名白名单：新增目录自动纳入，避免「新建文件漏检、门禁仍绿」。
@@ -153,11 +153,25 @@ function boundary() {
 			`${file} must not depend on Cordis Context`);
 	}
 
+	// 单一收听（D78）：会话内容只由内核调一次 `sessionController.follow`；
+	// 窗口只消费内核的 `ide/followSession`，不得自己开 `session/follow` / `$events`，
+	// 不得把 prompt / cancel / selectModel 重写成 `session/*` 请求，也不得再自带 translator/projector。
+	const transport = read('platform/dshClient/transport/dshIdeTransport.ts');
+	const hostBridge = read('platform/dshClient/host/ide-view-host.js');
+	assert.match(hostBridge, /controller\.follow\(\{[\s\S]*?assistantStream: true/, 'the kernel must call sessionController.follow with assistantStream');
+	assert.match(transport, /openStream\('ide\/followSession'/, 'the window must follow through the kernel stream');
+	assert.doesNotMatch(transport, /openStream\('session\/follow'/, 'the window must not open session/follow itself');
+	assert.doesNotMatch(transport, /openStream\('\$events'/, 'the window must not open the $events stream itself');
+	assert.doesNotMatch(transport, /call\('session', '(?:prompt|cancel|selectModel)'/, 'the window must not rewrite operations into session/* requests');
+	assert.match(transport, /call\('ide', 'dispatch'/, 'the window must hand operations to ide/dispatch');
+	assert.ok(!fs.existsSync(path.join(srcRoot, 'platform/dshClient/common/translator.ts')), 'the TUI translator must not come back');
+	assert.ok(!fs.existsSync(path.join(srcRoot, 'platform/dshClient/common/ide-view-projector.ts')), 'the TUI projector must not come back');
+
 	// listen 三层过滤（P3 启用）：事件名白名单 / 连接归属 / version 严格递增必须同时在代码里存在。
 	const listenBody = /listen<T>\(([\s\S]*?)\n\t}/.exec(channel);
 	assert.ok(listenBody !== null, 'DshIdeChannel.listen must be implemented (not a stub)');
-	assert.match(channel, /if \(event !== DSH_IDE_SNAPSHOT_EVENT\)/,
-		'listen must gate Event.None behind the snapshot event-name whitelist');
+	assert.match(channel, /if \(event !== DSH_IDE_SNAPSHOT_EVENT && event !== DSH_IDE_WATERFALL_EVENT\)/,
+		'listen must gate Event.None behind the snapshot and waterfall whitelist');
 	assert.match(channel, /DSH_IDE_SNAPSHOT_EVENT/, 'listen must whitelist the snapshot event name');
 	assert.match(channel, /emitted => emitted\.ctx === ctx/, 'listen must filter frames by owning connection');
 	assert.match(channel, /snapshot\.version <= sent/, 'publish path must drop non-advancing versions');
@@ -168,12 +182,13 @@ function boundary() {
 	assert.match(channel, /validateDshIdeInput/, 'call must validate inputs with the protocol validator');
 	assert.match(channel, /validateDshIdeInvokeOutput/, 'call must validate the { value } output contract');
 
-	// UI 投影层隔离（P4/K5 启用）：DTO → 渲染内容的映射必须只依赖平台 DTO 与 VS Code 既有模块，
-	// 既不能 import DSH 包（上面已扫），也不能反向依赖主进程/通道层（否则工作台层被拖进 IPC 细节）。
+	// 聊天渲染层隔离：帧解码与面板只依赖平台 DTO 与 VS Code 既有模块，
+	// 既不能 import DSH 包（上面已扫），也不能反向依赖主进程/通道层。
 	const uiProjectionFiles = [
 		'workbench/contrib/dsh/browser/dshIdeConsumer.ts',
-		'workbench/contrib/dsh/browser/dshIdeUiProjection.ts',
-		'workbench/contrib/dsh/browser/dshChatAgent.ts',
+		'workbench/contrib/dsh/browser/dshChatModel.ts',
+		'workbench/contrib/dsh/browser/dshChatSession.ts',
+		'workbench/contrib/dsh/browser/dshChatPanel.ts',
 	];
 	for (const file of uiProjectionFiles) {
 		const text = read(file);
@@ -182,160 +197,24 @@ function boundary() {
 		assert.doesNotMatch(text, /from\s+['"]@deepseek-ai\//,
 			`${file} must not import DSH runtime packages`);
 	}
-	// 消费者必须是唯一做快照校验的地方：通道层不得重复实现（单一实现纪律，第 2 章 §9）。
+	// 消费者必须是唯一做帧校验的地方：通道层不得重复实现（单一实现纪律，第 2 章 §9）。
 	assert.match(read(uiProjectionFiles[0]), /validateDshIdeSnapshot/,
-		'DshIdeConsumer must validate snapshots (it is the single validation point)');
+		'DshIdeConsumer must validate frames (it is the single validation point)');
 	const channelForValidation = read('platform/dshClient/electron-main/dshIdeChannel.ts');
 	assert.doesNotMatch(channelForValidation, /validateDshIdeSnapshot/,
-		'the channel must not duplicate snapshot validation — that belongs to the consumer');
-	// Chat Agent 必须是唯一注册的默认 Agent（不存在第二个 AI 供给方）。
-	const agentSource = read(uiProjectionFiles[2]);
-	assert.match(agentSource, /isDefault:\s*true/, 'the DSH chat agent must be the default participant');
-	assert.match(agentSource, /registerDynamicAgent/, 'the agent must be registered through the official API');
-
-	console.log(`PASS  boundary: workbench/** zero @deepseek-ai/* imports (${workbenchTs.length} files); channel zero Cordis ctx; ${pluginSources.length} plugin sources zero electron/@deepseek-ai/*/Cordis refs; listen three-layer filter + dispatch enforced; UI projection layer isolated (${uiProjectionFiles.length} files)`);
+		'the channel must not duplicate frame validation — that belongs to the consumer');
 }
 
 // ---------------------------------------------------------------------------
-// 3. verify:dsh-ide-projection-golden  —— P2 已实现（真实回放比对）
+// 3. verify:dsh-ide-projection-golden  —— 已随会话帧直传移除
+//
+// 会话内容不再翻译成另一套行：门禁不再回放 translator + projector。
+// 该 gate 保留为 PENDING，明确不计入通过，直到有替代断言。
 // ---------------------------------------------------------------------------
-/**
- * 第 69 轮：从本机真实 DSH 会话样本重算 rows 的 P95 字节数。
- *
- * 与 `verify:dsh-real-p95` 同源逻辑（多帧 zstd 逐帧解压 + 滑窗投影 + 最近秩法），
- * 但内置在门禁里，便于 `projection-golden` 直接断言。
- *
- * @returns {{ p95:number, limit:number, events:number, windows:number } | undefined}
- *   `undefined` 表示本机没有真实会话样本（不是失败）。
- */
-function probeRealSessionP95(repoRoot, translatorUrl, projectorUrl) {
-	const sessionsRoot = path.join(process.env['USERPROFILE'] ?? process.env['HOME'] ?? '', '.dsh', 'sessions');
-	if (!fs.existsSync(sessionsRoot)) { return undefined; }
-
-	// 取最新的 session.v4.jsonl.zstd
-	let newest = null;
-	let newestMtime = 0;
-	for (const ws of fs.readdirSync(sessionsRoot, { withFileTypes: true })) {
-		if (!ws.isDirectory()) { continue; }
-		const wsDir = path.join(sessionsRoot, ws.name);
-		let sessions = [];
-		try { sessions = fs.readdirSync(wsDir, { withFileTypes: true }); } catch { continue; }
-		for (const s of sessions) {
-			if (!s.isDirectory()) { continue; }
-			const candidate = path.join(wsDir, s.name, 'session.v4.jsonl.zstd');
-			if (!fs.existsSync(candidate)) { continue; }
-			const mtime = fs.statSync(candidate).mtimeMs;
-			if (mtime > newestMtime) { newestMtime = mtime; newest = candidate; }
-		}
-	}
-	if (newest === null) { return undefined; }
-
-	// 逐帧解压（Node 的 zstdDecompressSync 只解首帧）
-	const MAGIC = Buffer.from([0x28, 0xb5, 0x2f, 0xfd]);
-	const raw = fs.readFileSync(newest);
-	const starts = [];
-	for (let i = 0; i <= raw.length - 4; i++) {
-		if (raw.compare(MAGIC, 0, 4, i, i + 4) === 0) { starts.push(i); }
-	}
-	if (starts.length === 0) { return undefined; }
-	const chunks = [];
-	for (let k = 0; k < starts.length; k++) {
-		const start = starts[k];
-		const end = k + 1 < starts.length ? starts[k + 1] : raw.length;
-		try { chunks.push(zlib.zstdDecompressSync(raw.subarray(start, end))); } catch { /* 跳过坏帧 */ }
-	}
-	const events = [];
-	for (const line of Buffer.concat(chunks).toString('utf8').split('\n')) {
-		if (line.trim() === '') { continue; }
-		try {
-			const parsed = JSON.parse(line);
-			if (parsed.type !== 'session') { events.push(parsed); }
-		} catch { /* 跳过坏行 */ }
-	}
-	if (events.length < 10) { return undefined; }
-
-	// 子进程里跑投影（与 golden 回放同一条真实实现路径）
-	const WINDOW = 100;
-	const sizes = [];
-	for (let i = 0; i < events.length; i += WINDOW) {
-		const win = events.slice(i, i + WINDOW);
-		if (win.length < 10) { continue; }
-		const body = [
-			`import { translateAll } from ${JSON.stringify(translatorUrl)};`,
-			`import { projectIdeView } from ${JSON.stringify(projectorUrl)};`,
-			`const ev = JSON.parse(fs.readFileSync(0, 'utf8'));`,
-			`process.stdout.write(JSON.stringify(projectIdeView(translateAll(ev)).rows));`,
-		].join('\n');
-		const out = execFileSync(process.execPath, ['--experimental-strip-types', '--input-type=module', '-e',
-			`import { readFileSync } from 'node:fs'; const fs = { readFileSync };\n${body}`], {
-			cwd: repoRoot, encoding: 'utf8', input: JSON.stringify(win),
-		});
-		sizes.push(Buffer.byteLength(out, 'utf8'));
-	}
-	if (sizes.length === 0) { return undefined; }
-
-	const sorted = [...sizes].sort((a, b) => a - b);
-	const p95 = sorted[Math.ceil(0.95 * sorted.length) - 1];
-	const limit = 512 * 1024;
-	return { p95, limit, events: events.length, windows: sizes.length };
-}
-
-
 function projectionGolden() {
-	const goldenDir = path.join(import.meta.dirname, 'golden');
-	const fixtures = fs.existsSync(goldenDir) ? walk(goldenDir).filter(f => f.endsWith('.json')) : [];
-	assert.ok(fixtures.length > 0, 'no golden fixtures: P2 must provide at least one golden/*.json');
-
-	// 子进程以 strip-types 加载插件侧真实 translator/projector（不复制实现、不伪造比对）。
-	const common = path.join(srcRoot, 'platform/dshClient/common');
-	const translatorUrl = pathToFileURL(path.join(common, 'translator.ts')).href;
-	const projectorUrl = pathToFileURL(path.join(common, 'ide-view-projector.ts')).href;
-
-	for (const fixturePath of fixtures) {
-		const fixture = JSON.parse(fs.readFileSync(fixturePath, 'utf8'));
-		const body = [
-			`import { translateAll } from ${JSON.stringify(translatorUrl)};`,
-			`import { projectIdeView } from ${JSON.stringify(projectorUrl)};`,
-			`import { readFileSync } from 'node:fs';`,
-			`const fx = JSON.parse(readFileSync(${JSON.stringify(fixturePath)}, 'utf8'));`,
-			`process.stdout.write(JSON.stringify(projectIdeView(translateAll(fx.events))));`,
-		].join('\n');
-		const out = execFileSync(process.execPath, ['--experimental-strip-types', '--input-type=module', '-e', body], {
-			encoding: 'utf8',
-			cwd: repoRoot,
-		});
-		const actual = JSON.parse(out);
-		assert.equal(
-			JSON.stringify(actual),
-			JSON.stringify(fixture.expected),
-			`golden mismatch: ${path.basename(fixturePath)} — 投影器输出与冻结快照不一致（改动投影器须同步更新 golden）`,
-		);
-		assert.ok(Array.isArray(fixture.events) && fixture.events.length > 0, `${path.basename(fixturePath)} must carry a mock event stream`);
-	}
-
-	console.log(`PASS  projection-golden: ${fixtures.length} fixture(s) replayed against ${path.relative(repoRoot, common)}/translator.ts + ide-view-projector.ts, byte-exact match`);
-
-	// -----------------------------------------------------------------------
-	// 第 69 轮：把 P95 从「打印说明」改为**真实断言**。
-	//
-	// 此前这里只有一行 `console.log('PENDING(P6): 真实事件流 P95 字节数校准…')`——
-	// 与第 68 轮修掉的 contract 同类问题：**文字在、校验不在**。
-	//
-	// 第 51 轮已用真实 DSH 事件流实测（235,214 B / 14,522 B，均 ≤ 512 KiB），
-	// 并固化为独立脚本。这里把同一度量内置进门禁：**有真实样本时**重算 P95，
-	// 超过 ROWS_P95_BYTE_LIMIT 即抛错 FAIL；**无样本时**明确说明跳过（CI 干净
-	// checkout 不应因缺本机会话数据而红）。
-	// -----------------------------------------------------------------------
-	const realSessionP95 = probeRealSessionP95(repoRoot, translatorUrl, projectorUrl);
-	if (realSessionP95 === undefined) {
-		console.log('      P95: 本机无真实 DSH 会话样本，跳过（不因缺数据判失败；可用 npm run verify:dsh-real-p95 在有样本的机器上复跑）');
-	} else {
-		const { p95, limit, events, windows } = realSessionP95;
-		console.log(`      P95: 真实样本 ${events} 事件 / ${windows} 窗 → ${p95} B（阈值 ${limit} B）`);
-		if (p95 > limit) {
-			throw new Error(`projection-golden: 真实样本 P95 ${p95} B 超出阈值 ${limit} B —— 按第 5 章 §5 的固定序列校准（① 下调 MAX_ROWS → ② 收紧 preview → ③ 重生成 golden），属参数校准非架构回退`);
-		}
-	}
+	console.log('STATUS: PENDING');
+	console.log('projection-golden: 会话帧直传后不再有行投影，本 gate 待替代断言');
+	return 'PENDING';
 }
 
 // ---------------------------------------------------------------------------
@@ -423,8 +302,16 @@ function contract() {
 	for (let i = 0; i < 3; i++) {
 		if (a.nums[i] !== b.nums[i]) { meets = a.nums[i] > b.nums[i]; break; }
 		if (i === 2) {
-			// 三段相同：无 prerelease 的正式版高于带 prerelease 的版本。
-			meets = a.pre === undefined || (b.pre !== undefined && a.pre === b.pre);
+			// 三段相同：正式版高于预发布；同为预发布时按标签比较，所以 0.2.2-rc.2 ≥ 0.2.2-rc.1。
+			if (a.pre === b.pre) {
+				meets = true;
+			} else if (a.pre === undefined) {
+				meets = true;
+			} else if (b.pre === undefined) {
+				meets = false;
+			} else {
+				meets = a.pre > b.pre;
+			}
 		}
 	}
 	if (!meets) {

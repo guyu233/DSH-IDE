@@ -152,7 +152,7 @@ import ErrorTelemetry from '../../platform/telemetry/electron-main/errorTelemetr
 import { IProtocolMainService } from '../../platform/protocol/electron-main/protocol.js';
 import { createRemoteResourceRequestHandler } from '../../platform/protocol/electron-main/remoteResourceProtocol.js';
 import { DshIdeChannel, type DshIdeLauncher } from '../../platform/dshClient/electron-main/dshIdeChannel.js';
-import { DSH_IDE_COOKIE_ENV, DSH_IDE_ENDPOINT_ENV, DSH_IDE_LAUNCH_URL_ENV, DSH_IDE_SESSION_ENV } from '../../platform/dshClient/common/env.js';
+import { DSH_IDE_COOKIE_ENV, DSH_IDE_ENDPOINT_ENV, DSH_IDE_LAUNCH_URL_ENV, DSH_IDE_SESSION_ENV, DSH_IDE_COMPOSER_ENV } from '../../platform/dshClient/common/env.js';
 import { DshIdeTransport, authenticateHost } from '../../platform/dshClient/transport/dshIdeTransport.js';
 import { DshIdeLaunchListener } from '../../platform/dshClient/transport/dshIdeLaunchListener.js';
 import { createDshIdeBackendFromEnv } from '../../platform/dshClient/electron-main/dshIdeBackendFactory.js';
@@ -1462,7 +1462,16 @@ export class CodeApplication extends Disposable {
 					}
 					// 会话由 DSH 决定（不变量 I4），IDE 不得自己猜：把开窗方给的 sessionId 经
 					// `userEnv` 交给窗口（窗口内读到的是合并后的 env）。
-					const userEnv = spec.sessionId === undefined ? undefined : { [DSH_IDE_SESSION_ENV]: spec.sessionId };
+					// 同时转交 Host 预取的输入框目录：窗口第一帧就能画出模型 / 推理档 /
+					// 权限 / 预设，而不是先空着再等一次往返。
+					const userEnv: Record<string, string> = {};
+					if (spec.sessionId !== undefined) {
+						userEnv[DSH_IDE_SESSION_ENV] = spec.sessionId;
+					}
+					const composerPreset = process.env[DSH_IDE_COMPOSER_ENV];
+					if (typeof composerPreset === 'string' && composerPreset !== '') {
+						userEnv[DSH_IDE_COMPOSER_ENV] = composerPreset;
+					}
 
 					// 「用 DSH-IDE 打开当前工作区」：请求带工作区时按官方窗口 API 打开该文件夹。
 					if (spec.workspace !== undefined) {
@@ -1479,7 +1488,7 @@ export class CodeApplication extends Disposable {
 						await windowsMainService.open({
 							context: OpenContext.DESKTOP,
 							cli: this.environmentMainService.args,
-							...(userEnv === undefined ? {} : { userEnv }),
+							...(Object.keys(userEnv).length === 0 ? {} : { userEnv }),
 							urisToOpen: [{ folderUri }],
 							forceNewWindow: !onlyEmptyWindows,
 							forceReuseWindow: onlyEmptyWindows,
@@ -1499,7 +1508,7 @@ export class CodeApplication extends Disposable {
 						cli: this.environmentMainService.args,
 						forceEmpty: true,
 						forceNewWindow: true,
-						...(userEnv === undefined ? {} : { userEnv }),
+						...(Object.keys(userEnv).length === 0 ? {} : { userEnv }),
 					});
 					return { ok: true };
 				} catch (error) {

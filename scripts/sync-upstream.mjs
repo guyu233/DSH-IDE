@@ -3,8 +3,7 @@
  * sync-upstream.mjs —— DSH 上游升级差异报告（T7-08 固化）
  *
  * 作用：当 DSH 上游发布新版本时，一条命令生成「本插件复用面 vs 新版本」的差异报告，
- * 输出到 `.build/upstream-diff/<新版本>-dsh-ide-diff.md`（不入库），用于「升级先读 docs/DEVELOPMENT.md 第 5 章上游核对流程、
- * 再重跑 verify:dsh-ide-contract 全量核对」的落地凭据。只读，不改任何源码。
+ * 输出到 `.build/upstream-diff/<新版本>-dsh-ide-diff.md`（不入库），用于升级时比对复用面差异的落地凭据。只读，不改任何源码。
  *
  * 复用面 = 本项目真正依赖 DSH 上游的两部分：
  *   1) 渲染复用件：`packages/client/ui-chat` 的 20 个源文件 + 8 个 CSS 模块 + 1 个 APNG；
@@ -25,7 +24,7 @@ const here = path.dirname(fileURLToPath(import.meta.url))
 const ROOT = path.dirname(here)
 
 function parseArgs(argv) {
-	const a = { fetch: false, source: 'E:/deepseek-harness-0.2.2-rc.1', remote: 'https://github.com/deepseek-ai/deepseek-harness.git', base: undefined, target: undefined, out: undefined }
+	const a = { fetch: false, source: 'E:/deepseek-harness', remote: 'https://github.com/deepseek-ai/deepseek-harness.git', base: undefined, target: undefined, out: undefined }
 	for (let i = 0; i < argv.length; i++) {
 		const k = argv[i]
 		if (k === '--fetch') a.fetch = true

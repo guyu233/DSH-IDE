@@ -663,8 +663,9 @@ BUILD_TARGETS.forEach(buildTarget => {
 			() => verifyDshBuildProvenance(appStagingRoot)
 		));
 		task.task(appTask);
-		if (process.platform === platform && process.arch === arch && !minified) {
-			const dshIdePackTask = task.define('dsh-ide-pack', task.series(appTask, async () => {
+		// 非 minified 注册 dsh-ide-pack；minified 注册 dsh-ide-pack-min。两条都走同一套 staging（D29）。
+		if (process.platform === platform && process.arch === arch) {
+			const dshIdePackTask = task.define(minified ? 'dsh-ide-pack-min' : 'dsh-ide-pack', task.series(appTask, async () => {
 				const stagingRoot = path.join(buildRoot, appStagingRoot);
 				// bundle 根清单由官方构建生成（§3.7：不再手维护 dsh-ide/ 目录）：
 				//   manifest 模板 + patch  ← build/lib/dsh/
@@ -692,6 +693,7 @@ BUILD_TARGETS.forEach(buildTarget => {
 					[path.join(dshClientOut, 'common', 'dshIdeCommandLine.js'), path.join('common', 'dshIdeCommandLine.js')],
 					[path.join(dshClientOut, 'common', 'dshIdeArchiveSet.js'), path.join('common', 'dshIdeArchiveSet.js')],
 					[path.join(dshClientOut, 'common', 'dshIdeSessionSearch.js'), path.join('common', 'dshIdeSessionSearch.js')],
+					[path.join(dshClientOut, 'common', 'dshIdeComposer.js'), path.join('common', 'dshIdeComposer.js')],
 				];
 				for (const [from, to] of copyList) {
 					await fs.promises.cp(from, path.join(stagingRoot, to), { recursive: true });

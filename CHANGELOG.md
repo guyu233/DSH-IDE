@@ -54,5 +54,4 @@
 - 源码地图（`*.js.map`）仍随包分发，未做压缩处理，安装包体积偏大。
 - 真机验收项仍在逐项推进，个别交互首次使用时需要重启 DSH 生效。
 
-安装与构建方式见 [`README.md`](README.md) §1.1「安装」；完整规格见
-[`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md)。
+安装与构建方式见 [`README.md`](README.md)「安装与构建」章节。

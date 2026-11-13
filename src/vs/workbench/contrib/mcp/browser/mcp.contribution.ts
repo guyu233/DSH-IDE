@@ -127,7 +127,6 @@ Registry.as<IEditorPaneRegistry>(EditorExtensions.EditorPane).registerEditorPane
 Registry.as<IQuickAccessRegistry>(QuickAccessExtensions.Quickaccess).registerQuickAccessProvider({
 	ctor: McpResourceQuickAccess,
 	prefix: McpResourceQuickAccess.PREFIX,
-	when: ChatContextKeys.enabled,
 	placeholder: localize('mcp.quickaccess.placeholder', "Filter to an MCP resource"),
 	helpEntries: [{
 		description: localize('mcp.quickaccess.add', "MCP Server Resources"),

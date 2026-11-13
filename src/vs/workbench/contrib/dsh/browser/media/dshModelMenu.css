@@ -1,0 +1,224 @@
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) DSH-IDE contributors. All rights reserved.
+ *  Licensed under the MIT License.
+ *--------------------------------------------------------------------------------------------*/
+
+/* DSH 风格模型菜单。
+ *
+ * 尺寸、行高、间距对齐 DSH 的 `ui-model-selection/src/client/ModelSelect.module.css`
+ * （根菜单行 34px、字号 13px、内边距 8px；菜单内边距 4px）。
+ * 颜色一律走 VS Code 主题变量，保持 VS Code 的观感而不是 DSH 的浅色玻璃。
+ *
+ * 菜单挂在 `.monaco-workbench` 内，主题变量才解析得到值。
+ */
+
+.dsh-model-menu {
+	position: fixed;
+	z-index: 2500;
+	box-sizing: border-box;
+	display: flex;
+	flex-direction: column;
+	overflow: hidden;
+	min-width: 240px;
+	max-width: 420px;
+	padding: 4px;
+	border-radius: 6px;
+	background: var(--vscode-menu-background);
+	color: var(--vscode-menu-foreground);
+	border: 1px solid var(--vscode-menu-border, var(--vscode-widget-border, var(--vscode-contrastBorder, transparent)));
+	box-shadow: 0 2px 8px var(--vscode-widget-shadow);
+	font-size: 13px;
+	line-height: 20px;
+}
+
+.dsh-model-menu-panes {
+	display: flex;
+	flex-direction: column;
+	overflow: auto;
+	min-height: 0;
+}
+
+/* 根菜单的一行：标签 + 当前值 + chevron。 */
+.dsh-model-menu-cell {
+	box-sizing: border-box;
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	width: 100%;
+	height: 34px;
+	padding: 0 8px;
+	border: none;
+	border-radius: 4px;
+	background: transparent;
+	color: inherit;
+	font: inherit;
+	text-align: left;
+	cursor: pointer;
+	outline: none;
+}
+
+.dsh-model-menu-cell:hover,
+.dsh-model-menu-cell:focus-visible {
+	background: var(--vscode-menu-selectionBackground);
+	color: var(--vscode-menu-selectionForeground);
+}
+
+.dsh-model-menu-cell-label {
+	flex: 0 0 auto;
+	white-space: nowrap;
+}
+
+.dsh-model-menu-cell-value {
+	flex: 1 1 auto;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	text-align: right;
+	color: var(--vscode-descriptionForeground);
+}
+
+.dsh-model-menu-cell:hover .dsh-model-menu-cell-value,
+.dsh-model-menu-cell:focus-visible .dsh-model-menu-cell-value {
+	color: inherit;
+}
+
+.dsh-model-menu-cell-chevron {
+	flex: 0 0 auto;
+	font-size: 12px;
+	opacity: 0.7;
+}
+
+/* 团队开关行：与根菜单行同高。 */
+.dsh-model-menu-row {
+	box-sizing: border-box;
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	height: 34px;
+	padding: 0 8px;
+	border-radius: 4px;
+}
+
+.dsh-model-menu-row-label {
+	flex: 1 1 auto;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.dsh-model-menu-switch {
+	position: relative;
+	flex: 0 0 auto;
+	width: 30px;
+	height: 16px;
+	padding: 0;
+	border: none;
+	border-radius: 999px;
+	background: var(--vscode-input-background);
+	box-shadow: inset 0 0 0 1px var(--vscode-input-border, var(--vscode-contrastBorder, transparent));
+	cursor: pointer;
+}
+
+.dsh-model-menu-switch[aria-checked="true"] {
+	background: var(--vscode-button-background);
+	box-shadow: none;
+}
+
+.dsh-model-menu-switch::after {
+	content: "";
+	position: absolute;
+	top: 2px;
+	left: 2px;
+	width: 12px;
+	height: 12px;
+	border-radius: 50%;
+	background: var(--vscode-button-foreground);
+	transition: left 80ms ease;
+}
+
+.dsh-model-menu-switch[aria-checked="false"]::after {
+	background: var(--vscode-foreground);
+}
+
+.dsh-model-menu-switch[aria-checked="true"]::after {
+	left: 16px;
+}
+
+/* 搜索框：DSH 里是透明底、聚焦才给边框。 */
+.dsh-model-menu-search {
+	box-sizing: border-box;
+	width: 100%;
+	margin: 2px 0 3px;
+	padding: 5px 7px;
+	border: 1px solid transparent;
+	border-radius: 4px;
+	background: transparent;
+	color: var(--vscode-input-foreground);
+	font: inherit;
+	font-size: 12px;
+}
+
+.dsh-model-menu-search:focus {
+	outline: none;
+	border-color: var(--vscode-focusBorder);
+	background: var(--vscode-input-background);
+}
+
+.dsh-model-menu-search::placeholder {
+	color: var(--vscode-input-placeholderForeground, var(--vscode-descriptionForeground));
+}
+
+/* 供应商分组标题。 */
+.dsh-model-menu-group {
+	padding: 6px 8px 2px;
+	color: var(--vscode-descriptionForeground);
+	font-size: 11px;
+	font-weight: 600;
+}
+
+/* 可选项：与根菜单行同高，选中项带勾。 */
+.dsh-model-menu-item {
+	box-sizing: border-box;
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	width: 100%;
+	height: 34px;
+	padding: 0 8px;
+	border: none;
+	border-radius: 4px;
+	background: transparent;
+	color: inherit;
+	font: inherit;
+	text-align: left;
+	cursor: pointer;
+	outline: none;
+}
+
+.dsh-model-menu-item:hover,
+.dsh-model-menu-item:focus-visible,
+.dsh-model-menu-item.selected {
+	background: var(--vscode-menu-selectionBackground);
+	color: var(--vscode-menu-selectionForeground);
+}
+
+.dsh-model-menu-item-label {
+	flex: 1 1 auto;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.dsh-model-menu-item-check {
+	flex: 0 0 auto;
+	font-size: 12px;
+}
+
+.dsh-model-menu-note {
+	padding: 8px;
+	color: var(--vscode-descriptionForeground);
+	font-size: 12px;
+}

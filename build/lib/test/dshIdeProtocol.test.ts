@@ -56,14 +56,17 @@ const VALID_ARGS: Record<DshIdeMethod, unknown> = {
 	archiveSession: { sessionId: 's1' },
 	unarchiveSession: { sessionId: 's1' },
 	searchSessions: { query: 'hello' },
+	composerState: {},
+	setTeamEnabled: { enabled: true },
+	setAgentPreset: { preset: 'create' },
 	accountGetState: { client: { version: '2.0.0', locale: 'zh-CN', timezoneOffsetSeconds: 28800 } },
 	accountGetProfile: { client: { version: '2.0.0', locale: 'zh-CN', timezoneOffsetSeconds: 28800 } },
 };
 
 const ALL_METHODS = Object.keys(VALID_ARGS) as DshIdeMethod[];
 
-test('method whitelist has the 25 methods (20 session + 2 account + 2 archive + 1 search)', () => {
-	assert.equal(ALL_METHODS.length, 25);
+test('method whitelist has the 28 methods (25 previous + composer state, team, preset)', () => {
+	assert.equal(ALL_METHODS.length, 28);
 	assert.equal(new Set(ALL_METHODS).size, ALL_METHODS.length);
 });
 
@@ -160,8 +163,7 @@ function snapshot(overrides: Record<string, unknown> = {}): DshIdeSnapshot {
 
 test('validateDshIdeSnapshot accepts positive cases', () => {
 	assert.doesNotThrow(() => validateDshIdeSnapshot(snapshot()));
-	// P3：wireRevision 升到 2，`ready` 必须携带投影载荷 `view`（第 2 章 §2.1）。
-	const view = { rows: [{ id: 'row:1', revision: 1, kind: 'user', text: 'hi', folded: false, seq: 1 }], version: 3 };
+	const view = { frame: { type: 'event', event: { type: 'user/message', seq: 1, time: 1, data: {} } } };
 	assert.doesNotThrow(() => validateDshIdeSnapshot(snapshot({ version: 42, state: { state: 'ready', view } })));
 	assert.throws(() => validateDshIdeSnapshot(snapshot({ version: 42, state: { state: 'ready', message: 'ok' } })), /must be an object/);
 });
@@ -240,25 +242,6 @@ test('DSH_IDE_API_VERSION pins the validated upstream version', () => {
 	const upstream = /UPSTREAM_VALIDATED_VERSION\s*=\s*'([^']+)'/.exec(contract)?.[1];
 	assert.equal(DSH_IDE_API_VERSION, upstream, 'DSH_IDE_API_VERSION must equal UPSTREAM_VALIDATED_VERSION');
 });
-
-test('the transport calls exactly the contracted endpoint for deleteSession', () => {
-	// 传输层是纯 JS 可加载模块（值导入 `.js` 说明符在 strip-types 下不可解析），
-	// 因此用源码断言守住「不自己发明端点、不写死第二个插件名」。
-	const source = readFileSync(new URL('../../../src/vs/platform/dshClient/transport/dshIdeTransport.ts', import.meta.url), 'utf8');
-	const [namespace, method] = DSH_IDE_DELETE_SESSION_ENDPOINT.split('/');
-	assert.match(
-		source,
-		new RegExp(`call\\(\\s*'${namespace}'\\s*,\\s*'${method}'\\s*,\\s*\\{ sessionId \\}`),
-		'the transport must call the contracted endpoint with the exact wire field',
-	);
-	assert.match(source, new RegExp(DSH_IDE_DELETE_SESSION_PLUGIN.replace(/[/@]/g, '\\$&')), 'the refusal message must name the approved plugin');
-	assert.match(source, /deleted'\] !== true/, 'only { deleted: true } may be reported as accepted');
-});
-
-// ---------------------------------------------------------------------------
-// D18：AccountClientMetadata 构造器归并入协议真源（原 legacy-account-endpoints.ts 已删）
-// ---------------------------------------------------------------------------
-
 test('dshAccountClientMetadata returns the three required identity fields', () => {
 	const meta = dshAccountClientMetadata('ja-JP', '2.0.0');
 	assert.deepEqual(

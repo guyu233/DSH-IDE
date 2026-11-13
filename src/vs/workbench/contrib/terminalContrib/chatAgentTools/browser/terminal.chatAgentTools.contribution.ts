@@ -192,13 +192,13 @@ registerWorkbenchContribution2(AgentHostSandboxForwarder.ID, AgentHostSandboxFor
 registerActiveInstanceAction({
 	id: TerminalChatAgentToolsCommandId.ChatAddTerminalSelection,
 	title: localize('addTerminalSelection', 'Add Terminal Selection to Chat'),
-	precondition: ContextKeyExpr.and(ChatContextKeys.enabled, sharedWhenClause.terminalAvailable),
+	precondition: ContextKeyExpr.and(sharedWhenClause.terminalAvailable),
 	menu: [
 		{
 			id: MenuId.TerminalInstanceContext,
 			group: TerminalContextMenuGroup.Chat,
 			order: 1,
-			when: ContextKeyExpr.and(ChatContextKeys.enabled, TerminalContextKeys.textSelected)
+			when: ContextKeyExpr.and(TerminalContextKeys.textSelected)
 		},
 	],
 	run: async (activeInstance, _c, accessor) => {

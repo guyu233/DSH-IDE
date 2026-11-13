@@ -54,7 +54,6 @@ suite('VoiceInputModeService', () => {
 		configurationService.setUserConfiguration('agents.voice.showButton', options.voiceButtonShown ?? true);
 		configurationService.setUserConfiguration('dictation.showButton', options.dictationButtonShown ?? true);
 		const contextKeyService = new MockContextKeyService();
-		ChatContextKeys.enabled.bindTo(contextKeyService).set(true);
 		AGENTS_VOICE_ENTITLED.bindTo(contextKeyService).set(true);
 		const dictationService = createDictationService(options.dictationConfigured ?? false);
 		const service = store.add(new VoiceInputModeService(storageService, configurationService, contextKeyService, dictationService));
@@ -101,7 +100,7 @@ suite('VoiceInputModeService', () => {
 
 	test('shows the segmented pill only when it has multiple active controls', () => {
 		const values: Record<string, ContextKeyValue> = {
-			[ChatContextKeys.enabled.key]: true,
+			'chatIsEnabled': true,
 			[AGENTS_VOICE_ENTITLED.key]: true,
 			[ChatContextKeys.speechToTextConfigured.key]: true,
 			'config.agents.voice.enabled': true,

@@ -70,7 +70,6 @@ class QuickChatGlobalAction extends Action2 {
 		super({
 			id: ASK_QUICK_QUESTION_ACTION_ID,
 			title: localize2('quickChat', 'Open Quick Chat'),
-			precondition: ChatContextKeys.enabled,
 			icon: Codicon.chatSparkle,
 			f1: false,
 			category: CHAT_CATEGORY,
@@ -134,7 +133,6 @@ class AskQuickChatAction extends Action2 {
 			id: `workbench.action.openQuickChat`,
 			category: CHAT_CATEGORY,
 			title: localize2('interactiveSession.open', "Open Quick Chat"),
-			precondition: ChatContextKeys.enabled,
 			f1: true
 		});
 	}

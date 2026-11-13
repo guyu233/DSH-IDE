@@ -51,6 +51,8 @@ import { requiresNewerVSCode } from './modelPickerItemPrimitives.js';
 import { renderModelConfigurationButton } from './modelPickerConfiguration.js';
 import { getCompactModelPickerIcon } from './modelProviderIcons.js';
 import { ITabbedModelPickerContext, TabbedModelPicker } from './modelPickerTabbedWidget.js';
+import { DshModelMenu } from '../../../../../dsh/browser/dshModelMenu.js';
+import { getDshComposerSource } from '../../../../../dsh/browser/dshComposerRegistry.js';
 import { IModelPickerOpenTrigger, ModelPickerTelemetrySession } from './modelPickerTelemetry.js';
 import { getModelConfigProperty, getModelConfigValueLabel, MODEL_CONFIG_GROUP_EFFORT, setModelConfigValues, whenModelConfigValuesSaved } from './modelPickerModelConfig.js';
 import { IModelPickerProviderPlaceholder } from './modelPickerTabs.js';
@@ -146,6 +148,8 @@ export class ModelPickerWidget extends Disposable {
 	private _configButton: HTMLElement | undefined;
 	private _minimumWidth = MODEL_PICKER_MINIMUM_NAME_WIDTH;
 	private readonly _tabbedPicker = this._register(new MutableDisposable<TabbedModelPicker>());
+	/** DSH 风格菜单（DSH 数据源存在时替代 `_tabbedPicker`）。 */
+	private readonly _dshMenu = this._register(new MutableDisposable<DshModelMenu>());
 	private readonly _tabbedPickerHideListener = this._register(new MutableDisposable());
 	/** The on-device rows of this picker, bound to the chat's Agent Host connection, with their refresh listener. */
 	private readonly _localModels = this._register(new MutableDisposable<DisposableStore>());
@@ -731,6 +735,31 @@ export class ModelPickerWidget extends Disposable {
 		if (!anchorElement || this._domNode?.classList.contains('disabled')) {
 			return;
 		}
+		// DSH 集成：DSH 目录存在时改用 DSH 风格的两级菜单（模型 / 推理等级 / 团队），
+		// 不再是 VS Code 的一页式列表。触发按钮与关闭行为仍用本类的。
+		// 不做 `models.length > 0` 之类的「等加载完再显示」判断：目录为空也走 DSH 菜单，
+		// 由菜单自己显示空状态，控件本身永远在。
+		const dsh = getDshComposerSource();
+		if (dsh !== undefined) {
+			// 再点一次触发按钮 = 收起。`show()` 会被按钮的每次点击调用，这里自己判 toggle。
+			if (this._dshMenu.value?.isVisible) {
+				this._dshMenu.value.hide();
+				this._dshMenu.clear();
+				return;
+			}
+			this._dshMenu.value = new DshModelMenu({
+				anchor: anchorElement,
+				delegate: this._delegate,
+				source: dsh,
+				onDidHide: () => {
+					this._nameButton?.setAttribute('aria-expanded', 'false');
+					this._domNode?.classList.remove('model-picker-active');
+				},
+			});
+			this._nameButton?.setAttribute('aria-expanded', 'true');
+			this._domNode?.classList.add('model-picker-active');
+			return;
+		}
 		if (this._tabbedPicker.value?.isVisible) {
 			if (options) {
 				this._tabbedPicker.value.openWithFilter(options);
@@ -768,7 +797,10 @@ export class ModelPickerWidget extends Disposable {
 		const models = unavailable ? [] : this._delegate.getModels();
 		const comparisonModels = unavailable ? [] : this._delegate.getComparisonModels?.();
 		const presentation = this._delegate.getPresentationOptions();
-		const canShowManageModelsAction = presentation.showManageModelsAction && shouldShowManageModelsAction(this._entitlementService);
+		// DSH 集成：DSH 目录只有一家逻辑 vendor（`dsh`），供应商信息在 modelGroup 里。
+		// 隐藏顶部 vendor 图标排，改成单页分组列表，与 DSH 主窗口的模型菜单一致。
+		const dshManaged = this._delegate.getModels().some(model => model.metadata.modelGroup !== undefined);
+		const canShowManageModelsAction = !dshManaged && presentation.showManageModelsAction && shouldShowManageModelsAction(this._entitlementService);
 		const manageModelsAction = canShowManageModelsAction ? createManageModelsAction(this._commandService, this._delegate.getSessionType?.()) : undefined;
 		const logModelPickerInteraction = (interaction: ChatModelPickerInteraction) => {
 			this._telemetryService.publicLog2<ChatModelPickerInteractionEvent, ChatModelPickerInteractionClassification>('chat.modelPickerInteraction', { interaction });
@@ -911,7 +943,9 @@ export class ModelPickerWidget extends Disposable {
 				? localize('chat.modelPicker.activating', "Activating...")
 				: genericNoModels
 					? localize('chat.modelPicker.noModels', "No models available")
-					: (name ?? localize('chat.modelPicker.auto', "Auto"));
+					// DSH 集成：没有选中模型时不再回退成 VS Code 的合成「Auto」文案。
+					// DSH 目录里没有 Auto 这个模型，显示它会让人以为能选。
+					: (name ?? localize('chat.modelPicker.selectModel', "选择模型"));
 		const showModelLabel = (!comparisonSummary || noModelsAvailable) && (!compact || !modelIcon || noModelsAvailable);
 		if (showModelLabel) {
 			nameChildren.push(dom.$('span.chat-input-picker-label', undefined, modelLabel));

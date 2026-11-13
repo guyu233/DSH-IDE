@@ -362,7 +362,6 @@ registerAction2(class extends Action2 {
 				id: MenuId.DebugVariablesContext,
 				group: 'z_commands',
 				order: 110,
-				when: ChatContextKeys.enabled
 			}
 		});
 	}
@@ -398,7 +397,6 @@ registerAction2(class extends Action2 {
 				id: MenuId.DebugWatchContext,
 				group: 'z_commands',
 				order: 110,
-				when: ChatContextKeys.enabled
 			}
 		});
 	}
@@ -431,7 +429,6 @@ registerAction2(class extends Action2 {
 				id: MenuId.DebugScopesContext,
 				group: 'z_commands',
 				order: 1,
-				when: ChatContextKeys.enabled
 			}
 		});
 	}

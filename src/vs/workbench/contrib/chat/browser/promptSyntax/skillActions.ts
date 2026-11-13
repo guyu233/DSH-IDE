@@ -28,7 +28,6 @@ class ManageSkillsAction extends Action2 {
 			shortTitle: localize2('configure-skills.short', "Skills"),
 			icon: Codicon.lightbulb,
 			f1: true,
-			precondition: ChatContextKeys.enabled,
 			category: CHAT_CATEGORY
 		});
 	}

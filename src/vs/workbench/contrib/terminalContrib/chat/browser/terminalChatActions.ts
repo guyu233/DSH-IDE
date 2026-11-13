@@ -47,7 +47,6 @@ registerActiveXtermAction({
 	},
 	f1: true,
 	precondition: ContextKeyExpr.and(
-		ChatContextKeys.enabled,
 		ContextKeyExpr.or(TerminalContextKeys.processSupported, TerminalContextKeys.terminalHasBeenCreated),
 		TerminalChatContextKeys.hasChatAgent
 	),
@@ -55,7 +54,6 @@ registerActiveXtermAction({
 		id: MenuId.TerminalInstanceContext,
 		group: TerminalContextMenuGroup.Chat,
 		order: 2,
-		when: ChatContextKeys.enabled
 	},
 	run: (_xterm, _accessor, activeInstance, opts?: unknown) => {
 		if (isDetachedTerminalInstance(activeInstance)) {
@@ -105,7 +103,6 @@ registerActiveXtermAction({
 	icon: Codicon.close,
 	f1: true,
 	precondition: ContextKeyExpr.and(
-		ChatContextKeys.enabled,
 		TerminalChatContextKeys.visible,
 	),
 	run: (_xterm, _accessor, activeInstance) => {
@@ -123,7 +120,6 @@ registerActiveXtermAction({
 	shortTitle: localize2('run', 'Run'),
 	category: AbstractInlineChatAction.category,
 	precondition: ContextKeyExpr.and(
-		ChatContextKeys.enabled,
 		ContextKeyExpr.or(TerminalContextKeys.processSupported, TerminalContextKeys.terminalHasBeenCreated),
 		TerminalChatContextKeys.requestActive.negate(),
 		TerminalChatContextKeys.responseContainsCodeBlock,
@@ -156,7 +152,6 @@ registerActiveXtermAction({
 	shortTitle: localize2('runFirst', 'Run First'),
 	category: AbstractInlineChatAction.category,
 	precondition: ContextKeyExpr.and(
-		ChatContextKeys.enabled,
 		ContextKeyExpr.or(TerminalContextKeys.processSupported, TerminalContextKeys.terminalHasBeenCreated),
 		TerminalChatContextKeys.requestActive.negate(),
 		TerminalChatContextKeys.responseContainsMultipleCodeBlocks
@@ -189,7 +184,6 @@ registerActiveXtermAction({
 	category: AbstractInlineChatAction.category,
 	icon: Codicon.insert,
 	precondition: ContextKeyExpr.and(
-		ChatContextKeys.enabled,
 		ContextKeyExpr.or(TerminalContextKeys.processSupported, TerminalContextKeys.terminalHasBeenCreated),
 		TerminalChatContextKeys.requestActive.negate(),
 		TerminalChatContextKeys.responseContainsCodeBlock,
@@ -222,7 +216,6 @@ registerActiveXtermAction({
 	shortTitle: localize2('insertFirst', 'Insert First'),
 	category: AbstractInlineChatAction.category,
 	precondition: ContextKeyExpr.and(
-		ChatContextKeys.enabled,
 		ContextKeyExpr.or(TerminalContextKeys.processSupported, TerminalContextKeys.terminalHasBeenCreated),
 		TerminalChatContextKeys.requestActive.negate(),
 		TerminalChatContextKeys.responseContainsMultipleCodeBlocks
@@ -255,7 +248,6 @@ registerActiveXtermAction({
 	icon: Codicon.refresh,
 	category: AbstractInlineChatAction.category,
 	precondition: ContextKeyExpr.and(
-		ChatContextKeys.enabled,
 		ContextKeyExpr.or(TerminalContextKeys.processSupported, TerminalContextKeys.terminalHasBeenCreated),
 		TerminalChatContextKeys.requestActive.negate(),
 	),
@@ -297,7 +289,6 @@ registerActiveXtermAction({
 	title: localize2('viewInChat', 'View in Chat'),
 	category: AbstractInlineChatAction.category,
 	precondition: ContextKeyExpr.and(
-		ChatContextKeys.enabled,
 		ContextKeyExpr.or(TerminalContextKeys.processSupported, TerminalContextKeys.terminalHasBeenCreated),
 		TerminalChatContextKeys.requestActive.negate(),
 		TerminalChatContextKeys.usesAgentHost.negate(),
@@ -335,7 +326,7 @@ registerAction2(class ShowChatTerminalsAction extends Action2 {
 			title: localize2('viewHiddenChatTerminals', 'View Hidden Chat Terminals'),
 			category: localize2('terminalCategory2', 'Terminal'),
 			f1: true,
-			precondition: ContextKeyExpr.and(TerminalChatContextKeys.hasHiddenChatTerminals, ChatContextKeys.enabled),
+			precondition: ContextKeyExpr.and(TerminalChatContextKeys.hasHiddenChatTerminals),
 			menu: [{
 				id: MenuId.ViewTitle,
 				when: ContextKeyExpr.and(TerminalChatContextKeys.hasHiddenChatTerminals, ContextKeyExpr.equals('view', ChatViewId)),
