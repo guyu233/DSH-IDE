@@ -390,16 +390,15 @@ suite('ChatService', () => {
 				getManagedSettings: () => rules === undefined ? {} : { [policyKey]: rules },
 			});
 			const service = createChatService();
-			const activate = spy(service, 'activateDefaultAgent');
-			testDisposables.add(toDisposable(() => activate.restore()));
 			const model = startSessionModel(service).object;
 			const pending = service.sendRequest(model.sessionResource, 'do not start Local');
-			const before = activate.callCount;
 			rules = policyValue;
 			changes.fire();
 			ready.complete();
 			const result = await pending;
-			assert.deepStrictEqual({ before, after: activate.callCount, result: result.kind, requests: model.getRequests().length }, { before: 0, after: 0, result: 'rejected', requests: 0 });
+			// DSH-IDE 已移除默认 agent 预热，因此这里断言不产生任何请求：
+			// 策略生效前既不能发出请求，也就不会有机会激活任何 agent。
+			assert.deepStrictEqual({ result: result.kind, requests: model.getRequests().length }, { result: 'rejected', requests: 0 });
 		});
 
 		for (const location of [ChatAgentLocation.Chat, ChatAgentLocation.Terminal]) {
@@ -466,8 +465,6 @@ suite('ChatService', () => {
 				async invoke() { invocations++; return {}; },
 			}));
 			const service = createChatService();
-			const activate = spy(service, 'activateDefaultAgent');
-			testDisposables.add(toDisposable(() => activate.restore()));
 			try {
 				const model = startSessionModel(service, ChatAgentLocation.EditorInline).object;
 				const result = await service.sendRequest(model.sessionResource, 'Edit this file');
@@ -475,9 +472,9 @@ suite('ChatService', () => {
 				await result.data.responseCompletePromise;
 				await service.resendRequest(model.getRequests()[0]);
 				await waitForState(model.requestInProgress, inProgress => !inProgress);
-				assert.deepStrictEqual({
-					blocked: model.isInputBlocked.get(), activated: activate.calledWith(ChatAgentLocation.EditorInline), invocations,
-				}, { blocked: false, activated: true, invocations: 2 });
+				// 默认 agent 预热已移除；实际激活由 sendRequest 的 activateByEvent 完成，
+				// 因此这里只断言真正被调用两次，不再断言预热方法。
+				assert.deepStrictEqual({ blocked: model.isInputBlocked.get(), invocations }, { blocked: false, invocations: 2 });
 			} finally {
 				ready.complete();
 			}

@@ -18,8 +18,6 @@ import { IWorkbenchExtensionManagementService } from '../../../../services/exten
 import { CHAT_CATEGORY } from './chatActions.js';
 import { IChatSessionRecommendation } from '../../../../../base/common/product.js';
 import { ExtensionIdentifier } from '../../../../../platform/extensions/common/extensions.js';
-import { ChatAgentLocation } from '../../common/constants.js';
-import { IChatService } from '../../common/chatService/chatService.js';
 
 const INSTALL_CONTEXT_PREFIX = 'chat.installRecommendationAvailable';
 
@@ -84,13 +82,12 @@ export class ChatAgentRecommendation extends Disposable implements IWorkbenchCon
 			override async run(accessor: ServicesAccessor): Promise<void> {
 				const commandService = accessor.get(ICommandService);
 				const productService = accessor.get(IProductService);
-				const chatService = accessor.get(IChatService);
 
 				const installPreReleaseVersion = productService.quality !== 'stable';
 				await commandService.executeCommand('workbench.extensions.installExtension', recommendation.extensionId, {
 					installPreReleaseVersion
 				});
-				await runPostInstallCommand(commandService, chatService, recommendation.postInstallCommand);
+				await runPostInstallCommand(commandService, recommendation.postInstallCommand);
 			}
 		}));
 	}
@@ -122,12 +119,11 @@ export class ChatAgentRecommendation extends Disposable implements IWorkbenchCon
 	}
 }
 
-async function runPostInstallCommand(commandService: ICommandService, chatService: IChatService, commandId: string | undefined): Promise<void> {
+async function runPostInstallCommand(commandService: ICommandService, commandId: string | undefined): Promise<void> {
 	if (!commandId) {
 		return;
 	}
 	await waitForCommandRegistration(commandId);
-	await chatService.activateDefaultAgent(ChatAgentLocation.Chat);
 	try {
 		await commandService.executeCommand(commandId);
 	} catch {
