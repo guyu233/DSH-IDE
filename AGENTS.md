@@ -17,10 +17,10 @@
 
 ## 3. 代码复用优先
 
-- 先搜官方是否已有，再决定是否自写。只读参考目录：`E:/dsh-TUI/`、`E:/deepseek-harness/`、已安装 DSH 的 `resources/app.asar`，以及 `src/**`。这些目录只读，不得在其中写入。
+- 先搜官方是否已有，再决定是否自写。只读参考目录：`E:/deepseek-harness/`、已安装 DSH 的 `resources/app.asar`，以及 `src/**`。这些目录只读，不得在其中写入。
 - 优先搬用现成实现：协议客户端、远程调用、类型定义、适配器、会话/工作区控制器、工具、常量、schema。VS Code 侧同理复用既有服务与组件。
 - 能复用函数或片段时不搬整包；确需完整模块或共享单例时保留必要闭包。
-- 搬用必须保留原许可证与版权头，记录来源与 tree digest（格式见 `build/dsh/chat-render/PROVENANCE.md`），不伪造 Git commit。确需自写时在提交信息写明「为何不能先搬用」。
+- 搬用必须保留原许可证与版权头，记录来源与 tree digest（格式见 `build/lib/dsh/PROVENANCE.md`），不伪造 Git commit。确需自写时在提交信息写明「为何不能先搬用」。
 
 ## 4. 构建与保留边界
 
@@ -31,7 +31,7 @@
 
 ## 5. 许可证凭据
 
-- `src/vs/platform/dshClient/PROVENANCE.md`、`build/dsh/chat-render/PROVENANCE.md`、`build/dsh/chat-render/LICENSE-DSH` 保留且不得删改；`NOTICE.md` 与 `LICENSE.txt` 保留原文。
+- `src/vs/platform/dshClient/PROVENANCE.md` 保留且不得删改；随包复用凭据在 `build/lib/dsh/PROVENANCE.md` 与 `build/lib/dsh/LICENSE-DSH`（`gulp dsh-ide-pack` 从此处 stage 进 bundle），`build/dsh/chat-render/PROVENANCE.md` 与 `build/dsh/chat-render/LICENSE-DSH` 是同批凭据的留存副本，四者一律保留且不得删改；`NOTICE.md` 与 `LICENSE.txt` 保留原文。
 - `NOTICE.md` / `LICENSE` 只在新增第三方依赖或素材时于 `NOTICE.md` 末尾追加条目，原文一字不动；**禁止重写**。
 
 ## 6. 提交与验证纪律
@@ -46,5 +46,5 @@
 - **风格单一**：改动一律遵循 VS Code 既有约定——制表符缩进、单引号、语句结尾分号、`camelCase` / `PascalCase`、接口 `I` 前缀、类私有成员 `_` 前缀、`this._register(...)` / `DisposableStore` 管理生命周期、错误走 `onUnexpectedError`。不得引入第二套缩进、引号、命名或错误处理风格。
 - **同目录一致**：动手前先读同目录相邻实现，文件组织、导入顺序、命名、日志与配置读取方式与其保持一致。同一能力只保留一处实现和一个公共入口。
 - **注释语言**：**新增注释一律用中文**；不得翻译、改写或批量替换上游既有英文注释（保持与上游 diff 最小）。用户可见字符串、NLS key、日志与错误文案、类型名/标识符、API 注释仍按上游英文约定，不受本条影响。
-- **对照源码**：开发 DSH 相关能力时必须先读 `E:/deepseek-harness/` 与 `E:/dsh-TUI/` 的源码，以其中的协议、事件、字段与调用顺序为依据；不得凭记忆臆造形状，找不到依据时回到契约真源 `src/vs/platform/dshClient/common/dshIdeProtocol.ts`。
+- **对照源码**：开发 DSH 相关能力时必须先读 `E:/deepseek-harness/` 的源码，以其中的协议、事件、字段与调用顺序为依据；不得凭记忆臆造形状，找不到依据时回到契约真源 `src/vs/platform/dshClient/common/dshIdeProtocol.ts`。
 - **质量门禁**：新增与修改代码必须通过 `tsc --noEmit` 与相关测试。
