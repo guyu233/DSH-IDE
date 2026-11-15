@@ -72,6 +72,10 @@ const responsePartSchema = Adapt.v<PersistedResponsePart, SerializedChatResponse
 				case 'autoModeResolution':
 					return objectsEqual(a, b);
 
+				// DSH 节点载荷是 canonical JSON 字符串，内容变了就必须换掉旧 part。
+				case 'dshNode':
+					return objectsEqual(a, b);
+
 				// Static types that won't change after being pushed can use strict equality.
 				case 'clearToPreviousToolInvocation':
 				case 'codeblockUri':

@@ -35,7 +35,7 @@ import { migrateLegacyTerminalToolSpecificData } from '../chat.js';
 import { formatChatToolError } from '../chatProgressFormatting.js';
 import { IChatRequestOrigin, ISerializableChatRequestOrigin, reviveChatRequestOrigin, serializeChatRequestOrigin } from '../chatRequestOrigin.js';
 import { ChatPerfMark, markChat } from '../chatPerf.js';
-import { ChatAgentVoteDirection, ChatRequestQueueKind, ChatResponseClearToPreviousToolInvocationReason, ElicitationState, IChatAgentMarkdownContentWithVulnerability, IChatAutoModeResolutionPart, IChatClearToPreviousToolInvocation, IChatCodeCitation, IChatCommandButton, IChatConfirmation, IChatContentInlineReference, IChatContentReference, IChatDisabledClaudeHooksPart, IChatEditingSessionAction, IChatElicitationRequest, IChatElicitationRequestSerialized, IChatExternalEdit, IChatExternalToolInvocationUpdate, IChatExtensionsContent, IChatFollowup, IChatHookPart, IChatInfoMessage, IChatLocationData, IChatMarkdownContent, IChatMcpAuthenticationRequired, IChatMcpServersStarting, IChatMcpServersStartingSerialized, IChatMcpServersStartingSlow, IChatModelReference, IChatMultiDiffData, IChatMultiDiffDataSerialized, IChatNotebookEdit, IChatPlanReview, IChatProgress, IChatProgressMessage, IChatPullRequestContent, IChatQuestionCarousel, IChatResponseCodeblockUriPart, IChatResponseProgressFileTreeData, IChatSendRequestOptions, IChatService, IChatSessionTiming, IChatSystemNotificationPart, IChatTask, IChatTaskSerialized, IChatTextEdit, IChatThinkingPart, IChatToolInvocation, IChatToolInvocationSerialized, IChatTreeData, IChatUndoStop, IChatUsage, IChatUsageModelTotal, IChatUsagePromptTokenDetail, IChatUsedContext, IChatVoiceProgressPart, IChatWarningMessage, IChatWorkspaceEdit, ResponseModelState, ToolConfirmKind, isIUsedContext } from '../chatService/chatService.js';
+import { ChatAgentVoteDirection, ChatRequestQueueKind, ChatResponseClearToPreviousToolInvocationReason, ElicitationState, IChatAgentMarkdownContentWithVulnerability, IChatAutoModeResolutionPart, IChatClearToPreviousToolInvocation, IChatCodeCitation, IChatCommandButton, IChatConfirmation, IChatContentInlineReference, IChatContentReference, IChatDisabledClaudeHooksPart, IChatDshNodePart, IChatEditingSessionAction, IChatElicitationRequest, IChatElicitationRequestSerialized, IChatExternalEdit, IChatExternalToolInvocationUpdate, IChatExtensionsContent, IChatFollowup, IChatHookPart, IChatInfoMessage, IChatLocationData, IChatMarkdownContent, IChatMcpAuthenticationRequired, IChatMcpServersStarting, IChatMcpServersStartingSerialized, IChatMcpServersStartingSlow, IChatModelReference, IChatMultiDiffData, IChatMultiDiffDataSerialized, IChatNotebookEdit, IChatPlanReview, IChatProgress, IChatProgressMessage, IChatPullRequestContent, IChatQuestionCarousel, IChatResponseCodeblockUriPart, IChatResponseProgressFileTreeData, IChatSendRequestOptions, IChatService, IChatSessionTiming, IChatSystemNotificationPart, IChatTask, IChatTaskSerialized, IChatTextEdit, IChatThinkingPart, IChatToolInvocation, IChatToolInvocationSerialized, IChatTreeData, IChatUndoStop, IChatUsage, IChatUsageModelTotal, IChatUsagePromptTokenDetail, IChatUsedContext, IChatVoiceProgressPart, IChatWarningMessage, IChatWorkspaceEdit, ResponseModelState, ToolConfirmKind, isIUsedContext } from '../chatService/chatService.js';
 import { ChatAgentLocation, SessionTypeSelectionReason, ChatModeKind, ChatPermissionLevel } from '../constants.js';
 import { ChatToolInvocation } from './chatProgressTypes/chatToolInvocation.js';
 import { ChatPlanReviewData } from './chatProgressTypes/chatPlanReviewData.js';
@@ -254,7 +254,8 @@ export type IChatProgressHistoryResponseContent =
 	| IChatPullRequestContent
 	| IChatWorkspaceEdit
 	| IChatExternalEdit
-	| IChatAutoModeResolutionPart;
+	| IChatAutoModeResolutionPart
+	| IChatDshNodePart;
 
 /**
  * "Normal" progress kinds that are rendered as parts of the stream of content.
@@ -286,6 +287,12 @@ export type IChatProgressResponseContentSerialized = Exclude<IChatProgressRespon
 	| IChatDisabledClaudeHooksPart
 	| IChatVoiceProgressPart
 >;
+
+/**
+ * 可持久化的响应部件：`dshNode` 只带字符串，天然可序列化，故保留在持久化集合里。
+ * 显式列出是为了让 `SerializedChatResponsePart` 与操作日志的 Adapt 表覆盖到它。
+ */
+export type PersistedChatDshNodePart = IChatDshNodePart;
 
 const nonHistoryKinds = new Set(['toolInvocation', 'toolInvocationSerialized', 'undoStop', 'voiceProgress']);
 function isChatProgressHistoryResponseContent(content: IChatProgressResponseContent): content is IChatProgressHistoryResponseContent {
@@ -725,6 +732,11 @@ class AbstractResponse implements IResponse {
 				case 'autoModeResolution':
 					// Ignore
 					continue;
+				case 'dshNode':
+					// 复制文本必须是 encoded 的确定性函数：直接给 canonical JSON 原文，
+					// 不添加任何原文没有的措辞，也不吞掉节点。
+					segment = { text: part.encoded, isBlock: true };
+					break;
 				case 'systemNotification':
 					segment = { text: part.content.value, isBlock: true };
 					break;
@@ -1146,6 +1158,16 @@ export class Response extends AbstractResponse implements IDisposable {
 			this._contentChanged(quiet);
 		} else if (progress.kind === 'progressMessage' && progress.id !== undefined) {
 			const idx = this._responseParts.findIndex(p => p.kind === 'progressMessage' && p.id === progress.id);
+			if (idx === -1) {
+				this._responseParts.push(progress);
+			} else {
+				this._responseParts[idx] = progress;
+			}
+			this._contentChanged(quiet);
+		} else if (progress.kind === 'dshNode') {
+			// DSH 节点与 progressMessage 并列地按 id 覆盖：流式重放只更新同一行，
+			// 不追加。与 progressMessage 的差别是它的载荷是 canonical JSON 而非 markdown。
+			const idx = this._responseParts.findIndex(p => p.kind === 'dshNode' && p.id === progress.id);
 			if (idx === -1) {
 				this._responseParts.push(progress);
 			} else {
@@ -2132,7 +2154,7 @@ interface ISerializableChatResponseData {
 	elapsedMs?: number;
 }
 
-export type SerializedChatResponsePart = IMarkdownString | IChatResponseProgressFileTreeData | IChatContentInlineReference | IChatAgentMarkdownContentWithVulnerability | IChatThinkingPart | IChatProgressResponseContentSerialized | IChatQuestionCarousel | IChatPlanReview | IChatDisabledClaudeHooksPart;
+export type SerializedChatResponsePart = IMarkdownString | IChatResponseProgressFileTreeData | IChatContentInlineReference | IChatAgentMarkdownContentWithVulnerability | IChatThinkingPart | IChatProgressResponseContentSerialized | IChatQuestionCarousel | IChatPlanReview | IChatDisabledClaudeHooksPart | IChatDshNodePart;
 
 export interface ISerializableChatRequestData extends ISerializableChatResponseData {
 	agentHostMetadata?: Record<string, unknown>;

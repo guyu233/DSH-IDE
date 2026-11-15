@@ -31,7 +31,7 @@ import { ReadonlyChatSessionOptionsMap } from '../chatSessionsService.js';
 import { ChatAgentLocation, SessionTypeSelectionReason, ChatModeKind } from '../constants.js';
 import { IChatEditingSession } from '../editing/chatEditingService.js';
 import type { getAutoModelTier } from '../languageModels.js';
-import { IChatModel, IChatRequestModeInfo, IChatRequestModel, IChatRequestVariableData, IChatResponseModel, IExportableChatData, ISerializableChatData } from '../model/chatModel.js';
+import { ChatModel, IChatModel, IChatRequestModeInfo, IChatRequestModel, IChatRequestVariableData, IChatResponseModel, IExportableChatData, ISerializableChatData } from '../model/chatModel.js';
 import type { IChatModelReferenceDebugSnapshot } from '../model/chatModelStore.js';
 import { IChatAgentCommand, IChatAgentData, IChatAgentResult, UserSelectedTools } from '../participants/chatAgents.js';
 import { HookTypeValue } from '../promptSyntax/hookTypes.js';
@@ -335,6 +335,29 @@ export interface IChatProgressMessage {
 	 * appended, so live progress doesn't stack up rows.
 	 */
 	id?: string;
+}
+
+/**
+ * A DSH session node carried **verbatim** through the chat progress stream.
+ *
+ * DSH 的会话节点是结构化对象（12 类、字段远多于任何 `IChatProgress` 变体），
+ * 压成 markdown 必然既丢字段又造出原文没有的文案。这里只携带一个 canonical JSON
+ * 字符串 `encoded`：它是源载荷的**唯一**真值，渲染层必须由
+ * `parse(encoded)` 求值，不得读取任何其它数据源。
+ *
+ * 只放字符串而不是对象，是因为本类型会经由 `IChatProgressDto` 的 `Dto<>`
+ * 递归映射进入 main↔ext host RPC；`string` 的序列化是平凡安全的，
+ * 而 `unknown` 没有可序列化保证。
+ *
+ * 本类型是**内部** progress 变体：不写入 `vscode-dts/**`，并在
+ * `extHost.protocol.ts` 的 `IChatProgressDto` 里显式排除，扩展宿主看不到它。
+ */
+export interface IChatDshNodePart {
+	kind: 'dshNode';
+	/** 稳定身份 `dsh:<seq>:<blockIndex|node>`；同 id 后写覆盖前写。 */
+	id: string;
+	/** 源载荷的 canonical JSON（键按字典序），即无损载荷本体。 */
+	encoded: string;
 }
 
 export interface IChatSystemNotificationPart {
@@ -1683,7 +1706,8 @@ export type IChatProgress =
 	| IChatHookPart
 	| IChatExternalToolInvocationUpdate
 	| IChatDisabledClaudeHooksPart
-	| IChatAutoModeResolutionPart;
+	| IChatAutoModeResolutionPart
+	| IChatDshNodePart;
 
 export interface IChatFollowup {
 	kind: 'reply';
@@ -2156,6 +2180,17 @@ export interface IChatService {
 	startNewLocalSession(location: ChatAgentLocation, options?: IChatSessionStartOptions): IChatModelReference;
 
 	/**
+	 * 在指定 sessionResource 上取（或建）一个本地 ChatModel，返回具体类引用（可选扩展）。
+	 *
+	 * 与 `acquireOrLoadSession` 的区别：不查外部 provider、不加载历史，纯本地建空模型；
+	 * 返回 `ChatModel` 具体类型，供外部数据源直接 `addRequest` / `acceptResponseProgress`
+	 * 承接流式帧，而不经过 `_sendRequestAsync` 再发起一次请求。
+	 * DSH-IDE 用它复用已有的 `dsh://` sessionResource（Sessions 面板与正文同一会话）。
+	 * 声明为可选，避免强制所有 IChatService 的测试桩实现该方法。
+	 */
+	startSessionForResource?(sessionResource: URI, location: ChatAgentLocation, options?: IChatSessionStartOptions): IReference<ChatModel>;
+
+	/**
 	 * Get an active session without holding a reference to it.
 	 *
 	 * @returns The session's model, or undefined if no active session exists.
@@ -2257,8 +2292,6 @@ export interface IChatService {
 	readonly onDidDisposeSession: Event<{ readonly sessionResources: readonly URI[]; readonly reason: 'cleared' | 'disposed' }>;
 
 	transferChatSession(transferredSessionResource: URI, toWorkspace: URI): Promise<void>;
-
-	activateDefaultAgent(location: ChatAgentLocation): Promise<void>;
 
 	readonly requestInProgressObs: IObservable<boolean>;
 

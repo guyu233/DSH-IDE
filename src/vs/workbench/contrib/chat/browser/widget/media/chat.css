@@ -5155,3 +5155,152 @@ have to be updated for changes to the rules above, or to support more deeply nes
 		transform: translate(-50%, -50%) rotate(270deg);
 	}
 }
+
+
+/*---------------------------------------------------------------------------------------------
+ * DSH-IDE：权限模式选择器移入输入框内部后的布局
+ *
+ * 原样式只为 `.chat-secondary-toolbar .chat-responsive-picker-container` 定义，
+ * 而 DSH-IDE 把这个容器放进了 `.chat-input-toolbars`（输入框内部、与 +/模型选择
+ * 同一行）。这里补齐同一条 flex 规则，让它在框内仍然水平排列、可压缩。
+ *--------------------------------------------------------------------------------------------*/
+
+.interactive-session .chat-input-toolbars .chat-responsive-picker-container {
+	display: flex;
+	align-items: center;
+	flex: 0 1 auto;
+	min-width: 0;
+	gap: 2px;
+}
+
+/* 输入框内工具栏里，权限选择器排在执行工具栏之前。 */
+.interactive-session .chat-input-toolbars > .chat-responsive-picker-container {
+	order: 0;
+}
+
+/* 空容器（没有可渲染的权限项）不占位。 */
+.interactive-session .chat-input-toolbars > .chat-responsive-picker-container:empty {
+	display: none;
+}
+
+/* ---------------------------------------------------------------------------
+ * DSH-IDE 皮肤：会话真源在 DSH Host，帧由 DshChatModelDriver 直接写进原生
+ * ChatModel；这里只把 DSH 的观感套到原生选择器上，作用域限定 `.dsh-session`，
+ * 不影响 VS Code 自带 chat / 第三方扩展（AGENTS.md §4 保留扩展生态）。
+ * 数值对照只读源：ui-theme/base.css、ui-chat/MessageItem.module.css、
+ * ChatView.module.css、ui-primitives/UserMessageBubble.module.css。
+ * ------------------------------------------------------------------------- */
+
+.dsh-session {
+	/* 窄侧栏下用户消息改成通栏浅底卡片，不再右对齐窄气泡（真机反馈）。 */
+	--dsh-bubble-bg: var(--vscode-chat-requestBubbleBackground);
+	--dsh-radius: var(--vscode-cornerRadius-medium, 12px);
+}
+
+/* 通栏卡片：覆盖 chat.css 侧栏分支的 align-items:flex-end / max-width:90% / margin-left:auto。 */
+.dsh-session .interactive-item-container.interactive-request {
+	align-items: stretch;
+}
+
+.dsh-session .interactive-item-container.interactive-request .value {
+	display: flex !important;
+	flex-direction: column !important;
+	align-items: stretch !important;
+	width: 100%;
+}
+
+.dsh-session .interactive-item-container.interactive-request .value .rendered-markdown {
+	max-width: 100% !important;
+	width: 100%;
+	margin-left: 0 !important;
+	box-sizing: border-box;
+	background-color: var(--dsh-bubble-bg);
+	border-radius: var(--dsh-radius);
+	padding: 10px 16px;
+	white-space: pre-wrap;
+	overflow-wrap: anywhere;
+	word-break: break-word;
+}
+
+/* 支持的引擎用 DSH 的超椭圆圆角；不支持时保留上面的 border-radius（渐进增强）。 */
+@supports (corner-shape: superellipse(1.5)) {
+	.dsh-session .interactive-item-container.interactive-request .value .rendered-markdown {
+		corner-shape: superellipse(1.5);
+	}
+}
+
+/* 行内代码不再缩成 11px 的等宽小字（DSH MarkdownText 口径：正文同字号、胶囊底色）。 */
+.dsh-session .interactive-item-container .value .rendered-markdown :not(pre) > code {
+	font-size: 1em !important;
+	white-space: normal;
+	overflow-wrap: anywhere;
+	padding: 0 5px;
+	border-radius: 4px;
+	background-color: var(--vscode-textCodeBlock-background);
+}
+
+/* 分级 flow gap：普通 4px、回复段 12px（ChatView.module.css:86/92）。 */
+.dsh-session .interactive-item-container {
+	padding-top: 4px;
+	padding-bottom: 4px;
+}
+
+.dsh-session .interactive-item-container.interactive-response {
+	padding-top: 12px;
+}
+
+/* DSH 的 5px 细滚动条（ui-theme/scrollbar.css:25,81）。 */
+.dsh-session .monaco-scrollable-element > .scrollbar > .slider {
+	border-radius: 999px;
+}
+
+/* 深色主题下气泡沿用 VS Code 主题变量，不再用硬编码白底。 */
+.monaco-workbench.vs-dark .dsh-session,
+.monaco-workbench.hc-black .dsh-session {
+	--dsh-bubble-bg: var(--vscode-chat-requestBubbleBackground);
+}
+
+/* DSH 会话节点部件：只读取主题变量，不引入新配色。 */
+.chat-dsh-node {
+	border: 1px solid var(--vscode-chat-requestBorder, var(--vscode-input-border, transparent));
+	border-radius: 6px;
+	margin: 4px 0;
+	overflow: hidden;
+}
+
+.chat-dsh-node-header {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	padding: 4px 8px;
+	background: var(--vscode-chat-requestBubbleBackground);
+	font-size: 12px;
+}
+
+.chat-dsh-node-icon {
+	display: inline-flex;
+	color: var(--vscode-descriptionForeground);
+}
+
+.chat-dsh-node-label {
+	font-family: var(--vscode-editor-font-family);
+	color: var(--vscode-descriptionForeground);
+}
+
+.chat-dsh-node-body {
+	padding: 6px 8px;
+	overflow-x: auto;
+}
+
+.chat-dsh-node-json,
+.chat-dsh-node-raw {
+	margin: 0;
+	white-space: pre-wrap;
+	word-break: break-word;
+	font-family: var(--vscode-editor-font-family);
+	font-size: var(--vscode-chat-editorFontSize, 12px);
+}
+
+.chat-dsh-node-raw {
+	color: var(--vscode-errorForeground);
+}
