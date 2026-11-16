@@ -132,9 +132,11 @@ test('DSH bundle: chat content is driven by the native ChatModel, no sidecar art
 	const gulp = fs.readFileSync(path.join(vscodeRoot, 'build/gulpfile.vscode.ts'), 'utf8');
 	const next = fs.readFileSync(path.join(vscodeRoot, 'build/next/index.ts'), 'utf8');
 	const contribution = fs.readFileSync(path.join(vscodeRoot, 'src/vs/workbench/contrib/dsh/browser/dsh.contribution.ts'), 'utf8');
-	// 驱动器取代桥接：帧直接写进原生 ChatModel。
-	assert.match(contribution, /dshChatModelDriver\.js/, 'DshChatModelDriver must be registered');
+	// 层 4 的稳定路径：`dsh:/<id>` 会话由注册进原生 ChatWidget 的 content provider 提供内容，
+	// 不再经过已停用的 DshChatModelDriver，也没有 sidecar 视图桥。
+	assert.match(contribution, /registerDshChatSessionContent/, 'the dsh session content provider must be registered');
 	assert.doesNotMatch(contribution, /dshChatViewBridge/, 'sidecar view bridge must be gone');
+	assert.doesNotMatch(contribution, /dshChatModelDriver\.js/, 'the stopped ChatModel driver must not be re-registered');
 	// 构建链不再编译/复制 sidecar 产物。
 	assert.doesNotMatch(gulp, /build-render\.mjs/, 'no sidecar build step may remain');
 	assert.doesNotMatch(next, /stageDshChatRender|dsh-chat\.js/, 'no sidecar staging may remain in transpile');

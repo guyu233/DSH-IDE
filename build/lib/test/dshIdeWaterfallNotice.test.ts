@@ -47,11 +47,34 @@ test('question waterfall keeps labels and drops unknown events', () => {
 		eventId: 'q1',
 		event: 'user-questions/request',
 		agentId: 'agent-1',
-		request: { questions: [{ id: 'q', question: 'Pick', options: [{ label: 'Yes' }] }] },
+		request: { questions: [{ id: 'q', question: 'Pick', options: [{ label: 'Yes', description: 'nope' }], multiSelect: false }] },
 	});
 	assert.deepEqual(validateDshIdeWaterfallNotice(notice), notice);
 	assert.equal(projectDshIdeWaterfallNotice({ type: 'waterfall', eventId: 'e', event: 'other/request', agentId: 'a', request: {} }), undefined);
 	assert.equal(projectDshIdeWaterfallNotice({ type: 'ready', clientId: 'c' }), undefined);
+});
+
+test('approval waterfall keeps displayReason and still drops agent and signal', () => {
+	const notice = projectDshIdeWaterfallNotice({
+		type: 'waterfall',
+		kind: 'request',
+		eventId: 'e2',
+		event: 'approval/request',
+		agentId: 'agent-1',
+		request: {
+			toolName: 'shell',
+			reason: 'run',
+			displayReason: { en: 'Run a command', 'zh-CN': '运行命令' },
+			agent: { id: 'secret' },
+			signal: {},
+		},
+	});
+	assert.deepEqual(notice && notice.kind === 'request' ? notice.request : undefined, {
+		toolName: 'shell',
+		reason: 'run',
+		displayReason: { en: 'Run a command', 'zh-CN': '运行命令' },
+	});
+	assert.deepEqual(validateDshIdeWaterfallNotice(notice), notice);
 });
 
 test('cancel is a separate notice and the validator rejects a leaked request', () => {

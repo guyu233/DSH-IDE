@@ -97,11 +97,11 @@ const UNVERIFIED = FINDINGS.filter(f => !WIRED.includes(f.method)).map(f => f.me
 // 契约口径：method 白名单（20 会话域 + 2 账号域 + 2 归档域 + 团队/预设/附加 + readAttachment）
 // ---------------------------------------------------------------------------
 
-	test('D16 contract still declares exactly 30 methods', () => {
+	test('D16 contract still declares exactly 36 methods', () => {
 	const block = /const DSH_IDE_METHOD_KEYS[\s\S]*?\n\};/.exec(protocol);
 	assert.ok(block !== null, 'DSH_IDE_METHOD_KEYS must exist in the protocol single source');
 	const keys = [...block[0].matchAll(/^\s*([a-zA-Z]+):/gm)].map(m => m[1]);
-	assert.equal(keys.length, 30, `expected 30 methods, got ${keys.length}`);
+	assert.equal(keys.length, 36, `expected 36 methods, got ${keys.length}`);
 	for (const f of FINDINGS) {
 		assert.ok(keys.includes(f.method), `D16 finding must reference a real whitelist method: ${f.method}`);
 	}
@@ -118,6 +118,25 @@ test('D16 transport forwards every method to the kernel dispatcher and maps no e
 	assert.doesNotMatch(transport, /call\('session', 'prompt'/, 'transport must not carry its own prompt call');
 	assert.doesNotMatch(transport, /call\('session', 'selectModel'/, 'transport must not carry its own selectModel call');
 	assert.doesNotMatch(transport, /call\('session', 'cancel'/, 'transport must not carry its own cancel call');
+});
+
+test('chat-baseline methods without a verified remote stay missing(...)', () => {
+	// setGoal / listSkills / searchSessions 已按官方服务核对接线（见 HANDOFF 记录），不再在此列。
+	for (const method of ['addAttachment', 'removeAttachment', 'openInApp', 'dismissQuotaNotice']) {
+		assert.match(host, new RegExp(`${method}:\\s*missing\\('${method}'\\)`), `${method} must stay fail-closed until its official remote is verified`);
+	}
+	assert.match(protocol, /searchSessions:/, 'searchSessions already exists and must not be duplicated');
+	assert.match(protocol, /resume:/, 'resume already exists and must not be duplicated as resumeSession');
+	assert.doesNotMatch(protocol, /\bforkAt:/, 'fork.point already maps to atSeq; do not add forkAt');
+	assert.doesNotMatch(protocol, /\bloadThrough:/, 'loadOlder.throughSeq already is the official cut; do not add loadThrough');
+});
+
+test('setGoal and listSkills are wired to their official services', () => {
+	// goals：packages/goal/goal/src/index.ts 的 @Remote create/edit/pause/resume/complete/clear
+	assert.match(host, /async setGoal\(args\)/);
+	assert.match(host, /goals\.remoteExportCreate/);
+	// skills：packages/skill/skill/src/index.ts:473 list(options)
+	assert.match(host, /skills\.list\(/);
 });
 
 test('D16 Host bridge keeps the unverified methods as missing(...)', () => {
@@ -189,7 +208,7 @@ test('D17 deleteSession calls the approved physical-delete endpoint, never a clo
 test('D59 archive endpoints are official remotes and now wired without third-party approval', () => {
 	const block = /const DSH_IDE_METHOD_KEYS[\s\S]*?\n\};/.exec(protocol);
 	assert.ok(block !== null);
-	assert.equal([...block[0].matchAll(/^\s*([a-zA-Z]+):/gm)].length, 30, 'contract must declare 30 methods after readAttachment wiring');
+	assert.equal([...block[0].matchAll(/^\s*([a-zA-Z]+):/gm)].length, 36, 'contract must declare 36 methods after the chat-baseline expansion');
 	for (const endpoint of ['archiveSession', 'unarchiveSession']) {
 		assert.ok(protocol.includes(endpoint + ':'), endpoint + ' must be a contract method');
 		// 窗口只经 ide/dispatch 转发；真正调官方 remote 的是内核桥接。
@@ -252,15 +271,15 @@ test('D27 CI aggregate entry exists, follows §2 order, and refuses PENDING', ()
 	assert.equal(pkg.scripts['verify:dsh-ide-ci'], 'node build/lib/dsh/verify/dshIdeCi.mjs', 'the CI entry must be registered');
 
 	const script = read('build/lib/dsh/verify/dshIdeCi.mjs');
-	// 顺序取自第 5 章 §2（四门禁 → test-dsh:all → docs-graph）。
-	const order = [...script.matchAll(/script: '(verify:dsh-ide-[a-z-]+|test-dsh:all|verify:docs-graph)'/g)].map(m => m[1]);
+	// 顺序取自第 5 章 §2（四门禁 → test-dsh:all）。
+	// `verify:docs-graph` 从未在 package.json 里实现过，作为悬空步骤已移除。
+	const order = [...script.matchAll(/script: '(verify:dsh-ide-[a-z-]+|test-dsh:all)'/g)].map(m => m[1]);
 	assert.deepEqual(order, [
 		'verify:dsh-ide-protocol-single-source',
 		'verify:dsh-ide-boundary',
 		'verify:dsh-ide-projection-golden',
 		'verify:dsh-ide-contract',
 		'test-dsh:all',
-		'verify:docs-graph',
 	], 'the CI steps must follow chapter-5 §2 order');
 	// PENDING 不计通过（§9）。
 	assert.match(script, /status === 'PASS'/, 'the entry must require STATUS: PASS');
@@ -482,12 +501,14 @@ test('D68 contract gate can actually reach PASS, and fails on a lower installed 
 // 本轮把度量内置：有真实样本时重算并断言，超限即抛错；无样本时明确跳过。
 // ---------------------------------------------------------------------------
 
-test('D69 projection-golden is PENDING after the row projection was removed', () => {
+test('D69 projection-golden replays the typed projector instead of staying PENDING', () => {
 	const gate = read('build/lib/dsh/verify/dshIdeVerify.mjs');
 	// 会话内容改为帧直传后不再有 translator + projector，原 P95 探针随投影器一起删除。
-	// 门禁必须诚实标 PENDING（不计入通过），不能谎报 PASS。
+	// 现在有替代断言：回放 Host 的 typed 投影器（`dshIdeConversation.ts`）并校验协议。
 	assert.match(gate, /function projectionGolden\(\)/, 'the gate must still exist');
-	assert.match(gate, /STATUS: PENDING/, 'the gate must report PENDING explicitly');
+	assert.match(gate, /createDshIdeConversationState/, 'the gate must replay the typed projector');
+	assert.match(gate, /validateDshIdeSnapshot/, 'the gate must validate projected nodes against the protocol');
+	assert.match(gate, /return 'PASS'/, 'the gate must report PASS once the replay succeeds');
 	assert.doesNotMatch(gate, /function probeRealSessionP95/, 'the removed projector probe must not come back');
 	assert.doesNotMatch(gate, /function projectIdeView/, 'the removed projector must not come back');
 });

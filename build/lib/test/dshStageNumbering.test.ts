@@ -84,7 +84,11 @@ test('D28 verify script uses P-numbered PENDING markers only', () => {
 	const verify = fs.readFileSync(path.join(repoRoot, 'build/lib/dsh/verify/dshIdeVerify.mjs'), 'utf8');
 	// 允许 PENDING(P6) / PENDING(上游升级)；不允许 PENDING(2.5) 等旧编号。
 	assert.doesNotMatch(verify, /PENDING\([0-9]/, 'PENDING must carry a P-numbered or descriptive reason');
-	assert.match(verify, /PENDING\(P6\)/, 'projection-golden must keep its P6 calibration note');
+	// projection-golden 已有替代断言（typed 投影金标准），不再是 P6 校准期；
+	// 它的注释必须写明「金标准回放」，且门禁函数必须真的做协议校验。
+	assert.match(verify, /projection-golden: typed 投影金标准|projection-golden: \$\{view\.nodes\.length\}/,
+		'projection-golden must describe the typed projection golden replay');
+	assert.match(verify, /function projectionGolden\(\) \{\n\tconst projectPath/, 'projection-golden must actually replay the projector');
 });
 
 test('D28 legal PROVENANCE retains its historical deletion snapshot (must not be rewritten)', () => {

@@ -209,15 +209,57 @@ function boundary() {
 }
 
 // ---------------------------------------------------------------------------
-// 3. verify:dsh-ide-projection-golden  —— 已随会话帧直传移除
+// 3. verify:dsh-ide-projection-golden  —— typed 投影金标准
 //
-// 会话内容不再翻译成另一套行：门禁不再回放 translator + projector。
-// 该 gate 保留为 PENDING，明确不计入通过，直到有替代断言。
+// 会话帧不再翻译成另一套行，但 Host 侧确实有一层投影：`dshIdeConversation.ts`
+// 把官方事件装配成 `DshIdeConversationNode[]`。本门禁用一组金标准事件回放该投影，
+// 断言每个节点都过协议校验，且关键事实（子代理发现 / 结算通知）不被丢掉。
 // ---------------------------------------------------------------------------
-function projectionGolden() {
-	console.log('STATUS: PENDING');
-	console.log('PENDING(P6) projection-golden: 会话帧直传后不再有行投影，本 gate 待替代断言');
-	return 'PENDING';
+async function projectionGolden() {
+	const projectPath = pathToFileURL(path.join(repoRoot, 'src/vs/platform/dshClient/common/dshIdeConversation.ts')).href;
+	const protocolPath = pathToFileURL(path.join(repoRoot, 'src/vs/platform/dshClient/common/dshIdeProtocol.ts')).href;
+	const { createDshIdeConversationState, projectDshIdeConversation } = await import(projectPath);
+	const { validateDshIdeSnapshot, DSH_IDE_WIRE_REVISION } = await import(protocolPath);
+
+	const events = [
+		{ seq: 1, time: 1, type: 'user/message', data: { source: { kind: 'user' }, content: [{ type: 'text', text: 'hi' }] } },
+		{ seq: 2, time: 2, type: 'assistant/message', data: { turn: 1, step: 1, message: { content: [{ type: 'text', text: 'hello' }] }, usage: { inputTokens: 10, outputTokens: 2 } } },
+		{ seq: 3, time: 3, type: 'subagent/catalog', data: { childId: 'child-1', childCreatedAt: 5, mode: 'continuable', label: 'reviewer', name: 'reviewer', version: 3 } },
+		{ seq: 4, time: 4, type: 'user/message', data: { source: { kind: 'subagent-settled' }, content: [{ type: 'text', text: 'relay' }] } },
+		{ seq: 5, time: 5, type: 'deliverables/presented', data: { turn: 1, callId: 'present-1', files: [{ path: 'docs/a.md' }] } },
+	];
+
+	const state = createDshIdeConversationState();
+	const view = { hasMore: false, nodes: [] };
+	for (const event of events) {
+		const next = projectDshIdeConversation(state, { type: 'event', event });
+		assert.ok(next !== undefined, `projection must return a view for ${event.type}`);
+		view.nodes = next.nodes;
+	}
+
+	// 每个投影结果都必须过协议真源的校验（fail-closed）。
+	assert.doesNotThrow(() => validateDshIdeSnapshot({
+		wireRevision: DSH_IDE_WIRE_REVISION,
+		channelId: 'projection-golden',
+		version: 1,
+		state: { state: 'ready', view: { frame: { type: 'event' }, conversation: view } },
+	}), 'the projected conversation must satisfy the protocol contract');
+
+	const kinds = view.nodes.map(node => node.kind);
+	assert.deepEqual(kinds, ['user', 'assistant', 'subagent-catalog', 'subagent-notice'],
+		'projection must keep the user message, the assistant reply, the subagent catalog fact and the settlement notice');
+
+	// 子代理发现事实必须原样保留名字，不能只留一个空节点。
+	const catalog = view.nodes.find(node => node.kind === 'subagent-catalog');
+	assert.equal(catalog?.name, 'reviewer', 'subagent catalog must keep the child name');
+
+	// 投影节点不得携带原始事件（raw 不进线协议）。
+	for (const node of view.nodes) {
+		assert.equal(Object.hasOwn(node, 'raw'), false, 'projected nodes must not carry raw');
+	}
+
+	console.log(`projection-golden: ${view.nodes.length} 个金标准节点全部通过协议校验（含子代理发现与结算通知）`);
+	return 'PASS';
 }
 
 // ---------------------------------------------------------------------------
@@ -380,7 +422,8 @@ if (!gate || !Object.hasOwn(gates, gate)) {
 }
 
 try {
-	const status = gates[gate]();
+	// 部分门禁（projection-golden）需要动态 import TS 模块，返回 Promise。
+	const status = await gates[gate]();
 	console.log(`STATUS: ${status ?? 'PASS'}  [${gate}]`);
 } catch (err) {
 	console.error(`STATUS: FAIL  [${gate}]`);

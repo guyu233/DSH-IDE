@@ -3,456 +3,268 @@
  *  Licensed under the MIT License.
  *--------------------------------------------------------------------------------------------*/
 
-// DSH 聊天帧解码：follow 帧 → DSH 自己的 UserMessageNode / AssistantMessageNode。
-// 不翻译、不投影：断言的就是 DSH 的字段名与 block kind。
+// DSH 聊天模型单测：模型层只消费 Host 投影好的结构化会话（手册 §5.4）。
+// 裸 follow 帧由 `dshIdeConversation` 投影，本文件用同一个投影器构造输入，
+// 断言的是模型层的节点树、定位、分页与 token 累加。
 // 运行：node --experimental-strip-types --test build/lib/test/dshChatModel.test.ts
 
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { DshChatModel } from '../../../out/vs/workbench/contrib/dsh/browser/dshChatModel.js';
+import {
+	createDshIdeConversationState,
+	projectDshIdeConversation,
+} from '../../../src/vs/platform/dshClient/common/dshIdeConversation.ts';
 
-function snapshot(records: unknown[], assistantStream?: unknown): Record<string, unknown> {
-	return {
-		type: 'snapshot',
-		header: { version: 1, id: 's-1', createdAt: 0, isSeeded: false },
-		cursor: records.length,
-		records,
-		hasMore: false,
-		projections: { asOfSeq: -1, values: {} },
-		...(assistantStream === undefined ? {} : { assistantStream }),
-	};
+/** 用 Host 同款投影器把一串官方事件投影成模型输入。 */
+function conversationOf(events: readonly Record<string, unknown>[], hasMore = false) {
+	const state = createDshIdeConversationState();
+	for (const event of events) {
+		projectDshIdeConversation(state, { type: 'event', event });
+	}
+	return { hasMore, nodes: [...state.nodes.values()].sort((a, b) => a.seq - b.seq) };
 }
 
-function entry(seq: number, event: Record<string, unknown>): unknown {
-	return { type: 'event', event: { seq, time: seq, ...event } };
+function event(seq: number, type: string, data: Record<string, unknown> = {}): Record<string, unknown> {
+	return { seq, time: seq, type, data };
 }
 
-test('a snapshot opening turns DSH user and assistant messages into DSH nodes', () => {
+function accept(model: DshChatModel, events: readonly Record<string, unknown>[], hasMore = false) {
+	return model.acceptConversation(conversationOf(events, hasMore) as never);
+}
+
+test('user and assistant events become DSH nodes on the typed path', () => {
 	const model = new DshChatModel();
-	const changes = model.accept(snapshot([
-		entry(1, { type: 'user/message', data: { content: [{ type: 'text', text: 'hi' }] } }),
-		entry(2, { type: 'assistant/message', data: { turn: 1, step: 1, message: { content: [{ type: 'text', text: 'hello' }] } } }),
-	]));
-	assert.equal(changes.length, 2);
-	const nodes = model.list;
-	assert.equal(nodes.length, 2);
-	assert.equal(nodes[0].kind, 'user');
-	assert.equal(nodes[1].kind, 'assistant');
-	// 用户侧保留 DSH 的 ContentBlock（type: 'text'）。
-	const user = nodes[0];
-	if (user.kind === 'user') {
-		assert.deepEqual(user.content, [{ type: 'text', text: 'hi' }]);
-	}
-	// 助手侧是 DSH 的 AssistantBlock（kind: 'text'），不是 VS Code 的 markdownContent。
-	const assistant = nodes[1];
-	if (assistant.kind === 'assistant') {
-		assert.deepEqual(assistant.blocks, [{ kind: 'text', text: 'hello' }]);
-		assert.equal(assistant.turn, 1);
-		assert.equal(assistant.step, 1);
-	}
-});
-
-test('injected user/message with a non-user source becomes a context row, not a user bubble', () => {
-	const model = new DshChatModel();
-	const text = 'Time sampled while preparing turn 11, step 40: 2026-11-15T20:47:01+08:00[Asia/Shanghai]\nBrowser time zone for this request: Asia/Shanghai.\nElapsed since the preceding step context: unavailable.';
-	model.accept(snapshot([
-		entry(1, { type: 'user/message', data: { content: [{ type: 'text', text }], source: { kind: 'time-context' } } }),
-		entry(2, { type: 'user/message', data: { content: [{ type: 'text', text: 'hi' }] } }),
-	]));
-	const nodes = model.list;
-	assert.equal(nodes.length, 2);
-	assert.equal(nodes[0].kind, 'context', 'time-context injection must not be a user bubble');
-	if (nodes[0].kind === 'context') {
-		assert.deepEqual(nodes[0].producer, { role: 'inject', label: 'time-context' });
-		assert.equal(nodes[0].form, null);
-		assert.deepEqual(nodes[0].content, [{ type: 'text', text }]);
-	}
-	assert.equal(nodes[1].kind, 'user', 'a real human message stays a user row');
-});
-
-test('known context sources keep DSH producer roles and forms', () => {
-	const model = new DshChatModel();
-	model.accept(snapshot([
-		entry(1, { type: 'user/message', data: { content: [{ type: 'text', text: 'skill' }], source: { kind: 'skill-invocation', name: 'grep', form: 'catalog' } } }),
-		entry(2, { type: 'user/message', data: { content: [{ type: 'text', text: 'recall' }], source: { kind: 'session-reference', references: [{ label: 'chat A' }], form: 'recall' } } }),
-		entry(3, { type: 'user/message', data: { content: [{ type: 'text', text: 'human' }], source: { kind: 'user' } } }),
-	]));
-	const nodes = model.list;
-	assert.deepEqual(nodes.map(n => n.kind), ['context', 'context', 'user']);
-	if (nodes[0].kind === 'context') {
-		assert.deepEqual(nodes[0].producer, { role: 'inject', label: 'grep' });
-		assert.equal(nodes[0].form, 'catalog');
-	}
-	if (nodes[1].kind === 'context') {
-		assert.deepEqual(nodes[1].producer, { role: 'recall', label: 'chat A' });
-		assert.equal(nodes[1].form, 'recall');
-	}
-});
-
-test('a completed turn marks only its last assistant node for the single turn-tail usage row', () => {
-	const model = new DshChatModel();
-	model.accept(snapshot([
-		entry(1, { type: 'user/message', data: { content: [{ type: 'text', text: 'hi' }] } }),
-		entry(2, { type: 'assistant/message', data: { turn: 1, step: 1, message: { content: [{ type: 'text', text: 'part A' }] }, usage: { inputTokens: 10, outputTokens: 2 } } }),
-		entry(3, { type: 'assistant/message', data: { turn: 1, step: 2, message: { content: [{ type: 'text', text: 'part B' }] }, usage: { inputTokens: 20, outputTokens: 3 } } }),
-		entry(4, { type: 'turn/end', data: { turn: 1, step: 2, reason: { kind: 'completed' } } }),
-	]));
-	const assistants = model.list.filter(n => n.kind === 'assistant') as { turnEnded?: boolean }[];
-	assert.equal(assistants.length, 2);
-	assert.equal(assistants[0].turnEnded, undefined, 'earlier response fragment must not render a usage row');
-	assert.equal(assistants[1].turnEnded, true, 'only the closing response renders the turn-tail usage row');
-});
-
-test('an aborted turn does not mark a closing assistant node', () => {
-	const model = new DshChatModel();
-	model.accept(snapshot([
-		entry(1, { type: 'assistant/message', data: { turn: 1, step: 1, message: { content: [{ type: 'text', text: 'half' }] } } }),
-		entry(2, { type: 'turn/end', data: { turn: 1, step: 1, reason: { kind: 'interrupted', failure: { message: 'x' } } } }),
-	]));
-	assert.equal((model.list.find(n => n.kind === 'assistant') as { turnEnded?: boolean } | undefined)?.turnEnded, undefined);
-	assert.ok(model.list.some(n => n.kind === 'turn-error'));
-});
-
-test('DSH assistant blocks keep reasoning and tool-call kinds verbatim', () => {
-	const model = new DshChatModel();
-	model.accept(snapshot([
-		entry(1, {
-			type: 'assistant/message',
-			data: {
-				turn: 1, step: 1,
-				message: {
-					content: [
-						{ type: 'reasoning', text: 'thinking' },
-						{ type: 'text', text: 'answer' },
-						{ type: 'tool-call', id: 'c1', name: 'bash', arguments: '{"x":1}' },
-					],
-				},
-			},
-		}),
-	]));
-	const node = model.list[0];
-	assert.equal(node.kind, 'assistant');
-	if (node.kind === 'assistant') {
-		assert.deepEqual(node.blocks.map(block => block.kind), ['reasoning', 'text', 'tool-call']);
-		assert.deepEqual(node.blocks[2], { kind: 'tool-call', callId: 'c1', name: 'bash', argsRaw: '{"x":1}' });
-	}
-});
-
-test('streaming chunks accumulate into one assistant node until the message settles', () => {
-	const model = new DshChatModel();
-	model.accept(snapshot([]));
-	model.accept({ type: 'assistant-stream', frame: { type: 'start', attemptId: 'a1', revision: 1, turn: 3, step: 1 } });
-	model.accept({ type: 'assistant-stream', frame: { type: 'chunk', attemptId: 'a1', revision: 2, index: 0, time: 1, chunk: { type: 'text-delta', text: 'Hel' } } });
-	model.accept({ type: 'assistant-stream', frame: { type: 'chunk', attemptId: 'a1', revision: 3, index: 1, time: 2, chunk: { type: 'text-delta', text: 'lo' } } });
-
-	const streaming = model.list;
-	assert.equal(streaming.length, 1);
-	assert.equal(streaming[0].kind, 'assistant');
-	if (streaming[0].kind === 'assistant') {
-		assert.deepEqual(streaming[0].blocks, [{ kind: 'text', text: 'Hello' }]);
-	}
-
-	// durable 结算接管：流式临时节点消失，只剩稳定记录。
-	model.accept({ type: 'event', event: { type: 'assistant/message', seq: 9, time: 3, turn: 3, step: 1, data: { message: { content: [{ type: 'text', text: 'Hello' }] } } } });
-	assert.deepEqual(model.list.map(node => node.seq), [9]);
-});
-
-test('a replayed chunk with an older revision is dropped', () => {
-	const model = new DshChatModel();
-	model.accept(snapshot([]));
-	model.accept({ type: 'assistant-stream', frame: { type: 'start', attemptId: 'a1', revision: 1, turn: 1, step: 1 } });
-	model.accept({ type: 'assistant-stream', frame: { type: 'chunk', attemptId: 'a1', revision: 3, index: 1, time: 1, chunk: { type: 'text-delta', text: 'AB' } } });
-	model.accept({ type: 'assistant-stream', frame: { type: 'chunk', attemptId: 'a1', revision: 2, index: 0, time: 1, chunk: { type: 'text-delta', text: 'X' } } });
-	const node = model.list.find(item => item.kind === 'assistant');
-	assert.equal(node?.kind, 'assistant');
-	if (node?.kind === 'assistant') {
-		assert.deepEqual(node.blocks, [{ kind: 'text', text: 'AB' }]);
-	}
-});
-
-test('an abandoned attempt leaves no visible node', () => {
-	const model = new DshChatModel();
-	model.accept(snapshot([]));
-	model.accept({ type: 'assistant-stream', frame: { type: 'start', attemptId: 'a1', revision: 1, turn: 1, step: 1 } });
-	model.accept({ type: 'assistant-stream', frame: { type: 'chunk', attemptId: 'a1', revision: 2, index: 0, time: 1, chunk: { type: 'text-delta', text: 'half' } } });
-	model.accept({ type: 'assistant-stream', frame: { type: 'end', attemptId: 'a1', revision: 3, index: 1, outcome: { kind: 'abandoned' } } });
-	assert.deepEqual(model.list, []);
-});
-
-test('reasoning deltas stay in a reasoning block, never mixed into text', () => {
-	const model = new DshChatModel();
-	model.accept(snapshot([]));
-	model.accept({ type: 'assistant-stream', frame: { type: 'start', attemptId: 'a1', revision: 1, turn: 1, step: 1 } });
-	model.accept({ type: 'assistant-stream', frame: { type: 'chunk', attemptId: 'a1', revision: 2, index: 0, time: 1, chunk: { type: 'reasoning-delta', text: 'think' } } });
-	const node = model.list[0];
-	assert.equal(node.kind, 'assistant');
-	if (node.kind === 'assistant') {
-		assert.deepEqual(node.blocks, [{ kind: 'reasoning', text: 'think' }]);
-	}
-});
-
-test('unknown frames are ignored instead of guessed at', () => {
-	const model = new DshChatModel();
-	assert.deepEqual(model.accept({ type: 'mystery' }), []);
-	assert.deepEqual(model.accept({ type: 'event' }), []);
-	assert.deepEqual(model.accept({ type: 'assistant-stream', frame: { type: 'chunk', chunk: { type: 'text-delta', text: 'x' } } }), []);
-	assert.deepEqual(model.list, []);
-});
-
-test('clear drops the old session so a switch cannot leak nodes', () => {
-	const model = new DshChatModel();
-	model.accept(snapshot([entry(1, { type: 'user/message', data: { content: [{ type: 'text', text: 'old' }] } })]));
-	assert.equal(model.list.length, 1);
-	model.clear();
-	assert.deepEqual(model.list, []);
-});
-
-// ---- 解码保真（Step 1-A）：以下用例锁定"不增不减"在解码层的实证 ----
-
-test('每个 durable 节点都携带 raw，且 raw 就是源事件信封', () => {
-	const model = new DshChatModel();
-	const event = entry(7, { type: 'user/message', data: { content: [{ type: 'text', text: 'hi' }] } });
-	model.accept(snapshot([event]));
-	const node = model.list[0] as { raw?: unknown };
-	assert.ok(node.raw !== undefined, 'durable 节点必须带 raw');
-	const raw = node.raw as Record<string, unknown>;
-	assert.equal(raw['seq'], 7);
-	assert.equal(raw['type'], 'user/message');
-	// raw 是原对象本身，不是重建的副本：data 引用同一份内容。
-	assert.deepEqual(raw['data'], { content: [{ type: 'text', text: 'hi' }] });
-});
-
-test('session/end-seed(inherited) 落成 inherited-history 分界节点', () => {
-	const model = new DshChatModel();
-	model.accept(snapshot([
-		entry(1, { type: 'session/end-seed', data: { inherited: true } }),
-		entry(2, { type: 'user/message', data: { content: [{ type: 'text', text: 'after' }] } }),
-	]));
-	assert.deepEqual(model.list.map(n => n.kind), ['inherited-history', 'user']);
-});
-
-test('非 inherited 的 session/end-seed 不产生分界节点', () => {
-	const model = new DshChatModel();
-	model.accept(snapshot([entry(1, { type: 'session/end-seed', data: { inherited: false } })]));
-	assert.deepEqual(model.list, []);
-});
-
-test('未认领的 append-surface 事件落 unknown 节点且保留原文', () => {
-	const model = new DshChatModel();
-	model.accept(snapshot([
-		entry(5, { type: 'plugin/something', data: { surfaceOp: 'append', payload: { a: 1 } } }),
-	]));
-	const node = model.list[0];
-	assert.equal(node.kind, 'unknown');
-	if (node.kind === 'unknown') {
-		assert.equal(node.type, 'plugin/something');
-		assert.deepEqual(node.data, { surfaceOp: 'append', payload: { a: 1 } });
-	}
-});
-
-test('非 surface 的内部事件不产生可见节点（避免凭空多出界面行）', () => {
-	const model = new DshChatModel();
-	model.accept(snapshot([entry(1, { type: 'turn/start', data: { turn: 1 } })]));
-	assert.deepEqual(model.list, []);
-});
-
-test('tool-result 的 args/subCalls/isError 是必填，不被省略', () => {
-	const model = new DshChatModel();
-	model.accept(snapshot([
-		entry(3, {
-			type: 'tool/result',
-			data: {
-				message: { source: { callId: 'c1' }, content: [{ type: 'text', text: 'ok' }], isError: false },
-				call: { name: 'bash', argsRaw: '{}' },
-				args: { command: 'ls' },
-				subCalls: [],
-			},
-		}),
-	]));
-	const node = model.list[0];
-	assert.equal(node.kind, 'tool-result');
-	if (node.kind === 'tool-result') {
-		assert.deepEqual(node.args, { command: 'ls' });
-		assert.deepEqual(node.subCalls, []);
-		assert.equal(node.isError, false);
-	}
-});
-
-test('assistant 的 timing/interrupted 不再被丢弃', () => {
-	const model = new DshChatModel();
-	model.accept(snapshot([
-		entry(4, {
-			type: 'assistant/message',
-			data: {
-				message: {
-					content: [{ type: 'text', text: 'x' }],
-					timing: { stepStartTime: 1, firstTokenTime: 2, completedTime: 3 },
-					interrupted: true,
-				},
-			},
-		}),
-	]));
-	const node = model.list[0];
-	if (node.kind === 'assistant') {
-		assert.deepEqual(node.timing, { stepStartTime: 1, firstTokenTime: 2, completedTime: 3 });
-		assert.equal(node.interrupted, true);
-	}
-});
-
-test('file 块落 assistant 的 other（真源 AssistantBlock 无 file kind）', () => {
-	const model = new DshChatModel();
-	model.accept(snapshot([
-		entry(1, {
-			type: 'assistant/message',
-			data: { message: { content: [{ type: 'file', attachment: { name: 'a.txt' } }] } },
-		}),
-	]));
-	const node = model.list[0];
-	if (node.kind === 'assistant') {
-		assert.equal(node.blocks[0].kind, 'other');
-	}
-});
-
-test('非记录内容块不被丢弃（落 plugin 块并保留原值）', () => {
-	const model = new DshChatModel();
-	model.accept(snapshot([
-		entry(1, { type: 'user/message', data: { content: ['raw-string-block'] } }),
-	]));
-	const node = model.list[0];
-	if (node.kind === 'user') {
-		assert.equal(node.content.length, 1);
-		assert.equal(node.content[0].type, 'plugin');
-	}
-});
-
-test('prependPage inserts older records before the opening window and keeps seq order', () => {
-	const model = new DshChatModel();
-	const opening = snapshot([
-		entry(4, { type: 'user/message', data: { content: [{ type: 'text', text: 'now' }] } }),
+	accept(model, [
+		event(1, 'user/message', { source: { kind: 'user' }, content: [{ type: 'text', text: 'hi' }] }),
+		event(2, 'assistant/message', { turn: 1, step: 1, message: { content: [{ type: 'text', text: 'hello' }] } }),
 	]);
-	opening['hasMore'] = true;
-	model.accept(opening);
-	assert.equal(model.hasMore(), true);
-	assert.equal(model.firstSeq(), 4);
-
-	const outcome = model.prependPage({
-		records: [
-			entry(1, { type: 'turn/start', data: { turn: 1 } }),
-			entry(2, { type: 'user/message', data: { content: [{ type: 'text', text: 'earlier' }] } }),
-		] as readonly Readonly<Record<string, unknown>>[],
-		hasMore: false,
-	});
-
-	assert.equal(outcome.added, 1);
-	assert.equal(outcome.firstSeq, 1);
-	assert.equal(outcome.hasMore, false);
-	assert.equal(outcome.conflicts, 0);
-	assert.deepEqual(model.list.map(node => node.seq), [2, 4]);
-	const located = model.located;
-	assert.equal(located[0].node.seq, 2);
-	assert.equal(located[0].turn, 1, 'a prepended turn/start must locate the older user message');
-	assert.equal(located[1].turn, 1);
+	assert.deepEqual(model.list.map(node => node.kind), ['user', 'assistant']);
 	assert.equal(model.hasMore(), false);
 });
 
-test('prependPage skips records that are not strictly older and does not replace a conflicting seq', () => {
+test('injected user/message with a non-user source becomes a context row', () => {
 	const model = new DshChatModel();
-	model.accept(snapshot([
-		entry(2, { type: 'user/message', data: { content: [{ type: 'text', text: 'kept' }] } }),
-		entry(3, { type: 'user/message', data: { content: [{ type: 'text', text: 'tail' }] } }),
-	]));
-	const outcome = model.prependPage({
-		records: [
-			entry(2, { type: 'user/message', data: { content: [{ type: 'text', text: 'replaced' }] } }),
-			entry(3, { type: 'user/message', data: { content: [{ type: 'text', text: 'tail' }] } }),
-			entry(1, { type: 'user/message', data: { content: [{ type: 'text', text: 'older' }] } }),
-		] as readonly Readonly<Record<string, unknown>>[],
-		hasMore: true,
-	});
-	assert.equal(outcome.added, 1);
-	assert.equal(outcome.conflicts, 0, 'seq >= firstSeq is ignored, not counted as a conflict');
-	assert.equal(model.list[0].seq, 1);
-	const kept = model.list[1];
-	assert.equal(kept.kind, 'user');
-	if (kept.kind === 'user') {
-		assert.deepEqual(kept.content, [{ type: 'text', text: 'kept' }]);
-	}
-});
-
-test('prependPage counts a same-seq payload mismatch inside one page and keeps the first event', () => {
-	const model = new DshChatModel();
-	const outcome = model.prependPage({
-		records: [
-			entry(1, { type: 'user/message', data: { content: [{ type: 'text', text: 'first' }] } }),
-			entry(1, { type: 'user/message', data: { content: [{ type: 'text', text: 'other' }] } }),
-		] as readonly Readonly<Record<string, unknown>>[],
-		hasMore: true,
-	});
-	assert.equal(outcome.conflicts, 1);
-	assert.equal(outcome.added, 1);
-	const node = model.list[0];
-	assert.equal(node.kind, 'user');
-	if (node.kind === 'user') {
-		assert.deepEqual(node.content, [{ type: 'text', text: 'first' }]);
-	}
-});
-
-test('an empty history page forces hasMore false', () => {
-	const model = new DshChatModel();
-	model.accept(snapshot([
-		entry(2, { type: 'user/message', data: { content: [{ type: 'text', text: 'only' }] } }),
-	]));
-	const outcome = model.prependPage({ records: [], hasMore: true });
-	assert.equal(outcome.hasMore, false);
-	assert.equal(model.hasMore(), false);
+	accept(model, [
+		event(1, 'user/message', {
+			source: { kind: 'time-context' },
+			content: [{ type: 'text', text: 'now' }],
+		}),
+	]);
 	assert.equal(model.list.length, 1);
+	assert.equal(model.list[0].kind, 'context');
+});
+
+test('assistant blocks keep reasoning and tool-call kinds verbatim', () => {
+	const model = new DshChatModel();
+	accept(model, [
+		event(1, 'assistant/message', {
+			turn: 1,
+			step: 1,
+			message: {
+				content: [
+					{ type: 'reasoning', text: 'think' },
+					{ type: 'tool-call', id: 'call-1', name: 'read', arguments: '{"path":"a"}' },
+					{ type: 'text', text: 'done' },
+				],
+			},
+		}),
+	]);
+	const node = model.list[0];
+	assert.equal(node.kind, 'assistant');
+	if (node.kind === 'assistant') {
+		assert.deepEqual(node.blocks.map(block => block.kind), ['reasoning', 'tool-call', 'text']);
+	}
 });
 
 test('subagent/catalog becomes a catalog node and does not invent missing fields', () => {
 	const model = new DshChatModel();
-	model.accept(snapshot([
-		entry(4, { type: 'subagent/catalog', data: { version: 0, childId: 'child-1', mode: 'continuable', label: 'Look up', name: 'lookup' } }),
-	]));
+	accept(model, [
+		event(1, 'subagent/catalog', { childId: 'c-1', childCreatedAt: 5, mode: 'continuable', label: 'reviewer', name: 'reviewer', version: 3 }),
+	]);
+	assert.equal(model.list.length, 1);
 	const node = model.list[0];
 	assert.equal(node.kind, 'subagent-catalog');
 	if (node.kind === 'subagent-catalog') {
-		assert.equal(node.childId, 'child-1');
-		assert.equal(node.mode, 'continuable');
-		assert.equal(node.label, 'Look up');
-		assert.equal(node.name, 'lookup');
-		assert.equal(node.version, 0);
-		assert.equal('childCreatedAt' in node, false);
-		assert.equal(node.raw && typeof node.raw === 'object' && (node.raw as { type?: string }).type, 'subagent/catalog');
+		assert.equal(node.name, 'reviewer');
+		assert.equal(node.version, 3);
 	}
 });
 
-test('subagent-settled user messages are notices, not user bubbles, even without text', () => {
+test('subagent-settled user messages are notices, not user bubbles', () => {
 	const model = new DshChatModel();
-	model.accept(snapshot([
-		entry(5, { type: 'user/message', data: { content: [], source: { kind: 'subagent-settled', stopReason: 'completed' } } }),
-		entry(6, { type: 'user/message', data: { content: [{ type: 'text', text: 'relay' }], source: { kind: 'agent-message' } } }),
-	]));
-	assert.deepEqual(model.list.map(node => node.kind), ['subagent-notice', 'subagent-notice']);
-	const settled = model.list[0];
-	if (settled.kind === 'subagent-notice') {
-		assert.deepEqual(settled.source, { kind: 'subagent-settled', stopReason: 'completed' });
-		assert.deepEqual(settled.content, []);
+	accept(model, [
+		event(1, 'user/message', { source: { kind: 'subagent-settled' }, content: [{ type: 'text', text: 'relay' }] }),
+	]);
+	assert.equal(model.list.length, 1);
+	assert.equal(model.list[0].kind, 'subagent-notice');
+});
+
+test('session/end-seed(inherited) becomes an inherited-history marker', () => {
+	const model = new DshChatModel();
+	accept(model, [event(1, 'session/end-seed', { inherited: true })]);
+	assert.equal(model.list.length, 1);
+	assert.equal(model.list[0].kind, 'inherited-history');
+});
+
+test('non-inherited session/end-seed produces no marker', () => {
+	const model = new DshChatModel();
+	accept(model, [event(1, 'session/end-seed', { inherited: false })]);
+	assert.equal(model.list.length, 0);
+});
+
+test('internal non-surface events produce no visible node', () => {
+	const model = new DshChatModel();
+	accept(model, [event(1, 'turn/start', { turn: 1 })]);
+	assert.equal(model.list.length, 0);
+});
+
+test('tool-result keeps args/subCalls/isError required', () => {
+	const model = new DshChatModel();
+	accept(model, [
+		event(1, 'tool/result', {
+			message: { source: { callId: 'call-1' }, content: [{ type: 'text', text: 'body' }], isError: false },
+			call: { name: 'read', argsRaw: '{"path":"a"}' },
+			args: { path: 'a' },
+			subCalls: [],
+		}),
+	]);
+	const node = model.list[0];
+	assert.equal(node.kind, 'tool-result');
+	if (node.kind === 'tool-result') {
+		assert.deepEqual(node.args, { path: 'a' });
+		assert.equal(node.isError, false);
+		assert.deepEqual(node.subCalls, []);
 	}
 });
 
-test('a later snapshot drops history events from the previous session window', () => {
+test('clear drops the old session so a switch cannot leak nodes', () => {
 	const model = new DshChatModel();
-	model.prependPage({
-		records: [
-			entry(1, { type: 'user/message', data: { content: [{ type: 'text', text: 'old' }] } }),
-		] as readonly Readonly<Record<string, unknown>>[],
-		hasMore: true,
-	});
-	model.accept(snapshot([
-		entry(9, { type: 'user/message', data: { content: [{ type: 'text', text: 'fresh' }] } }),
-	]));
-	assert.equal(model.firstSeq(), 9);
+	accept(model, [event(1, 'user/message', { source: { kind: 'user' }, content: [{ type: 'text', text: 'old' }] })]);
+	assert.equal(model.list.length, 1);
+	model.clear();
+	assert.equal(model.list.length, 0);
+	assert.equal(model.firstSeq(), undefined);
+});
+
+test('a later conversation drops nodes from the previous session window', () => {
+	const model = new DshChatModel();
+	accept(model, [event(1, 'user/message', { source: { kind: 'user' }, content: [{ type: 'text', text: 'first' }] })]);
+	accept(model, [event(9, 'user/message', { source: { kind: 'user' }, content: [{ type: 'text', text: 'second' }] })]);
 	assert.equal(model.list.length, 1);
 	assert.equal(model.list[0].seq, 9);
+});
+
+test('acceptConversation builds the node tree straight from typed nodes', () => {
+	const model = new DshChatModel();
+	model.acceptConversation({
+		hasMore: true,
+		nodes: [
+			{ kind: 'user', seq: 3, time: 3, content: [{ type: 'text', text: 'typed' }] },
+			{ kind: 'subagent-catalog', seq: 4, time: 4, childId: 'c-1', mode: 'continuable', name: 'reviewer', version: 3 },
+			{ kind: 'assistant', seq: 5, time: 5, turn: 1, step: 1, blocks: [{ kind: 'text', text: 'ok' }] },
+			{ kind: 'tool-result', seq: 6, time: 6, callId: 'call-1', name: 'read', args: { path: 'a' }, content: [{ type: 'text', text: 'body' }], isError: false, subCalls: [] },
+		],
+	} as never);
+	assert.deepEqual(model.list.map(node => node.kind), ['user', 'subagent-catalog', 'assistant', 'tool-result']);
+	assert.equal(model.hasMore(), true);
+	const catalog = model.list[1];
+	assert.equal(catalog.kind, 'subagent-catalog');
+	if (catalog.kind === 'subagent-catalog') {
+		assert.equal(catalog.name, 'reviewer');
+		assert.equal(catalog.childId, 'c-1');
+	}
+});
+
+test('acceptConversation keeps command nodes keyed by commandId', () => {
+	const model = new DshChatModel();
+	model.acceptConversation({
+		hasMore: false,
+		nodes: [{ kind: 'command', seq: 7, time: 7, commandId: 'cmd-1', name: 'plan', args: null, outcome: { kind: 'success' } }],
+	} as never);
+	assert.equal(model.list.length, 1);
+	const command = model.list[0];
+	assert.equal(command.kind, 'command');
+	if (command.kind === 'command') {
+		assert.equal(command.commandId, 'cmd-1');
+		assert.equal(command.outcome?.kind, 'success');
+	}
+});
+
+test('acceptConversation keeps firstSeq and token usage correct on the typed path', () => {
+	const model = new DshChatModel();
+	model.acceptConversation({
+		hasMore: true,
+		nodes: [
+			{ kind: 'user', seq: 12, time: 12, content: [{ type: 'text', text: 'q' }] },
+			{
+				kind: 'assistant', seq: 13, time: 13, turn: 2, step: 1,
+				blocks: [{ kind: 'text', text: 'a' }],
+				usage: { inputTokens: 100, outputTokens: 20, cacheReadTokens: 30, cacheWriteTokens: 5 },
+			},
+		],
+	} as never);
+	assert.equal(model.firstSeq(), 12);
+	assert.deepEqual(model.tokenUsage(), {
+		uncachedInputTokens: 65,
+		cacheReadTokens: 30,
+		cacheWriteTokens: 5,
+		outputTokens: 20,
+	});
+	assert.deepEqual(model.located.map(entry => [entry.turn, entry.step]), [[undefined, undefined], [2, 1]]);
+});
+
+test('acceptConversation resets previous token usage instead of accumulating across sessions', () => {
+	const model = new DshChatModel();
+	model.acceptConversation({
+		hasMore: false,
+		nodes: [{ kind: 'assistant', seq: 1, time: 1, turn: 1, step: 1, blocks: [{ kind: 'text', text: 'a' }], usage: { inputTokens: 10, outputTokens: 1 } }],
+	} as never);
+	assert.ok(model.tokenUsage() !== undefined);
+	model.acceptConversation({ hasMore: false, nodes: [] } as never);
+	assert.equal(model.tokenUsage(), undefined);
+	assert.equal(model.firstSeq(), undefined);
+});
+
+test('prependPage merges an older page through the projector, keeping seq order', () => {
+	const model = new DshChatModel();
+	accept(model, [event(9, 'user/message', { source: { kind: 'user' }, content: [{ type: 'text', text: 'newer' }] })]);
+	const page = {
+		hasMore: true,
+		records: [
+			{ type: 'event', event: event(2, 'user/message', { source: { kind: 'user' }, content: [{ type: 'text', text: 'older' }] }) },
+		],
+	};
+	const result = model.prependPage(page as never);
+	assert.equal(result.added, 1);
+	assert.equal(result.firstSeq, 2);
+	assert.deepEqual(model.list.map(node => node.seq), [2, 9]);
+});
+
+test('prependPage skips records that are not strictly older', () => {
+	const model = new DshChatModel();
+	accept(model, [event(5, 'user/message', { source: { kind: 'user' }, content: [{ type: 'text', text: 'current' }] })]);
+	const result = model.prependPage({
+		hasMore: false,
+		records: [{ type: 'event', event: event(5, 'user/message', { source: { kind: 'user' }, content: [{ type: 'text', text: 'dup' }] }) }],
+	} as never);
+	assert.equal(result.added, 0);
+	assert.equal(model.list.length, 1);
+});
+
+test('an empty history page forces hasMore false', () => {
+	const model = new DshChatModel();
+	accept(model, [event(3, 'user/message', { source: { kind: 'user' }, content: [{ type: 'text', text: 'x' }] })], true);
+	assert.equal(model.hasMore(), true);
+	model.prependPage({ hasMore: true, records: [] } as never);
 	assert.equal(model.hasMore(), false);
+});
+
+test('the model no longer parses bare follow frames', () => {
+	const model = new DshChatModel();
+	// 手册 §5.4：模型层只吃 typed conversation；裸帧一律不产生变更。
+	assert.deepEqual(model.accept({ type: 'snapshot', records: [] }), []);
+	assert.deepEqual(model.accept({ type: 'event', event: event(1, 'user/message', {}) }), []);
+	assert.deepEqual(model.accept({ type: 'assistant-stream', frame: { type: 'start', attemptId: 'a1', revision: 1 } }), []);
+	assert.equal(model.list.length, 0);
 });

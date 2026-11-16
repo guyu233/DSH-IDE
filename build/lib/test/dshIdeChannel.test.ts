@@ -48,6 +48,7 @@ const ALL_METHODS: DshIdeMethod[] = [
 	'accountGetState', 'accountGetProfile',
 	'archiveSession', 'unarchiveSession', 'searchSessions',
 	'composerState', 'presentationSettings', 'setTeamEnabled', 'setAgentPreset',
+	'addAttachment', 'removeAttachment', 'setGoal', 'listSkills', 'openInApp', 'dismissQuotaNotice',
 ];
 
 interface FakeBackend extends DshIdeBackend {
@@ -85,7 +86,7 @@ test('P3 error codes are declared and distinct', () => {
 	const all = [DSH_IDE_FEATURE_UNAVAILABLE, DSH_IDE_INVALID_ARGUMENT, DSH_IDE_ALREADY_RESOLVED, DSH_IDE_SESSION_SWITCHED, DSH_IDE_SNAPSHOT_STALE];
 	assert.equal(new Set(all).size, all.length);
 	assert.equal(DSH_IDE_CHANNEL, 'dshIde');
-	assert.equal(DSH_IDE_WIRE_REVISION, 3, 'follow frames replace the projected rows');
+	assert.equal(DSH_IDE_WIRE_REVISION, 4, 'typed chat projections bump the snapshot revision');
 });
 
 // ---------------------------------------------------------------------------
@@ -204,7 +205,7 @@ const VALID: Record<DshIdeMethod, unknown> = {
 	rewind: { sessionId: 's-1', to: 'p0' },
 	loadOlder: { sessionId: 's-1', beforeSeq: 7 },
 	answerApproval: { requestId: 'r1', decision: 'approve' },
-	answerQuestion: { requestId: 'r1', answer: 'yes' },
+	answerQuestion: { requestId: 'r1', answer: { answers: [{ id: 'q', selected: ['yes'] }] } },
 	cancelRequest: { requestId: 'r1' },
 	setModel: { model: 'deepseek/deepseek-chat' },
 	setEffort: { effort: 'high' },
@@ -226,6 +227,12 @@ const VALID: Record<DshIdeMethod, unknown> = {
 	presentationSettings: {},
 	setTeamEnabled: { enabled: false },
 	setAgentPreset: { preset: 'create' },
+	addAttachment: { attachment: { attachmentId: 'img-1', mediaType: 'image/png', bytes: 3, width: 1, height: 1 } },
+	removeAttachment: { attachmentId: 'img-1' },
+	setGoal: { action: 'create', objective: 'ship the chat baseline' },
+	listSkills: {},
+	openInApp: { target: 'readme.md' },
+	dismissQuotaNotice: { seq: 1 },
 };
 
 async function openedChannel(backend = fakeBackend()) {
@@ -235,7 +242,7 @@ async function openedChannel(backend = fakeBackend()) {
 	return { view, channel, backend, first };
 }
 
-test('channel dispatches all 30 DTO methods through validateDshIdeInput', async () => {
+test('channel dispatches all 36 DTO methods through validateDshIdeInput', async () => {
 	const { channel, backend } = await openedChannel();
 	for (const method of ALL_METHODS) {
 		const output = await channel.call<{ value: unknown }>('ctx-a', method, VALID[method]);

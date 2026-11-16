@@ -296,7 +296,8 @@ test('list methods project only neutral fields', async () => {
 		{ sessionId: 's-2', workspaceId: 'w-1', updatedAt: 1, running: false, blank: false, agentAvailable: false },
 	]);
 	assert.deepEqual(await bridge.invoke('listModels', {}), [{ provider: 'deepseek', model: 'chat', name: 'DeepSeek Chat' }]);
-	assert.equal(await bridge.invoke('fetchRowDetail', { rowId: 'row:1' }), null);
+	// 手册 §5.3 第 4 条：官方无只读行详情端点，必须明确 FEATURE_UNAVAILABLE，不返回 null。
+	await assert.rejects(bridge.invoke('fetchRowDetail', { rowId: 'row:1' }), error => error.code === 'dsh-ide/feature-unavailable');
 });
 
 test('session listing returns no data and makes no reads without a binding', async () => {
@@ -1192,6 +1193,74 @@ test('composerState keeps only the fields the input bar renders', async () => {
 	});
 });
 
+test('listSkills projects only the neutral skill card fields', async () => {
+	const calls = [];
+	const { bridge } = bridgeWith({
+		skills: {
+			list: async options => {
+				calls.push(options);
+				return [
+					{
+						name: 'dsh-doc',
+						description: 'DSH 文档',
+						whenToUse: '查 DSH 事实时',
+						invocation: { modelInvocable: true, userInvocable: true },
+						source: 'bundled',
+						provider: 'dsh-agent-preset',
+						path: 'C:/secret/absolute/path.md',
+						resourceBase: { kind: 'directory', path: 'C:/secret' },
+					},
+					{
+						name: 'virtual-only',
+						description: '虚拟技能',
+						invocation: { modelInvocable: false, userInvocable: true },
+						source: 'runtime',
+						provider: 'local',
+					},
+					// 缺必填字段的条目不投影，也不伪造默认值。
+					{ name: '', description: 'bad', invocation: { modelInvocable: true, userInvocable: true }, provider: 'x' },
+					null,
+				];
+			},
+		},
+	});
+	bridge.open({ view: 'chat', params: { sessionId: 's-1' } });
+	const skills = await bridge.invoke('listSkills', {});
+	// scope 用绑定会话 id，和官方 ui-skill 的用法一致。
+	assert.deepEqual(calls, [{ scope: 's-1' }]);
+	assert.deepEqual(skills, [
+		{
+			name: 'dsh-doc',
+			description: 'DSH 文档',
+			whenToUse: '查 DSH 事实时',
+			modelInvocable: true,
+			userInvocable: true,
+			provider: 'dsh-agent-preset',
+		},
+		{
+			name: 'virtual-only',
+			description: '虚拟技能',
+			modelInvocable: false,
+			userInvocable: true,
+			provider: 'local',
+		},
+	]);
+	// 绝对路径与 resourceBase 一律不下发。
+	for (const skill of skills) {
+		assert.equal('path' in skill, false);
+		assert.equal('resourceBase' in skill, false);
+	}
+});
+
+test('listSkills rejects explicitly when the skills service is unavailable', async () => {
+	const { bridge } = bridgeWith();
+	bridge.open({ view: 'chat', params: { sessionId: 's-1' } });
+	await assert.rejects(
+		() => bridge.invoke('listSkills', {}),
+		error => error.code === 'dsh-ide/feature-unavailable',
+	);
+});
+
 test('setTeamEnabled and setAgentPreset call the official services on the live agent', async () => {
 	const agent = { id: 's-1' };
 	const calls = [];
@@ -1205,4 +1274,48 @@ test('setTeamEnabled and setAgentPreset call the official services on the live a
 	assert.deepEqual(await bridge.invoke('setAgentPreset', { preset: 'create' }), { accepted: true });
 	assert.deepEqual(calls, [['team', agent, true], ['preset', agent, 'create']]);
 	await assert.rejects(() => bridge.invoke('setAgentPreset', { preset: 'has space' }), error => error.code === INVALID_ARGUMENT);
+});
+
+test('setGoal routes each action to the official goals service', async () => {
+	const agent = { id: 's-1' };
+	const calls = [];
+	const view = {
+		id: 'g-1', revision: 2, objective: '完成手册', phase: 'active', maxGoalRounds: 8,
+		roundsStarted: 1, createdAt: 10, updatedAt: 20, activation: 'armed',
+	};
+	const goals = {
+		remoteExportCreate: (who, request) => { calls.push(['create', who, request]); return { ref: { id: 'g-1', revision: 1 } }; },
+		edit: (who, ref, request) => { calls.push(['edit', who, ref, request]); return view; },
+		pause: (who, ref) => { calls.push(['pause', who, ref]); return { ...view, phase: 'paused' }; },
+		resume: (who, ref) => { calls.push(['resume', who, ref]); return view; },
+		complete: (who, ref) => { calls.push(['complete', who, ref]); return { ...view, phase: 'complete' }; },
+		clear: (who, ref) => { calls.push(['clear', who, ref]); return ref; },
+	};
+	const { bridge } = bridgeWith({
+		agents: { get: id => id === 's-1' ? agent : undefined },
+		goals,
+	});
+	bridge.open({ view: 'chat', params: { sessionId: 's-1' } });
+
+	await bridge.invoke('setGoal', { action: 'create', objective: '完成手册', maxGoalRounds: 8 });
+	await bridge.invoke('setGoal', { action: 'edit', id: 'g-1', revision: 1, objective: '新目标' });
+	await bridge.invoke('setGoal', { action: 'pause', id: 'g-1', revision: 2 });
+	await bridge.invoke('setGoal', { action: 'resume', id: 'g-1', revision: 3 });
+	await bridge.invoke('setGoal', { action: 'complete', id: 'g-1', revision: 4 });
+	await bridge.invoke('setGoal', { action: 'clear', id: 'g-1', revision: 5 });
+
+	assert.deepEqual(calls.map(call => call[0]), ['create', 'edit', 'pause', 'resume', 'complete', 'clear']);
+	// create 走官方远程导出，入参形状对齐 CreateGoalRequest。
+	assert.deepEqual(calls[0][2], { objective: '完成手册', maxGoalRounds: 8 });
+	// 其余动作都带 CAS 引用。
+	assert.deepEqual(calls[2][2], { id: 'g-1', revision: 2 });
+});
+
+test('setGoal refuses when there is no live agent', async () => {
+	const { bridge } = bridgeWith();
+	bridge.open({ view: 'chat', params: { sessionId: 's-1' } });
+	await assert.rejects(
+		() => bridge.invoke('setGoal', { action: 'create', objective: 'x' }),
+		error => error.code === 'dsh-ide/feature-unavailable',
+	);
 });

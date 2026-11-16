@@ -84,6 +84,28 @@ test('a version gap fails closed with SNAPSHOT_STALE and keeps the rendered fram
 	consumer.dispose();
 });
 
+test('a ready view keeps the whole typed payload for renderers', async () => {
+	const consumer = new DshIdeConsumer();
+	const seen: DshIdeConsumerState[] = [];
+	consumer.onDidChangeFrame(({ state }) => seen.push(state));
+	const conversation = { hasMore: false, nodes: [{ kind: 'user', seq: 1, time: 1, content: [{ type: 'text', text: 'hi' }] }] };
+	const snapshot: DshIdeSnapshot = {
+		wireRevision: DSH_IDE_WIRE_REVISION,
+		channelId: 'ch-1',
+		version: 1,
+		state: { state: 'ready', view: { frame: frame(), conversation, quotaNotice: { code: 'QUOTA', seq: 3 } } },
+	};
+	consumer.accept(snapshot);
+	await tick();
+	const rendered = seen.at(-1);
+	// `frame` 只作兼容回退；`view` 必须带全 typed 字段，渲染层才能不解析裸帧。
+	assert.deepEqual(rendered?.frame, frame());
+	assert.deepEqual(rendered?.view?.conversation, conversation);
+	assert.deepEqual(rendered?.view?.quotaNotice, { code: 'QUOTA', seq: 3 });
+	assert.equal(consumer.state.view, rendered?.view);
+	consumer.dispose();
+});
+
 test('a backwards version fails closed instead of overwriting state', async () => {
 	const consumer = new DshIdeConsumer();
 	consumer.accept(starting(2));

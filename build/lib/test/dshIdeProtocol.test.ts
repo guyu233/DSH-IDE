@@ -42,7 +42,7 @@ const VALID_ARGS: Record<DshIdeMethod, unknown> = {
 	rewind: { sessionId: 's1', to: 'p0' },
 	loadOlder: { sessionId: 's1', beforeSeq: 7 },
 	answerApproval: { requestId: 'r1', decision: 'approve' },
-	answerQuestion: { requestId: 'r1', answer: 'yes' },
+	answerQuestion: { requestId: 'r1', answer: { answers: [{ id: 'q', selected: ['yes', 'no'] }] } },
 	cancelRequest: { requestId: 'r1' },
 	setModel: { model: 'deepseek-chat' },
 	setEffort: { effort: 'high' },
@@ -64,12 +64,18 @@ const VALID_ARGS: Record<DshIdeMethod, unknown> = {
 	setAgentPreset: { preset: 'create' },
 	accountGetState: { client: { version: '2.0.0', locale: 'zh-CN', timezoneOffsetSeconds: 28800 } },
 	accountGetProfile: { client: { version: '2.0.0', locale: 'zh-CN', timezoneOffsetSeconds: 28800 } },
+	addAttachment: { attachment: { attachmentId: 'img-1', mediaType: 'image/png', bytes: 3, width: 1, height: 1 } },
+	removeAttachment: { attachmentId: 'img-1' },
+	setGoal: { action: 'create', objective: 'ship the chat baseline' },
+	listSkills: {},
+	openInApp: { target: 'file:///workspace/readme.md' },
+	dismissQuotaNotice: { seq: 1 },
 };
 
 const ALL_METHODS = Object.keys(VALID_ARGS) as DshIdeMethod[];
 
-test('method whitelist has all 30 methods', () => {
-	assert.equal(ALL_METHODS.length, 30);
+test('method whitelist has all 36 methods', () => {
+	assert.equal(ALL_METHODS.length, 36);
 	assert.equal(new Set(ALL_METHODS).size, ALL_METHODS.length);
 });
 
@@ -114,7 +120,10 @@ test('validateDshIdeInput rejects missing/invalid required fields', () => {
 	assert.throws(() => validateDshIdeInput('submit', { text: '  ' }), /non-empty string/);
 	assert.throws(() => validateDshIdeInput('rewind', { sessionId: 's1' }), /non-empty string/);
 	assert.throws(() => validateDshIdeInput('answerApproval', { requestId: 'r1', decision: 'maybe' }), /decision/);
-	assert.throws(() => validateDshIdeInput('answerQuestion', { requestId: 'r1' }), /must be a JSON value/);
+	assert.throws(() => validateDshIdeInput('answerQuestion', { requestId: 'r1' }), /must be an object/);
+	assert.throws(() => validateDshIdeInput('answerQuestion', { requestId: 'r1', answer: 'yes' }), /must be an object/);
+	assert.throws(() => validateDshIdeInput('setGoal', { action: 'create' }), /non-empty string/);
+	assert.throws(() => validateDshIdeInput('setGoal', { action: 'pause', id: 'g1' }), /revision/);
 	assert.throws(() => validateDshIdeInput('runCommand', { command: 'help', args: [1] }), /array of strings/);
 	assert.throws(() => validateDshIdeInput('fetchRowDetail', { rowId: '' }), /non-empty string/);
 });
@@ -169,6 +178,52 @@ test('validateDshIdeSnapshot accepts positive cases', () => {
 	const view = { frame: { type: 'event', event: { type: 'user/message', seq: 1, time: 1, data: {} } } };
 	assert.doesNotThrow(() => validateDshIdeSnapshot(snapshot({ version: 42, state: { state: 'ready', view } })));
 	assert.throws(() => validateDshIdeSnapshot(snapshot({ version: 42, state: { state: 'ready', message: 'ok' } })), /must be an object/);
+});
+
+test('validateDshIdeSnapshot accepts official typed chat projections and rejects unknown ones', () => {
+	const image = { attachmentId: 'img-1', mediaType: 'image/png', bytes: 3, width: 1, height: 1 };
+	const view = {
+		frame: { type: 'snapshot' },
+		conversation: {
+			hasMore: false,
+			nodes: [{ kind: 'user', seq: 1, time: 2, content: [{ type: 'text', text: 'hi' }, { type: 'image', attachment: image }] }],
+		},
+		deliverables: [{ turn: 1, callId: 'present-1', files: [{ path: 'notes/a.txt', description: 'notes' }] }],
+		attachments: [image],
+		plan: { active: true, pending: false },
+		goal: {
+			goal: { id: 'g1', revision: 1, objective: 'ship', phase: 'blocked', maxGoalRounds: 4, blockedReason: { code: 'need-input', message: 'waiting' } },
+			roundsStarted: 1,
+			createdAt: 3,
+			updatedAt: 4,
+			activation: 'disarmed',
+		},
+		todos: [{ content: 'write the contract', status: 'in_progress' }],
+		skills: [{ name: 'grep', description: 'search', modelInvocable: true, userInvocable: false, provider: 'local' }],
+		tokenUsageDelta: { inputTokens: 10, outputTokens: 2, cacheReadTokens: 1 },
+		quotaNotice: { code: 'ACCOUNT_QUOTA', seq: 2, message: '额度已用尽' },
+		composer: {
+			model: { current: { provider: 'deepseek', model: 'chat', effort: 'high' }, groups: [{ id: 'deepseek', name: 'DeepSeek', models: [{ id: 'chat', name: 'Chat', efforts: [{ id: 'high', name: 'High' }], defaultEffort: 'high' }] }] },
+			permission: { current: 'default', options: [{ value: 'default', name: 'Default' }] },
+			team: { enabled: false, confirmDisable: true },
+			preset: null,
+		},
+		pending: [{
+			eventId: 'e1',
+			event: 'approval/request',
+			agentId: 'agent-1',
+			request: { toolName: 'shell', callId: 'c1', reason: 'run', displayReason: { en: 'Run a command', 'zh-CN': '运行命令' } },
+		}],
+	};
+	assert.doesNotThrow(() => validateDshIdeSnapshot(snapshot({ version: 1, state: { state: 'ready', view } })));
+	assert.throws(() => validateDshIdeSnapshot(snapshot({
+		version: 1,
+		state: { state: 'ready', view: { frame: { type: 'event' }, conversation: { hasMore: false, nodes: [{ kind: 'plugin-card', seq: 1, time: 1 }] } } },
+	})), /not an official conversation node/);
+	assert.throws(() => validateDshIdeSnapshot(snapshot({
+		version: 1,
+		state: { state: 'ready', view: { frame: { type: 'event' }, contributor: 'third-party' } },
+	})), /unknown field/);
 });
 
 test('validateDshIdeSnapshot rejects unknown fields', () => {
@@ -314,6 +369,22 @@ test('runCommand contract: args forbid whitespace and slash injection', () => {
 		assert.throws(() => validateDshIdeInput('runCommand', { command: 'plan', args: [bad] }), /whitespace\/slash/,
 			`arg ${JSON.stringify(bad)} must be rejected`);
 	}
+});
+
+test('runCommand contract: attachments follow the image attachment whitelist', () => {
+	const image = { attachmentId: 'img-1', mediaType: 'image/png', bytes: 3, width: 1, height: 1 };
+	assert.doesNotThrow(() => validateDshIdeInput('runCommand', { command: 'present', args: ['x'], attachments: [image] }));
+	assert.doesNotThrow(() => validateDshIdeInput('runCommand', { command: 'present', attachments: [] }));
+	// 附件必须逐字段命中 ImageAttachmentRef，路径/URL 形状一律拒绝。
+	assert.throws(() => validateDshIdeInput('runCommand', {
+		command: 'present',
+		attachments: [{ path: 'C:/secret.png' }],
+	}), /unknown field/);
+	assert.throws(() => validateDshIdeInput('runCommand', {
+		command: 'present',
+		attachments: [{ ...image, mediaType: 'text/plain' }],
+	}), /supported image media type/);
+	assert.throws(() => validateDshIdeInput('runCommand', { command: 'present', attachments: 'nope' }), /must be an array/);
 });
 
 test('setPermissionPreset contract: preset uses the same token constraint', () => {

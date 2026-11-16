@@ -60,7 +60,6 @@ const STEPS = Object.freeze([
 	{ name: 'projection-golden', script: 'verify:dsh-ide-projection-golden' },
 	{ name: 'contract', script: 'verify:dsh-ide-contract' },
 	{ name: 'test-dsh:all', script: 'test-dsh:all' },
-	{ name: 'docs-graph', script: 'verify:docs-graph' },
 ]);
 
 /**

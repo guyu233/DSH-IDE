@@ -669,6 +669,7 @@ BUILD_TARGETS.forEach(buildTarget => {
 					[path.join(dshClientOut, 'common', 'dshIdeComposer.js'), path.join('common', 'dshIdeComposer.js')],
 [path.join(dshClientOut, 'common', 'dshIdeLocationIndex.js'), path.join('common', 'dshIdeLocationIndex.js')],
 					[path.join(dshClientOut, 'common', 'dshIdeWaterfallNotice.js'), path.join('common', 'dshIdeWaterfallNotice.js')],
+					[path.join(dshClientOut, 'common', 'dshIdeRequestView.js'), path.join('common', 'dshIdeRequestView.js')],
 				];
 				for (const [from, to] of copyList) {
 					await fs.promises.cp(from, path.join(stagingRoot, to), { recursive: true });
