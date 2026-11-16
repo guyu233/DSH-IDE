@@ -24,6 +24,8 @@ export type DshViewKind =
 	| 'turn-error'
 	| 'turn-max-tokens'
 	| 'inherited-history'
+	| 'subagent-catalog'
+	| 'subagent-notice'
 	| 'unknown';
 
 /** 所有子视图的统一输入。 */

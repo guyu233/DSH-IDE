@@ -239,6 +239,32 @@ export interface DshInheritedHistoryNode extends DshNodeBase {
 	readonly turn?: number;
 }
 
+/**
+ * 父会话上的 `subagent/catalog` 发现事实。
+ * 只保留事件 data 里真实有的字段，不补名字、耗时或子会话正文。
+ */
+export interface DshSubagentCatalogNode extends DshNodeBase {
+	readonly kind: 'subagent-catalog';
+	readonly childId?: string;
+	readonly childCreatedAt?: number;
+	readonly mode?: string;
+	readonly label?: string;
+	readonly name?: string;
+	readonly version?: number;
+	readonly turn?: number;
+}
+
+/**
+ * `user/message` 且 `source.kind` 为 `subagent-settled` 或 `agent-message`。
+ * DSH 把它们画成 turn trigger，不是用户气泡。`source` 原样保留。
+ */
+export interface DshSubagentNoticeNode extends DshNodeBase {
+	readonly kind: 'subagent-notice';
+	readonly content: readonly DshContentBlock[];
+	readonly source: unknown;
+	readonly turn?: number;
+}
+
 /** 聊天里的全部节点（DSH 的完整集合，一个都不丢）。 */
 export type DshChatNode =
 	| DshUserMessageNode
@@ -252,7 +278,9 @@ export type DshChatNode =
 	| DshTurnErrorNode
 	| DshTurnMaxTokensNode
 	| DshUnknownSurfaceNode
-	| DshInheritedHistoryNode;
+	| DshInheritedHistoryNode
+	| DshSubagentCatalogNode
+	| DshSubagentNoticeNode;
 
 /** 渲染层只需要 `AssistantBlock` 的窄形状（与 DSH 定义同构）。 */
 export type AssistantBlockLike = DshAssistantBlock;
@@ -537,6 +565,21 @@ export class DshChatModel extends Disposable {
 		const raw = event;
 
 		if (type === 'user/message') {
+			const source = data['source'];
+			const sourceKind = isRecord(source) ? stringOf(source['kind']) : undefined;
+			if (sourceKind === 'subagent-settled' || sourceKind === 'agent-message') {
+				const notice: DshSubagentNoticeNode = {
+					kind: 'subagent-notice',
+					...(stringOf(data['messageId']) === undefined ? {} : { messageId: stringOf(data['messageId'])! }),
+					seq,
+					time,
+					content: contentBlocksOf(data['content']),
+					source,
+					turn,
+					raw,
+				};
+				return this.put(`seq:${seq}`, notice);
+			}
 			const content = contentBlocksOf(data['content']);
 			if (content.length === 0) {
 				return [];
@@ -545,8 +588,6 @@ export class DshChatModel extends Disposable {
 			// source.kind !== 'user' 的是插件注入的模型可见上下文（time-context、
 			// skill-invocation、agent-instructions …），不是人发的消息。
 			// 这类事件要归到 ContextMessageNode 折叠行，不能画成右侧用户气泡。
-			const source = data['source'];
-			const sourceKind = isRecord(source) ? stringOf(source['kind']) : undefined;
 			if (sourceKind !== undefined && sourceKind !== 'user') {
 				const contextNode: DshContextMessageNode = {
 					kind: 'context',
@@ -772,6 +813,25 @@ export class DshChatModel extends Disposable {
 				raw,
 			};
 			return this.put(`seq:${seq}`, node as unknown as DshChatNode);
+		}
+
+		if (type === 'subagent/catalog') {
+			// 父会话上的子代理发现事实（`subagent/src/catalog.ts`）。不是 surface 事件，
+			// 但不能丢掉，否则父会话看不到子会话入口。字段缺了就不写，视图会显示缺失。
+			const node: DshSubagentCatalogNode = {
+				kind: 'subagent-catalog',
+				seq,
+				time,
+				...(stringOf(data['childId']) === undefined ? {} : { childId: stringOf(data['childId'])! }),
+				...(numberOf(data['childCreatedAt']) === undefined ? {} : { childCreatedAt: numberOf(data['childCreatedAt'])! }),
+				...(stringOf(data['mode']) === undefined ? {} : { mode: stringOf(data['mode'])! }),
+				...(stringOf(data['label']) === undefined ? {} : { label: stringOf(data['label'])! }),
+				...(stringOf(data['name']) === undefined ? {} : { name: stringOf(data['name'])! }),
+				...(numberOf(data['version']) === undefined ? {} : { version: numberOf(data['version'])! }),
+				turn,
+				raw,
+			};
+			return this.put(`seq:${seq}`, node);
 		}
 
 		if (type === 'session/end-seed' && data['inherited'] === true) {

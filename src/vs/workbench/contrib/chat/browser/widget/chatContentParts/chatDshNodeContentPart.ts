@@ -188,7 +188,7 @@ export function dshNodePartPlaintext(part: IChatDshNodePart): string {
 const KNOWN_KINDS: readonly DshViewKind[] = [
 	'user', 'steering', 'context', 'assistant', 'tool-call', 'tool-result',
 	'command', 'compaction', 'model-retry', 'turn-error', 'turn-max-tokens',
-	'inherited-history', 'unknown',
+	'inherited-history', 'subagent-catalog', 'subagent-notice', 'unknown',
 ];
 
 function asKind(value: unknown): DshViewKind | undefined {

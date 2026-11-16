@@ -408,6 +408,38 @@ test('an empty history page forces hasMore false', () => {
 	assert.equal(model.list.length, 1);
 });
 
+test('subagent/catalog becomes a catalog node and does not invent missing fields', () => {
+	const model = new DshChatModel();
+	model.accept(snapshot([
+		entry(4, { type: 'subagent/catalog', data: { version: 0, childId: 'child-1', mode: 'continuable', label: 'Look up', name: 'lookup' } }),
+	]));
+	const node = model.list[0];
+	assert.equal(node.kind, 'subagent-catalog');
+	if (node.kind === 'subagent-catalog') {
+		assert.equal(node.childId, 'child-1');
+		assert.equal(node.mode, 'continuable');
+		assert.equal(node.label, 'Look up');
+		assert.equal(node.name, 'lookup');
+		assert.equal(node.version, 0);
+		assert.equal('childCreatedAt' in node, false);
+		assert.equal(node.raw && typeof node.raw === 'object' && (node.raw as { type?: string }).type, 'subagent/catalog');
+	}
+});
+
+test('subagent-settled user messages are notices, not user bubbles, even without text', () => {
+	const model = new DshChatModel();
+	model.accept(snapshot([
+		entry(5, { type: 'user/message', data: { content: [], source: { kind: 'subagent-settled', stopReason: 'completed' } } }),
+		entry(6, { type: 'user/message', data: { content: [{ type: 'text', text: 'relay' }], source: { kind: 'agent-message' } } }),
+	]));
+	assert.deepEqual(model.list.map(node => node.kind), ['subagent-notice', 'subagent-notice']);
+	const settled = model.list[0];
+	if (settled.kind === 'subagent-notice') {
+		assert.deepEqual(settled.source, { kind: 'subagent-settled', stopReason: 'completed' });
+		assert.deepEqual(settled.content, []);
+	}
+});
+
 test('a later snapshot drops history events from the previous session window', () => {
 	const model = new DshChatModel();
 	model.prependPage({
