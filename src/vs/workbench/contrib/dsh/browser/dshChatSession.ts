@@ -587,7 +587,7 @@ function sameTodos(left: readonly DshIdeTodoView[], right: readonly DshIdeTodoVi
 	return true;
 }
 
-/** 技能列表是否与上一帧相同。 */
+/** 技能列表是否与上一帧相同（六个字段全比较，避免权限/来源变化被静默吞掉）。 */
 function sameSkills(left: readonly DshIdeSkillView[], right: readonly DshIdeSkillView[]): boolean {
 	if (left.length !== right.length) {
 		return false;
@@ -595,7 +595,12 @@ function sameSkills(left: readonly DshIdeSkillView[], right: readonly DshIdeSkil
 	for (let i = 0; i < left.length; i++) {
 		const a = left[i];
 		const b = right[i];
-		if (a.name !== b.name || a.description !== b.description || a.whenToUse !== b.whenToUse) {
+		if (a.name !== b.name
+			|| a.description !== b.description
+			|| a.whenToUse !== b.whenToUse
+			|| a.modelInvocable !== b.modelInvocable
+			|| a.userInvocable !== b.userInvocable
+			|| a.provider !== b.provider) {
 			return false;
 		}
 	}

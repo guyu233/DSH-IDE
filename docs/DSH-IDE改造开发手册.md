@@ -491,9 +491,9 @@ DshChatSession.acceptView / acceptConversation → DshChatModel（typed 节点�
 | 层 3 状态层 | 完成并冻结（§8.1） | `DshChatModel.acceptConversation` 只吃 typed 节点树（约 1150→730 行）；裸帧解析删除 |
 | 层 4 逐类 UI（降级翻译） | 完成（§8.1） | `dshChatHistory.ts` / `dshChatSessionContent.ts` / `dshSessionSearchCommands.ts` / `dshTeamCommands.ts` |
 
-门禁：`verify:dsh-ide-ci` 五步全 PASS（`DSH_INSTALLED_VERSION=0.2.2-rc.3`）；`test-dsh:all` PASS——本轮实测 `node --test` 365 项全过、mocha 7 项全过。全量 `tsc --noEmit` 仍 FAIL（既有 VS Code 文件，本批改动文件零错误，按 §5.5 记录）。
+门禁：`verify:dsh-ide-ci` 五步全 PASS（`DSH_INSTALLED_VERSION=0.2.2-rc.3`）；`test-dsh:all` PASS——本轮实测 `node --test` 369 项全过、mocha 7 项全过。全量 `tsc --noEmit` 仍 FAIL（既有 VS Code 文件，本批改动文件零错误，按 §5.5 记录）。
 
-> **口径说明**：§8.3 的「352 项」是第一阶段当时记录的计数，本轮未复算；本轮以实测的 `node --test 365 + mocha 7` 为准（新增 27 项：`dshChatSessionExtras` 4 + `dshChatHistoryNative` 7 + `dshSessionItemState` 5 + `dshIconArtwork` 4 + `dshIconReplacement` 3 + `dshIconsStyleSheet` 4）。
+> **口径说明**：§8.3 的「352 项」是第一阶段当时记录的计数，本轮未复算；本轮以实测的 `node --test 369 + mocha 7` 为准（新增 31 项：`dshChatSessionExtras` 5 + `dshChatHistoryNative` 10 + `dshSessionItemState` 5 + `dshIconArtwork` 4 + `dshIconReplacement` 3 + `dshIconsStyleSheet` 4）。
 
 ### 9.3 现状核对：草稿与新计划的差异（必须先认清）
 
@@ -542,7 +542,9 @@ DshChatSession.acceptView / acceptConversation → DshChatModel（typed 节点�
 3. **单测**：新增 `build/lib/test/dshChatSessionExtras.test.ts`（4 项：保存+getter、判重不重复 fire、bind 清空并通知、四字段到 history part 全程可达）；`dshChatSessionContent.test.ts` 同步覆盖 history 映射。
 4. **契约边界**：不改协议/通道/Host，只补层 3 冻结边界允许的只读暴露（§5 例外条款）。
 
-**验收（实测）**：`test-dsh:all` 349 项 PASS；`verify:dsh-ide-ci` 五步全 PASS（contract 在 `DSH_INSTALLED_VERSION=0.2.2-rc.3` 下 PASS）。
+**验收（实测）**：`test-dsh:all` PASS（369 项 node --test 全过 + mocha 7 项全过）；`verify:dsh-ide-ci` 五步全 PASS（contract 在 `DSH_INSTALLED_VERSION=0.2.2-rc.3` 下 PASS）。
+
+> **对抗式复核补记（子智能体 `glm-5.3-flash` + `hy4flash`）**：复核报出 3 个真缺陷并已修：① running 阶段 assistant 的 tool-call 块与独立 `tool-call` 节点会画两张卡（改为按 response 记账 `drawnCallIds`）；② 同一 response 内连续 `turn-error` 互相覆盖（第二次失败前先 `flush`）；③ `sameSkills` 只比 3/6 字段，`modelInvocable`/`userInvocable`/`provider` 变化被吞（已补齐）。另有 1 处低危：`quotaNotice` 会覆盖真实 `turn-error` 的 errorDetails（改为「已有错误时降级为 warning，不覆盖」）。四项均补了回归单测。
 
 #### 阶段 2-B：翻译层升级（history part → 真原生 content kind）
 
@@ -555,7 +557,7 @@ DshChatSession.acceptView / acceptConversation → DshChatModel（typed 节点�
 | B1 工具 | tool call / result / 子调用树 | `markdownContent` → `toolInvocation`（含 `toolInvocationSerialized`） | `chatListRenderer.ts:4603` | **已落地**：`tool-call`/`tool-result`/assistant `tool-call` block → `toolInvocationSerialized`（`simpleToolInvocation` 承载输入输出，`resultError` 承载失败，`subCalls` 递归展开）；已结束的 callId 去重，不重复出卡 |
 | B2 审批/问卷 | pending approval / question | `warning + command` → `confirmation` / `questionCarousel`（保留 `dsh.answerApproval/answerQuestion` 命令回传） | `:4585` / `:4615` | **不可行，保留降级**：`ChatConfirmationContentPart` 按钮只调 `chatService.sendRequest`（`chatConfirmationContentPart.ts:45-57`），无法回传 `dsh.answerApproval`；`questionCarousel` 回传要求 `resolveId` + `notifyQuestionCarouselAnswer`（`chatListRenderer.ts:5251-5253`），当前 `DshChatPending` 无 `IChatQuestion.type/options{id,label,value}/allowSkip`，且 `acceptPending` 只取第一题 |
 | B3 计划/变更 | plan / deliverables / diff | `info` / `reference` → `planReview` / `changesSummary` / `multiDiffData` | `:4617` / `:4619` / `:4570` | **不可行，保留降级**：`DshIdePlanView` 只有 `active/pending`（无 `title/content/actions`）；deliverable 只有字符串 `path`（无 URI 与 diff），`changesSummary`/`multiDiffData` 需要真实 `requestId`/URI |
-| B4 状态/错误 | running / 错误 / quota | 无或 `markdownContent` / `warning` → `working` / `errorDetails` / `warning` | `:4577` / `:4611` / `:4587` | **错误与额度已落地**：`turn-error` → response 级 `errorDetails`（含 `code`），`quotaNotice` → `errorDetails.isQuotaExceeded`；`working` 需跨层传 running，本轮不做（记录为后续项） |
+| B4 状态/错误 | running / 错误 / quota | 无或 `markdownContent` / `warning` → `working` / `errorDetails` / `warning` | `:4577` / `:4611` / `:4587` | **错误与额度已落地**：`turn-error` → response 级 `errorDetails`（含 `code`），`quotaNotice` → `errorDetails.isQuotaExceeded`；`working` 本轮不做——**结构性原因**：`IChatWorkingProgress` 只在渲染层联合 `IChatRendererContent`（`chatViewModel.ts:203`），**不在** `IChatProgress`（`chatService.ts:1641-1686`）里，而 `IChatSessionHistoryItem.response.parts` 的类型是 `IChatProgress[]`（`chatSessionsService.ts:357-370`）；把它塞进 history 会被 restorer 的 `acceptResponseProgress` 拒收。要走 `working` 必须在 content provider 之外另接活跃响应，属跨层改动，留作后续项 |
 | B5 思考/附件 | reasoning / attachments | `thinking` 已接；附件数量文本 → `IChatAttachmentWidgetRegistry` 的附件 chip | `:4638`；`chatAttachmentWidgetRegistry.ts:35-43,64` | **thinking 保留；附件 chip 不可行**：`IChatAttachmentWidgetRegistry` 是输入附件工厂（要 `IChatRequestVariableEntry` + sessionResource URI），不是 history part；`DshIdeImageAttachmentRef.attachmentId` 明确不是路径/URL |
 
 约束：
@@ -607,7 +609,7 @@ DshChatSession.acceptView / acceptConversation → DshChatModel（typed 节点�
 > **本轮修掉的真实回归**：替换分支最初直接 `continue`，把 `--vscode-icon-<id>-content` 根变量一起吞掉；`style.css` 等处直接消费这些变量（如 chevron-down），会让那些伪元素变空。现已改为「根变量照旧输出、只换 `::before` 规则」，并由上述集成单测钉住。
 5. **验证边界（未做，需用户真机）**：浅色/深色/高对比度、spin 动画、不同 font-size 的实际观感按 AGENTS §6 由用户在 2-E 执行；AI 不以代码推断观测结论。直接覆盖 `::before` 的 CSS 点（如 `chat.css:1436`）本轮未逐条加 mask 覆盖，记录为「已知混合状态」，与草稿 §7.5 的预期一致。
 
-**门禁（实测）**：`test-dsh:all` PASS（365 项 node --test 全过 + mocha 7 项全过）；`verify:dsh-ide-ci` 五步全 PASS；生成脚本 `--check` PASS（无漂移）。
+**门禁（实测）**：`test-dsh:all` PASS（369 项 node --test 全过 + mocha 7 项全过）；`verify:dsh-ide-ci` 五步全 PASS；生成脚本 `--check` PASS（无漂移）。
 
 #### 阶段 2-E：真机验收与收尾
 

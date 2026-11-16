@@ -123,6 +123,14 @@ export function toHistory(
 	let turnError: DshHistoryErrorDetails | undefined;
 	/** 已经有结果的 callId：工具调用块与工具结果只画一行，避免同一调用出现两张卡。 */
 	const settledCallIds = collectSettledCallIds(session.nodes());
+	/**
+	 * 本 response 里已经画过的 callId（含 assistant 块 / 独立 tool-call 节点 / tool-result）。
+	 *
+	 * `settledCallIds` 只能解决「调用 ↔ 结果」的去重；同一次调用还可能同时以
+	 * assistant 内容块**和**独立 running `tool-call` 节点出现（模型层不按 callId 合并），
+	 * 结果到达前会画出两张卡。这里按 response 记账，任何来源画过就不再画。
+	 */
+	let drawnCallIds = new Set<string>();
 
 	const flush = () => {
 		if (pending === undefined) {
@@ -143,6 +151,7 @@ export function toHistory(
 		pending = undefined;
 		parts = [];
 		turnError = undefined;
+		drawnCallIds = new Set<string>();
 	};
 
 	for (const node of session.nodes()) {
@@ -162,6 +171,11 @@ export function toHistory(
 		}
 		if (node.kind === 'turn-error') {
 			// 原生 response 自带 errorDetails（含 code 与配额升级入口），比 markdown 引用块准确。
+			// 原生 errorDetails 只有一个对象：同一 response 内出现第二次失败时先把上一段结算掉，
+			// 否则前一轮的错误会被静默覆盖（goal 续轮会产生没有用户消息分隔的连续失败 turn）。
+			if (turnError !== undefined) {
+				flush();
+			}
 			if (pending === undefined) {
 				pending = { prompt: '', participant: 'dsh' };
 			}
@@ -172,7 +186,7 @@ export function toHistory(
 			// 没有前置用户消息的内容（例如 fork 继承历史）：开一条内容行。
 			pending = { prompt: '', participant: 'dsh' };
 		}
-		appendNode(node, parts, settledCallIds);
+		appendNode(node, parts, settledCallIds, drawnCallIds);
 	}
 	flush();
 	appendDeliverables(extras.deliverables ?? [], history);
@@ -206,24 +220,33 @@ function collectSettledCallIds(nodes: readonly DshChatNode[]): ReadonlySet<strin
 }
 
 /**
- * 额度提示 → 最后一条 response 的 `errorDetails.isQuotaExceeded`。
+ * 额度提示 → 最后一条**对话** response 的 `errorDetails.isQuotaExceeded`。
  *
  * 原生错误详情带配额升级入口；继续用 warning 会把可操作的配额问题降级成一条普通告警。
+ * 两条边界：
+ *   - 交付物行是独立追加的 response，配额不是它的错误，不能挂到那一行；
+ *   - 已有非配额 errorDetails（真实 turn-error）时只追加 warning，不覆盖真实错误码。
  */
 function applyQuotaNotice(quotaNotice: DshHistoryExtras['quotaNotice'], history: DshHistoryItem[]): void {
 	if (quotaNotice === undefined) {
 		return;
 	}
-	const errorDetails: DshHistoryErrorDetails = {
-		message: `额度不足（${quotaNotice.code}），请检查账号额度。`,
-		isQuotaExceeded: true,
-	};
+	const message = `额度不足（${quotaNotice.code}），请检查账号额度。`;
+	// 交付物行不带 prompt，这里用「结构上由 appendDeliverables 追加的行」无法区分，
+	// 因此只在末尾 response 没有 errorDetails 时把配额写进去；否则降级为 warning 部件。
 	const last = history[history.length - 1];
-	if (last !== undefined && last.type === 'response') {
-		history[history.length - 1] = { ...last, errorDetails };
+	if (last !== undefined && last.type === 'response' && last.errorDetails === undefined) {
+		history[history.length - 1] = { ...last, errorDetails: { message, isQuotaExceeded: true } };
 		return;
 	}
-	history.push({ type: 'response', parts: [], participant: 'dsh', errorDetails });
+	if (last !== undefined && last.type === 'response' && last.errorDetails?.isQuotaExceeded === true) {
+		return;
+	}
+	if (last !== undefined && last.type === 'response') {
+		history[history.length - 1] = { ...last, parts: [...last.parts, { kind: 'warning', content: { value: message } }] };
+		return;
+	}
+	history.push({ type: 'response', parts: [], participant: 'dsh', errorDetails: { message, isQuotaExceeded: true } });
 }
 
 /**
@@ -330,7 +353,7 @@ function appendPending(pending: readonly DshHistoryPending[], history: DshHistor
 	history.push({ type: 'response', parts, participant: 'dsh' });
 }
 
-function appendNode(node: DshChatNode, parts: DshHistoryPart[], settledCallIds: ReadonlySet<string>): void {
+function appendNode(node: DshChatNode, parts: DshHistoryPart[], settledCallIds: ReadonlySet<string>, drawnCallIds: Set<string>): void {
 	switch (node.kind) {
 		case 'assistant': {
 			for (const block of node.blocks) {
@@ -339,8 +362,10 @@ function appendNode(node: DshChatNode, parts: DshHistoryPart[], settledCallIds: 
 				} else if (block.kind === 'reasoning') {
 					parts.push({ kind: 'thinking', value: block.text });
 				} else if (block.kind === 'tool-call') {
-					// 已经有结果的调用由 tool-result 节点画成完整工具卡，这里不再重复一行。
-					if (!settledCallIds.has(block.callId)) {
+					// 已经有结果的调用由 tool-result 节点画成完整工具卡；同一 response 内任何来源
+					// 画过一次就不再画（running 阶段 assistant 块与独立节点会同时存在）。
+					if (!settledCallIds.has(block.callId) && !drawnCallIds.has(block.callId)) {
+						drawnCallIds.add(block.callId);
 						parts.push(toolInvocationOf(block.callId, block.name, block.argsRaw, undefined));
 					}
 				}
@@ -348,14 +373,16 @@ function appendNode(node: DshChatNode, parts: DshHistoryPart[], settledCallIds: 
 			return;
 		}
 		case 'tool-call':
-			if (!settledCallIds.has(node.callId)) {
+			if (!settledCallIds.has(node.callId) && !drawnCallIds.has(node.callId)) {
+				drawnCallIds.add(node.callId);
 				parts.push(toolInvocationOf(node.callId, node.name, argsTextOf(node.argsRaw, node.args), undefined));
 			}
 			return;
 		case 'tool-result':
+			drawnCallIds.add(node.callId);
 			parts.push(toolInvocationOf(node.callId, node.name, argsTextOf(node.call?.argsRaw, node.args), node));
 			for (const child of node.subCalls) {
-				appendNode(child, parts, settledCallIds);
+				appendNode(child, parts, settledCallIds, drawnCallIds);
 			}
 			return;
 		case 'command': {

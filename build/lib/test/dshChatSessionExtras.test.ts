@@ -94,6 +94,21 @@ test('2-A: bind clears plan/goal/todos/skills and notifies', async () => {
 	}
 });
 
+test('2-A: a skill permission change fires even when the name is unchanged', () => {
+	const session = new DshChatSession(fakeClient());
+	let fired = 0;
+	session.onDidChangeExtras(() => fired++);
+	try {
+		session.acceptView(view({ skills: [{ name: 'dsh-doc', description: 'x', modelInvocable: true, userInvocable: true, provider: 'bundled' }] }));
+		assert.equal(fired, 1);
+		// 只改 modelInvocable：若 sameSkills 漏字段，这里不会 fire（真缺陷）。
+		session.acceptView(view({ skills: [{ name: 'dsh-doc', description: 'x', modelInvocable: false, userInvocable: true, provider: 'bundled' }] }));
+		assert.equal(fired, 2, 'a permission/provider change must not be swallowed');
+	} finally {
+		session.dispose();
+	}
+});
+
 test('2-A: the four fields reach history parts through the same extras shape the provider uses', () => {
 	// content provider 只做一件事：把 getter 原样交给 toHistory。这里用同一形状验证映射可达。
 	const session = new DshChatSession(fakeClient());

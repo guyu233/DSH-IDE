@@ -129,3 +129,41 @@ test('B4: a quota notice marks the response as quota exceeded', () => {
 		'the quota notice must not stay a generic warning');
 	assert.equal(response.errorDetails?.isQuotaExceeded, true);
 });
+
+test('a running tool call is drawn once even when the assistant block and the tool-call node both exist', () => {
+	const history = toHistory(session([
+		{ kind: 'user', seq: 1, time: 1, content: [{ type: 'text', text: 'run' }] },
+		{
+			kind: 'assistant', seq: 2, time: 2, turn: 1, step: 1,
+			blocks: [{ kind: 'tool-call', callId: 'c9', name: 'read', argsRaw: '{}' }],
+		},
+		{ kind: 'tool-call', seq: 3, time: 3, callId: 'c9', name: 'read', phase: 'start', argsRaw: '{}' },
+	]));
+	const response = lastResponse(history);
+	const tools = response.parts.filter(part => part.kind === 'toolInvocationSerialized');
+	assert.equal(tools.length, 1, 'one call must render one card, not two');
+});
+
+test('two turn errors in the same response are both preserved instead of overwriting each other', () => {
+	const history = toHistory(session([
+		{ kind: 'user', seq: 1, time: 1, content: [{ type: 'text', text: 'run' }] },
+		{ kind: 'turn-error', seq: 2, time: 2, turn: 1, step: 1, message: 'first', code: 'E1' },
+		{ kind: 'turn-error', seq: 3, time: 3, turn: 2, step: 1, message: 'second', code: 'E2' },
+	]));
+	const errors = history
+		.filter(item => item.type === 'response')
+		.map(item => (item as { errorDetails?: { message: string } }).errorDetails?.message);
+	assert.deepEqual(errors, ['first', 'second'], 'consecutive failures must not overwrite each other');
+});
+
+test('a quota notice does not overwrite a real turn error', () => {
+	const history = toHistory(session([
+		{ kind: 'user', seq: 1, time: 1, content: [{ type: 'text', text: 'q' }] },
+		{ kind: 'turn-error', seq: 2, time: 2, turn: 1, step: 1, message: 'boom', code: 'MODEL_ERROR' },
+	]), [], { quotaNotice: { code: 'ACCOUNT_QUOTA', seq: 3 } });
+	const response = lastResponse(history);
+	assert.equal(response.errorDetails?.message, 'boom', 'the real error must win over the quota notice');
+	assert.equal(response.errorDetails?.isQuotaExceeded, undefined);
+	const warnings = response.parts.filter(part => part.kind === 'warning') as { content: { value: string } }[];
+	assert.ok(warnings.some(part => part.content.value.includes('额度不足')), 'the quota notice must still be visible');
+});
