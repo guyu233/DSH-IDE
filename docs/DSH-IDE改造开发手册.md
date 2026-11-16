@@ -615,6 +615,17 @@ DshChatSession.acceptView / acceptConversation → DshChatModel（typed 节点�
 2. 清理临时文件 `.dsh-preview/`、`.session_dump.txt`（用户决定）。
 3. 更新 §9.2 状态表与 §8 逐轮记录，把第二阶段各轮落地情况写入 §8（保持摘要可追溯；详细逐轮历史可查 git log）。
 
+**产物与安装（本轮已完成到「等待重启」）**：
+
+| 项 | 实测值 |
+|---|---|
+| 构建 | `npx gulp dsh-ide-pack` 成功；`dist/dsh-ide-2.0.0.tgz` 142,010,375 B |
+| 产物 sha256 | `08ca5677d06344af95f5ff4ef6cc52f0e88d39efb254edf79c41798078d1a489` |
+| `verify:dsh-artifact` | PASS（common 11 个模块、Host 入口含 archiveSession/unarchiveSession/searchSessions/loadOlder/throughSeq、node-pty 随包） |
+| profile 精确覆盖 | 已按手册 §5/§6 的「按包内路径精确覆盖」把插件层（`index.js`/`client.js`/`package.json`/`icon.svg`/`cordis.patch.yml`/`LICENSE-DSH`/`PROVENANCE.md`/`host/`/`common/`/`locale/`）覆盖到 `$DSH_PROFILE_DIR/node_modules/dsh-ide/`；**未覆盖 `runtime/`**（随包 app） |
+| `verify:dsh-install-drift` | **PASS**：24/24 文件逐字节一致、0 漂移、装载配置链完整、入口语法/导出形状合规 |
+| 运行时加载 | `cordis_inspect_query(Config.listConfigs{name:"dsh-ide"})` 返回 **`status: "absent"`** —— **仍未加载**，须重启 DSH 才生效。**重启会终止当前会话，AI 不自行执行** |
+
 ### 9.6 第二阶段实施顺序（已定）
 
 > **2-A（修数据链）与 2-B（翻译层升级）为主线顺序推进；2-D（图标全局替换）与 2-A/2-B 并行启动；2-C（Session 缺口）随主线核对；全部代码完成、门禁全绿后，最后统一做 2-E（真机验收）。**
