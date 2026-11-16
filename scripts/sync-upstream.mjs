@@ -74,7 +74,7 @@ const CONTRACT_FILES = [
 
 function readVendoredVersion() {
 	try {
-		const p = fs.readFileSync(path.join(ROOT, 'vscode-1.143.1/build/dsh/chat-render/PROVENANCE.md'), 'utf8')
+		const p = fs.readFileSync(path.join(ROOT, 'vscode-1.143.1/build/lib/dsh/PROVENANCE.md'), 'utf8')
 		const m = p.match(/\|\s*版本\s*\|\s*`?([0-9][^`|\s]*)`?\s*\|/)
 		if (m) return m[1]
 	} catch { /* ignore */ }
@@ -175,9 +175,9 @@ function main() {
 		lines.push('- base 与 target 相同，无需动作。')
 	} else {
 		if (changedUi.length === 0 && changedCss.length === 0 && changedAsset.length === 0) {
-			lines.push('- 渲染复用件：无变化，无需改 `vscode-1.143.1/build/dsh/chat-render/`。')
+			lines.push('- DSH 渲染样式：无变化，无需改 `vscode-1.143.1/src/vs/workbench/contrib/chat/browser/widget/media/chat.css` 的 DSH 皮肤段。')
 		} else {
-			lines.push('- **渲染复用件有变化**：用 `node build/dsh/chat-render/regen-sources.mjs` 按新源重生成 `src/**`；若新增运行时符号（ui-primitives 的 Tooltip 等）需在 `shims/primitives.tsx` 补桩；CSS 变化用 `build-css.mjs` 重生成；随后 `build-render.mjs` + `smoke.mjs` 复验。')
+			lines.push('- **DSH 渲染样式有变化**：聊天内容由 `DshChatModelDriver` 直接写进原生 ChatModel，观感在 `chat.css` 的 `.dsh-session` 段维护；逐项对照上游 CSS 数值更新该段，不新增 sidecar。')
 			for (const [p, s] of changedUi) lines.push(`  - ${s} \`${rel(p)}\``)
 			for (const [p, s] of changedCss) lines.push(`  - ${s} \`${rel(p)}\``)
 			for (const [p, s] of changedAsset) lines.push(`  - ${s} \`${rel(p)}\``)
@@ -189,7 +189,7 @@ function main() {
 			for (const [p, s] of changedContract) lines.push(`  - ${s} \`${p}\``)
 		}
 		lines.push('- 跑 `verify:dsh-ide-contract` 与 `verify:dsh-ide-protocol-single-source`，确认无破坏性变更。')
-		lines.push('- 按 `VSCODE_PATCH_POINTS` 重核指纹；更新 `vscode-1.143.1/build/dsh/chat-render/PROVENANCE.md` 版本/commit/sha256。')
+		lines.push('- 按 `VSCODE_PATCH_POINTS` 重核指纹；更新 `vscode-1.143.1/build/lib/dsh/PROVENANCE.md` 版本/commit/sha256。')
 	}
 	lines.push('')
 

@@ -540,56 +540,29 @@ async function verifyDshBuildProvenance(stagingRoot: string): Promise<void> {
 }
 
 /**
- * P1 sidecar：把按源码颗粒复用的 ui-chat 渲染件（唯一一份 React 18.3.1）编成
- * `build/dsh/chat-render/dist/dsh-chat.js` + `.css`，再放进每个 bundle 输出的固定路径。
- *
- * 位置（§3.7 职责归位）：源码与构建脚本在 `build/dsh/chat-render/`，产物 `dist/` 不入库。
- * 目标路径必须与 `src/vs/workbench/contrib/dsh/browser/dshChatSeam.ts` 的
- * `DSH_CHAT_SIDECAR_PATH` 一致：`vs/workbench/contrib/dsh/browser/chatRender/`。
- *
- * 为什么必须在 bundle **之后**执行：`build/next/index.ts` 的 `bundle()` 会先 `cleanDir(outDir)`
- * 再按 `copyResources()` 的精选 glob 复制资源——sidecar 不在 `src/**` 里，也不在精选清单里，
- * 所以旧实现（复制进 `src/` 让 transpile 带走）只对 `gulp compile` 生效，打包出的 runtime/app
- * 里从来没有 dsh-chat.js，接缝静默降级。这里改为 bundle 后直接写入目标目录。
- *
- * 用跑 gulp 的 Node（process.execPath），而非 electron.exe；不联网、不 npm install。
+ * 把 DSH 的鲸鱼图标写进每个 bundle 输出的 media 目录。
+ * globalCompositeBar.ts 与 chatParticipant.contribution.ts 用 FileAccess.asBrowserUri
+ * 指向它；它不在 bundle 的 copyResources 精选 glob 内，必须 bundle 后补写。
+ * DSH 帧由 DshChatModelDriver 直接写进原生 ChatModel，不再有 sidecar 产物。
  */
-const dshChatRenderSource = path.join(root, 'build', 'dsh', 'chat-render');
-const dshChatRenderSidecarPath = path.join('vs', 'workbench', 'contrib', 'dsh', 'browser', 'chatRender');
 const dshWhaleMediaSource = path.join(root, 'src', 'vs', 'workbench', 'contrib', 'dsh', 'browser', 'media', 'dsh-whale.svg');
 const dshWhaleMediaTargetPath = path.join('vs', 'workbench', 'contrib', 'dsh', 'browser', 'media');
-const DSH_CHAT_RENDER_OUTPUT_DIRS = ['out-build', 'out', 'out-vscode', 'out-vscode-min'];
+const DSH_MEDIA_OUTPUT_DIRS = ['out-build', 'out', 'out-vscode', 'out-vscode-min'];
 
 const prepareDshChatRenderTask = task.define('prepare-dsh-chat-render', async () => {
-	const build = cp.spawnSync(process.execPath, [path.join(dshChatRenderSource, 'build-render.mjs')], { cwd: root, stdio: 'inherit' });
-	if (build.error || build.status !== 0) {
-		throw new Error(`dsh chat-render sidecar build failed: ${build.error?.message ?? `status ${build.status}`}`);
-	}
-	const dist = path.join(dshChatRenderSource, 'dist');
 	let staged = 0;
-	for (const outDirName of DSH_CHAT_RENDER_OUTPUT_DIRS) {
+	for (const outDirName of DSH_MEDIA_OUTPUT_DIRS) {
 		const outDir = path.join(root, outDirName);
 		if (!fs.existsSync(outDir)) {
 			continue;
 		}
-		const target = path.join(outDir, dshChatRenderSidecarPath);
-		await fs.promises.mkdir(target, { recursive: true });
-		for (const name of ['dsh-chat.js', 'dsh-chat.css']) {
-			await fs.promises.copyFile(path.join(dist, name), path.join(target, name));
-		}
-		// globalCompositeBar.ts:298 与 chatParticipant.contribution.ts:46 用 FileAccess.asBrowserUri
-		// 指向该 media 资源；与 sidecar 同理，它不在 bundle 的 copyResources 精选 glob 内，须在 bundle 后写入。
 		const mediaTarget = path.join(outDir, dshWhaleMediaTargetPath);
 		await fs.promises.mkdir(mediaTarget, { recursive: true });
 		await fs.promises.copyFile(dshWhaleMediaSource, path.join(mediaTarget, 'dsh-whale.svg'));
 		staged++;
 	}
-	console.log(`[dsh-chat-render] sidecar + dsh-whale.svg staged into ${staged} bundle output(s): ${DST_SHOW(DSH_CHAT_RENDER_OUTPUT_DIRS)}`);
+	console.log(`[dsh-chat-render] dsh-whale.svg staged into ${staged} bundle output(s): ${DSH_MEDIA_OUTPUT_DIRS.join(', ')}`);
 });
-
-function DST_SHOW(names: readonly string[]): string {
-	return `${names.join(', ')} -> ${dshChatRenderSidecarPath}`;
-}
 
 const BUILD_TARGETS = [
 	{ platform: 'win32', arch: 'x64' },	{ platform: 'win32', arch: 'arm64' },
@@ -694,24 +667,23 @@ BUILD_TARGETS.forEach(buildTarget => {
 					[path.join(dshClientOut, 'common', 'dshIdeArchiveSet.js'), path.join('common', 'dshIdeArchiveSet.js')],
 					[path.join(dshClientOut, 'common', 'dshIdeSessionSearch.js'), path.join('common', 'dshIdeSessionSearch.js')],
 					[path.join(dshClientOut, 'common', 'dshIdeComposer.js'), path.join('common', 'dshIdeComposer.js')],
+[path.join(dshClientOut, 'common', 'dshIdeLocationIndex.js'), path.join('common', 'dshIdeLocationIndex.js')],
+					[path.join(dshClientOut, 'common', 'dshIdeWaterfallNotice.js'), path.join('common', 'dshIdeWaterfallNotice.js')],
 				];
 				for (const [from, to] of copyList) {
 					await fs.promises.cp(from, path.join(stagingRoot, to), { recursive: true });
 				}
+				// §5 复用凭据随包保留；聊天内容已由 DshChatModelDriver 直接写进原生
+				// ChatModel，不再有需要随包分发的 sidecar 渲染制品。
+				for (const [from, to] of [
+					['build/lib/dsh/PROVENANCE.md', 'PROVENANCE.md'],
+					['build/lib/dsh/LICENSE-DSH', 'LICENSE-DSH'],
+				] as const) {
+					await fs.promises.copyFile(path.join(root, from), path.join(stagingRoot, to));
+				}
 				// D55：运行期才写入的端点文件（内含一次性 query token）绝不能随包分发。
 				// 若构建机上残留了旧文件，直接删掉并记入 staging 清单校验之前。
 				await fs.promises.rm(path.join(stagingRoot, 'runtime', 'host-endpoint.json'), { force: true });
-				// 渲染制品 + 合规随包文件（4 个，不含构建期源码/shims/README）。
-				const renderStaging = path.join(stagingRoot, 'chat-render');
-				await fs.promises.mkdir(path.join(renderStaging, 'dist'), { recursive: true });
-				for (const [from, to] of [
-					['dist/dsh-chat.js', 'chat-render/dist/dsh-chat.js'],
-					['dist/dsh-chat.css', 'chat-render/dist/dsh-chat.css'],
-					['PROVENANCE.md', 'chat-render/PROVENANCE.md'],
-					['LICENSE-DSH', 'chat-render/LICENSE-DSH'],
-				] as const) {
-					await fs.promises.copyFile(path.join(dshChatRenderSource, from), path.join(stagingRoot, to));
-				}
 				// 声明式自校验：模板 files 白名单里的每一项都必须真的在 staging 根出现，
 				// 否则 npm pack 会静默产出缺文件的包（旧实现就漏过部分入口）。
 				// 含 glob 的条目（如 `locale/*.json`）校验其非通配前缀目录存在且至少匹配一个文件。

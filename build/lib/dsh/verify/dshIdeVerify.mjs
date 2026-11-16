@@ -159,7 +159,8 @@ function boundary() {
 	const transport = read('platform/dshClient/transport/dshIdeTransport.ts');
 	const hostBridge = read('platform/dshClient/host/ide-view-host.js');
 	assert.match(hostBridge, /controller\.follow\(\{[\s\S]*?assistantStream: true/, 'the kernel must call sessionController.follow with assistantStream');
-	assert.match(transport, /openStream\('ide\/followSession'/, 'the window must follow through the kernel stream');
+	// 调用现在跨多行（follow 多了 onDisconnect 参数），断言按「出现该端点」匹配。
+	assert.match(transport, /'ide\/followSession'/, 'the window must follow through the kernel stream');
 	assert.doesNotMatch(transport, /openStream\('session\/follow'/, 'the window must not open session/follow itself');
 	assert.doesNotMatch(transport, /openStream\('\$events'/, 'the window must not open the $events stream itself');
 	assert.doesNotMatch(transport, /call\('session', '(?:prompt|cancel|selectModel)'/, 'the window must not rewrite operations into session/* requests');
@@ -170,8 +171,10 @@ function boundary() {
 	// listen 三层过滤（P3 启用）：事件名白名单 / 连接归属 / version 严格递增必须同时在代码里存在。
 	const listenBody = /listen<T>\(([\s\S]*?)\n\t}/.exec(channel);
 	assert.ok(listenBody !== null, 'DshIdeChannel.listen must be implemented (not a stub)');
-	assert.match(channel, /if \(event !== DSH_IDE_SNAPSHOT_EVENT && event !== DSH_IDE_WATERFALL_EVENT\)/,
-		'listen must gate Event.None behind the snapshot and waterfall whitelist');
+	// 白名单三个事件：snapshot（版本帧）、waterfall（审批/问卷）、session-notice（运行态）。
+	// 三个都要出现在同一个 reject 条件里，缺一个就等于把未知事件当成已知事件放行。
+	assert.match(channel, /if \(event !== DSH_IDE_SNAPSHOT_EVENT && event !== DSH_IDE_WATERFALL_EVENT && event !== DSH_IDE_SESSION_NOTICE_EVENT\)/,
+		'listen must gate Event.None behind the snapshot, waterfall and session-notice whitelist');
 	assert.match(channel, /DSH_IDE_SNAPSHOT_EVENT/, 'listen must whitelist the snapshot event name');
 	assert.match(channel, /emitted => emitted\.ctx === ctx/, 'listen must filter frames by owning connection');
 	assert.match(channel, /snapshot\.version <= sent/, 'publish path must drop non-advancing versions');
@@ -188,7 +191,7 @@ function boundary() {
 		'workbench/contrib/dsh/browser/dshIdeConsumer.ts',
 		'workbench/contrib/dsh/browser/dshChatModel.ts',
 		'workbench/contrib/dsh/browser/dshChatSession.ts',
-		'workbench/contrib/dsh/browser/dshChatPanel.ts',
+		'workbench/contrib/dsh/browser/dshChatModelDriver.ts',
 	];
 	for (const file of uiProjectionFiles) {
 		const text = read(file);
@@ -213,7 +216,7 @@ function boundary() {
 // ---------------------------------------------------------------------------
 function projectionGolden() {
 	console.log('STATUS: PENDING');
-	console.log('projection-golden: 会话帧直传后不再有行投影，本 gate 待替代断言');
+	console.log('PENDING(P6) projection-golden: 会话帧直传后不再有行投影，本 gate 待替代断言');
 	return 'PENDING';
 }
 

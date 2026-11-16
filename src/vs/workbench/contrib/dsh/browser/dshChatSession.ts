@@ -10,10 +10,25 @@
 
 import { Emitter, Event } from '../../../../base/common/event.js';
 import { Disposable } from '../../../../base/common/lifecycle.js';
-import type { IDshClientService } from '../../../../platform/dshClient/common/dshClientService.js';
+import { IDshClientService } from '../../../../platform/dshClient/common/dshClientService.js';
 import type { DshIdeWaterfallNotice } from '../../../../platform/dshClient/common/dshIdeProtocol.js';
-import { DshChatModel, type DshChatEntry } from './dshChatModel.js';
-import type { DshChatModelOption, DshChatPending } from './dshChatPanel.js';
+import { DshChatModel, type DshChatNode } from './dshChatModel.js';
+
+/** 下拉里的一个模型选项。 */
+export interface DshChatModelOption {
+	readonly provider: string;
+	readonly model: string;
+	readonly name: string;
+}
+
+/** 正在等用户决定的批准 / 问卷。 */
+export interface DshChatPending {
+	readonly eventId: string;
+	readonly kind: 'approval' | 'question';
+	readonly title: string;
+	readonly options: readonly string[];
+	readonly questionId?: string;
+}
 
 /** 输入框目录里的一个模型（`projectDshIdeComposer` 的 `model.groups[].models[]`）。 */
 interface ComposerModelCatalog {
@@ -22,11 +37,24 @@ interface ComposerModelCatalog {
 }
 
 export interface IDshChatSession {
-	readonly onDidChangeEntries: Event<readonly [readonly DshChatEntry[], boolean]>;
+	readonly onDidChangeNodes: Event<readonly [readonly DshChatNode[], boolean]>;
 	readonly onDidChangeModelMenu: Event<void>;
 	readonly onDidChangePending: Event<readonly DshChatPending[]>;
 	readonly onDidChangeRunning: Event<boolean>;
-	entries(): readonly DshChatEntry[];
+	nodes(): readonly DshChatNode[];
+	/**
+	 * 每个节点的 Turn 坐标，与 `nodes()` 同序。
+	 *
+	 * `user/message` 事件不带 turn，只有按 seq 顺序扫过 turn/start 才能定位；
+	 * 这份坐标来自 `DshChatModel.located`，界面不再自己推断回合。
+	 */
+	locatedTurns(): readonly (number | undefined)[];
+	/**
+	 * 整个会话的 token 用量（Host 的 `tokenUsage` 投影）。
+	 *
+	 * `undefined` 表示这次 follow 没带投影 —— 用量条据此隐藏，绝不显示伪造的 0。
+	 */
+	tokenUsage(): { uncachedInputTokens: number; cacheReadTokens: number; cacheWriteTokens: number; outputTokens: number } | undefined;
 	models(): readonly DshChatModelOption[];
 	currentModel(): { readonly provider: string; readonly model: string } | undefined;
 	pending(): readonly DshChatPending[];
@@ -44,7 +72,7 @@ export class DshChatSession extends Disposable implements IDshChatSession {
 	private readonly _onDidChangeModelMenu = this._register(new Emitter<void>());
 	private readonly _onDidChangePending = this._register(new Emitter<readonly DshChatPending[]>());
 	private readonly _onDidChangeRunning = this._register(new Emitter<boolean>());
-	private readonly _onDidChangeEntries = this._register(new Emitter<readonly [readonly DshChatEntry[], boolean]>());
+	private readonly _onDidChangeNodes = this._register(new Emitter<readonly [readonly DshChatNode[], boolean]>());
 	private readonly pendingItems = new Map<string, DshChatPending>();
 	private _models: readonly DshChatModelOption[] = [];
 	private _current: { provider: string; model: string } | undefined;
@@ -54,20 +82,28 @@ export class DshChatSession extends Disposable implements IDshChatSession {
 	readonly onDidChangeModelMenu: Event<void> = this._onDidChangeModelMenu.event;
 	readonly onDidChangePending: Event<readonly DshChatPending[]> = this._onDidChangePending.event;
 	readonly onDidChangeRunning: Event<boolean> = this._onDidChangeRunning.event;
-	readonly onDidChangeEntries: Event<readonly [readonly DshChatEntry[], boolean]> = this._onDidChangeEntries.event;
+	readonly onDidChangeNodes: Event<readonly [readonly DshChatNode[], boolean]> = this._onDidChangeNodes.event;
 
 	constructor(private readonly client: IDshClientService) {
 		super();
-		this._register(this.model.onDidReset(() => this._onDidChangeEntries.fire([[], true])));
-		this._register(this.model.onDidChange(patches => {
-			if (patches.length > 0) {
-				this._onDidChangeEntries.fire([this.model.list, false]);
+		this._register(this.model.onDidReset(() => this._onDidChangeNodes.fire([[], true])));
+		this._register(this.model.onDidChange(changes => {
+			if (changes.length > 0) {
+				this._onDidChangeNodes.fire([this.model.list, false]);
 			}
 		}));
 	}
 
-	entries(): readonly DshChatEntry[] {
+	nodes(): readonly DshChatNode[] {
 		return this.model.list;
+	}
+
+	locatedTurns(): readonly (number | undefined)[] {
+		return this.model.located.map(entry => entry.turn);
+	}
+
+	tokenUsage(): { uncachedInputTokens: number; cacheReadTokens: number; cacheWriteTokens: number; outputTokens: number } | undefined {
+		return this.model.tokenUsage();
 	}
 
 	models(): readonly DshChatModelOption[] {
@@ -84,6 +120,10 @@ export class DshChatSession extends Disposable implements IDshChatSession {
 
 	running(): boolean {
 		return this._running;
+	}
+
+	boundId(): string | undefined {
+		return this.boundSessionId;
 	}
 
 	/** 换会话：清空旧记录、重读目录、重开跟进流。 */
@@ -231,4 +271,14 @@ export class DshChatSession extends Disposable implements IDshChatSession {
 		this._running = running;
 		this._onDidChangeRunning.fire(running);
 	}
+}
+
+/** 进程内唯一的聊天会话状态：贡献点与聊天视图共用同一份（帧只喂一次）。 */
+let sharedChatSession: DshChatSession | undefined;
+
+export function dshChatSessionFor(client: IDshClientService): DshChatSession {
+	if (sharedChatSession === undefined) {
+		sharedChatSession = new DshChatSession(client);
+	}
+	return sharedChatSession;
 }

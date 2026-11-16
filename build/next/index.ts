@@ -402,6 +402,9 @@ function fileContentMapperPlugin(outDir: string, target: BuildTarget): esbuild.P
 // Transpile (Goal 1: TS → JS using esbuild.transform for maximum speed)
 // ============================================================================
 
+// transpile 只处理 src/**；DSH 帧由 DshChatModelDriver 直接写入原生 ChatModel，
+// 不再有需要单独 stage 的 sidecar 产物。
+
 async function transpile(outDir: string, excludeTests: boolean): Promise<void> {
 	// Find all .ts files
 	const ignorePatterns = ['**/*.d.ts'];

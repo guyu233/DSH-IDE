@@ -64,10 +64,9 @@ test('DSH bundle: host/client/manifest/icon live at their native positions', () 
 	const expected = [
 		'build/lib/dsh/package.json',
 		'build/lib/dsh/cordis.patch.yml',
-		'build/dsh/chat-render/build-render.mjs',
-		'build/dsh/chat-render/index.tsx',
-		'build/dsh/chat-render/PROVENANCE.md',
-		'build/dsh/chat-render/LICENSE-DSH',
+		// §5 凭据保留：sidecar 删除后 PROVENANCE/LICENSE 迁到 build/lib/dsh/。
+		'build/lib/dsh/PROVENANCE.md',
+		'build/lib/dsh/LICENSE-DSH',
 		'resources/dsh/icon.svg',
 		'resources/dsh/locale/en.json',
 		'resources/dsh/locale/zh.json',
@@ -92,12 +91,10 @@ test('DSH bundle: dsh-ide-pack stages host entries from out/ and manifest/icon f
 	assert.ok(literals.length > 0, 'dsh-ide-pack task body not found');
 	const gulpSource = fs.readFileSync(path.join(vscodeRoot, 'build/gulpfile.vscode.ts'), 'utf8');
 	assert.match(gulpSource, /minified \? 'dsh-ide-pack-min' : 'dsh-ide-pack'/, 'minified pack must be a sibling task, not a replacement');
-	for (const needle of ['index.js', 'client.js', 'host', 'common', 'package.json', 'cordis.patch.yml', 'icon.svg', 'locale', 'chat-render']) {
+	for (const needle of ['index.js', 'client.js', 'host', 'common', 'package.json', 'cordis.patch.yml', 'icon.svg', 'locale', 'PROVENANCE.md', 'LICENSE-DSH']) {
 		assert.ok(literals.includes(needle), `dsh-ide-pack must stage ${needle}`);
 	}
 	const gulp = fs.readFileSync(path.join(vscodeRoot, 'build/gulpfile.vscode.ts'), 'utf8');
-	assert.match(gulp, /const dshChatRenderSource = path\.join\(root, 'build', 'dsh', 'chat-render'\)/,
-		'sidecar must be read from build/dsh/chat-render');
 	// T11-03：两个中间常量已删除，改为断言**实际来源路径**内联出现在任务体里
 	// （`dsh-ide-pack` 直接 path.join 到 build/lib/dsh 与 resources/dsh）。
 	assert.match(gulp, /path\.join\([^)]*'build',\s*'lib',\s*'dsh'\)/,
@@ -109,31 +106,39 @@ test('DSH bundle: dsh-ide-pack stages host entries from out/ and manifest/icon f
 test('DSH bundle: manifest files whitelist only names runtime payloads', () => {
 	const pkg = JSON.parse(fs.readFileSync(path.join(vscodeRoot, 'build/lib/dsh/package.json'), 'utf8'));
 	assert.ok(Array.isArray(pkg.files));
-	for (const required of ['index.js', 'client.js', 'host/', 'common/', 'cordis.patch.yml', 'locale/*.json', 'icon.svg', 'runtime/', 'chat-render/dist/']) {
+	for (const required of ['index.js', 'client.js', 'host/', 'common/', 'cordis.patch.yml', 'locale/*.json', 'icon.svg', 'runtime/']) {
 		assert.ok(pkg.files.includes(required), `manifest files must include ${required}`);
 	}
-	for (const forbidden of ['chat-client/', 'chat-render/README.md', 'node_modules/', 'vendor/']) {
-		assert.ok(!pkg.files.includes(forbidden), `manifest files must not include build-only input ${forbidden}`);
+	for (const forbidden of ['chat-client/', 'chat-render/', 'node_modules/', 'vendor/']) {
+		assert.ok(!pkg.files.some((entry: string) => entry.startsWith(forbidden)),
+			`manifest files must not include removed sidecar / build-only input ${forbidden}`);
 	}
 });
 
-test('DSH bundle: sidecar is written after the bundle step (cleanDir would drop it otherwise)', () => {
-	const source = readGulpfile();
+test('DSH bundle: DSH whale media is staged after the bundle step (cleanDir would drop it otherwise)', () => {
 	const body = fs.readFileSync(path.join(vscodeRoot, 'build/gulpfile.vscode.ts'), 'utf8');
-	// prepare-dsh-chat-render 必须排在 esbuildBundleTask 之后：bundle() 会 cleanDir(outDir)。
+	const source = readGulpfile();
+	// prepare-dsh-chat-render 仍负责鲸鱼图标，且必须排在 esbuildBundleTask 之后。
 	const appTaskIndex = body.indexOf('const appTask = task.define(`dsh-ide-${platform}-${arch}${dashed(minified)}`');
 	assert.ok(appTaskIndex > 0, 'appTask definition not found');
 	const appTaskBody = body.slice(appTaskIndex, appTaskIndex + 900);
 	assert.ok(appTaskBody.indexOf('esbuildBundleTask') < appTaskBody.indexOf('prepareDshChatRenderTask'),
 		'prepareDshChatRenderTask must run AFTER esbuildBundleTask');
+	assert.match(body, /dsh-whale\.svg/, 'the Chat view icon must still be staged');
 	assert.ok(source.statements.length > 0);
 });
 
-test('DSH bundle: sidecar target path matches the seam constant', () => {
-	const seam = fs.readFileSync(path.join(vscodeRoot, 'src/vs/workbench/contrib/dsh/browser/dshChatSeam.ts'), 'utf8');
-	assert.match(seam, /DSH_CHAT_SIDECAR_PATH\s*=\s*'vs\/workbench\/contrib\/dsh\/browser\/chatRender\/dsh-chat\.js'/);
+test('DSH bundle: chat content is driven by the native ChatModel, no sidecar artifacts remain', () => {
 	const gulp = fs.readFileSync(path.join(vscodeRoot, 'build/gulpfile.vscode.ts'), 'utf8');
-	assert.match(gulp, /path\.join\('vs', 'workbench', 'contrib', 'dsh', 'browser', 'chatRender'\)/);
+	const next = fs.readFileSync(path.join(vscodeRoot, 'build/next/index.ts'), 'utf8');
+	const contribution = fs.readFileSync(path.join(vscodeRoot, 'src/vs/workbench/contrib/dsh/browser/dsh.contribution.ts'), 'utf8');
+	// 驱动器取代桥接：帧直接写进原生 ChatModel。
+	assert.match(contribution, /dshChatModelDriver\.js/, 'DshChatModelDriver must be registered');
+	assert.doesNotMatch(contribution, /dshChatViewBridge/, 'sidecar view bridge must be gone');
+	// 构建链不再编译/复制 sidecar 产物。
+	assert.doesNotMatch(gulp, /build-render\.mjs/, 'no sidecar build step may remain');
+	assert.doesNotMatch(next, /stageDshChatRender|dsh-chat\.js/, 'no sidecar staging may remain in transpile');
+	assert.ok(!fs.existsSync(path.join(vscodeRoot, 'src/vs/workbench/contrib/dsh/browser/dshChatSeam.ts')), 'sidecar seam file must be removed');
 });
 
 test('DSH bundle: only the Host common dependencies are staged (transport modules stay in the app)', () => {
