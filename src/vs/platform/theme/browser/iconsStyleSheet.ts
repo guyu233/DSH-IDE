@@ -44,12 +44,18 @@ export function getIconsStyleSheet(themeService: IThemeService | undefined): IIc
 					continue;
 				}
 
+				const fontFamilyVar = css.inline`--vscode-icon-${css.className(contribution.id)}-font-family`;
+				const contentVar = css.inline`--vscode-icon-${css.className(contribution.id)}-content`;
+
 				// 替换只在「默认 codicon 未被产品图标主题改写」时生效：产品主题若显式给了
 				// 另一套字形，说明它有意覆盖，不应再被产品图形盖掉。
 				const maskUrl = definition.font === undefined && replacement !== undefined
 					? replacement(contribution.id)
 					: undefined;
 				if (maskUrl !== undefined) {
+					// 根变量必须照旧输出：有些 CSS 直接消费 `var(--vscode-icon-<id>-content)`
+					// （如 `style.css` 的 chevron-down），删掉会让那些伪元素变空。
+					rootAttribs.push(css.inline`${contentVar}: ${css.stringValue(definition.fontCharacter)}; ${fontFamilyVar}: 'codicon';`);
 					// 用 mask 保留 currentColor 着色：图形本体作为 alpha 蒙版，颜色仍由 CSS color 决定。
 					// 尺寸用 1em，跟随 font-size 缩放（`codicon.css` 的基础布局仍生效）。
 					rules.push(css.inline`.codicon-${css.className(contribution.id)}:before { content: ''; background-color: currentColor; width: 1em; height: 1em; -webkit-mask: url(${css.stringValue(maskUrl)}) center / contain no-repeat; mask: url(${css.stringValue(maskUrl)}) center / contain no-repeat; }`);
@@ -57,8 +63,6 @@ export function getIconsStyleSheet(themeService: IThemeService | undefined): IIc
 				}
 
 				const fontContribution = definition.font;
-				const fontFamilyVar = css.inline`--vscode-icon-${css.className(contribution.id)}-font-family`;
-				const contentVar = css.inline`--vscode-icon-${css.className(contribution.id)}-content`;
 				if (fontContribution) {
 					usedFontIds[fontContribution.id] = fontContribution.definition;
 					rootAttribs.push(
