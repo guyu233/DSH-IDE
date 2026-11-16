@@ -148,6 +148,10 @@ export interface DshIdeMethodArgs {
 	 * `throughSeq` 是**包含式日志切点**：给出时只读该 seq 及之前的历史（「按固定切点
 	 * 只读查看」的官方支撑）；省略时按观察到的日志末端取页。三者可组合：
 	 * `throughSeq` 定切点、`beforeSeq` 定向后翻页、`maxMessages` 限本页条数。
+	 *
+	 * 返回值是 `DshIdeLoadOlderResult`。`session/page` 是独立只读端点，不重推
+	 * `follow` 的 opening snapshot，所以分页内容必须随 `call` 返回，不能等 snapshot。
+	 * 下一页游标用已加载记录的最小 `seq` 作为 `beforeSeq`，协议不传官方 `cursor`。
 	 */
 	loadOlder: { sessionId: string; throughSeq?: number; beforeSeq?: number; maxMessages?: number };
 	/** 决议审批请求。 */
@@ -589,6 +593,45 @@ export function validateDshIdeInvokeOutput(value: unknown): { readonly value: un
 	const output = exactRecord(value, ['value'], 'DshIdeInvokeOutput');
 	jsonValue(output['value'], 'DshIdeInvokeOutput.value', new Set());
 	return output as { readonly value: unknown };
+}
+
+/**
+ * 官方 `SessionPage` 的 IDE 投影：只要 `records` 与 `hasMore`。
+ * 不声明 `cursor`——翻页游标由调用方用已加载最小 seq 推导。
+ * `records` 保持 JSON 对象，不在协议层复制 DSH 的 `SessionHistoryRecord`。
+ */
+export interface DshIdeLoadOlderPage {
+	readonly records: readonly Readonly<Record<string, unknown>>[];
+	readonly hasMore: boolean;
+}
+
+/** `loadOlder` 的 `call` 返回值。`accepted` 只允许 `true`；失败走错误，不走 `accepted: false`。 */
+export interface DshIdeLoadOlderResult {
+	readonly accepted: true;
+	readonly page: DshIdeLoadOlderPage;
+}
+
+/** 校验 `loadOlder` 的返回值。未知字段、缺页、非数组 records、非布尔 hasMore 一律拒绝。 */
+export function validateDshIdeLoadOlderResult(value: unknown): DshIdeLoadOlderResult {
+	const result = exactRecord(value, ['accepted', 'page'], 'DshIdeLoadOlderResult');
+	if (result['accepted'] !== true) {
+		throw new TypeError('DshIdeLoadOlderResult.accepted must be true');
+	}
+	const page = exactRecord(result['page'], ['records', 'hasMore'], 'DshIdeLoadOlderResult.page');
+	if (!Array.isArray(page['records'])) {
+		throw new TypeError('DshIdeLoadOlderResult.page.records must be an array');
+	}
+	page['records'].forEach((record, index) => {
+		const label = `DshIdeLoadOlderResult.page.records[${index}]`;
+		if (typeof record !== 'object' || record === null || Array.isArray(record)) {
+			throw new TypeError(`${label} must be an object`);
+		}
+		jsonValue(record, label, new Set());
+	});
+	if (typeof page['hasMore'] !== 'boolean') {
+		throw new TypeError('DshIdeLoadOlderResult.page.hasMore must be a boolean');
+	}
+	return result as unknown as DshIdeLoadOlderResult;
 }
 
 /** 审批请求的中立视图。不含官方 `agent` / `signal`。 */

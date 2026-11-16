@@ -571,17 +571,21 @@ function createMethodHandlers(bridge) {
 		},
 		rewind: missing('rewind'),
 		async loadOlder(args) {
-			// D13（第 21 轮）：官方 `session/page` 是只读分页端点，形状见契约注释；
-			// 按 §2 §4 动作类口径返回 { accepted: true }，分页内容仍只经 listen('snapshot') 到达。
+			// 官方 `session/page` 是独立只读端点，返回值就是这一页；
+			// follow 只在开头推一次 snapshot，page() 不会重推，所以必须把页带回去。
+			// 只投影 records + hasMore，丢掉官方 cursor（下一页用最小 seq 当 beforeSeq）。
 			const sessionId = args.sessionId ?? requireSession();
 			bridge.assertOwnership(sessionId);
-			await controller().page({
+			const page = await controller().page({
 				address: { kind: 'session', sessionId },
 				...(args.throughSeq === undefined ? {} : { throughSeq: args.throughSeq }),
 				...(args.beforeSeq === undefined ? {} : { beforeSeq: args.beforeSeq }),
 				...(args.maxMessages === undefined ? {} : { maxMessages: args.maxMessages }),
 			});
-			return { accepted: true };
+			if (!page || !Array.isArray(page.records) || typeof page.hasMore !== 'boolean') {
+				throw coded(FEATURE_UNAVAILABLE, 'sessionController.page returned a page without records and hasMore', { capability: 'loadOlder' });
+			}
+			return { accepted: true, page: { records: page.records, hasMore: page.hasMore } };
 		},
 		async answerApproval(args) {
 			const outcome = approvalOutcome(args.decision);

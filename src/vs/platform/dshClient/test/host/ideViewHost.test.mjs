@@ -1059,22 +1059,31 @@ test('archiveSession keeps ownership checks and propagates the official active-s
 });
 
 // ---------------------------------------------------------------------------
-// D13（第 21 轮）：loadOlder 接线——契约按官方 SessionPageRequest 对齐为
-// { sessionId, beforeSeq?:number, maxMessages?:number }；Host 调 sessionController.page()，
-// 按 §2 §4 动作类口径返回 { accepted: true }。
+// loadOlder：Host 调 sessionController.page()，并把官方 SessionPage 投影成
+// { accepted: true, page: { records, hasMore } }。cursor 不进返回值。
 // ---------------------------------------------------------------------------
 
 test('loadOlder calls sessionController.page with the official request shape', async () => {
 	const calls = [];
+	const older = { records: [{ seq: 3, type: 'user/message', time: 1, data: { text: 'earlier' } }], hasMore: true };
+	const tail = { records: [], hasMore: false, cursor: 9 };
 	const { bridge } = bridgeWith({
-		sessionController: { ...sessionControllerStub(), page: async request => { calls.push(request); return { cursor: 1, events: [] }; } },
+		sessionController: { ...sessionControllerStub(), page: async request => { calls.push(request); return calls.length === 1 ? older : tail; } },
 	});
 	bridge.open({ view: 'chat', params: { sessionId: 's-1' } });
-	assert.deepEqual(await bridge.invoke('loadOlder', { throughSeq: 9, beforeSeq: 7, maxMessages: 20 }), { accepted: true });
+	assert.deepEqual(await bridge.invoke('loadOlder', { throughSeq: 9, beforeSeq: 7, maxMessages: 20 }), { accepted: true, page: older });
 	assert.deepEqual(calls[0], { address: { kind: 'session', sessionId: 's-1' }, throughSeq: 9, beforeSeq: 7, maxMessages: 20 });
-	// 省略可选字段时不传该键（官方的省略语义是「按日志末端取页」）。
-	assert.deepEqual(await bridge.invoke('loadOlder', {}), { accepted: true });
+	// 省略可选字段时不传该键；官方 cursor 被丢掉，只留 records + hasMore。
+	assert.deepEqual(await bridge.invoke('loadOlder', {}), { accepted: true, page: { records: [], hasMore: false } });
 	assert.deepEqual(calls[1], { address: { kind: 'session', sessionId: 's-1' } });
+});
+
+test('loadOlder refuses a page that is not records plus hasMore', async () => {
+	const { bridge } = bridgeWith({
+		sessionController: { ...sessionControllerStub(), page: async () => ({ cursor: 1, events: [] }) },
+	});
+	bridge.open({ view: 'chat', params: { sessionId: 's-1' } });
+	await assert.rejects(() => bridge.invoke('loadOlder', {}), error => error.code === FEATURE_UNAVAILABLE);
 });
 
 test('loadOlder refuses a foreign session before touching the Host', async () => {

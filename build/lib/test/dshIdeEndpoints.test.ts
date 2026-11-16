@@ -54,7 +54,7 @@ const FINDINGS: readonly EndpointFinding[] = [
 		method: 'loadOlder',
 		landing: 'session/page',
 		evidence: 'session-controller/src/index.ts:528 @Remote(page)；types.ts:469 SessionPageRequest{address,throughSeq?,beforeSeq?,maxMessages?,turnWindow?}；ui-trajectory/src/client/index.ts:102-104 session.loadOlder()',
-		note: '已完成（代码侧，第 21 轮）：契约 loadOlder 已按官方 SessionPageRequest 对齐为 {sessionId, beforeSeq?:number, maxMessages?:number}；Host 调 sessionController.page()、transport 调 session/page args {request}；按 §2 §4 动作类口径返回 {accepted:true}，分页内容仍只经 listen(snapshot) 到达。',
+		note: '已完成（代码侧）：契约 loadOlder 按官方 SessionPageRequest 对齐为 {sessionId, throughSeq?, beforeSeq?, maxMessages?}；Host 调 sessionController.page() 并直返 {accepted:true, page:{records, hasMore}}。page() 不重推 follow snapshot，分页内容不经 listen(snapshot)。',
 	},
 	{
 		method: 'setEffort',

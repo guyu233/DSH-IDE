@@ -23,6 +23,7 @@ import {
 	jsonValue,
 	validateDshIdeInput,
 	validateDshIdeInvokeOutput,
+	validateDshIdeLoadOlderResult,
 	validateDshIdeSnapshot,
 	type DshIdeMethod,
 	type DshIdeSnapshot,
@@ -220,6 +221,26 @@ test('validateDshIdeInvokeOutput rejects snapshot/unknown fields/undefined', () 
 	assert.throws(() => validateDshIdeInvokeOutput({ value: 1, snapshot: snapshot() }), /unknown field/);
 	assert.throws(() => validateDshIdeInvokeOutput({ value: undefined }), /must omit explicit undefined field/);
 	assert.throws(() => validateDshIdeInvokeOutput(undefined), /must be an object/);
+});
+
+test('validateDshIdeLoadOlderResult accepts records and hasMore', () => {
+	const parsed = validateDshIdeLoadOlderResult({
+		accepted: true,
+		page: { records: [{ seq: 3, type: 'user/message', data: { text: 'earlier' } }], hasMore: true },
+	});
+	assert.equal(parsed.accepted, true);
+	assert.equal(parsed.page.records.length, 1);
+	assert.equal(parsed.page.hasMore, true);
+	assert.equal(validateDshIdeLoadOlderResult({ accepted: true, page: { records: [], hasMore: false } }).page.records.length, 0);
+});
+
+test('validateDshIdeLoadOlderResult rejects a malformed page', () => {
+	assert.throws(() => validateDshIdeLoadOlderResult({ accepted: false, page: { records: [], hasMore: false } }), /accepted must be true/);
+	assert.throws(() => validateDshIdeLoadOlderResult({ accepted: true }), /must be an object/);
+	assert.throws(() => validateDshIdeLoadOlderResult({ accepted: true, page: { records: {}, hasMore: true } }), /records must be an array/);
+	assert.throws(() => validateDshIdeLoadOlderResult({ accepted: true, page: { records: [], hasMore: 1 } }), /hasMore must be a boolean/);
+	assert.throws(() => validateDshIdeLoadOlderResult({ accepted: true, page: { records: ['x'], hasMore: false } }), /must be an object/);
+	assert.throws(() => validateDshIdeLoadOlderResult({ accepted: true, page: { records: [], hasMore: false, cursor: 4 } }), /unknown field/);
 });
 
 // ---------------------------------------------------------------------------
