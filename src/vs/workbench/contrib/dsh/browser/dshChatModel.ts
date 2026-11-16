@@ -583,6 +583,10 @@ export class DshChatModel extends Disposable {
 				}
 				if (closing !== undefined) {
 					(closing as { turnEnded?: boolean }).turnEnded = true;
+					// 该标记是**原地变更**（不新增节点、raw 不变），必须显式发一次变更，
+					// 否则 driver 的 sync 不会被调度，`turnEnded` 永远到不了渲染层。
+					// 用 `added: false` 表示"同一节点内容更新"，与 put 的替换语义一致。
+					changes.push({ node: closing, added: false });
 				}
 			}
 			return changes;

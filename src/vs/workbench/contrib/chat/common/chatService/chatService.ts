@@ -356,8 +356,28 @@ export interface IChatDshNodePart {
 	kind: 'dshNode';
 	/** 稳定身份 `dsh:<seq>:<blockIndex|node>`；同 id 后写覆盖前写。 */
 	id: string;
-	/** 源载荷的 canonical JSON（键按字典序），即无损载荷本体。 */
+	/** 源载荷的 canonical JSON（键按字典序），即无损载荷本体，也是校验真值。 */
 	encoded: string;
+	/**
+	 * 分派提示：节点的语义 kind（`user` / `assistant` / `tool-result` …）。
+	 *
+	 * 只用于选择渲染函数，**不进入任何可见文本**。它由解码层已有的推导给出，
+	 * 避免渲染层重新实现 `type/data → kind` 判别（`turn/end` 二义、`user/message`
+	 * 既是 user 又是 context 等规则在解码层已经消解）。
+	 */
+	hint: string;
+	/**
+	 * 渲染真值：解码后节点的 canonical JSON（**不含** IDE 私有装饰字段）。
+	 *
+	 * 与 `encoded` 的区别是它含跨事件累积的字段（例如 `command` 的 `name`/`args`
+	 * 来自 `command/run`、`outcome` 来自 `command/done`；`turn`/`step` 来自定位扫描），
+	 * 这些字段在任何单条事件 raw 里都不完整。
+	 *
+	 * 不带 `raw`（避免与 `encoded` 重复存储），绑定关系由
+	 * `verifyProjectionBinding` 保证：`projectionEncoded` 去掉 `raw` 后必须与
+	 * `encoded` 同源可还原。
+	 */
+	projectionEncoded: string;
 }
 
 export interface IChatSystemNotificationPart {

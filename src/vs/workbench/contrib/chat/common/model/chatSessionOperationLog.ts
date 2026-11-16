@@ -72,7 +72,8 @@ const responsePartSchema = Adapt.v<PersistedResponsePart, SerializedChatResponse
 				case 'autoModeResolution':
 					return objectsEqual(a, b);
 
-				// DSH 节点载荷是 canonical JSON 字符串，内容变了就必须换掉旧 part。
+				// DSH 节点三件套（encoded / projectionEncoded / hint）任一变化都要换掉旧 part，
+				// 因此必须做深比较而不是 kind 相等。
 				case 'dshNode':
 					return objectsEqual(a, b);
 

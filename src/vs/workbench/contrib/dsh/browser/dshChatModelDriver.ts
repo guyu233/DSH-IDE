@@ -58,10 +58,33 @@ function partIdOf(node: DshChatNode): string {
 	return `dsh:${node.seq}:node`;
 }
 
-/** 节点 → `dshNode` part；payload 严格是节点 `raw` 的 canonical JSON。 */
+/**
+ * IDE 私有装饰字段：只服务 IDE 渲染，不属于 DSH 真源结构，不能进 `projectionEncoded`。
+ *
+ * 否则渲染层会把 IDE 自己加的字段当成 DSH 数据源，破坏「所有显示内容都能从 DSH 载荷派生」。
+ */
+const IDE_ONLY_FIELDS: readonly string[] = ['turnEnded'];
+
+/** 去掉 IDE 私有字段后的节点投影；`raw` 也剥离（它与 `encoded` 重复）。 */
+function projectionOf(node: DshChatNode): unknown {
+	const record: Record<string, unknown> = { ...(node as unknown as Record<string, unknown>) };
+	for (const field of IDE_ONLY_FIELDS) {
+		delete record[field];
+	}
+	delete record['raw'];
+	return record;
+}
+
+/** 节点 → `dshNode` part：encoded 是 raw 真值，projectionEncoded 是渲染真值，hint 是分派信号。 */
 function nodePart(node: DshChatNode): IChatDshNodePart {
 	const source = node.raw === undefined ? node : node.raw;
-	return { kind: 'dshNode', id: partIdOf(node), encoded: stableStringify(source) };
+	return {
+		kind: 'dshNode',
+		id: partIdOf(node),
+		encoded: stableStringify(source),
+		hint: node.kind,
+		projectionEncoded: stableStringify(projectionOf(node)),
+	};
 }
 
 export class DshChatModelDriver extends Disposable implements IWorkbenchContribution {
@@ -204,14 +227,15 @@ export class DshChatModelDriver extends Disposable implements IWorkbenchContribu
 		}
 	}
 
-	/** 把一个节点写成 `dshNode` part；同 id 且 canonical 未变则跳过（避免重放堆叠）。 */
+	/** 把一个节点写成 `dshNode` part；三件套全都没变才跳过（避免重放堆叠）。 */
 	private writeNode(model: ChatModel, request: ChatRequestModel, node: DshChatNode): void {
 		const part = nodePart(node);
-		if (this.writtenParts.get(part.id) === part.encoded) {
+		const fingerprint = `${part.encoded}\u0000${part.projectionEncoded}\u0000${part.hint}`;
+		if (this.writtenParts.get(part.id) === fingerprint) {
 			return;
 		}
 		model.acceptResponseProgress(request, part as IChatProgress);
-		this.writtenParts.set(part.id, part.encoded);
+		this.writtenParts.set(part.id, fingerprint);
 	}
 
 	override dispose(): void {

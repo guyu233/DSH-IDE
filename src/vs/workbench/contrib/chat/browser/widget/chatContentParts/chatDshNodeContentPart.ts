@@ -6,7 +6,7 @@
 import * as dom from '../../../../../../base/browser/dom.js';
 import { renderAsPlaintext } from '../../../../../../base/browser/markdownRenderer.js';
 import { Codicon } from '../../../../../../base/common/codicons.js';
-import { Disposable } from '../../../../../../base/common/lifecycle.js';
+import { Disposable, DisposableStore } from '../../../../../../base/common/lifecycle.js';
 import { MarkdownString } from '../../../../../../base/common/htmlContent.js';
 import { ThemeIcon } from '../../../../../../base/common/themables.js';
 import { localize } from '../../../../../../nls.js';
@@ -15,90 +15,157 @@ import { IMarkdownRenderer } from '../../../../../../platform/markdown/browser/m
 import { IChatDshNodePart } from '../../../common/chatService/chatService.js';
 import { IChatRendererContent } from '../../../common/model/chatViewModel.js';
 import { IChatContentPart } from './chatContentParts.js';
+import { DshRawJsonView } from './dsh/dshRawJsonView.js';
+import { DshViewKind, DshNodeViewInput } from './dsh/dshNodeTypes.js';
+import { DshUserView } from './dsh/dshUserView.js';
+import { DshAssistantView } from './dsh/dshAssistantView.js';
+import { DshToolView } from './dsh/dshToolView.js';
+import { DshContextView } from './dsh/dshContextView.js';
+import { DshCommandView } from './dsh/dshCommandView.js';
+import { DshCompactionView } from './dsh/dshCompactionView.js';
+import { DshModelRetryView } from './dsh/dshModelRetryView.js';
+import { DshTurnErrorView } from './dsh/dshTurnErrorView.js';
+import { DshTurnMaxTokensView } from './dsh/dshTurnMaxTokensView.js';
+import { DshInheritedHistoryView } from './dsh/dshInheritedHistoryView.js';
+import { DshUnknownView } from './dsh/dshUnknownView.js';
 
 /**
- * DSH 会话节点的原生渲染部件。
+ * DSH 会话节点的原生渲染部件（按 kind 分派）。
  *
- * 纯度约束（「不增不减」的渲染侧保证）：
- * - **唯一**数据源是 `part.encoded`；本文件不读任何其它状态，也不认识 `DshChatNode` 类型。
- * - 渲染结果必须是 `decode(encoded)` 的函数：同样的 encoded 必然得到同样的 DOM 内容。
- * - 任何解码失败都降级为**原样**显示 encoded 文本，绝不丢弃、绝不猜造标签。
+ * 两个真值的分工（由 `verifyProjectionBinding` 绑定）：
+ * - `encoded` = 源载荷 canonical，**校验真值**；用于「原始载荷」详情与解码兜底。
+ * - `projectionEncoded` = 解码后节点 canonical，**渲染真值**；含跨事件累积字段。
+ * - `hint` = 分派信号，只选择渲染函数，不进入任何可见文本。
  *
- * 之所以先落一个"结构化 JSON 视图"而不是逐类子视图：先把无损通路打通并可证，
- * 逐类组件（UserBubble / ToolCallTree / TurnUsagePanel…）只需替换本文件内部的
- * `renderNode` 分派，`encoded` 契约不变。
+ * 纯度约束：本文件不 import `DshChatNode`，不读 `DshChatSession` / `DshChatModel`
+ * 或任何其它 part；所有可见内容都由上述两个 JSON 字符串派生。
  */
 export class ChatDshNodeContentPart extends Disposable implements IChatContentPart {
 	readonly domNode: HTMLElement;
 
 	constructor(
 		private readonly part: IChatDshNodePart,
-		renderer: IMarkdownRenderer,
+		private readonly renderer: IMarkdownRenderer,
 		@IInstantiationService instantiationService: IInstantiationService,
 	) {
 		super();
+		// 视图目前都用显式构造；保留注入点供后续子视图按需 createInstance。
 		void instantiationService;
-		void renderer;
-		this.domNode = this._renderNode(part);
+		this.domNode = this._render(part);
 	}
 
-	private _renderNode(part: IChatDshNodePart): HTMLElement {
-		let parsed: unknown;
-		let ok = true;
-		try {
-			parsed = JSON.parse(part.encoded);
-		} catch {
-			ok = false;
-		}
-
+	private _render(part: IChatDshNodePart): HTMLElement {
 		const container = dom.$('.chat-dsh-node');
 		container.setAttribute('data-dsh-node-id', part.id);
 
-		if (!ok) {
-			// 解码失败：原样显示 encoded，不丢信息。
+		// 解码：只解一次，两个视图共用；失败则原样显示 encoded（不丢信息）。
+		let encodedParsed: unknown;
+		let encodedOk = true;
+		try {
+			encodedParsed = JSON.parse(part.encoded);
+		} catch {
+			encodedOk = false;
+		}
+		if (!encodedOk) {
+			container.setAttribute('data-dsh-node-kind', 'malformed');
 			const fallback = dom.append(container, dom.$('.chat-dsh-node-raw'));
 			fallback.textContent = part.encoded;
+			container.setAttribute('aria-label', localize('chat.dshNode.malformed', "DSH node (unparsable payload)"));
 			return container;
 		}
 
-		const kind = this._kindOf(parsed);
+		let parsedProjection: unknown;
+		let projectionOk = true;
+		try {
+			parsedProjection = JSON.parse(part.projectionEncoded);
+		} catch {
+			projectionOk = false;
+		}
+
+		const kind = this._resolveKind(part, parsedProjection, encodedParsed);
 		container.setAttribute('data-dsh-node-kind', kind);
 
-		const header = dom.append(container, dom.$('.chat-dsh-node-header'));
-		const icon = dom.append(header, dom.$('span.chat-dsh-node-icon'));
-		icon.classList.add(...ThemeIcon.asClassNameArray(Codicon.json));
-		icon.setAttribute('aria-hidden', 'true');
-		const label = dom.append(header, dom.$('span.chat-dsh-node-label'));
-		// 标签只写 kind 本身（来自 encoded），不添加任何原文没有的措辞。
-		label.textContent = kind;
+		const stores = new DisposableStore();
+		this._register(stores);
 
-		const body = dom.append(container, dom.$('.chat-dsh-node-body'));
-		const pre = dom.append(body, dom.$('pre.chat-dsh-node-json'));
-		// 逐字呈现 canonical JSON：这是"完整呈现、无伪造、无遗漏"的当前形态。
-		pre.textContent = JSON.stringify(parsed, null, 2);
+		const input: DshNodeViewInput = {
+			encoded: part.encoded,
+			encodedParsed,
+			parsed: projectionOk ? parsedProjection : encodedParsed,
+			projectionAvailable: projectionOk,
+			id: part.id,
+			kind,
+		};
+
+		const view = this._createView(kind, input, stores);
+		container.appendChild(view.domNode);
+
+		// 每个节点都必须有「原始载荷」详情：专用视图不能成为唯一出口。
+		container.appendChild(this._renderRawDetails(input, stores));
 
 		container.setAttribute('aria-label', localize('chat.dshNode.label', "DSH node {0}", kind));
 		return container;
 	}
 
-	/** 只从 encoded 派生：取节点自身的判别字段，取不到就是 `unknown`。 */
-	private _kindOf(parsed: unknown): string {
-		if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
-			const record = parsed as Record<string, unknown>;
-			const kind = record['kind'];
-			if (typeof kind === 'string' && kind !== '') {
-				return kind;
-			}
-			const type = record['type'];
-			if (typeof type === 'string' && type !== '') {
-				return type;
-			}
+	/** 分派 kind：优先用 hint，退化到投影/源载荷上的判别字段，最后 unknown。 */
+	private _resolveKind(part: IChatDshNodePart, projection: unknown, encoded: unknown): DshViewKind {
+		const fromHint = asKind(part.hint);
+		if (fromHint !== undefined) {
+			return fromHint;
+		}
+		const fromProjection = asKind(readString(projection, 'kind'));
+		if (fromProjection !== undefined) {
+			return fromProjection;
+		}
+		// 源载荷没有 kind，只有事件 type；这里只做兜底识别，不做完整 type→kind 推导。
+		const type = readString(encoded, 'type');
+		if (type !== undefined) {
+			return 'unknown';
 		}
 		return 'unknown';
 	}
 
+	private _createView(kind: DshViewKind, input: DshNodeViewInput, stores: DisposableStore): { domNode: HTMLElement } {
+		switch (kind) {
+			case 'user':
+			case 'steering':
+				return new DshUserView(input, this.renderer, stores);
+			case 'assistant':
+				return new DshAssistantView(input, this.renderer, stores);
+			case 'tool-call':
+			case 'tool-result':
+				return new DshToolView(input, this.renderer, stores);
+			case 'context':
+				return new DshContextView(input, this.renderer, stores);
+			case 'command':
+				return new DshCommandView(input, stores);
+			case 'compaction':
+				return new DshCompactionView(input, this.renderer, stores);
+			case 'model-retry':
+				return new DshModelRetryView(input, stores);
+			case 'turn-error':
+				return new DshTurnErrorView(input, this.renderer, stores);
+			case 'turn-max-tokens':
+				return new DshTurnMaxTokensView(input, stores);
+			case 'inherited-history':
+				return new DshInheritedHistoryView(input, stores);
+			case 'unknown':
+			default:
+				return new DshUnknownView(input, stores);
+		}
+	}
+
+	/** 「原始载荷」详情：永远显示 encoded 原文，保证专用视图不隐藏任何字段。 */
+	private _renderRawDetails(input: DshNodeViewInput, stores: DisposableStore): HTMLElement {
+		return new DshRawJsonView(input, stores).domNode;
+	}
+
 	hasSameContent(other: IChatRendererContent): boolean {
-		return other.kind === 'dshNode' && other.id === this.part.id && other.encoded === this.part.encoded;
+		return other.kind === 'dshNode'
+			&& other.id === this.part.id
+			&& other.encoded === this.part.encoded
+			&& other.projectionEncoded === this.part.projectionEncoded
+			&& other.hint === this.part.hint;
 	}
 }
 
@@ -110,3 +177,28 @@ export function dshNodePartPlaintext(part: IChatDshNodePart): string {
 		return part.encoded;
 	}
 }
+
+// ---- 本地安全读取（不依赖 dsh contrib 类型） ----
+
+const KNOWN_KINDS: readonly DshViewKind[] = [
+	'user', 'steering', 'context', 'assistant', 'tool-call', 'tool-result',
+	'command', 'compaction', 'model-retry', 'turn-error', 'turn-max-tokens',
+	'inherited-history', 'unknown',
+];
+
+function asKind(value: unknown): DshViewKind | undefined {
+	return typeof value === 'string' && (KNOWN_KINDS as readonly string[]).includes(value)
+		? value as DshViewKind
+		: undefined;
+}
+
+function readString(value: unknown, key: string): string | undefined {
+	if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+		return undefined;
+	}
+	const raw = (value as Record<string, unknown>)[key];
+	return typeof raw === 'string' ? raw : undefined;
+}
+
+void Codicon;
+void ThemeIcon;

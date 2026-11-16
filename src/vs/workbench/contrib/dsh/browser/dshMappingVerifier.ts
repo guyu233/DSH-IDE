@@ -141,8 +141,7 @@ export function verifyBijection(
  *
  * 只对 id 能对上、且两侧都可解析的条目做比较；对不上的由 {@link verifyBijection} 报告。
  */
-export function verifyRoundTrip(
-	nodes: readonly IDshChatNodeLike[],
+export function verifyRoundTrip(	nodes: readonly IDshChatNodeLike[],
 	parts: readonly IDshNodePartLike[],
 	idOf: (node: IDshChatNodeLike) => string,
 ): readonly string[] {
@@ -177,4 +176,91 @@ export function verifyRoundTrip(
 		}
 	}
 	return mismatched;
+}
+
+/**
+ * 校验「两个真值」的绑定：`projectionEncoded`（渲染真值）必须与 `encoded`（校验真值）同源。
+ *
+ * 断言三件事，任一失败即判失真：
+ * 1. 两者都是合法 JSON；
+ * 2. `projectionEncoded` 的 `seq` 与 `encoded` 的 `seq` 相同（同一节点）；
+ * 3. `projectionEncoded` 的 `kind` 与 part 的 `hint` 一致（分派信号没有跑偏）。
+ *
+ * 注意：`projectionEncoded` 刻意剥离了 `raw`（避免与 `encoded` 重复存储），
+ * 因此这里不比较 `raw`，而是用 `seq` + `kind/hint` 建立身份绑定。
+ * `raw` 与 `encoded` 的等价由 {@link verifyRoundTrip} 独立保证，两者合起来覆盖全链。
+ */
+export function verifyProjectionBinding(
+	parts: readonly { readonly hint?: string; readonly encoded: string; readonly projectionEncoded?: string }[],
+): readonly string[] {
+	const broken: string[] = [];
+	for (const [index, part] of parts.entries()) {
+		const label = part.hint === undefined ? `#${index}` : `${part.hint}#${index}`;
+		if (part.projectionEncoded === undefined) {
+			broken.push(`${label}:missing-projection`);
+			continue;
+		}
+		let source: unknown;
+		let projection: unknown;
+		try {
+			source = JSON.parse(part.encoded);
+			projection = JSON.parse(part.projectionEncoded);
+		} catch {
+			broken.push(`${label}:unparsable`);
+			continue;
+		}
+		if (typeof source !== 'object' || source === null || typeof projection !== 'object' || projection === null) {
+			broken.push(`${label}:not-object`);
+			continue;
+		}
+		const s = source as Record<string, unknown>;
+		const p = projection as Record<string, unknown>;
+		if (s['seq'] !== p['seq']) {
+			broken.push(`${label}:seq-mismatch`);
+			continue;
+		}
+		if (part.hint !== undefined && p['kind'] !== part.hint) {
+			broken.push(`${label}:hint-mismatch`);
+			continue;
+		}
+		if (p['raw'] !== undefined) {
+			// projection 不得内嵌 raw：否则与 encoded 重复，且可能掩盖真值不一致。
+			broken.push(`${label}:projection-contains-raw`);
+		}
+	}
+	return broken;
+}
+
+/**
+ * 校验 projection 不含 IDE 私有装饰字段。
+ *
+ * 这些字段（如 `turnEnded`）只服务 IDE 渲染，不属于 DSH 真源；一旦混进
+ * `projectionEncoded`，渲染层就会把 IDE 自造数据当成 DSH 数据源。
+ */
+export function verifyNoIdeOnlyFields(
+	parts: readonly { readonly hint?: string; readonly projectionEncoded?: string }[],
+	ideOnlyFields: readonly string[],
+): readonly string[] {
+	const found: string[] = [];
+	for (const [index, part] of parts.entries()) {
+		if (part.projectionEncoded === undefined) {
+			continue;
+		}
+		let projection: unknown;
+		try {
+			projection = JSON.parse(part.projectionEncoded);
+		} catch {
+			continue;
+		}
+		if (typeof projection !== 'object' || projection === null) {
+			continue;
+		}
+		const record = projection as Record<string, unknown>;
+		for (const field of ideOnlyFields) {
+			if (record[field] !== undefined) {
+				found.push(`${part.hint ?? '#' + index}:${field}`);
+			}
+		}
+	}
+	return found;
 }

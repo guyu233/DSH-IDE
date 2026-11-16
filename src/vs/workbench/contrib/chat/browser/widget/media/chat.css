@@ -5304,3 +5304,212 @@ have to be updated for changes to the rules above, or to support more deeply nes
 .chat-dsh-node-raw {
 	color: var(--vscode-errorForeground);
 }
+
+/* ---- DSH 节点专用视图（全部限定在 .dsh-session 作用域） ---- */
+
+.dsh-session .chat-dsh-card {
+	border: 1px solid var(--vscode-chat-requestBorder, var(--vscode-input-border, transparent));
+	border-radius: 8px;
+	margin: 4px 0;
+	padding: 8px 12px;
+	background: var(--vscode-chat-requestBubbleBackground, transparent);
+}
+
+.dsh-session .chat-dsh-card-error {
+	border-color: var(--vscode-inputValidation-errorBorder, var(--vscode-errorForeground));
+}
+
+.dsh-session .chat-dsh-card-warning {
+	border-color: var(--vscode-inputValidation-warningBorder, var(--vscode-editorWarning-foreground));
+}
+
+.dsh-session .chat-dsh-title {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	font-size: 13px;
+	line-height: 24px;
+	margin-bottom: 4px;
+}
+
+.dsh-session .chat-dsh-title-icon {
+	display: inline-flex;
+	color: var(--vscode-descriptionForeground);
+}
+
+.dsh-session .chat-dsh-title-text {
+	font-family: var(--vscode-editor-font-family);
+	color: var(--vscode-descriptionForeground);
+}
+
+.dsh-session .chat-dsh-badge {
+	display: inline-block;
+	padding: 0 6px;
+	border-radius: 999px;
+	font-size: 11px;
+	line-height: 16px;
+	background: var(--vscode-badge-background);
+	color: var(--vscode-badge-foreground);
+}
+
+.dsh-session .chat-dsh-badge-error {
+	background: var(--vscode-inputValidation-errorBackground, var(--vscode-errorForeground));
+	color: var(--vscode-badge-foreground);
+}
+
+.dsh-session .chat-dsh-badge-warning {
+	background: var(--vscode-inputValidation-warningBackground, var(--vscode-editorWarning-foreground));
+	color: var(--vscode-badge-foreground);
+}
+
+.dsh-session .chat-dsh-badge-success {
+	background: var(--vscode-testing-iconPassed, var(--vscode-badge-background));
+	color: var(--vscode-badge-foreground);
+}
+
+.dsh-session .chat-dsh-user-body,
+.dsh-session .chat-dsh-assistant-body,
+.dsh-session .chat-dsh-context-content {
+	font-size: 14px;
+	line-height: 24px;
+}
+
+.dsh-session .chat-dsh-user-steering,
+.dsh-session .chat-dsh-steering {
+	border-left: 2px solid var(--vscode-focusBorder);
+}
+
+.dsh-session .chat-dsh-markdown {
+	margin: 4px 0;
+}
+
+.dsh-session .chat-dsh-disclosure {
+	margin: 4px 0;
+}
+
+.dsh-session .chat-dsh-disclosure-summary {
+	cursor: pointer;
+	display: flex;
+	align-items: center;
+	gap: 4px;
+	font-size: 13px;
+	line-height: 24px;
+	color: var(--vscode-descriptionForeground);
+}
+
+.dsh-session .chat-dsh-disclosure-body {
+	padding: 4px 0 4px 16px;
+}
+
+.dsh-session .chat-dsh-field {
+	display: flex;
+	gap: 8px;
+	font-size: 12px;
+	line-height: 18px;
+	font-family: var(--vscode-editor-font-family);
+}
+
+.dsh-session .chat-dsh-field-key {
+	color: var(--vscode-descriptionForeground);
+	flex-shrink: 0;
+}
+
+.dsh-session .chat-dsh-field-value {
+	white-space: pre-wrap;
+	word-break: break-word;
+	overflow-wrap: anywhere;
+}
+
+.dsh-session .chat-dsh-attachment {
+	border: 1px solid var(--vscode-chat-requestBorder, var(--vscode-input-border, transparent));
+	border-radius: 6px;
+	padding: 4px 8px;
+	margin: 4px 0;
+}
+
+.dsh-session .chat-dsh-attachment-name {
+	font-size: 13px;
+}
+
+.dsh-session .chat-dsh-attachment-detail {
+	font-size: 11px;
+	color: var(--vscode-descriptionForeground);
+	font-family: var(--vscode-editor-font-family);
+	white-space: pre-wrap;
+	word-break: break-word;
+}
+
+.dsh-session .chat-dsh-tool-error {
+	border-left: 2px solid var(--vscode-errorForeground);
+	padding-left: 8px;
+	margin: 4px 0;
+}
+
+.dsh-session .chat-dsh-subcalls {
+	margin-left: 12px;
+	border-left: 1px solid var(--vscode-chat-requestBorder, var(--vscode-input-border, transparent));
+	padding-left: 8px;
+}
+
+.dsh-session .chat-dsh-inherited {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	margin: 12px 0;
+	color: var(--vscode-descriptionForeground);
+	font-size: 12px;
+}
+
+.dsh-session .chat-dsh-inherited-line {
+	flex: 1;
+	height: 1px;
+	background: var(--vscode-chat-requestBorder, var(--vscode-input-border, transparent));
+}
+
+.dsh-session .chat-dsh-inherited-label {
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+}
+
+.dsh-session .chat-dsh-unknown-json {
+	margin: 4px 0;
+	font-size: 12px;
+	font-family: var(--vscode-editor-font-family);
+	white-space: pre-wrap;
+	word-break: break-word;
+}
+
+.dsh-session .chat-dsh-raw {
+	margin-top: 6px;
+}
+
+.dsh-session .chat-dsh-raw-summary {
+	cursor: pointer;
+	font-size: 11px;
+	color: var(--vscode-descriptionForeground);
+	display: flex;
+	align-items: center;
+	gap: 4px;
+}
+
+.dsh-session .chat-dsh-raw-json {
+	margin: 4px 0 0;
+	font-size: 11px;
+	font-family: var(--vscode-editor-font-family);
+	white-space: pre-wrap;
+	word-break: break-word;
+	opacity: 0.85;
+}
+
+/* 窄侧栏与高对比度下的可读性 */
+.monaco-workbench.hc-black .dsh-session .chat-dsh-card {
+	border-width: 1px;
+	border-style: solid;
+}
+
+@media (max-width: 480px) {
+	.dsh-session .chat-dsh-card {
+		padding: 6px 8px;
+	}
+}

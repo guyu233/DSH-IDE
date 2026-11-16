@@ -8,7 +8,7 @@
 
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { canonicalNode, verifyBijection, verifyRoundTrip, verifySourceFidelity } from '../../../out/vs/workbench/contrib/dsh/browser/dshMappingVerifier.js';
+import { canonicalNode, verifyBijection, verifyNoIdeOnlyFields, verifyProjectionBinding, verifyRoundTrip, verifySourceFidelity } from '../../../out/vs/workbench/contrib/dsh/browser/dshMappingVerifier.js';
 
 /** 构造一个带 raw 的源节点。 */
 function node(kind: string, seq: number, raw: unknown) {
@@ -111,3 +111,45 @@ test('L3: 键序不同不算失配（canonical 归一）', () => {
 	const parts = [part(idOf(nodes[0]), JSON.stringify({ a: 1, b: 2 }))];
 	assert.deepEqual(verifyRoundTrip(nodes, parts, idOf), []);
 });
+
+// ---- projection 绑定（C 方案）：两个真值必须同源 ----
+
+function dshPart(hint: string, encodedObj: unknown, projectionObj: unknown) {
+	return { kind: 'dshNode', hint, encoded: JSON.stringify(encodedObj), projectionEncoded: JSON.stringify(projectionObj) };
+}
+
+test('projection binding: seq 与 hint 一致时通过', () => {
+	const parts = [dshPart('command', { seq: 2, type: 'command/done', data: {} }, { kind: 'command', seq: 2, name: 'help', outcome: { kind: 'success' } })];
+	assert.deepEqual(verifyProjectionBinding(parts), []);
+});
+
+test('projection binding: seq 不一致被抓出', () => {
+	const parts = [dshPart('command', { seq: 2 }, { kind: 'command', seq: 99 })];
+	assert.deepEqual(verifyProjectionBinding(parts), ['command#0:seq-mismatch']);
+});
+
+test('projection binding: hint 与投影 kind 不一致被抓出', () => {
+	const parts = [dshPart('assistant', { seq: 1 }, { kind: 'command', seq: 1 })];
+	assert.deepEqual(verifyProjectionBinding(parts), ['assistant#0:hint-mismatch']);
+});
+
+test('projection binding: projection 内嵌 raw 被拒（避免重复存储与掩盖真值）', () => {
+	const parts = [dshPart('user', { seq: 1 }, { kind: 'user', seq: 1, raw: { seq: 1 } })];
+	assert.deepEqual(verifyProjectionBinding(parts), ['user#0:projection-contains-raw']);
+});
+
+test('projection binding: projectionEncoded 非法 JSON 被抓出', () => {
+	const parts = [{ kind: 'dshNode', hint: 'user', encoded: '{"seq":1}', projectionEncoded: 'not json' }];
+	assert.deepEqual(verifyProjectionBinding(parts), ['user#0:unparsable']);
+});
+
+test('verifyNoIdeOnlyFields: turnEnded 混入 projection 被抓出', () => {
+	const parts = [dshPart('assistant', { seq: 1 }, { kind: 'assistant', seq: 1, turnEnded: true })];
+	assert.deepEqual(verifyNoIdeOnlyFields(parts, ['turnEnded']), ['assistant:turnEnded']);
+});
+
+test('verifyNoIdeOnlyFields: 干净 projection 通过', () => {
+	const parts = [dshPart('assistant', { seq: 1 }, { kind: 'assistant', seq: 1, turn: 1 })];
+	assert.deepEqual(verifyNoIdeOnlyFields(parts, ['turnEnded']), []);
+});
+
