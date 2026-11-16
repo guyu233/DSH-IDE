@@ -24,6 +24,7 @@ export function registerChatPromptNavigationActions() {
 					weight: KeybindingWeight.WorkbenchContrib,
 					when: ChatContextKeys.inChatSession,
 				},
+				precondition: ChatContextKeys.enabled,
 				f1: true,
 				category: CHAT_CATEGORY,
 			});
@@ -44,6 +45,7 @@ export function registerChatPromptNavigationActions() {
 					weight: KeybindingWeight.WorkbenchContrib,
 					when: ChatContextKeys.inChatSession,
 				},
+				precondition: ChatContextKeys.enabled,
 				f1: true,
 				category: CHAT_CATEGORY,
 			});

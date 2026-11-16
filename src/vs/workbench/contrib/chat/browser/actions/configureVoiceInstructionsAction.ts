@@ -30,9 +30,11 @@ class ConfigureSpeechInstructionsAction extends Action2 {
 		super({
 			id,
 			title,
+			precondition: ChatContextKeys.enabled,
 			f1: false,
 			menu: {
 				id: MenuId.CommandPalette,
+				when: ChatContextKeys.enabled,
 			},
 		});
 	}

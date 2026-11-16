@@ -33,7 +33,9 @@ class OpenChatStorageFolderAction extends Action2 {
 			title: localize2('workbench.action.chat.openStorageFolder.label', "Open Chat Storage Folder"),
 			icon: Codicon.attach,
 			category: Categories.Developer,
-			f1: true,		});
+			f1: true,
+			precondition: ChatContextKeys.enabled
+		});
 	}
 
 	override async run(accessor: ServicesAccessor, ...args: unknown[]): Promise<void> {

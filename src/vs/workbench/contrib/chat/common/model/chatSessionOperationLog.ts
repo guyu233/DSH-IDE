@@ -72,11 +72,6 @@ const responsePartSchema = Adapt.v<PersistedResponsePart, SerializedChatResponse
 				case 'autoModeResolution':
 					return objectsEqual(a, b);
 
-				// DSH 节点三件套（encoded / projectionEncoded / hint）任一变化都要换掉旧 part，
-				// 因此必须做深比较而不是 kind 相等。
-				case 'dshNode':
-					return objectsEqual(a, b);
-
 				// Static types that won't change after being pushed can use strict equality.
 				case 'clearToPreviousToolInvocation':
 				case 'codeblockUri':

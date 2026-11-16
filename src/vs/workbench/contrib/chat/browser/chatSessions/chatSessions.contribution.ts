@@ -681,6 +681,7 @@ export class ChatSessionsService extends Disposable implements IChatSessionsServ
 						category: CHAT_CATEGORY,
 						icon: Codicon.plus,
 						f1: false,
+						precondition: ChatContextKeys.enabled
 					});
 				}
 
@@ -722,6 +723,7 @@ export class ChatSessionsService extends Disposable implements IChatSessionsServ
 						category: CHAT_CATEGORY,
 						icon: Codicon.plus,
 						f1: true,
+						precondition: ChatContextKeys.enabled,
 					});
 				}
 
@@ -739,6 +741,7 @@ export class ChatSessionsService extends Disposable implements IChatSessionsServ
 						category: CHAT_CATEGORY,
 						icon: Codicon.plus,
 						f1: false, // Hide from Command Palette
+						precondition: ChatContextKeys.enabled,
 						menu: !isAvailableInSessionTypePicker ? {
 							id: MenuId.ChatNewMenu,
 							group: '3_new_special',
@@ -1729,6 +1732,7 @@ function registerNewSessionInPlaceAction(type: string, displayName: string): IDi
 				title: localize2('interactiveSession.openNewChatSessionInPlace', "New {0} Session", displayName),
 				category: CHAT_CATEGORY,
 				f1: false,
+				precondition: ChatContextKeys.enabled,
 			});
 		}
 
@@ -1761,6 +1765,7 @@ function registerNewSessionExternalAction(type: string, displayName: string, res
 				title: localize2('interactiveSession.openNewChatSessionExternal', "New {0} Session", displayName),
 				category: CHAT_CATEGORY,
 				f1: false,
+				precondition: ChatContextKeys.enabled,
 			});
 		}
 		async run(accessor: ServicesAccessor): Promise<void> {

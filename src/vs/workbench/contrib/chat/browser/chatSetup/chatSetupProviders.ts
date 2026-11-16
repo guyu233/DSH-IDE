@@ -633,23 +633,11 @@ export class SetupAgent extends Disposable implements IChatAgentImplementation {
 	}
 
 	private async whenAgentActivated(chatService: IChatService): Promise<void> {
-		// 不再主动预热默认 agent：等待「任一 agent 被实际激活」这一既有事实，
-		// 语义与原实现一致（原实现激活默认 agent 后即 resolve），但不再由本流程触发激活。
-		void chatService;
-		return this.instantiationService.invokeFunction(async accessor => {
-			const chatAgentService = accessor.get(IChatAgentService);
-			if (chatAgentService.getActivatedAgents().length > 0) {
-				return;
-			}
-			await new Promise<void>(resolve => {
-				const listener = chatAgentService.onDidChangeAgents(() => {
-					if (chatAgentService.getActivatedAgents().length > 0) {
-						listener.dispose();
-						resolve();
-					}
-				});
-			});
-		});
+		try {
+			await chatService.activateDefaultAgent(this.location);
+		} catch (error) {
+			this.logService.error(error);
+		}
 	}
 
 	private computeDiagnosticInfo(agentActivated: boolean, agentReady: boolean, languageModelReady: boolean, toolsModelReady: boolean, requestModel: IChatRequestModel, languageModelsService: ILanguageModelsService, chatAgentService: IChatAgentService, modeInfo: { kind?: ChatModeKind } | undefined) {

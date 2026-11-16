@@ -673,6 +673,7 @@ export function registerChatActions() {
 				icon: Codicon.plus,
 				f1: true,
 				category: CHAT_CATEGORY,
+				precondition: ChatContextKeys.enabled,
 				keybinding: {
 					weight: KeybindingWeight.WorkbenchContrib,
 					primary: KeyMod.CtrlCmd | KeyCode.KeyN,
@@ -710,6 +711,7 @@ export function registerChatActions() {
 				icon: Codicon.copilot,
 				f1: false,
 				category: CHAT_CATEGORY,
+				precondition: ChatContextKeys.enabled,
 				menu: [{
 					id: MenuId.EditorTitle,
 					group: 'navigation',
@@ -734,6 +736,7 @@ export function registerChatActions() {
 				icon: Codicon.newSession,
 				f1: false,
 				category: CHAT_CATEGORY,
+				precondition: ChatContextKeys.enabled,
 				menu: [{
 					id: MenuId.EditorTitle,
 					group: 'navigation',
@@ -758,6 +761,7 @@ export function registerChatActions() {
 				icon: Codicon.comment,
 				f1: false,
 				category: CHAT_CATEGORY,
+				precondition: ChatContextKeys.enabled,
 				menu: [{
 					id: MenuId.EditorTitle,
 					group: 'navigation',
@@ -781,6 +785,7 @@ export function registerChatActions() {
 				title: localize2('interactiveSession.openToSide', "New Chat Editor to the Side"),
 				f1: true,
 				category: CHAT_CATEGORY,
+				precondition: ChatContextKeys.enabled,
 			});
 		}
 
@@ -798,6 +803,7 @@ export function registerChatActions() {
 				title: localize2('interactiveSession.newChatWindow', "New Chat Window"),
 				f1: true,
 				category: CHAT_CATEGORY,
+				precondition: ChatContextKeys.enabled,
 				menu: [{
 					id: MenuId.ChatTitleBarMenu,
 					group: 'b_new',
@@ -822,6 +828,7 @@ export function registerChatActions() {
 			super({
 				id: 'workbench.action.chat.clearInputHistory',
 				title: localize2('interactiveSession.clearHistory.label', "Clear Input History"),
+				precondition: ChatContextKeys.enabled,
 				category: CHAT_CATEGORY,
 				f1: true,
 			});
@@ -1106,6 +1113,7 @@ export function registerChatActions() {
 				title: localize2('interactiveSession.showContextUsage.label', "Show Context Window Usage"),
 				category: CHAT_CATEGORY,
 				f1: true,
+				precondition: ChatContextKeys.enabled,
 			});
 		}
 
@@ -1122,6 +1130,7 @@ export function registerChatActions() {
 				id: 'workbench.action.chat.compactAgentHostConversation',
 				title: localize2('interactiveSession.compactAgentHostConversation.label', "Compact Conversation"),
 				category: CHAT_CATEGORY,
+				precondition: ChatContextKeys.enabled,
 				menu: {
 					id: MenuId.ChatContextUsageActions,
 					group: 'navigation',
@@ -1162,7 +1171,7 @@ export function registerChatActions() {
 		}
 	});
 
-	const nonEnterpriseCopilotUsers = ContextKeyExpr.and(ContextKeyExpr.notEquals(`config.${defaultChat.completionsAdvancedSetting}.authProvider`, defaultChat.provider.enterprise.id));
+	const nonEnterpriseCopilotUsers = ContextKeyExpr.and(ChatContextKeys.enabled, ContextKeyExpr.notEquals(`config.${defaultChat.completionsAdvancedSetting}.authProvider`, defaultChat.provider.enterprise.id));
 	registerAction2(class extends Action2 {
 		constructor() {
 			super({
@@ -1208,6 +1217,7 @@ export function registerChatActions() {
 				title: localize2('showCopilotUsageExtensions', "Show Extensions using Copilot"),
 				f1: true,
 				category: EXTENSIONS_CATEGORY,
+				precondition: ChatContextKeys.enabled
 			});
 		}
 
@@ -1312,6 +1322,7 @@ export function registerChatActions() {
 				title: localize2('resetTrustedTools', "Reset Tool Confirmations"),
 				category: CHAT_CATEGORY,
 				f1: true,
+				precondition: ChatContextKeys.enabled
 			});
 		}
 		override run(accessor: ServicesAccessor): void {
@@ -1328,6 +1339,7 @@ export function registerChatActions() {
 				category: CHAT_CATEGORY,
 				icon: Codicon.sparkle,
 				f1: true,
+				precondition: ChatContextKeys.enabled
 			});
 		}
 
@@ -1349,6 +1361,7 @@ export function registerChatActions() {
 				category: CHAT_CATEGORY,
 				icon: Codicon.sparkle,
 				f1: true,
+				precondition: ChatContextKeys.enabled
 			});
 		}
 
@@ -1372,6 +1385,7 @@ export function registerChatActions() {
 				category: CHAT_CATEGORY,
 				icon: Codicon.sparkle,
 				f1: true,
+				precondition: ChatContextKeys.enabled
 			});
 		}
 
@@ -1395,6 +1409,7 @@ export function registerChatActions() {
 				category: CHAT_CATEGORY,
 				icon: Codicon.sparkle,
 				f1: true,
+				precondition: ChatContextKeys.enabled
 			});
 		}
 
@@ -1418,6 +1433,7 @@ export function registerChatActions() {
 				category: CHAT_CATEGORY,
 				icon: Codicon.sparkle,
 				f1: true,
+				precondition: ChatContextKeys.enabled
 			});
 		}
 
@@ -1441,6 +1457,7 @@ export function registerChatActions() {
 				category: CHAT_CATEGORY,
 				icon: Codicon.sparkle,
 				f1: true,
+				precondition: ChatContextKeys.enabled
 			});
 		}
 
@@ -1464,6 +1481,7 @@ export function registerChatActions() {
 				category: CHAT_CATEGORY,
 				icon: Codicon.repoForked,
 				f1: true,
+				precondition: ChatContextKeys.enabled
 			});
 		}
 
@@ -1484,6 +1502,7 @@ export function registerChatActions() {
 				shortTitle: localize2('insertTroubleshootSlashCommand.short', "Insert /troubleshoot"),
 				category: CHAT_CATEGORY,
 				f1: true,
+				precondition: ChatContextKeys.enabled
 			});
 		}
 
@@ -1504,6 +1523,7 @@ export function registerChatActions() {
 				shortTitle: localize('openChatFeatureSettings.short', "Chat Settings"),
 				category: CHAT_CATEGORY,
 				f1: true,
+				precondition: ChatContextKeys.enabled,
 				menu: [{
 					id: MenuId.ChatWelcomeContext,
 					group: '2_settings',
@@ -1511,7 +1531,7 @@ export function registerChatActions() {
 				},
 				{
 					id: MenuId.ViewTitle,
-					when: ContextKeyExpr.and(ContextKeyExpr.equals('view', ChatViewId)),
+					when: ContextKeyExpr.and(ChatContextKeys.enabled, ContextKeyExpr.equals('view', ChatViewId)),
 					order: 15,
 					group: '3_configure'
 				}]
@@ -1533,6 +1553,7 @@ export function registerChatActions() {
 		},
 		group: 'navigation',
 		when: ContextKeyExpr.and(
+			ChatContextKeys.enabled,
 			ContextKeyExpr.equals('view', ChatViewId),
 		),
 		order: 6
@@ -1848,6 +1869,7 @@ registerAction2(class EditToolApproval extends Action2 {
 			metadata: {
 				description: localize2('chat.editToolApproval.description', "Edit/manage the tool approval and confirmation preferences for AI chat agents."),
 			},
+			precondition: ChatContextKeys.enabled,
 			f1: true,
 			category: CHAT_CATEGORY,
 		});

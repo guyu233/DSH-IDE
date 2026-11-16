@@ -14,7 +14,7 @@ import { ThemeIcon } from '../../../../../base/common/themables.js';
 import { URI } from '../../../../../base/common/uri.js';
 import { IInstantiationService } from '../../../../../platform/instantiation/common/instantiation.js';
 import { IChatRequestVariableEntry } from '../attachments/chatVariableEntries.js';
-import { ChatAgentVoteDirection, ChatRequestQueueKind, IChatCodeCitation, IChatContentReference, IChatDisabledClaudeHooksPart, IChatDshNodePart, IChatFollowup, IChatMcpAuthenticationRequired, IChatMcpServersStarting, IChatMcpServersStartingSlow, IChatPlanReview, IChatProgressMessage, IChatQuestionCarousel, IChatResponseErrorDetails, IChatUsage, IChatUsedContext } from '../chatService/chatService.js';
+import { ChatAgentVoteDirection, ChatRequestQueueKind, IChatCodeCitation, IChatContentReference, IChatDisabledClaudeHooksPart, IChatFollowup, IChatMcpAuthenticationRequired, IChatMcpServersStarting, IChatMcpServersStartingSlow, IChatPlanReview, IChatProgressMessage, IChatQuestionCarousel, IChatResponseErrorDetails, IChatUsage, IChatUsedContext } from '../chatService/chatService.js';
 import { getFullyQualifiedId, IChatAgentCommand, IChatAgentData, IChatAgentNameService, IChatAgentResult } from '../participants/chatAgents.js';
 import { IParsedChatRequest } from '../requestParser/chatParserTypes.js';
 import { IChatModel, IChatProgressRenderableResponseContent, IChatRequestDisablement, IChatRequestModel, IChatResponseModel, IChatTextEditGroup, IResponse } from './chatModel.js';
@@ -200,7 +200,7 @@ export interface IChatTurnPillsPart {
 /**
  * Type for content parts rendered by IChatListRenderer (not necessarily in the model)
  */
-export type IChatRendererContent = IChatProgressRenderableResponseContent | IChatReferences | IChatCodeCitations | IChatErrorDetailsPart | IChatChangesSummaryPart | IChatWorkingProgress | IChatMcpServersStarting | IChatMcpAuthenticationRequired | IChatMcpServersStartingSlow | IChatQuestionCarousel | IChatPlanReview | IChatDisabledClaudeHooksPart | IChatTurnPillsPart | IChatDshNodePart;
+export type IChatRendererContent = IChatProgressRenderableResponseContent | IChatReferences | IChatCodeCitations | IChatErrorDetailsPart | IChatChangesSummaryPart | IChatWorkingProgress | IChatMcpServersStarting | IChatMcpAuthenticationRequired | IChatMcpServersStartingSlow | IChatQuestionCarousel | IChatPlanReview | IChatDisabledClaudeHooksPart | IChatTurnPillsPart;
 
 export interface IChatResponseViewModel {
 	readonly model: IChatResponseModel;

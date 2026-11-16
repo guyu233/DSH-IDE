@@ -76,7 +76,9 @@ export class OpenAgentHostStateFileAction extends Action2 {
 			title: localize2('openAgentHostStateFile', "Open Agent Host State File"),
 			f1: true,
 			category: Categories.Developer,
-			precondition: ContextKeyExpr.and(				IsSessionsWindowContext.negate(),
+			precondition: ContextKeyExpr.and(
+				ChatContextKeys.enabled,
+				IsSessionsWindowContext.negate(),
 			),
 		});
 	}

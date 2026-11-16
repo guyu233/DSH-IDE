@@ -35,6 +35,7 @@ export function registerMoveActions() {
 				id: 'workbench.action.chat.openInEditor',
 				title: localize2('chat.openInEditor.label', "Move Chat into Editor Area"),
 				category: CHAT_CATEGORY,
+				precondition: ChatContextKeys.enabled,
 				f1: true,
 				menu: {
 					id: MenuId.ViewTitle,
@@ -57,6 +58,7 @@ export function registerMoveActions() {
 				id: 'workbench.action.chat.openInNewWindow',
 				title: localize2('chat.openInNewWindow.label', "Move Chat into New Window"),
 				category: CHAT_CATEGORY,
+				precondition: ChatContextKeys.enabled,
 				f1: true,
 				menu: {
 					id: MenuId.ViewTitle,
@@ -79,6 +81,7 @@ export function registerMoveActions() {
 				id: 'workbench.action.chat.openInSidebar',
 				title: localize2('interactiveSession.openInSidebar.label', "Move Chat into Side Bar"),
 				category: CHAT_CATEGORY,
+				precondition: ChatContextKeys.enabled,
 				f1: true
 			});
 		}

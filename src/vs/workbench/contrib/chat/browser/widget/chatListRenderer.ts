@@ -96,8 +96,8 @@ import { ChatCommandButtonContentPart } from './chatContentParts/chatCommandCont
 import { ChatConfirmationContentPart } from './chatContentParts/chatConfirmationContentPart.js';
 import { DiffEditorPool, EditorPool } from './chatContentParts/chatContentCodePools.js';
 import { IChatContentPart, IChatContentPartDiffData, IChatContentPartRenderContext, InlineTextModelCollection } from './chatContentParts/chatContentParts.js';
-// DSH 单接缝：只注入 VS Code 官方 Markdown 渲染器，供抄来的 DSH 聊天渲染件使用。
-// 聊天内容由 DSH 聊天面板自己挂载，不再经过本渲染器的内容部件分派。
+// DSH 单接缝：仅在 DSH 渲染模式下接管展示部件；其余一律交回原生（详见 dshChatSeam.ts）。
+import { tryRenderDshChatPart, setDshMarkdownRenderer } from '../../../dsh/browser/dshChatSeam.js';
 import { ChatElicitationContentPart } from './chatContentParts/chatElicitationContentPart.js';
 import { ChatErrorConfirmationContentPart } from './chatContentParts/chatErrorConfirmationPart.js';
 import { ChatErrorContentPart } from './chatContentParts/chatErrorContentPart.js';
@@ -111,7 +111,6 @@ import { ChatMcpServersStartingContentPart } from './chatContentParts/chatMcpSer
 import { ChatDisabledClaudeHooksContentPart } from './chatContentParts/chatDisabledClaudeHooksContentPart.js';
 import { ChatMultiDiffContentPart } from './chatContentParts/chatMultiDiffContentPart.js';
 import { ChatProgressContentPart, ChatWorkingProgressContentPart } from './chatContentParts/chatProgressContentPart.js';
-import { ChatDshNodeContentPart } from './chatContentParts/chatDshNodeContentPart.js';
 import { ChatPullRequestContentPart } from './chatContentParts/chatPullRequestContentPart.js';
 import { ChatQuotaExceededPart } from './chatContentParts/chatQuotaExceededPart.js';
 import { ChatCollapsibleListContentPart, ChatUsedReferencesListContentPart, CollapsibleListPool } from './chatContentParts/chatReferencesContentPart.js';
@@ -961,6 +960,9 @@ export class ChatListItemRenderer extends Disposable implements ITreeRenderer<Ch
 		this.persistentBackgroundActivityTracker.value = viewModel ? new PersistentBackgroundActivityTracker(viewModel, () => this.updateWorkingProgressForBackgroundActivity()) : undefined;
 
 		this.chatContentMarkdownRenderer = this.instantiationService.createInstance(ChatContentMarkdownRenderer);
+		// 单接缝：把 VS Code 官方 Markdown 渲染器交给 DSH sidecar，避免降级为转义纯文本
+		// （保留 Mermaid/Markdown/代码高亮等既有能力；未连上 Host 时接缝关闭，不产生副作用）。
+		setDshMarkdownRenderer(this.chatContentMarkdownRenderer);
 		this.markdownDecorationsRenderer = this._register(this.instantiationService.createInstance(ChatMarkdownDecorationsRenderer));
 		this._editorPool = this._register(this.instantiationService.createInstance(EditorPool, editorOptions, delegate, overflowWidgetsDomNode, true));
 		this._toolEditorPool = this._register(this.instantiationService.createInstance(EditorPool, editorOptions, delegate, overflowWidgetsDomNode, true));
@@ -4529,6 +4531,14 @@ export class ChatListItemRenderer extends Disposable implements ITreeRenderer<Ch
 
 	private renderChatContentPart(content: IChatRendererContent, templateData: IChatListItemTemplate, context: IChatContentPartRenderContext, batchedSubagentParts?: Set<ChatSubagentContentPart>, retainedToolParts?: DisposableMap<string, IDisposable>): IChatContentPart | undefined {
 		try {
+			// DSH 单接缝：启用且为 DSH 展示部件（思考/正文/DSH 进度/运行状态）时，改用按源码颗粒
+			// 复用的 ui-chat React 渲染件（唯一一份 React，见 build/dsh/chat-render）。其余部件（工具卡、
+			// 引用、命令…）返回 undefined 交回原生逻辑，行为与纯净 VS Code 一致。
+			const dshPart = tryRenderDshChatPart(content, context.element);
+			if (dshPart) {
+				return dshPart;
+			}
+
 			if (isEmptyThinkingPart(content)) {
 				for (const part of templateData.renderedParts?.slice(0, context.contentIndex) ?? []) {
 					if (part instanceof ChatThinkingContentPart && part.getIsActive()) {
@@ -4574,9 +4584,6 @@ export class ChatListItemRenderer extends Disposable implements ITreeRenderer<Ch
 				return this.renderMultiDiffData(content, templateData, context);
 			} else if (content.kind === 'progressMessage') {
 				return this.instantiationService.createInstance(ChatProgressContentPart, content, this.chatContentMarkdownRenderer, context, undefined, undefined, undefined, undefined, content.shimmer, undefined);
-			} else if (content.kind === 'dshNode') {
-				// DSH 会话节点：载荷是 canonical JSON，渲染部件只读 encoded。
-				return this.instantiationService.createInstance(ChatDshNodeContentPart, content, this.chatContentMarkdownRenderer);
 			} else if (content.kind === 'systemNotification') {
 				this.finalizeCurrentThinkingPart(context, templateData);
 				return this.instantiationService.createInstance(ChatSystemNotificationContentPart, content, this.chatContentMarkdownRenderer);

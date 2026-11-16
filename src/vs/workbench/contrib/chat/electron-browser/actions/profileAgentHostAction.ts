@@ -251,7 +251,9 @@ export class ProfileAgentHostAction extends Action2 {
 			precondition: ContextKeyExpr.and(
 				ContextKeyExpr.or(
 					IsSessionsWindowContext,
-					ContextKeyExpr.and(						AGENT_HOST_ENABLED_CONTEXT_KEY,
+					ContextKeyExpr.and(
+						ChatContextKeys.enabled,
+						AGENT_HOST_ENABLED_CONTEXT_KEY,
 					),
 				),
 				CONTEXT_AGENT_HOST_PROFILE_STATE.notEqualsTo(AgentHostProfileState.Starting),

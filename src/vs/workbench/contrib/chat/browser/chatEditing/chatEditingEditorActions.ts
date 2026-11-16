@@ -90,7 +90,7 @@ abstract class NavigateAction extends ChatEditingEditorAction {
 				? localize2('next', 'Go to Next Chat Edit')
 				: localize2('prev', 'Go to Previous Chat Edit'),
 			icon: next ? Codicon.arrowDown : Codicon.arrowUp,
-			precondition: ContextKeyExpr.and(ctxHasEditorModification),
+			precondition: ContextKeyExpr.and(ChatContextKeys.enabled, ctxHasEditorModification),
 			keybinding: {
 				primary: next
 					? KeyMod.Alt | KeyCode.F5

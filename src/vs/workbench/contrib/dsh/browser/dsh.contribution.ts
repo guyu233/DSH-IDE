@@ -28,7 +28,6 @@ import { ILanguageModelsService } from '../../chat/common/languageModels.js';
 import { ILogService } from '../../../../platform/log/common/log.js';
 import { Disposable } from '../../../../base/common/lifecycle.js';
 import './dshAgentSessionsController.js';
-import './dshChatModelDriver.js';
 
 registerSingleton(IDshClientService, DshClientService, InstantiationType.Delayed);
 

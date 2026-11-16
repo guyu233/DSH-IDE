@@ -22,6 +22,7 @@ import { IInstantiationService } from '../../../../../platform/instantiation/com
 import { KeybindingWeight } from '../../../../../platform/keybinding/common/keybindingsRegistry.js';
 import { ILogService } from '../../../../../platform/log/common/log.js';
 import { ITelemetryService } from '../../../../../platform/telemetry/common/telemetry.js';
+import { AgentHostAllowSignedOutWhenUsableSettingId } from '../../../../../platform/chatContracts/common/agentService.js';
 import { AGENT_HOST_EXISTING_SESSION_HARNESS_PICKER_ENABLED_CONTEXT_KEY } from '../../../../../platform/chatContracts/common/agentHostEnablementService.js';
 import { IsSessionsWindowContext } from '../../../../common/contextkeys.js';
 import { ChatContextKeyExprs, ChatContextKeys } from '../../common/actions/chatContextKeys.js';
@@ -271,6 +272,7 @@ class ToggleChatModeAction extends Action2 {
 			f1: true,
 			category: CHAT_CATEGORY,
 			precondition: ContextKeyExpr.and(
+				ChatContextKeys.enabled,
 				ChatContextKeys.requestInProgress.negate())
 		});
 	}
@@ -341,6 +343,7 @@ class SwitchToNextModelAction extends Action2 {
 			title: localize2('interactive.switchToNextModel.label', "Switch to Next Model"),
 			category: CHAT_CATEGORY,
 			f1: true,
+			precondition: ChatContextKeys.enabled,
 		});
 	}
 
@@ -360,6 +363,7 @@ class SwitchToNextPinnedModelAction extends Action2 {
 			title: localize2('interactive.switchToNextPinnedModel.label', "Switch to Next Pinned Model"),
 			category: CHAT_CATEGORY,
 			f1: true,
+			precondition: ChatContextKeys.enabled,
 		});
 	}
 
@@ -384,17 +388,13 @@ export class OpenModelPickerAction extends Action2 {
 				weight: KeybindingWeight.WorkbenchContrib,
 				when: ChatContextKeys.inChatInput
 			},
-			// DSH 集成：模型选择器不等 `chatIsEnabled`。上游用它判断有没有按需激活的聊天
-			// Agent（Copilot 可能没装），DSH 只有一个常驻 Agent，等它只会让第一帧短暂空白。
-			precondition: ChatContextKeys.location.isEqualTo(ChatAgentLocation.Chat),
+			precondition: ChatContextKeys.enabled,
 			menu: {
 				id: MenuId.ChatInput,
 				order: 3,
 				group: 'navigation',
-				when: ContextKeyExpr.and(
-					ChatContextKeys.location.isEqualTo(ChatAgentLocation.Chat),
-					ChatContextKeys.inQuickChat.negate(),
-				),
+				// DSH 集成：隐藏内建模型选择器（模型/推理强度由 DSH 会话侧决定）。when 恒假 => 不渲染。
+				when: ContextKeyExpr.false(),
 			}
 		});
 	}
@@ -419,15 +419,16 @@ export class OpenPermissionPickerAction extends Action2 {
 			tooltip: localize('setPermissionLevel', "Set Permissions"),
 			category: CHAT_CATEGORY,
 			f1: false,
-			// DSH 集成：权限选择器同样不等 `chatIsEnabled`，理由与模型选择器一致。
-			precondition: ChatContextKeys.location.isEqualTo(ChatAgentLocation.Chat),
+			precondition: ChatContextKeys.enabled,
 			menu: {
 				id: MenuId.ChatInputSecondary,
 				order: 1,
 				group: 'navigation',
 				when:
 					ContextKeyExpr.and(
+						ChatContextKeys.enabled,
 						ChatContextKeys.location.isEqualTo(ChatAgentLocation.Chat),
+						ChatContextKeys.chatModeKind.notEqualsTo(ChatModeKind.Ask),
 						ChatContextKeys.inQuickChat.negate(),
 						ChatContextKeys.inAutomationsDialog.negate(),
 						ContextKeyExpr.or(
@@ -458,8 +459,7 @@ export class OpenModePickerAction extends Action2 {
 			tooltip: localize('setChatMode', "Set Agent"),
 			category: CHAT_CATEGORY,
 			f1: false,
-			// DSH 集成：模式选择器同样不等 `chatIsEnabled`。
-			precondition: ChatContextKeys.location.isEqualTo(ChatAgentLocation.Chat),
+			precondition: ChatContextKeys.enabled,
 			keybinding: {
 				when: ContextKeyExpr.and(
 					ChatContextKeys.inChatInput,
@@ -472,6 +472,7 @@ export class OpenModePickerAction extends Action2 {
 					id: MenuId.ChatInput,
 					order: 1,
 					when: ContextKeyExpr.and(
+						ChatContextKeys.enabled,
 						ChatContextKeys.location.isEqualTo(ChatAgentLocation.Chat),
 						ChatContextKeys.inQuickChat.negate(),
 						// Hide the agent picker while a delegation (continue in) target is pending
@@ -509,7 +510,7 @@ export class OpenSessionTargetPickerAction extends Action2 {
 			tooltip: localize('setSessionTarget', "Set Session Target"),
 			category: CHAT_CATEGORY,
 			f1: false,
-			precondition: ContextKeyExpr.and(ContextKeyExpr.or(ChatContextKeys.chatSessionIsEmpty, ChatContextKeys.inAgentSessionsWelcome), ChatContextKeys.currentlyEditingInput.negate(), ChatContextKeys.currentlyEditing.negate()),
+			precondition: ContextKeyExpr.and(ChatContextKeys.enabled, ContextKeyExpr.or(ChatContextKeys.chatSessionIsEmpty, ChatContextKeys.inAgentSessionsWelcome), ChatContextKeys.currentlyEditingInput.negate(), ChatContextKeys.currentlyEditing.negate()),
 			menu: [
 				{
 					id: MenuId.ChatInput,
@@ -548,6 +549,7 @@ export class OpenDelegationPickerAction extends Action2 {
 			category: CHAT_CATEGORY,
 			f1: false,
 			precondition: ContextKeyExpr.and(
+				ChatContextKeys.enabled,
 				ChatContextKeys.chatSessionIsEmpty.negate(),
 				ChatContextKeys.currentlyEditingInput.negate(),
 				ChatContextKeys.currentlyEditing.negate(),
@@ -559,6 +561,7 @@ export class OpenDelegationPickerAction extends Action2 {
 					id: MenuId.ChatInputSecondary,
 					order: 0.5,
 					when: ContextKeyExpr.and(
+						ChatContextKeys.enabled,
 						ChatContextKeys.location.isEqualTo(ChatAgentLocation.Chat),
 						ChatContextKeys.inQuickChat.negate(),
 						ChatContextKeys.chatSessionIsEmpty.negate(),
@@ -599,7 +602,7 @@ export class OpenWorkspacePickerAction extends Action2 {
 			tooltip: localize('selectWorkspace', "Select Target Workspace"),
 			category: CHAT_CATEGORY,
 			f1: false,
-			precondition: ContextKeyExpr.and(ChatContextKeys.inAgentSessionsWelcome),
+			precondition: ContextKeyExpr.and(ChatContextKeys.enabled, ChatContextKeys.inAgentSessionsWelcome),
 			menu: [
 				{
 					id: MenuId.ChatInputSecondary,
@@ -627,6 +630,7 @@ export class ChatSessionPrimaryPickerAction extends Action2 {
 			title: localize2('interactive.openChatSessionPrimaryPicker.label', "Open Primary Session Picker"),
 			category: CHAT_CATEGORY,
 			f1: false,
+			precondition: ChatContextKeys.enabled,
 			menu: [
 				{
 					// Cloud sessions: keep on the primary chat input toolbar
@@ -694,6 +698,7 @@ class ChangeChatModelAction extends Action2 {
 			title: localize2('interactive.changeModel.label', "Change Model"),
 			category: CHAT_CATEGORY,
 			f1: false,
+			precondition: ChatContextKeys.enabled,
 		});
 	}
 

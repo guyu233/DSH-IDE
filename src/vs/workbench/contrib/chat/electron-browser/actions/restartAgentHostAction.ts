@@ -22,7 +22,9 @@ export class RestartLocalAgentHostAction extends Action2 {
 			title: localize2('restartLocalAgentHost', "Restart Local Agent Host"),
 			category: Categories.Developer,
 			f1: true,
-			precondition: ContextKeyExpr.and(				AGENT_HOST_ENABLED_CONTEXT_KEY,
+			precondition: ContextKeyExpr.and(
+				ChatContextKeys.enabled,
+				AGENT_HOST_ENABLED_CONTEXT_KEY,
 				RemoteNameContext.isEqualTo(''),
 			),
 		});

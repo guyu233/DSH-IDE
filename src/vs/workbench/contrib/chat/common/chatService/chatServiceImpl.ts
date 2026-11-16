@@ -13,7 +13,7 @@ import { BugIndicatingError, ErrorNoTelemetry, isCancellationError, onUnexpected
 import { Emitter, Event } from '../../../../../base/common/event.js';
 import { MarkdownString } from '../../../../../base/common/htmlContent.js';
 import { Iterable } from '../../../../../base/common/iterator.js';
-import { Disposable, DisposableResourceMap, DisposableStore, IDisposable, IReference, MutableDisposable, toDisposable } from '../../../../../base/common/lifecycle.js';
+import { Disposable, DisposableResourceMap, DisposableStore, IDisposable, MutableDisposable, toDisposable } from '../../../../../base/common/lifecycle.js';
 import { ResourceMap } from '../../../../../base/common/map.js';
 import { revive } from '../../../../../base/common/marshalling.js';
 import { equals } from '../../../../../base/common/objects.js';
@@ -665,19 +665,6 @@ export class ChatService extends Disposable implements IChatService {
 		}, options?.debugOwner ?? 'ChatService#startNewLocalSession');
 	}
 
-	startSessionForResource(sessionResource: URI, location: ChatAgentLocation, options?: IChatSessionStartOptions): IReference<ChatModel> {
-		// 纯本地：不查外部 provider、不加载历史。同一 resource 重复调用复用同一个 model，
-		// 让 DSH 流式帧可以增量 addRequest / appendProgress 而不重建会话。
-		return this._sessionModels.acquireOrCreate({
-			initialData: undefined,
-			location,
-			sessionResource,
-			canUseTools: options?.canUseTools ?? false,
-			disableBackgroundKeepAlive: options?.disableBackgroundKeepAlive,
-			sessionTypeSelectionReason: options?.sessionTypeSelectionReason
-		}, options?.debugOwner ?? 'ChatService#startSessionForResource');
-	}
-
 	private policyInitialized = false;
 	private readonly managedPolicy: IObservable<boolean>;
 
@@ -730,11 +717,39 @@ export class ChatService extends Disposable implements IChatService {
 	private async initializeSession(model: ChatModel): Promise<void> {
 		this.trace('initializeSession', `Initialize session ${model.sessionResource}`);
 
-		// DSH-IDE 不再预热「默认 agent」：默认 participant 的激活改由发请求时的
-		// `activateByEvent('onChatParticipant:<id>')` 按实际用到者触发（见 sendRequest 路径），
-		// 这样既不影响任何扩展的安装/注册/按事件激活，也不会在会话初始化时抢占默认 agent。
+		// Activate the default extension provided agent but do not wait
+		// for it to be ready so that the session can be used immediately
+		// without having to wait for the agent to be ready.
 		if (isLocalChatSessionSubjectToManagedPolicy(model.sessionResource, model.initialLocation) && !this.policyInitialized) {
 			await whenAccountPolicySettled(this.accountPolicyGateService);
+		}
+		if (!isLocalChatSessionSubjectToManagedPolicy(model.sessionResource, model.initialLocation) || !this.managedPolicy.get()) {
+			await this.activateDefaultAgent(model.initialLocation);
+		}
+	}
+
+	async activateDefaultAgent(location: ChatAgentLocation): Promise<void> {
+		await this.extensionService.whenInstalledExtensionsRegistered();
+
+		const defaultAgentData = this.chatAgentService.getContributedDefaultAgent(location) ?? this.chatAgentService.getContributedDefaultAgent(ChatAgentLocation.Chat);
+		if (!defaultAgentData) {
+			throw new ErrorNoTelemetry('No default agent contributed');
+		}
+
+		// Await activation of the extension provided agent
+		// Using `activateById` as workaround for the issue
+		// https://github.com/microsoft/vscode/issues/250590
+		if (!defaultAgentData.isCore) {
+			await this.extensionService.activateById(defaultAgentData.extensionId, {
+				activationEvent: `onChatParticipant:${defaultAgentData.id}`,
+				extensionId: defaultAgentData.extensionId,
+				startup: false
+			});
+		}
+
+		const defaultAgent = this.chatAgentService.getActivatedAgents().find(agent => agent.id === defaultAgentData.id);
+		if (!defaultAgent) {
+			throw new ErrorNoTelemetry('No default agent registered');
 		}
 	}
 

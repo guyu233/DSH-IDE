@@ -62,7 +62,7 @@ import { IChatAgentMetadata, IChatAgentRequest, IChatAgentResult, UserSelectedTo
 import { ICodeMapperRequest, ICodeMapperResult } from '../../contrib/chat/common/editing/chatCodeMapperService.js';
 import { IChatContextItem } from '../../contrib/chat/common/contextContrib/chatContext.js';
 import { IChatProgressHistoryResponseContent, IChatRequestModeInstructions, IChatRequestVariableData } from '../../contrib/chat/common/model/chatModel.js';
-import { ChatResponseClearToPreviousToolInvocationReason, IChatContentInlineReference, IChatDshNodePart, IChatExternalEditsDto, IChatFollowup, IChatMultiDiffData, IChatMultiDiffDataSerialized, IChatNotebookEdit, IChatProgress, IChatTask, IChatTaskDto, IChatUserActionEvent, IChatVoteAction } from '../../contrib/chat/common/chatService/chatService.js';
+import { ChatResponseClearToPreviousToolInvocationReason, IChatContentInlineReference, IChatExternalEditsDto, IChatFollowup, IChatMultiDiffData, IChatMultiDiffDataSerialized, IChatNotebookEdit, IChatProgress, IChatTask, IChatTaskDto, IChatUserActionEvent, IChatVoteAction } from '../../contrib/chat/common/chatService/chatService.js';
 import { IChatSessionItem, IChatSessionProviderOptionGroup, IChatSessionProviderOptionItem } from '../../contrib/chat/common/chatSessionsService.js';
 import { IChatRequestVariableValue } from '../../contrib/chat/common/attachments/chatVariables.js';
 import { ChatAgentLocation } from '../../contrib/chat/common/constants.js';
@@ -1935,13 +1935,9 @@ export type IDocumentContextDto = {
 
 /**
  * Wire shape for chat progress sent between the extension host and the main thread.
- *
- * `dshNode` 是本仓内部的 DSH 会话节点载荷（canonical JSON 字符串），只存在于
- * workbench 内部的 ChatModel → 渲染层路径，**不进入扩展宿主协议**：在这里显式排除，
- * 保证公共扩展 API（`vscode-dts/**`）与 `IChatProgressDto` 都不出现它。
  */
 export type IChatProgressDto =
-	| Dto<Exclude<IChatProgress, IChatTask | IChatNotebookEdit | IChatDshNodePart>>
+	| Dto<Exclude<IChatProgress, IChatTask | IChatNotebookEdit>>
 	| IChatTaskDto
 	| IChatNotebookEditDto
 	| IChatExternalEditsDto

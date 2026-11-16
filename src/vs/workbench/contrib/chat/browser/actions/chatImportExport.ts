@@ -42,6 +42,7 @@ export function registerChatExportActions() {
 				id: 'workbench.action.chat.export',
 				category: CHAT_CATEGORY,
 				title: localize2('chat.export.label', "Export Chat..."),
+				precondition: ChatContextKeys.enabled,
 				f1: true,
 			});
 		}
@@ -85,6 +86,7 @@ export function registerChatExportActions() {
 				id: 'workbench.action.chat.import',
 				title: localize2('chat.import.label', "Import Chat..."),
 				category: CHAT_CATEGORY,
+				precondition: ChatContextKeys.enabled,
 				f1: true,
 			});
 		}

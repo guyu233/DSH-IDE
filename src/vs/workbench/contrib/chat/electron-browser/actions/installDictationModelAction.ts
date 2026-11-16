@@ -21,6 +21,7 @@ import { ChatContextKeys } from '../../common/actions/chatContextKeys.js';
 
 export function registerInstallDictationModelAction(): void {
 	const enabled = ContextKeyExpr.and(
+		ChatContextKeys.enabled,
 		ContextKeyExpr.equals('config.dictation.enabled', true),
 	);
 

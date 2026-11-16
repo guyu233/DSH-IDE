@@ -39,6 +39,7 @@ export function registerChatOpenAgentDebugPanelAction() {
 				title: localize2('chat.openAgentDebugPanel.label', "Open Agent Debug Logs"),
 				f1: true,
 				category: Categories.Developer,
+				precondition: ChatContextKeys.enabled,
 			});
 		}
 
@@ -61,6 +62,7 @@ export function registerChatOpenAgentDebugPanelAction() {
 				title: localize2('chat.openAgentDebugPanelForSession.label', "Show Agent Debug Logs"),
 				f1: false,
 				category: CHAT_CATEGORY,
+				precondition: ChatContextKeys.enabled,
 				menu: [{
 					id: MenuId.ChatWelcomeContext,
 					group: '2_settings',
@@ -68,7 +70,7 @@ export function registerChatOpenAgentDebugPanelAction() {
 					when: ChatContextKeys.inChatEditor.negate()
 				}, {
 					id: MenuId.ViewTitle,
-					when: ContextKeyExpr.and(ContextKeyExpr.equals('view', ChatViewId)),
+					when: ContextKeyExpr.and(ChatContextKeys.enabled, ContextKeyExpr.equals('view', ChatViewId)),
 					order: 0,
 					group: '4_logs'
 				}]
@@ -113,6 +115,7 @@ export function registerChatOpenAgentDebugPanelAction() {
 				f1: true,
 				category: Categories.Developer,
 				precondition: ContextKeyExpr.and(
+					ChatContextKeys.enabled,
 					CHAT_DEBUG_HAS_ACTIVE_SESSION,
 					CHAT_DEBUG_ACTIVE_SESSION_IS_AGENT_HOST.negate(),
 				),
@@ -184,6 +187,7 @@ export function registerChatOpenAgentDebugPanelAction() {
 				icon: Codicon.chatImport,
 				f1: true,
 				category: Categories.Developer,
+				precondition: ChatContextKeys.enabled,
 				menu: [{
 					id: MenuId.EditorTitle,
 					group: 'navigation',

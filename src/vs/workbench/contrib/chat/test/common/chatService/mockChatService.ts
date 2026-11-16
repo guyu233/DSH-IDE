@@ -183,6 +183,10 @@ export class MockChatService implements IChatService {
 
 	logChatIndex(): void { }
 
+	activateDefaultAgent(_location: ChatAgentLocation): Promise<void> {
+		return Promise.resolve();
+	}
+
 	async getLiveSessionItems(): Promise<IChatDetail[]> {
 		return this.liveSessionItems;
 	}

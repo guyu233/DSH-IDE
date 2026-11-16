@@ -21,7 +21,7 @@ import { IMarkdownString, MarkdownString } from '../../../../../base/common/html
 import { Iterable } from '../../../../../base/common/iterator.js';
 import { Disposable, DisposableStore, IDisposable, MutableDisposable, thenIfNotDisposed, toDisposable } from '../../../../../base/common/lifecycle.js';
 import { ResourceSet } from '../../../../../base/common/map.js';
-import { FileAccess, Schemas } from '../../../../../base/common/network.js';
+import { Schemas } from '../../../../../base/common/network.js';
 import { IsSessionsWindowContext } from '../../../../common/contextkeys.js';
 import { filter } from '../../../../../base/common/objects.js';
 import { autorun, constObservable, derived, IObservable, IReader, observableFromEvent, observableValue } from '../../../../../base/common/observable.js';
@@ -1805,8 +1805,7 @@ export class ChatWidget extends Disposable implements IChatWidget {
 		return {
 			title,
 			message: new MarkdownString(DISCLAIMER),
-			// 空会话图标用 DeepSeek Harness 官方鲸鱼（与 favicon.svg 同一文件），不用 chatSparkle。
-			icon: FileAccess.asBrowserUri('vs/workbench/contrib/dsh/browser/media/dsh-whale.svg'),
+			icon: Codicon.chatSparkle,
 			additionalMessage,
 		};
 	}
@@ -2714,7 +2713,6 @@ export class ChatWidget extends Disposable implements IChatWidget {
 			defaultMode: this.viewOptions.defaultMode,
 			sessionTypePickerDelegate: this.viewOptions.sessionTypePickerDelegate,
 			workspacePickerDelegate: this.viewOptions.workspacePickerDelegate,
-			dshComposer: this.viewOptions.dshComposer,
 			isSessionsWindow: this.viewOptions.isSessionsWindow,
 		};
 

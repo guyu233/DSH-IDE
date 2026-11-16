@@ -33,7 +33,6 @@ import { IChatEditorOptions } from './widgetHosts/editor/chatEditor.js';
 import { ChatInputPart } from './widget/input/chatInputPart.js';
 import { IChatWidgetContrib } from './widget/chatWidget.js';
 import { ICodeBlockActionContext, ICodeBlockRenderOptions } from './widget/chatContentParts/codeBlockPart.js';
-import type { IDshComposerSource } from '../../dsh/browser/dshComposerSource.js';
 import { AgentSessionTarget } from './agentSessions/agentSessions.js';
 
 export { ChatOutline } from './chatOutline.js';
@@ -343,12 +342,6 @@ export interface IChatWidgetViewOptions {
 	workspacePickerDelegate?: IWorkspacePickerDelegate;
 
 	/**
-	 * DSH 集成：模型 / 模式 / 权限三个选择器的数据源。给出时选择器读 DSH 的
-	 * 会话目录与预设，而不是 VS Code 自带的模型表、模式表和权限三档。
-	 */
-	dshComposer?: IDshComposerSource;
-
-	/**
 	 * Optional handler for chat submission.
 	 * When provided, this handler is called before the normal input acceptance flow.
 	 * If it returns true (handled), the normal submission is skipped.
@@ -479,8 +472,6 @@ export interface IChatWidget {
 	readonly parsedInput: IParsedChatRequest;
 	readonly lockedAgentId: string | undefined;
 	lastSelectedAgent: IChatAgentData | undefined;
-	/** 把 widget 绑定到指定的会话模型；外部数据源（DSH-IDE）据此共用同一 ChatModel。 */
-	setModel(model: IChatModel | undefined): void;
 	readonly scopedContextKeyService: IContextKeyService;
 	readonly input: ChatInputPart;
 	/** The main input part at the bottom of the widget. Unlike `input`, this always returns the main input, not the inline editing input. */

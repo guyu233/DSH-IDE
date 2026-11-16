@@ -130,7 +130,9 @@ abstract class BaseArchiveAllAgentSessionsAction extends Action2 {
 		super({
 			id: 'workbench.action.chat.archiveAllAgentSessions',
 			title: action.title,
-			icon: action.icon,			category: AGENT_SESSIONS_CATEGORY,
+			icon: action.icon,
+			precondition: ChatContextKeys.enabled,
+			category: AGENT_SESSIONS_CATEGORY,
 			f1: true,
 		});
 	}
@@ -184,7 +186,9 @@ export class MarkAllAgentSessionsReadAction extends Action2 {
 	constructor() {
 		super({
 			id: 'workbench.action.chat.markAllAgentSessionsRead',
-			title: localize2('markAllRead.label', "Mark All as Read"),			category: AGENT_SESSIONS_CATEGORY,
+			title: localize2('markAllRead.label', "Mark All as Read"),
+			precondition: ChatContextKeys.enabled,
+			category: AGENT_SESSIONS_CATEGORY,
 			f1: true,
 			menu: {
 				id: MenuId.AgentSessionsContext,
@@ -877,7 +881,9 @@ export class DeleteAllLocalSessionsAction extends Action2 {
 	constructor() {
 		super({
 			id: 'workbench.action.chat.clearHistory',
-			title: localize2('agentSessions.deleteAll', "Delete All Local Workspace Chat Sessions"),			category: AGENT_SESSIONS_CATEGORY,
+			title: localize2('agentSessions.deleteAll', "Delete All Local Workspace Chat Sessions"),
+			precondition: ChatContextKeys.enabled,
+			category: AGENT_SESSIONS_CATEGORY,
 			f1: true,
 		});
 	}
@@ -1206,7 +1212,9 @@ export class ShowAgentSessionsSidebar extends UpdateChatViewWidthAction {
 		super({
 			id: ShowAgentSessionsSidebar.ID,
 			title: ShowAgentSessionsSidebar.TITLE,
-			precondition: ContextKeyExpr.and(				ChatContextKeys.agentSessionsViewerOrientation.isEqualTo(AgentSessionsViewerOrientation.Stacked),
+			precondition: ContextKeyExpr.and(
+				ChatContextKeys.enabled,
+				ChatContextKeys.agentSessionsViewerOrientation.isEqualTo(AgentSessionsViewerOrientation.Stacked),
 			),
 			f1: true,
 			category: AGENT_SESSIONS_CATEGORY,
@@ -1227,7 +1235,9 @@ export class HideAgentSessionsSidebar extends UpdateChatViewWidthAction {
 		super({
 			id: HideAgentSessionsSidebar.ID,
 			title: HideAgentSessionsSidebar.TITLE,
-			precondition: ContextKeyExpr.and(				ChatContextKeys.agentSessionsViewerOrientation.isEqualTo(AgentSessionsViewerOrientation.SideBySide),
+			precondition: ContextKeyExpr.and(
+				ChatContextKeys.enabled,
+				ChatContextKeys.agentSessionsViewerOrientation.isEqualTo(AgentSessionsViewerOrientation.SideBySide),
 			),
 			f1: true,
 			category: AGENT_SESSIONS_CATEGORY,
@@ -1247,7 +1257,9 @@ export class ToggleAgentSessionsSidebar extends Action2 {
 	constructor() {
 		super({
 			id: ToggleAgentSessionsSidebar.ID,
-			title: ToggleAgentSessionsSidebar.TITLE,			f1: true,
+			title: ToggleAgentSessionsSidebar.TITLE,
+			precondition: ChatContextKeys.enabled,
+			f1: true,
 			category: AGENT_SESSIONS_CATEGORY,
 		});
 	}
@@ -1275,7 +1287,9 @@ export class FocusAgentSessionsAction extends Action2 {
 		super({
 			id: FocusAgentSessionsAction.id,
 			title: localize2('chat.focusAgentSessionsViewer.label', "Focus Agent Sessions"),
-			precondition: ContextKeyExpr.and(				ContextKeyExpr.equals(`config.${ChatConfiguration.ChatViewSessionsEnabled}`, true)
+			precondition: ContextKeyExpr.and(
+				ChatContextKeys.enabled,
+				ContextKeyExpr.equals(`config.${ChatConfiguration.ChatViewSessionsEnabled}`, true)
 			),
 			category: AGENT_SESSIONS_CATEGORY,
 			f1: true,
