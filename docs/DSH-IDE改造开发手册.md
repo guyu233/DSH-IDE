@@ -847,6 +847,14 @@ DshChatSession.accept / acceptWaterfall → DshChatModel（节点树）
 - §1.4「不能承接」→ 改为「层 4 已逐类补齐」：11 个 typed 字段全部有 Host 来源、仅剩 4 个无官方 remote 的 `missing()`、`fetchRowDetail` 明确抛 `FEATURE_UNAVAILABLE`、`runCommand` 已支持图片附件。
 - §1.5 / §3.2 的 `missing()` 清单从 6 项收敛到 4 项（`setGoal` / `listSkills` 已接线）。
 
+**同轮附带清理（旧路线死代码）：**
+
+- 删除 `dshHistoryPager.ts`：自建 DOM 滚动条与 loadOlder 触发器，全仓零引用。历史补齐改由 provider 侧 `fillOlderHistory` 完成，原生 ChatWidget 自带滚动。
+- 删除 `dshMappingVerifier.ts` 及其测试：服务于已取消的 `ChatDshNodeContentPart` 双射校验路线，零生产引用。
+- 删除 `dsh.contribution.ts` 里指向已停用 `DshChatModelDriver` 的过期注释。
+
+清理后 `verify:dsh-ide-ci` 仍全 PASS，改动 540 行删除、1 行插入。
+
 ### 8.19 子智能体工作流（按模型目录组织）
 
 - 子智能体插件已启用，`workflow` 与 `subagent` 工具可用；子智能体模型目录（`list_subagent_models`）可用路由为 `workbuddylocal` 的 `hy4flash-free`、`glm-5.3-flash`、`hy4flash`。
