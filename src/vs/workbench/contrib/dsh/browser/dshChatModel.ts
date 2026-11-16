@@ -19,9 +19,8 @@
 
 import { Emitter, Event } from '../../../../base/common/event.js';
 import { Disposable } from '../../../../base/common/lifecycle.js';
-import { stableStringify } from '../../../../base/common/objects.js';
-import { indexLocations } from '../../../../platform/dshClient/common/dshIdeLocationIndex.js';
-import type { DshIdeLoadOlderPage } from '../../../../platform/dshClient/common/dshIdeProtocol.js';
+import { createDshIdeConversationState, projectDshIdeConversation } from '../../../../platform/dshClient/common/dshIdeConversation.js';
+import type { DshIdeConversationNode, DshIdeConversationView, DshIdeLoadOlderPage } from '../../../../platform/dshClient/common/dshIdeProtocol.js';
 
 /**
  * DSH 的全部会话节点与内容块。
@@ -319,8 +318,6 @@ export class DshChatModel extends Disposable {
 	/** 是否见过任何一条带 `usage` 的助手消息（区分「0」与「没有投影」）。 */
 	private usageSeen = false;
 
-	/** 按 seq 升序的**原始事件流**：定位索引要从头扫，不能只看节点。 */
-	private readonly rawEvents: { seq: number; type: string; data: unknown }[] = [];
 
 	/**
 	 * 开口 snapshot 之前未知，允许再要一页。
@@ -334,26 +331,21 @@ export class DshChatModel extends Disposable {
 
 	/** 按 identity 索引：durable 用 `seq:<n>`，流式用 `stream:<attemptId>`。 */
 	private readonly nodes = new Map<string, DshChatNode>();
-	/** 进行中的 attempt：revision 去重 + 已拼好的 blocks。 */
-	private readonly attempts = new Map<string, { turn: number; step: number; revision: number; blocks: DshAssistantBlock[]; id: string }>();
-	/** 已经结算的 attempt：durable 消息到达后丢弃临时节点。 */
-	private readonly settledAttempts = new Set<string>();
 
 	/**
 	 * 带 Turn/Step 坐标的节点列表。
 	 *
-	 * 顺序就是 DSH 的画面顺序：先按 seq 升序，再用定位索引给每个节点算出 Turn。
-	 * `user/message` 事件本身不带 turn，只能按 seq 顺序扫 turn/start 才能定位；
-	 * 不这么做就会把用户消息全部推到末尾（真机现象）。
+	 * 顺序就是 DSH 的画面顺序：按 seq 升序。Turn/Step 直接读节点自带值——
+	 * Host 投影器已经把官方事件装配成带坐标的节点，本层不再扫原始事件。
 	 */
 	get located(): readonly { node: DshChatNode; turn?: number; step?: number }[] {
-		const coordinates = indexLocations(this.rawEvents);
 		return this.list.map(node => {
-			const at = coordinates.get(node.seq);
+			const ownTurn = (node as { turn?: unknown }).turn;
+			const ownStep = (node as { step?: unknown }).step;
 			return {
 				node,
-				...(at?.turn === undefined ? {} : { turn: at.turn }),
-				...(at?.step === undefined ? {} : { step: at.step }),
+				...(typeof ownTurn === 'number' ? { turn: ownTurn } : {}),
+				...(typeof ownStep === 'number' ? { step: ownStep } : {}),
 			};
 		});
 	}
@@ -385,16 +377,42 @@ export class DshChatModel extends Disposable {
 		};
 	}
 
-	/** 接受一帧 follow 结果。 */
+	/**
+	 * 兼容入口：只接受已经投影好的结构化会话。
+	 *
+	 * 按手册 §5.4，模型层不再解析裸 follow 帧。传入裸帧会返回空变更，
+	 * 由调用方改走 `acceptView(snapshot.conversation)`。
+	 */
 	accept(frame: Readonly<Record<string, unknown>>): readonly DshChatChange[] {
-		const type = frame['type'];
-		let changes: readonly DshChatChange[] = [];
-		if (type === 'snapshot') {
-			changes = this.applySnapshot(frame);
-		} else if (type === 'event' && isRecord(frame['event'])) {
-			changes = this.applyDurable(frame['event']);
-		} else if (type === 'assistant-stream' && isRecord(frame['frame'])) {
-			changes = this.applyStream(frame['frame']);
+		void frame;
+		return [];
+	}
+
+	/**
+	 * 接受 Host 投影好的结构化会话。
+	 *
+	 * Host 已经把官方事件装配成 `DshIdeConversationNode[]`，这里只做节点类型到
+	 * `DshChatNode` 的机械映射，不再解析裸帧、不再自己拼装。
+	 */
+	acceptConversation(conversation: DshIdeConversationView): readonly DshChatChange[] {
+		this.clear();
+		this._hasMore = conversation.hasMore;
+		const changes: DshChatChange[] = [];
+		for (const node of conversation.nodes) {
+			const mapped = fromConversationNode(node);
+			if (mapped === undefined) {
+				continue;
+			}
+			this.nodes.set(identityOf(node), mapped);
+			// typed 路径从节点自带的 usage 累加 token 用量。
+			if (node.kind === 'assistant' && node.usage !== undefined) {
+				this.usageSeen = true;
+				this.usage.inputTokens += node.usage.inputTokens;
+				this.usage.outputTokens += node.usage.outputTokens;
+				this.usage.cacheReadTokens += node.usage.cacheReadTokens ?? 0;
+				this.usage.cacheWriteTokens += node.usage.cacheWriteTokens ?? 0;
+			}
+			changes.push({ node: mapped, added: true });
 		}
 		if (changes.length > 0) {
 			this._onDidChange.fire(changes);
@@ -402,12 +420,20 @@ export class DshChatModel extends Disposable {
 		return changes;
 	}
 
-	/** 已加载事件里最小的 seq。没有事件时为 undefined，调用方省略 beforeSeq。 */
+	/**
+	 * 已加载内容里最小的 seq。没有内容时为 undefined，调用方省略 beforeSeq。
+	 *
+	 * 只看已投影的节点：模型层不再持有原始事件，节点 seq 就是分页游标的唯一来源。
+	 */
 	firstSeq(): number | undefined {
 		let min: number | undefined;
-		for (const event of this.rawEvents) {
-			if (min === undefined || event.seq < min) {
-				min = event.seq;
+		for (const [id, node] of this.nodes) {
+			// 流式临时节点的 seq 是合成值（`stream:` 前缀），不参与历史游标。
+			if (id.startsWith(STREAM_NODE_PREFIX)) {
+				continue;
+			}
+			if (min === undefined || node.seq < min) {
+				min = node.seq;
 			}
 		}
 		return min;
@@ -434,15 +460,15 @@ export class DshChatModel extends Disposable {
 	/**
 	 * 把一页更早的官方历史并进当前模型。
 	 *
-	 * `records` 与 opening snapshot 相同，是 `{ type:'event', event }`。
-	 * 只收 seq 严格小于当前最小 seq 的记录，插到 rawEvents 前面再投影，
-	 * 这样定位扫描仍然按 seq 升序。已有 seq 不覆盖；载荷不同只计数，不替换。
+	 * `records` 是官方 `{ type:'event', event }` 分页记录。这里用 Host 同一套
+	 * `projectDshIdeConversation` 把这一页投影成结构化节点再并入，**不解析裸 follow 帧**。
+	 * 只收 seq 严格小于当前最小 seq 的记录；已有 seq 不覆盖，载荷不同只计数。
 	 */
 	prependPage(page: DshIdeLoadOlderPage): DshHistoryPrepend {
 		const floor = this.firstSeq();
-		const known = new Map(this.rawEvents.map(event => [event.seq, event]));
 		const accepted: Record<string, unknown>[] = [];
 		let conflicts = 0;
+		const seenSeq = new Set<number>();
 		for (const record of page.records) {
 			if (!isRecord(record) || record['type'] !== 'event' || !isRecord(record['event'])) {
 				continue;
@@ -456,28 +482,31 @@ export class DshChatModel extends Disposable {
 			if (floor !== undefined && seq >= floor) {
 				continue;
 			}
-			const data = isRecord(event['data']) ? event['data'] : {};
-			const prior = known.get(seq);
-			if (prior !== undefined) {
-				if (prior.type !== type || stableStringify(prior.data) !== stableStringify(data)) {
-					conflicts++;
-				}
+			// 同页内重复 seq：载荷不一致只计冲突，不重复并入。
+			if (seenSeq.has(seq)) {
+				conflicts++;
 				continue;
 			}
-			known.set(seq, { seq, type, data });
+			seenSeq.add(seq);
 			accepted.push(event);
 		}
 		accepted.sort((a, b) => (numberOf(a['seq']) ?? 0) - (numberOf(b['seq']) ?? 0));
-		for (const event of accepted) {
-			const seq = numberOf(event['seq'])!;
-			const type = stringOf(event['type'])!;
-			const data = isRecord(event['data']) ? event['data'] : {};
-			this.rawEvents.push({ seq, type, data });
-		}
-		this.rawEvents.sort((a, b) => a.seq - b.seq);
+		// 这一页交给 Host 同款投影器；投影结果是 typed 节点，直接并入节点树。
 		const changes: DshChatChange[] = [];
+		const pageState = createDshIdeConversationState();
 		for (const event of accepted) {
-			changes.push(...this.applyDurable(event, false));
+			projectDshIdeConversation(pageState, { type: 'event', event });
+		}
+		for (const node of pageState.nodes.values()) {
+			const mapped = fromConversationNode(node);
+			if (mapped === undefined) {
+				continue;
+			}
+			const identity = identityOf(node);
+			if (!this.nodes.has(identity)) {
+				this.nodes.set(identity, mapped);
+				changes.push({ node: mapped, added: true });
+			}
 		}
 		const hasMore = page.records.length === 0 ? false : page.hasMore;
 		const historyChanged = hasMore !== this._hasMore || this._historyStatus !== 'idle';
@@ -505,473 +534,159 @@ export class DshChatModel extends Disposable {
 		this.usage.cacheWriteTokens = 0;
 		this.usageSeen = false;
 		this.nodes.clear();
-		this.rawEvents.length = 0;
-		this.attempts.clear();
-		this.settledAttempts.clear();
 		this._hasMore = true;
 		this._historyStatus = 'idle';
 		this._onDidReset.fire();
-	}
-
-	private applySnapshot(frame: Readonly<Record<string, unknown>>): readonly DshChatChange[] {
-		this.clear();
-		if (typeof frame['hasMore'] === 'boolean') {
-			this._hasMore = frame['hasMore'];
-		}
-		const records = Array.isArray(frame['records']) ? frame['records'] : [];
-		const changes: DshChatChange[] = [];
-		for (const record of records) {
-			if (isRecord(record) && record['type'] === 'event' && isRecord(record['event'])) {
-				changes.push(...this.applyDurable(record['event']));
-			}
-		}
-		// 流式基线：恢复进行中的 attempt。
-		const baseline = isRecord(frame['assistantStream']) ? frame['assistantStream'] : undefined;
-		const active = baseline !== undefined && isRecord(baseline['activeAttempt']) ? baseline['activeAttempt'] : undefined;
-		if (active !== undefined) {
-			const attemptId = stringOf(active['attemptId']);
-			const stream = Array.isArray(active['stream']) ? active['stream'] : [];
-			if (attemptId !== undefined) {
-				this.attempts.set(attemptId, {
-					turn: numberOf(active['turn']) ?? 0,
-					step: numberOf(active['step']) ?? 0,
-					revision: numberOf(active['revision']) ?? 0,
-					blocks: streamToBlocks(stream),
-					id: `stream:${attemptId}`,
-				});
-			}
-		}
-		return changes;
-	}
-
-	/**
-	 * durable 事件：按 DSH 自己的事件类型分派；**任何**事件都先留 `raw`，再决定投影形状。
-	 * `recordRaw` 为 false 时调用方已经按 seq 插好 rawEvents（历史页），这里只投影节点。
-	 */
-	private applyDurable(event: Record<string, unknown>, recordRaw = true): readonly DshChatChange[] {
-		const seq = numberOf(event['seq']);
-		if (seq === undefined) {
-			return [];
-		}
-		const type = stringOf(event['type']);
-		const data = isRecord(event['data']) ? event['data'] : {};
-		const time = numberOf(event['time']) ?? 0;
-		// 原始事件留档：定位索引要按 seq 顺序重扫（user/message 自己不带 turn）。
-		if (recordRaw && typeof type === 'string' && type !== '') {
-			this.rawEvents.push({ seq, type, data });
-		}
-		const turn = numberOf(event['turn']) ?? numberOf(data['turn']) ?? 0;
-		// 源载荷原样：所有节点的 `raw` 都是这一个对象，解码层不得改写它。
-		const raw = event;
-
-		if (type === 'user/message') {
-			const source = data['source'];
-			const sourceKind = isRecord(source) ? stringOf(source['kind']) : undefined;
-			if (sourceKind === 'subagent-settled' || sourceKind === 'agent-message') {
-				const notice: DshSubagentNoticeNode = {
-					kind: 'subagent-notice',
-					...(stringOf(data['messageId']) === undefined ? {} : { messageId: stringOf(data['messageId'])! }),
-					seq,
-					time,
-					content: contentBlocksOf(data['content']),
-					source,
-					turn,
-					raw,
-				};
-				return this.put(`seq:${seq}`, notice);
-			}
-			const content = contentBlocksOf(data['content']);
-			if (content.length === 0) {
-				return [];
-			}
-			// 逐条对照 DSH `conversation-nodes/message.ts:96`：user/message 里
-			// source.kind !== 'user' 的是插件注入的模型可见上下文（time-context、
-			// skill-invocation、agent-instructions …），不是人发的消息。
-			// 这类事件要归到 ContextMessageNode 折叠行，不能画成右侧用户气泡。
-			if (sourceKind !== undefined && sourceKind !== 'user') {
-				const contextNode: DshContextMessageNode = {
-					kind: 'context',
-					...(stringOf(data['messageId']) === undefined ? {} : { messageId: stringOf(data['messageId'])! }),
-					seq,
-					time,
-					content,
-					source,
-					producer: contextProducerOf(source, sourceKind),
-					form: contextFormOf(source),
-					turn,
-					raw,
-				};
-				return this.put(`seq:${seq}`, contextNode);
-			}
-			const node: DshUserMessageNode = {
-				kind: 'user',
-				...(stringOf(data['messageId']) === undefined ? {} : { messageId: stringOf(data['messageId'])! }),
-				seq,
-				time,
-				content,
-				...(source === undefined ? {} : { source }),
-				raw,
-			};
-			const changes = this.put(`seq:${seq}`, node);
-			return changes;
-		}
-
-		if (type === 'assistant/message') {
-			const message = isRecord(data['message']) ? data['message'] : {};
-			const step = numberOf(data['step']) ?? numberOf(message['step']) ?? 0;
-			const blocks = assistantBlocksOf(message['content']);
-			// `usage` 在**事件级**（`AssistantMessage` 事件的字段），不是 message 上；
-			// 两处都读一次以兼容历史 log。整个会话的 token 用量在这里累加。
-			const usage = isRecord(data['usage']) ? data['usage'] : isRecord(message['usage']) ? message['usage'] : undefined;
-			if (usage !== undefined) {
-				this.usageSeen = true;
-				this.usage.inputTokens += numberOf(usage['inputTokens']) ?? 0;
-				this.usage.outputTokens += numberOf(usage['outputTokens']) ?? 0;
-				this.usage.cacheReadTokens += numberOf(usage['cacheReadTokens']) ?? 0;
-				this.usage.cacheWriteTokens += numberOf(usage['cacheWriteTokens']) ?? 0;
-			}
-			if (blocks.length === 0) {
-				return [];
-			}
-			const node: DshAssistantMessageNode = {
-				kind: 'assistant',
-				...(stringOf(data['messageId']) === undefined ? {} : { messageId: stringOf(data['messageId'])! }),
-				seq,
-				time,
-				turn,
-				step,
-				blocks,
-				...(usage === undefined ? {} : { usage }),
-				...(message['providerMetadata'] === undefined ? {} : { providerMetadata: message['providerMetadata'] as DshAssistantMessageNode['providerMetadata'] }),
-				...(message['requestConfig'] === undefined ? {} : { requestConfig: message['requestConfig'] }),
-				...(message['timing'] === undefined ? {} : { timing: message['timing'] }),
-				...(data['interrupted'] === true || message['interrupted'] === true ? { interrupted: true as const } : {}),
-				raw,
-			};
-			const changes = this.put(`seq:${seq}`, node);
-			// durable 消息接管同回合的流式临时节点。
-			for (const [attemptId, attempt] of [...this.attempts]) {
-				if (attempt.turn === turn) {
-					this.attempts.delete(attemptId);
-					this.settledAttempts.add(attemptId);
-					this.nodes.delete(attempt.id);
-				}
-			}
-			return changes;
-		}
-
-		// ---- 其余全部 DSH 会话事件：一个都不丢 ----
-
-		if (type === 'tool/call') {
-			const callId = stringOf(data['callId']);
-			const name = stringOf(data['name']);
-			if (callId === undefined || name === undefined) {
-				return [];
-			}
-			const node: DshRunningToolCall = {
-				kind: 'tool-call',
-				callId,
-				name,
-				phase: 'start',
-				argsRaw: typeof data['arguments'] === 'string' ? data['arguments'] : '',
-				turn,
-				step: numberOf(data['step']) ?? 0,
-				time,
-				seq,
-				raw,
-			};
-			return this.put(`seq:${seq}`, node as unknown as DshChatNode);
-		}
-
-		if (type === 'tool/result') {
-			const message = isRecord(data['message']) ? data['message'] : {};
-			const source = isRecord(message['source']) ? message['source'] : {};
-			const callId = stringOf(source['callId']);
-			if (callId === undefined) {
-				return [];
-			}
-			// 上游 `ToolResultNode` 的形状：`call` 带工具名与原始参数，`subCalls` 是
-			// PTC 递归子调用（子调用要缩进嵌在父调用下面，不能丢）。
-			const call = isRecord(data['call']) ? data['call'] : undefined;
-			const callName = call === undefined ? '' : stringOf(call['name']) ?? '';
-			const callArgsRaw = call === undefined ? undefined : stringOf(call['argsRaw']);
-			const subCalls = Array.isArray(data['subCalls'])
-				? data['subCalls'].flatMap(child => decodeToolCallBlock(child))
-				: [];
-			const node: DshToolResultNode = {
-				kind: 'tool-result',
-				seq,
-				time,
-				callId,
-				name: callName,
-				...(typeof data['parentCallId'] === 'string' ? { parentCallId: data['parentCallId'] } : {}),
-				args: data['args'],
-				...(call === undefined ? {} : { call: { name: callName, argsRaw: callArgsRaw ?? '' } }),
-				...(typeof data['callTime'] === 'number' ? { callTime: data['callTime'] } : {}),
-				content: contentBlocksOf(message['content']),
-				isError: message['isError'] === true,
-				subCalls,
-				...(data['error'] === undefined ? {} : { error: data['error'] as DshToolResultNode['error'] }),
-				...(data['meta'] === undefined ? {} : { meta: data['meta'] }),
-				turn,
-				raw,
-			};
-			return this.put(`seq:${seq}`, node as unknown as DshChatNode);
-		}
-
-		if (type === 'turn/end') {
-			const reason = isRecord(data['reason']) ? data['reason'] : {};
-			const kind = stringOf(reason['kind']);
-			const step = numberOf(data['step']) ?? 0;
-			const changes: DshChatChange[] = [];
-			if (kind === 'error' || kind === 'aborted' || kind === 'interrupted') {
-				const failure = isRecord(reason['failure']) ? reason['failure'] : {};
-				const node: DshTurnErrorNode = {
-					kind: 'turn-error',
-					seq,
-					time,
-					turn,
-					step,
-					message: typeof failure['message'] === 'string' ? failure['message'] : '',
-					...(typeof failure['code'] === 'string' ? { code: failure['code'] } : {}),
-					raw,
-				};
-				changes.push(...this.put(`seq:${seq}`, node as unknown as DshChatNode));
-			} else if (kind === 'max-tokens') {
-				const node: DshTurnMaxTokensNode = { kind: 'turn-max-tokens', seq, time, turn, step, raw };
-				changes.push(...this.put(`seq:${seq}`, node as unknown as DshChatNode));
-			} else {
-				// 正常收尾：DSH `TurnTailNodeView` 只在回合结束后画一次 IconActions/用量。
-				// 给该回合最后一个助手节点打标记，渲染层据此避免每个回复分片都画一条 Usage。
-				let closing: DshChatNode | undefined;
-				for (const node of this.nodes.values()) {
-					if (node.kind === 'assistant' && node.seq < seq && (closing === undefined || node.seq > closing.seq)) {
-						closing = node;
-					}
-				}
-				if (closing !== undefined) {
-					(closing as { turnEnded?: boolean }).turnEnded = true;
-					// 该标记是**原地变更**（不新增节点、raw 不变），必须显式发一次变更，
-					// 否则 driver 的 sync 不会被调度，`turnEnded` 永远到不了渲染层。
-					// 用 `added: false` 表示"同一节点内容更新"，与 put 的替换语义一致。
-					changes.push({ node: closing, added: false });
-				}
-			}
-			return changes;
-		}
-
-		if (type === 'llm/retry') {
-			const node: DshModelRetryNode = {
-				kind: 'model-retry',
-				seq,
-				time,
-				retryState: 'scheduled',
-				turn,
-				...(numberOf(data['retry']) === undefined ? {} : { retry: numberOf(data['retry'])! }),
-				...(numberOf(data['maxRetries']) === undefined ? {} : { maxRetries: numberOf(data['maxRetries'])! }),
-				...(numberOf(data['delayMs']) === undefined ? {} : { delayMs: numberOf(data['delayMs'])! }),
-				...(data['mode'] === 'normal' || data['mode'] === 'always' ? { mode: data['mode'] } : {}),
-				...(isRecord(data['failure']) ? { failure: { message: typeof data['failure']['message'] === 'string' ? data['failure']['message'] : '', ...(typeof data['failure']['code'] === 'string' ? { code: data['failure']['code'] } : {}) } } : {}),
-				raw,
-			};
-			return this.put(`seq:${seq}`, node as unknown as DshChatNode);
-		}
-
-		if (type === 'command/run' || type === 'command/done') {
-			const commandId = stringOf(data['commandId']);
-			if (commandId === undefined) {
-				return [];
-			}
-			const previous = this.nodes.get(`cmd:${commandId}`);
-			const base = previous !== undefined && previous.kind === 'command' ? previous : undefined;
-			const node: DshCommandNode = {
-				kind: 'command',
-				seq: base?.seq ?? seq,
-				time: base?.time ?? time,
-				commandId,
-				name: type === 'command/run' ? (stringOf(data['name']) ?? null) : (base?.name ?? null),
-				args: type === 'command/run' ? (typeof data['rawInput'] === 'string' ? data['rawInput'] : null) : (base?.args ?? null),
-				outcome: type === 'command/done'
-					? { kind: data['ok'] === false ? 'error' : 'success', ...(typeof data['text'] === 'string' ? { text: data['text'] } : {}) }
-					: (base?.outcome ?? null),
-				turn,
-				raw,
-			};
-			return this.put(`cmd:${commandId}`, node as unknown as DshChatNode);
-		}
-
-		if (type === 'compaction/summary' || type === 'user/message#compaction') {
-			const node: DshCompactionNode = {
-				kind: 'compaction',
-				seq,
-				time,
-				summary: typeof data['summary'] === 'string' ? data['summary'] : null,
-				...(numberOf(data['summaryEventSeq']) === undefined ? {} : { summaryEventSeq: numberOf(data['summaryEventSeq'])! }),
-				...(numberOf(data['shadowedItemCount']) === undefined ? {} : { shadowedItemCount: numberOf(data['shadowedItemCount'])! }),
-				...(numberOf(data['shadowedTokenCount']) === undefined ? {} : { shadowedTokenCount: numberOf(data['shadowedTokenCount'])! }),
-				turn,
-				raw,
-			};
-			return this.put(`seq:${seq}`, node as unknown as DshChatNode);
-		}
-
-		if (type === 'subagent/catalog') {
-			// 父会话上的子代理发现事实（`subagent/src/catalog.ts`）。不是 surface 事件，
-			// 但不能丢掉，否则父会话看不到子会话入口。字段缺了就不写，视图会显示缺失。
-			const node: DshSubagentCatalogNode = {
-				kind: 'subagent-catalog',
-				seq,
-				time,
-				...(stringOf(data['childId']) === undefined ? {} : { childId: stringOf(data['childId'])! }),
-				...(numberOf(data['childCreatedAt']) === undefined ? {} : { childCreatedAt: numberOf(data['childCreatedAt'])! }),
-				...(stringOf(data['mode']) === undefined ? {} : { mode: stringOf(data['mode'])! }),
-				...(stringOf(data['label']) === undefined ? {} : { label: stringOf(data['label'])! }),
-				...(stringOf(data['name']) === undefined ? {} : { name: stringOf(data['name'])! }),
-				...(numberOf(data['version']) === undefined ? {} : { version: numberOf(data['version'])! }),
-				turn,
-				raw,
-			};
-			return this.put(`seq:${seq}`, node);
-		}
-
-		if (type === 'session/end-seed' && data['inherited'] === true) {
-			// ui-chat 的合成节点（`conversation-nodes/inherited-history.ts`）：fork 继承历史的分界。
-			const node: DshInheritedHistoryNode = { kind: 'inherited-history', seq, time, turn, raw };
-			return this.put(`seq:${seq}`, node as unknown as DshChatNode);
-		}
-
-		if (type === 'assistant/attempt') {
-			// 结算为 attempt：流式文本在原处转正，不另起节点。
-			const attemptId = stringOf(data['attemptId']);
-			if (attemptId === undefined) {
-				return [];
-			}
-			const attempt = this.attempts.get(attemptId);
-			if (attempt === undefined) {
-				return [];
-			}
-			this.attempts.delete(attemptId);
-			this.settledAttempts.add(attemptId);
-			const existing = this.nodes.get(attempt.id);
-			if (existing === undefined || existing.kind !== 'assistant') {
-				return [];
-			}
-			return [{ node: existing, added: false }];
-		}
-
-		// 未知事件不能一律画成可见行：真源兜底只收 **append-origin 的 surface 事件**
-		// （`conversation-nodes/fallback.ts:23` 的 `isAppendSurfaceEvent`，其判定为
-		// `surfaceOp === 'append'`，见 `core/session/src/surface.ts:89-93`）。
-		// 非 surface 的内部事件（turn/start、attempt、boundary 等）留在 rawEvents 供定位，
-		// 不产生可见节点——否则就是凭空「增」出界面行。
-		if (data['surfaceOp'] === 'append') {
-			const unknownNode: DshUnknownSurfaceNode = {
-				kind: 'unknown',
-				seq,
-				time,
-				type: type ?? '',
-				data,
-				turn,
-				raw,
-			};
-			return this.put(`seq:${seq}`, unknownNode as unknown as DshChatNode);
-		}
-
-		return [];
-	}
-
-	/** `assistant-stream`：start / chunk / end，按 revision 单调去重。 */
-	private applyStream(frame: Record<string, unknown>): readonly DshChatChange[] {
-		const type = stringOf(frame['type']);
-		const attemptId = stringOf(frame['attemptId']);
-		const revision = numberOf(frame['revision']);
-		if (attemptId === undefined || revision === undefined) {
-			return [];
-		}
-		if (type === 'start') {
-			if (this.attempts.has(attemptId) || this.settledAttempts.has(attemptId)) {
-				return [];
-			}
-			const attempt = {
-				turn: numberOf(frame['turn']) ?? 0,
-				step: numberOf(frame['step']) ?? 0,
-				revision,
-				blocks: [] as DshAssistantBlock[],
-				id: `stream:${attemptId}`,
-			};
-			this.attempts.set(attemptId, attempt);
-			const node = this.streamNode(attemptId, attempt);
-			this.nodes.set(attempt.id, node);
-			return [{ node, added: true }];
-		}
-		if (type === 'chunk') {
-			const attempt = this.attempts.get(attemptId);
-			const chunk = isRecord(frame['chunk']) ? frame['chunk'] : undefined;
-			if (attempt === undefined || chunk === undefined || revision <= attempt.revision) {
-				return [];
-			}
-			attempt.revision = revision;
-			appendChunk(attempt.blocks, chunk);
-			const node = this.streamNode(attemptId, attempt);
-			this.nodes.set(attempt.id, node);
-			return [{ node, added: false }];
-		}
-		if (type === 'end') {
-			const attempt = this.attempts.get(attemptId);
-			if (attempt === undefined) {
-				return [];
-			}
-			const outcome = isRecord(frame['outcome']) ? frame['outcome'] : {};
-			this.attempts.delete(attemptId);
-			this.settledAttempts.add(attemptId);
-			if (outcome['kind'] === 'abandoned') {
-				// 没有落成可见消息：丢弃这次尝试留下的临时节点。
-				this.nodes.delete(attempt.id);
-				this._onDidReset.fire();
-				return [];
-			}
-			// committed：等 durable `assistant/message` 接管；先把流式标记去掉。
-			const existing = this.nodes.get(attempt.id);
-			if (existing === undefined) {
-				return [];
-			}
-			return [{ node: existing, added: false }];
-		}
-		return [];
-	}
-
-	private streamNode(attemptId: string, attempt: { turn: number; step: number; revision: number; blocks: DshAssistantBlock[]; id: string }): DshAssistantMessageNode {
-		return {
-			kind: 'assistant',
-			seq: this.streamSeq(attemptId),
-			time: Date.now(),
-			turn: attempt.turn,
-			step: attempt.step,
-			blocks: attempt.blocks,
-		};
-	}
-
-	/** 流式节点没有 durable seq：用已有序号之后的值，保证排在历史之后。 */
-	private streamSeq(attemptId: string): number {
-		let max = 0;
-		for (const node of this.nodes.values()) {
-			if (node.seq > max) {
-				max = node.seq;
-			}
-		}
-		void attemptId;
-		return max + 1;
-	}
-
-	private put(id: string, node: DshChatNode): readonly DshChatChange[] {
-		const existed = this.nodes.has(id);
-		this.nodes.set(id, node);
-		return [{ node, added: !existed }];
 	}
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/** 流式临时节点的身份前缀：seq 是合成值，不参与历史游标。 */
+const STREAM_NODE_PREFIX = 'stream:';
+
+/**
+ * 结构化节点在模型里的身份键。
+ *
+ * 命令按 `commandId` 原地更新；其余按 seq。和裸帧路径的键保持一致，
+ * 这样 `loadOlder` 前插和流式接管不会因为换路径而错位。
+ */
+function identityOf(node: DshIdeConversationNode): string {
+	return node.kind === 'command' ? `cmd:${node.commandId}` : `seq:${node.seq}`;
+}
+
+/**
+ * Host 投影的 `DshIdeConversationNode` → 本层 `DshChatNode`。
+ *
+ * 纯机械映射：只做类型收窄与 `raw` 的补位，不改写任何字段语义。
+ * `raw` 在 typed 路径下没有原始事件，按 undefined 处理（协议本就不让线上传 raw）。
+ */
+function fromConversationNode(node: DshIdeConversationNode): DshChatNode | undefined {
+	const base = {
+		seq: node.seq,
+		time: node.time,
+		...(node.messageId === undefined ? {} : { messageId: node.messageId }),
+	};
+	switch (node.kind) {
+		case 'user':
+		case 'steering':
+		case 'subagent-notice':
+			return {
+				...base,
+				kind: node.kind,
+				content: node.content as readonly DshContentBlock[],
+				...(node.turn === undefined ? {} : { turn: node.turn }),
+			} as DshChatNode;
+		case 'context':
+			return {
+				...base,
+				kind: 'context',
+				content: node.content as readonly DshContentBlock[],
+				...(node.form === undefined ? {} : { form: node.form }),
+				...(node.turn === undefined ? {} : { turn: node.turn }),
+			} as DshChatNode;
+		case 'assistant':
+			return {
+				...base,
+				kind: 'assistant',
+				turn: node.turn,
+				step: node.step,
+				blocks: node.blocks as readonly DshAssistantBlock[],
+				...(node.usage === undefined ? {} : { usage: node.usage }),
+				...(node.providerMetadata === undefined ? {} : { providerMetadata: node.providerMetadata }),
+				...(node.interrupted === true ? { interrupted: true as const } : {}),
+			};
+		case 'tool-call':
+			return {
+				...base,
+				kind: 'tool-call',
+				callId: node.callId,
+				...(node.parentCallId === undefined ? {} : { parentCallId: node.parentCallId }),
+				name: node.name,
+				phase: node.phase,
+				...(node.step === undefined ? {} : { step: node.step }),
+				...(node.argsRaw === undefined ? {} : { argsRaw: node.argsRaw }),
+				...(node.args === undefined ? {} : { args: node.args }),
+				...(node.turn === undefined ? {} : { turn: node.turn }),
+			} as DshChatNode;
+		case 'tool-result':
+			return {
+				...base,
+				kind: 'tool-result',
+				callId: node.callId,
+				...(node.parentCallId === undefined ? {} : { parentCallId: node.parentCallId }),
+				name: node.name,
+				args: node.args,
+				...(node.call === undefined ? {} : { call: node.call }),
+				...(node.callTime === undefined ? {} : { callTime: node.callTime }),
+				content: node.content as readonly DshContentBlock[],
+				isError: node.isError,
+				...(node.error === undefined ? {} : { error: node.error }),
+				subCalls: node.subCalls.map(fromConversationNode).filter((child): child is DshToolCallBlock => child !== undefined && (child.kind === 'tool-call' || child.kind === 'tool-result')),
+				...(node.turn === undefined ? {} : { turn: node.turn }),
+			} as DshChatNode;
+		case 'command':
+			return {
+				...base,
+				kind: 'command',
+				commandId: node.commandId,
+				name: node.name,
+				args: node.args,
+				outcome: node.outcome,
+				...(node.turn === undefined ? {} : { turn: node.turn }),
+			};
+		case 'compaction':
+			return {
+				...base,
+				kind: 'compaction',
+				summary: node.summary,
+				...(node.summaryEventSeq === undefined ? {} : { summaryEventSeq: node.summaryEventSeq }),
+				...(node.shadowedItemCount === undefined ? {} : { shadowedItemCount: node.shadowedItemCount }),
+				...(node.shadowedTokenCount === undefined ? {} : { shadowedTokenCount: node.shadowedTokenCount }),
+				...(node.turn === undefined ? {} : { turn: node.turn }),
+			};
+		case 'model-retry':
+			return {
+				...base,
+				kind: 'model-retry',
+				...(node.retry === undefined ? {} : { retry: node.retry }),
+				...(node.maxRetries === undefined ? {} : { maxRetries: node.maxRetries }),
+				...(node.delayMs === undefined ? {} : { delayMs: node.delayMs }),
+				...(node.mode === undefined ? {} : { mode: node.mode }),
+				...(node.retryState === undefined ? {} : { retryState: node.retryState }),
+				...(node.failure === undefined ? {} : { failure: node.failure }),
+				...(node.turn === undefined ? {} : { turn: node.turn }),
+			} as DshChatNode;
+		case 'turn-error':
+			return {
+				...base,
+				kind: 'turn-error',
+				turn: node.turn,
+				step: node.step,
+				message: node.message,
+				...(node.code === undefined ? {} : { code: node.code }),
+			} as DshChatNode;
+		case 'turn-max-tokens':
+			return { ...base, kind: 'turn-max-tokens', turn: node.turn, step: node.step } as DshChatNode;
+		case 'inherited-history':
+			return { ...base, kind: 'inherited-history', ...(node.turn === undefined ? {} : { turn: node.turn }) };
+		case 'subagent-catalog':
+			return {
+				...base,
+				kind: 'subagent-catalog',
+				...(node.childId === undefined ? {} : { childId: node.childId }),
+				...(node.childCreatedAt === undefined ? {} : { childCreatedAt: node.childCreatedAt }),
+				...(node.mode === undefined ? {} : { mode: node.mode }),
+				...(node.label === undefined ? {} : { label: node.label }),
+				...(node.name === undefined ? {} : { name: node.name }),
+				...(node.version === undefined ? {} : { version: node.version }),
+				...(node.turn === undefined ? {} : { turn: node.turn }),
+			};
+		default:
+			return undefined;
+	}
 }
 
 function stringOf(value: unknown): string | undefined {
@@ -982,169 +697,3 @@ function numberOf(value: unknown): number | undefined {
 	return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
 }
 
-/** DSH `ContentBlock[]` 原样读取（不改造型，只过滤出可识别的）。 */
-/**
- * 递归解码一个工具调用块（`RunningToolCall` 或 `ToolResultNode`）。
- *
- * 上游 `ToolCallBlock` 是自递归的：PTC 子调用挂在父调用的 `subCalls` 上。
- * 这里按同一形状递归，深度不设人为上限（上游也没有）。
- */
-function decodeToolCallBlock(value: unknown): DshToolCallBlock[] {
-	if (!isRecord(value)) {
-		return [];
-	}
-	const callId = stringOf(value['callId']);
-	if (callId === undefined) {
-		return [];
-	}
-	const subCalls = Array.isArray(value['subCalls'])
-		? value['subCalls'].flatMap(child => decodeToolCallBlock(child))
-		: [];
-	const seq = numberOf(value['seq']) ?? 0;
-	const time = numberOf(value['time']) ?? 0;
-	const hasResult = value['kind'] === 'tool-result' || value['content'] !== undefined;
-	if (hasResult) {
-		const call = isRecord(value['call']) ? value['call'] : undefined;
-		const name = call === undefined ? stringOf(value['name']) ?? '' : stringOf(call['name']) ?? '';
-		const block: DshToolResultNode = {
-			kind: 'tool-result',
-			seq,
-			time,
-			callId,
-			name,
-			args: value['args'],
-			...(call === undefined ? {} : { call: { name, argsRaw: stringOf(call['argsRaw']) ?? '' } }),
-			content: contentBlocksOf(value['content']),
-			isError: value['isError'] === true,
-			subCalls,
-			raw: value,
-		};
-		return [block];
-	}
-	const phase = value['phase'] === 'preparing' ? 'preparing' : 'start';
-	const block: DshRunningToolCall = {
-		kind: 'tool-call',
-		seq,
-		time,
-		callId,
-		name: stringOf(value['name']) ?? '',
-		phase,
-		...(typeof value['argsRaw'] === 'string' ? { argsRaw: value['argsRaw'] } : {}),
-		...(subCalls.length === 0 ? {} : { subCalls }),
-		raw: value,
-	};
-	return [block];
-}
-
-/** DSH `event-projection.ts:47-53`：只放行 Chat 认得的 form，其余保持不透明。 */
-const KNOWN_CONTEXT_FORMS: readonly string[] = ['instructions', 'catalog', 'snapshot', 'notice', 'relay', 'recall'];
-
-function contextFormOf(source: unknown): string | null {
-	const record = isRecord(source) ? source : undefined;
-	const form = record === undefined ? undefined : stringOf(record['form']);
-	return form !== undefined && KNOWN_CONTEXT_FORMS.includes(form) ? form : null;
-}
-
-/** DSH `event-projection.ts:60-76`：把注入源投影为折叠行的 producer 标签。 */
-function contextProducerOf(source: unknown, kind: string): { readonly role: string; readonly label: string | null } {
-	const record = isRecord(source) ? source : undefined;
-	if (record === undefined) {
-		return { role: 'inject', label: null };
-	}
-	if (kind === 'session-reference') {
-		const refs = Array.isArray(record['references']) ? record['references'] : [];
-		const labels = refs.flatMap(entry => isRecord(entry) && typeof entry['label'] === 'string' ? [entry['label']] : []);
-		return { role: 'recall', label: labels.join(', ') || kind };
-	}
-	if (kind === 'agent-instructions') {
-		const changes = Array.isArray(record['changes']) ? record['changes'] : [];
-		const paths = changes.flatMap(entry => isRecord(entry) && typeof entry['path'] === 'string' ? [entry['path']] : []);
-		return { role: 'inject', label: paths.join(', ') || kind };
-	}
-	if (kind === 'skill-invocation') {
-		return { role: 'inject', label: stringOf(record['name']) ?? kind };
-	}
-	// MessageSourceMap 可合并扩展；未知 producer 用它的 durable kind 可见，例如 time-context。
-	return { role: 'inject', label: kind };
-}
-
-function contentBlocksOf(value: unknown): DshContentBlock[] {
-	if (!Array.isArray(value)) {
-		return [];
-	}
-	const blocks: DshContentBlock[] = [];
-	for (const block of value) {
-		if (!isRecord(block)) {
-			// 非记录块也要留痕：落成带原值的 plugin 块，绝不 continue 丢掉。
-			blocks.push({ type: 'plugin', pluginType: 'non-record', block });
-			continue;
-		}
-		const type = stringOf(block['type']);
-		if (type === 'text' && typeof block['text'] === 'string') {
-			blocks.push({ type: 'text', text: block['text'] });
-		} else if (type === 'reasoning' && typeof block['text'] === 'string') {
-			blocks.push({ type: 'reasoning', text: block['text'] });
-		} else if (type === 'image') {
-			blocks.push({ type: 'image', attachment: block['attachment'] });
-		} else if (type === 'file') {
-			blocks.push({ type: 'file', attachment: block['attachment'] });
-		} else if (type === 'tool-call' && typeof block['id'] === 'string' && typeof block['name'] === 'string') {
-			// `arguments` 真源是 string，但历史日志可能出现非字符串；保留原值而不是伪造成空串。
-			blocks.push({ type: 'tool-call', id: block['id'], name: block['name'], arguments: block['arguments'] as string });
-		} else if (type === 'tool-addition' || type === 'tool-removal') {
-			blocks.push({ type, toolName: String(block['toolName'] ?? '') });
-		} else {
-			// 未知块原样保留：DSH 用 `other` 把它画成 JSON 卡片，我们同样不能丢。
-			// 真实 `type` 存在 `pluginType`，不覆盖判别值，canonical 仍能还原源载荷。
-			blocks.push({ type: 'plugin', pluginType: type ?? 'non-record', block });
-		}
-	}
-	return blocks;
-}
-
-/** DSH `toAssistantBlocks`（`event-projection.ts:105`）同一份映射。 */
-function assistantBlocksOf(value: unknown): DshAssistantBlock[] {
-	return contentBlocksOf(value).map(toAssistantBlock);
-}
-
-/** DSH `toAssistantBlock`（`event-projection.ts:114-121`）逐字对应，含 `file` 落 `other`。 */
-function toAssistantBlock(block: DshContentBlock): DshAssistantBlock {
-	switch (block.type) {
-		case 'text': return { kind: 'text', text: block.text };
-		case 'reasoning': return { kind: 'reasoning', text: block.text };
-		case 'image': return { kind: 'image', attachment: block.attachment };
-		case 'tool-call': return { kind: 'tool-call', callId: block.id, name: block.name, argsRaw: block.arguments };
-		// 真源 `AssistantBlock` 没有 `file`，`file` 与所有插件块一起落 `other` 原样保留。
-		default: return { kind: 'other', block };
-	}
-}
-
-/** 流式 chunk 追加：对应 DSH `StreamChunk` 的 text-delta / reasoning-delta。 */
-function appendChunk(blocks: DshAssistantBlock[], chunk: Record<string, unknown>): void {
-	const type = stringOf(chunk['type']);
-	const text = typeof chunk['text'] === 'string' ? chunk['text'] : undefined;
-	if (text === undefined) {
-		return;
-	}
-	const kind = type === 'reasoning-delta' ? 'reasoning' : type === 'text-delta' ? 'text' : undefined;
-	if (kind === undefined) {
-		return;
-	}
-	const last = blocks[blocks.length - 1];
-	if (last !== undefined && last.kind === kind) {
-		blocks[blocks.length - 1] = { kind, text: last.text + text };
-		return;
-	}
-	blocks.push({ kind, text });
-}
-
-/** 快照里的流式基线：`readonly JsonValue[]`，按 chunk 形状追加。 */
-function streamToBlocks(stream: readonly unknown[]): DshAssistantBlock[] {
-	const blocks: DshAssistantBlock[] = [];
-	for (const chunk of stream) {
-		if (isRecord(chunk)) {
-			appendChunk(blocks, chunk);
-		}
-	}
-	return blocks;
-}

@@ -11,7 +11,7 @@
 import { Emitter, Event } from '../../../../base/common/event.js';
 import { Disposable } from '../../../../base/common/lifecycle.js';
 import { IDshClientService } from '../../../../platform/dshClient/common/dshClientService.js';
-import { validateDshIdeLoadOlderResult, type DshIdeLoadOlderResult, type DshIdeWaterfallNotice } from '../../../../platform/dshClient/common/dshIdeProtocol.js';
+import { validateDshIdeLoadOlderResult, type DshIdeDeliverableView, type DshIdeImageAttachmentRef, type DshIdeLoadOlderResult, type DshIdePendingItem, type DshIdeQuotaNotice, type DshIdeViewSnapshot, type DshIdeWaterfallNotice } from '../../../../platform/dshClient/common/dshIdeProtocol.js';
 import { DshChatModel, type DshChatNode, type DshHistoryStatus } from './dshChatModel.js';
 
 /** 下拉里的一个模型选项。 */
@@ -41,6 +41,7 @@ export interface IDshChatSession {
 	readonly onDidChangeHistory: Event<void>;
 	readonly onDidChangeModelMenu: Event<void>;
 	readonly onDidChangePending: Event<readonly DshChatPending[]>;
+	readonly onDidChangeExtras: Event<void>;
 	readonly onDidChangeRunning: Event<boolean>;
 	nodes(): readonly DshChatNode[];
 	/**
@@ -77,6 +78,8 @@ export class DshChatSession extends Disposable implements IDshChatSession {
 	private readonly model = this._register(new DshChatModel());
 	private readonly _onDidChangeModelMenu = this._register(new Emitter<void>());
 	private readonly _onDidChangePending = this._register(new Emitter<readonly DshChatPending[]>());
+	/** typed extras（交付物 / 附件 / 额度）变化：内容没变也会 fire，渲染层自行判重。 */
+	private readonly _onDidChangeExtras = this._register(new Emitter<void>());
 	private readonly _onDidChangeRunning = this._register(new Emitter<boolean>());
 	private readonly _onDidChangeNodes = this._register(new Emitter<readonly [readonly DshChatNode[], boolean]>());
 	private readonly _onDidChangeHistory = this._register(new Emitter<void>());
@@ -88,9 +91,16 @@ export class DshChatSession extends Disposable implements IDshChatSession {
 	private _current: { provider: string; model: string } | undefined;
 	private _running = false;
 	private boundSessionId: string | undefined;
+	/** typed 视图里的交付物 / 附件 / 额度提示（单一真源，面板只读）。 */
+	private _deliverables: readonly DshIdeDeliverableView[] = [];
+	private _attachments: readonly DshIdeImageAttachmentRef[] = [];
+	private _quotaNotice: DshIdeQuotaNotice | undefined;
+	/** typed `pending` 的当前清单。 */
+	private _pendingView: readonly DshIdePendingItem[] = [];
 
 	readonly onDidChangeModelMenu: Event<void> = this._onDidChangeModelMenu.event;
 	readonly onDidChangePending: Event<readonly DshChatPending[]> = this._onDidChangePending.event;
+	readonly onDidChangeExtras: Event<void> = this._onDidChangeExtras.event;
 	readonly onDidChangeRunning: Event<boolean> = this._onDidChangeRunning.event;
 	readonly onDidChangeNodes: Event<readonly [readonly DshChatNode[], boolean]> = this._onDidChangeNodes.event;
 	readonly onDidChangeHistory: Event<void> = this._onDidChangeHistory.event;
@@ -130,6 +140,62 @@ export class DshChatSession extends Disposable implements IDshChatSession {
 		return [...this.pendingItems.values()];
 	}
 
+	/** typed `pending` 的当前清单（面板渲染待决议卡用）。 */
+	pendingItemsView(): readonly DshIdePendingItem[] {
+		return this._pendingView;
+	}
+
+	deliverables(): readonly DshIdeDeliverableView[] {
+		return this._deliverables;
+	}
+
+	attachments(): readonly DshIdeImageAttachmentRef[] {
+		return this._attachments;
+	}
+
+	quotaNotice(): DshIdeQuotaNotice | undefined {
+		return this._quotaNotice;
+	}
+
+	/**
+	 * 用 typed `pending` 覆盖待决议列表。
+	 *
+	 * typed 字段是唯一真源：Host 已经按 eventId 聚合过，前端不再自己累加或去重。
+	 */
+	private acceptPending(pending: readonly DshIdePendingItem[]): void {
+		this._pendingView = pending;
+		const before = this.pendingItems.size;
+		const beforeIds = [...this.pendingItems.keys()].join('\u0000');
+		this.pendingItems.clear();
+		for (const item of pending) {
+			if (item.event === 'approval/request' && 'toolName' in item.request) {
+				const reason = item.request.reason;
+				this.pendingItems.set(item.eventId, {
+					eventId: item.eventId,
+					kind: 'approval',
+					title: reason === undefined
+						? `DSH 请求运行 ${item.request.toolName}`
+						: `DSH 请求运行 ${item.request.toolName}：${reason}`,
+					options: [],
+				});
+			} else if (item.event === 'user-questions/request' && 'questions' in item.request) {
+				const question = item.request.questions[0];
+				this.pendingItems.set(item.eventId, {
+					eventId: item.eventId,
+					kind: 'question',
+					title: question?.question ?? 'DSH 提问',
+					options: (question?.options ?? []).map(option => option.label),
+					questionId: question?.id ?? '',
+				});
+			}
+		}
+		// 每帧都下发 pending，但内容没变就不必让面板重画。
+		const afterIds = [...this.pendingItems.keys()].join('\u0000');
+		if (before !== this.pendingItems.size || beforeIds !== afterIds) {
+			this._onDidChangePending.fire(this.pending());
+		}
+	}
+
 	running(): boolean {
 		return this._running;
 	}
@@ -139,25 +205,38 @@ export class DshChatSession extends Disposable implements IDshChatSession {
 	}
 
 	/** 换会话：清空旧记录、重读目录、重开跟进流。 */
-	async bind(sessionId: string | undefined): Promise<void> {
+	/**
+	 * 换会话：清空旧记录、重读目录、重开跟进流。
+	 *
+	 * @returns 绑定是否成功。通道 rebind 失败时返回 false，调用方必须据此提示用户，
+	 *          不能假装绑定成功继续打开视图。
+	 */
+	async bind(sessionId: string | undefined): Promise<boolean> {
 		if (sessionId === this.boundSessionId) {
-			return;
+			return true;
 		}
 		this.generation++;
 		this.boundSessionId = sessionId;
 		this.model.clear();
 		this.pendingItems.clear();
+		this._pendingView = [];
+		this._deliverables = [];
+		this._attachments = [];
+		this._quotaNotice = undefined;
 		this._onDidChangePending.fire([]);
+		// extras 也被清空：必须通知，否则复用同一个共享会话的 content 会一直显示旧交付物。
+		this._onDidChangeExtras.fire();
 		this._running = false;
 		this._onDidChangeRunning.fire(false);
 		if (sessionId === undefined) {
-			return;
+			return true;
 		}
 		const rebound = await this.client.rebindView(sessionId);
 		if (!rebound.ok) {
-			return;
+			return false;
 		}
 		await this.refreshComposer();
+		return true;
 	}
 
 	/** 启动时连接已由 `openView` 按开窗参数建好：只登记绑定并补读目录，不重开流。 */
@@ -166,10 +245,36 @@ export class DshChatSession extends Disposable implements IDshChatSession {
 		await this.refreshComposer();
 	}
 
-	/** 收一帧内核送来的 follow 结果 / 批准帧。 */
-	accept(snapshotView: Readonly<Record<string, unknown>> | undefined): void {
-		if (snapshotView !== undefined) {
-			this.model.accept(snapshotView);
+	/**
+	 * 收一帧完整 typed 视图。
+	 *
+	 * 有 `conversation` 时直接用结构化节点树重建；没有（旧 Host 或非内容帧）才退回裸 `frame`。
+	 * `pending` / `deliverables` / `quotaNotice` / `attachments` 同样以 typed 字段为唯一真源。
+	 */
+	acceptView(view: DshIdeViewSnapshot | undefined): void {
+		if (view === undefined) {
+			return;
+		}
+		if (view.conversation !== undefined) {
+			this.model.acceptConversation(view.conversation);
+		} else {
+			this.model.accept(view.frame);
+		}
+		if (view.pending !== undefined) {
+			this.acceptPending(view.pending);
+		}
+		// extras 每帧都可能带同样的值：内容不变就不通知，避免渲染层每帧全量重建 history。
+		const nextDeliverables = view.deliverables ?? [];
+		const nextAttachments = view.attachments ?? [];
+		const nextQuota = view.quotaNotice;
+		const extrasChanged = !sameDeliverables(this._deliverables, nextDeliverables)
+			|| !sameAttachments(this._attachments, nextAttachments)
+			|| !sameQuota(this._quotaNotice, nextQuota);
+		this._deliverables = nextDeliverables;
+		this._attachments = nextAttachments;
+		this._quotaNotice = nextQuota;
+		if (extrasChanged) {
+			this._onDidChangeExtras.fire();
 		}
 	}
 
@@ -357,4 +462,49 @@ export function dshChatSessionFor(client: IDshClientService): DshChatSession {
 		sharedChatSession = new DshChatSession(client);
 	}
 	return sharedChatSession;
+}
+
+/** 交付物是否与上一帧相同（用于避免无变化时重建 history）。 */
+function sameDeliverables(
+	left: readonly DshIdeDeliverableView[],
+	right: readonly DshIdeDeliverableView[],
+): boolean {
+	if (left.length !== right.length) {
+		return false;
+	}
+	for (let i = 0; i < left.length; i++) {
+		const a = left[i];
+		const b = right[i];
+		if (a.turn !== b.turn || a.callId !== b.callId || a.files.length !== b.files.length) {
+			return false;
+		}
+		for (let j = 0; j < a.files.length; j++) {
+			if (a.files[j].path !== b.files[j].path || a.files[j].description !== b.files[j].description) {
+				return false;
+			}
+		}
+	}
+	return true;
+}
+
+/** 附件列表是否与上一帧相同。 */
+function sameAttachments(
+	left: readonly DshIdeImageAttachmentRef[],
+	right: readonly DshIdeImageAttachmentRef[],
+): boolean {
+	if (left.length !== right.length) {
+		return false;
+	}
+	return left.every((item, index) => item.attachmentId === right[index].attachmentId);
+}
+
+/** 额度提示是否与上一帧相同。 */
+function sameQuota(
+	left: DshIdeQuotaNotice | undefined,
+	right: DshIdeQuotaNotice | undefined,
+): boolean {
+	if (left === undefined || right === undefined) {
+		return left === right;
+	}
+	return left.code === right.code && left.seq === right.seq;
 }

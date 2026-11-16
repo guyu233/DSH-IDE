@@ -18,6 +18,7 @@ import {
 	assertSnapshotContinuity,
 	validateDshIdeSnapshot,
 	type DshIdeSnapshot,
+	type DshIdeViewSnapshot,
 	type DshRemoteError,
 } from '../../../../platform/dshClient/common/dshIdeProtocol.js';
 
@@ -25,6 +26,12 @@ import {
 export interface DshIdeConsumerState {
 	/** 最近一帧跟会话结果；未收到为 undefined。 */
 	readonly frame: Readonly<Record<string, unknown>> | undefined;
+	/**
+	 * 最近一帧的完整 typed 视图（`conversation` / `pending` / `deliverables` 等）。
+	 *
+	 * 渲染层读这个；`frame` 只作为兼容回退保留，稳定路径不再依赖裸帧。
+	 */
+	readonly view: DshIdeViewSnapshot | undefined;
 	/** 已接受快照的 version；未接受过为 -1。 */
 	readonly version: number;
 	readonly channelId: string | undefined;
@@ -44,6 +51,7 @@ export class DshIdeConsumer extends Disposable {
 
 	private last: DshIdeSnapshot | undefined;
 	private current: Readonly<Record<string, unknown>> | undefined;
+	private currentView: DshIdeViewSnapshot | undefined;
 	private pending: DshIdeSnapshot | undefined;
 	private mergeTimer: ReturnType<typeof setTimeout> | undefined;
 	private failed = false;
@@ -55,6 +63,7 @@ export class DshIdeConsumer extends Disposable {
 	get state(): DshIdeConsumerState {
 		return {
 			frame: this.current,
+			view: this.currentView,
 			version: this.last?.version ?? -1,
 			channelId: this.last?.channelId,
 			phase: this.last?.state.state ?? 'none',
@@ -94,6 +103,7 @@ export class DshIdeConsumer extends Disposable {
 		this.pending = undefined;
 		this.last = undefined;
 		this.current = undefined;
+		this.currentView = undefined;
 		this.failed = false;
 		this.failReason = undefined;
 	}
@@ -125,6 +135,7 @@ export class DshIdeConsumer extends Disposable {
 		this.last = frame;
 		if (frame.state.state === 'ready' && frame.state.view !== undefined) {
 			this.current = frame.state.view.frame;
+			this.currentView = frame.state.view;
 		}
 		this._onDidChangeFrame.fire({ state: this.state });
 	}

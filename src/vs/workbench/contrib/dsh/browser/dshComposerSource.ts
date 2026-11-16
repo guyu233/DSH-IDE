@@ -62,7 +62,8 @@ export interface IDshComposerSource {
 	readonly onDidChange: Event<void>;
 	refresh(): Promise<void>;
 	selectModel(provider: string, model: string): Promise<void>;
-	selectEffort(effort: string): Promise<void>;	selectPreset(preset: string): Promise<void>;
+	selectEffort(effort: string): Promise<void>;
+	selectPreset(preset: string): Promise<void>;
 	selectPermission(permission: string): Promise<void>;
 	setTeam(enabled: boolean): Promise<void>;
 }
