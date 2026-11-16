@@ -483,6 +483,22 @@ DshChatSession.acceptView / acceptConversation → DshChatModel（typed 节点�
 
 > **如实记录**：`hy4flash` 的报告中「mocha 13 项」「365 项已被 376/377/378 取代且 r92 日志有失败」等说法来自它读到的工作区其他日志，不是本轮实测；主智能体复跑 `npm run test-dsh` 得 **7 passing**，`test-dsh:all` 得 **370 项全过**，以实测为准（手册 §9.2/§9.5 已按实测回写）。
 
+### 8.7 子智能体插件与模型目录的启用证据
+
+本轮「启用子智能体插件组成工作流」的实测依据（`plugin_manager list_plugins` + `cordis_inspect_query`）：
+
+| 项 | 实测状态 |
+|---|---|
+| `@deepseek-ai/dsh-subagent`（`include:subagent`） | enabled / active；config `maxDepth: 2` |
+| `@deepseek-ai/dsh-subagent-spawn-in-process` | enabled / active（spawn 后端） |
+| `@deepseek-ai/dsh-subagent-fork-in-process` | enabled / active（fork 后端） |
+| `@deepseek-ai/dsh-agent-team` + `@deepseek-ai/dsh-tool-agent-team` | enabled / active（共享任务板） |
+| `@deepseek-ai/dsh-tool-subagent/model-selection-settings` | enabled / active；`allowedModels` 恰为 `workbuddylocal/glm-5.3-flash` 与 `workbuddylocal/hy4flash` |
+| `list_subagent_models` 实测返回 | `workbuddylocal/glm-5.3-flash`（effort low/high/max）、`workbuddylocal/hy4flash`（effort high） |
+| 实际派工 | 3 个 `workflow` 并行工作流共 5 个子智能体：`route-check`（能力验证）、`agent-1`/`agent-2`（2-A/2-B 核对）、`agent-3`/`agent-4`（对抗复核），全部绑定上述两个模型 |
+
+> 说明：Host 级 `include:tool-subagent` 行在 profile 清单里是 inactive，但当前会话的 `ptc` preset 在 preset 作用域内挂了 `tool-subagent`（`provider: spawn`、`modelSelection: true`、`modelDiscovery: true`），所以本会话的 `subagent` / `subagent_fork` / `list_subagent_models` 工具可用——这也是子智能体能被实际派工的原因。这一点按源码核对记录，不臆造 Host 级启用。
+
 ---
 ## 9. 当前状态：第一阶段完成；第二阶段 2-A/2-B/2-C/2-D 已落地，2-E 真机验收待用户执行
 
