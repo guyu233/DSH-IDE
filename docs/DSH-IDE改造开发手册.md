@@ -473,14 +473,14 @@ DshChatSession.acceptView / acceptConversation → DshChatModel（typed 节点�
 产出落 `.build/dsh-part-contracts.md` 与 `.build/dsh-2b-audit.md`（本地核对材料，不入库）。关键结论：`confirmation` 按钮点击走 `chatService.sendRequest`，**不能**回传 `dsh.answerApproval`；`questionCarousel` 回传依赖 `resolveId` 与 `notifyQuestionCarouselAnswer`，当前数据链不具备；`planReview` / `changesSummary` / `multiDiffData` 需要正文与真实 URI，DSH 侧只有 `active/pending` 与字符串 path。以上判定为本轮「保留降级形态」的依据。
 
 ---
-## 9. 当前状态：第一阶段完成；第二阶段 2-A / 2-B 已落地，2-C/2-D 待做
+## 9. 当前状态：第一阶段完成；第二阶段 2-A/2-B/2-C/2-D 已落地，2-E 真机验收待用户执行
 
 ### 9.1 阶段划分（本次更新）
 
 草稿在 2026-11-16 22:23 更新后，目标已从"把内容接进来"推进到"**用 VS Code 原生模具正确渲染 + 图标全局替换**"。手册据此把工作分为两阶段：
 
 - **第一阶段（已完成并冻结）**：§3 的四层改造——数据通路、契约、Host 投影、状态层、逐类 UI 接线。见 §8 逐轮记录。
-- **第二阶段（进行中）**：把第一阶段"降级翻译"的 UI 升级为真正的 VS Code 原生 content kind；补齐 Session 面板缺口；图标全局替换为 DSH SVG。见 §9.3–§9.6。**2-A 与 2-B 的可行项已落地（§9.5），2-C/2-D 待做。**
+- **第二阶段（进行中）**：把第一阶段"降级翻译"的 UI 升级为真正的 VS Code 原生 content kind；补齐 Session 面板缺口；图标全局替换为 DSH SVG。见 §9.3–§9.6。**2-A/2-B/2-C/2-D 已落地（§9.5），只剩 2-E 真机验收。**
 
 ### 9.2 第一阶段真实状态（基线，不再改）
 
@@ -491,9 +491,9 @@ DshChatSession.acceptView / acceptConversation → DshChatModel（typed 节点�
 | 层 3 状态层 | 完成并冻结（§8.1） | `DshChatModel.acceptConversation` 只吃 typed 节点树（约 1150→730 行）；裸帧解析删除 |
 | 层 4 逐类 UI（降级翻译） | 完成（§8.1） | `dshChatHistory.ts` / `dshChatSessionContent.ts` / `dshSessionSearchCommands.ts` / `dshTeamCommands.ts` |
 
-门禁：`verify:dsh-ide-ci` 五步全 PASS（`DSH_INSTALLED_VERSION=0.2.2-rc.3`）；`test-dsh:all` PASS——本轮实测 `node --test` 349 项全过、mocha 7 项全过。全量 `tsc --noEmit` 仍 FAIL（既有 VS Code 文件，本批改动文件零错误，按 §5.5 记录）。
+门禁：`verify:dsh-ide-ci` 五步全 PASS（`DSH_INSTALLED_VERSION=0.2.2-rc.3`）；`test-dsh:all` PASS——本轮实测 `node --test` 358 项全过、mocha 7 项全过。全量 `tsc --noEmit` 仍 FAIL（既有 VS Code 文件，本批改动文件零错误，按 §5.5 记录）。
 
-> **口径说明**：§8.3 的「352 项」是第一阶段当时记录的计数，本轮未复算；本轮以实测的 `node --test 349 + mocha 7` 为准（新增 11 项：`dshChatSessionExtras` 4 + `dshChatHistoryNative` 7）。
+> **口径说明**：§8.3 的「352 项」是第一阶段当时记录的计数，本轮未复算；本轮以实测的 `node --test 358 + mocha 7` 为准（新增 20 项：`dshChatSessionExtras` 4 + `dshChatHistoryNative` 7 + `dshSessionItemState` 5 + `dshIconArtwork` 4）。
 
 ### 9.3 现状核对：草稿与新计划的差异（必须先认清）
 
@@ -577,6 +577,15 @@ DshChatSession.acceptView / acceptConversation → DshChatModel（typed 节点�
 | 归档/恢复 | 协议有 `archiveSession`/`unarchiveSession` | 若官方已接且在右键菜单可见则验证；否则作为低优先项，不改主链 |
 | 两套会话链 | 显示主链 `DshAgentSessionsController`，操作用 `DshIdeSessionsService` | 保持，不合并 |
 
+**落地结果（本轮已完成）**：
+
+1. **归档 / 恢复**：`DshAgentSessionsController` 实现原生可选接口 `setChatSessionItemArchived(resource, archived)`；写回走既有 `archiveSession` / `unarchiveSession`（Host 侧官方 `workspaceRegistry`），成功后就地更新行 `archived` 并 fire `onDidChangeChatSessionItems`，失败保留原状并 `warn`（不假装成功）。
+2. **已读状态**：实现 `setChatSessionItemRead(resource, isRead)`。DSH 没有已读持久化端点，这里只改本地行状态，**不写回 Host**（注释已写明，避免被误当作持久化）。
+3. **纯函数抽取**：新增 `dshSessionItemState.ts`（`withArchived` / `withRead` / `timingForRunning`），把「找不到行 / 值没变 / 保持行身份」的语义从控制器里拆出来，可用零 DI 单测覆盖；新增 `build/lib/test/dshSessionItemState.test.ts`（5 项）。
+4. **unread 徽标**：原生 `IChatSessionItem` 只有 `badge`（字符串）与 `isRead`（布尔），没有独立的「未读」徽标控件；已按 §9.5「无 API 则记录不做」处理，不造第二套状态。
+
+**验收（实测）**：`test-dsh:all` PASS（含新增 5 项）；`verify:dsh-ide-ci` 五步全 PASS。
+
 #### 阶段 2-D：图标全局替换（草稿 §7，独立工作流，可并行）
 
 这是"难也要做"的独立需求，单独排期、单独门禁，不阻塞 2-A/2-B。
@@ -587,6 +596,16 @@ DshChatSession.acceptView / acceptConversation → DshChatModel（typed 节点�
 4. **补直接覆盖点**：`codicon.css:6-23` 字体加载/基础布局保留；逐一检查直接覆盖 `::before` 的 CSS（如 `chat.css:1436-1442`、`testing.css:198`、`tabs.css:724-733`、`tree.css:70`），命中的加 DSH mask 覆盖或记录例外。24 处 `var(--vscode-icon-...)` 消费点随 `getCSS()` 的 `:root` 值变化。
 5. **验证**：浅色/深色/高对比度主题、spin 动画、不同 font-size 场景；遵守草稿 §7.5"不是 100% 纯 DSH"的预期。
 6. **门禁**：`tsc --noEmit` + 主题相关测试；**不需要**同步 `dshIdeContract.ts` patch hash（§9.3 已纠正草稿错误）。
+
+**落地结果（本轮已完成）**：
+
+1. **资源生成脚本**：新增 `build/lib/dsh/genDshIconDataUris.mjs`（带 `--check` 漂移模式）。实测官方 `ICON_ARTWORK` 为 **104** 个 glyph（不是草稿写的 109），生成 `dshIconDataUris.ts`（约 76 KB）；每个 glyph 按 regular stroke=1 求值，兼容三种声明（`strokeWidth => \`…\``、`() => '…'`、`strokeWidth === ICON_MEDIUM_STROKE` 三元的 medium/regular 两支）。data URI 全量 URL-encode（含单引号转 `%27`），保证可直接放进 CSS `url()`。
+2. **映射表**：`dshCodiconMap.ts` 手写 60+ 条语义对应（search/plus/close/copy/branch/check/chevron/…），并在 `resolveDshGlyph` 里过滤掉不存在的 glyph（防 `mask: url(undefined)`）；未映射的 codicon 返回 `undefined`，保持 codicon 原样。
+3. **替换缝**：新增 `platform/theme/common/iconReplacement.ts`（单槽位注册 + 注销，重复注册直接抛错）；`iconsStyleSheet.getCSS()` 在「默认 codicon 未被产品图标主题改写」时查询替换函数，命中输出 `content:''; background-color:currentColor; width/height:1em; mask: url('data:…') center / contain no-repeat`，未命中保留原 font 规则。platform 层不 import workbench；挂载点在 `dsh.contribution.ts` → `dshIconReplacement.ts`。
+4. **单测**：新增 `build/lib/test/dshIconArtwork.test.ts`（4 项：glyph 数量、data URI 形状、映射目标存在、未映射返回 undefined）。
+5. **验证边界（未做，需用户真机）**：浅色/深色/高对比度、spin 动画、不同 font-size 的实际观感按 AGENTS §6 由用户在 2-E 执行；AI 不以代码推断观测结论。直接覆盖 `::before` 的 CSS 点（如 `chat.css:1436`）本轮未逐条加 mask 覆盖，记录为「已知混合状态」，与草稿 §7.5 的预期一致。
+
+**门禁（实测）**：`test-dsh:all` PASS（358 项 node --test 全过 + mocha 7 项全过）；`verify:dsh-ide-ci` 五步全 PASS；生成脚本 `--check` PASS（无漂移）。
 
 #### 阶段 2-E：真机验收与收尾
 

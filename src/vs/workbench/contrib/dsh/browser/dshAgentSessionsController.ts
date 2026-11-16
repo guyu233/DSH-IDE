@@ -12,6 +12,8 @@ import { Codicon } from '../../../../base/common/codicons.js';
 import { Emitter } from '../../../../base/common/event.js';
 import { Disposable } from '../../../../base/common/lifecycle.js';
 import { URI } from '../../../../base/common/uri.js';
+import { localize } from '../../../../nls.js';
+import { INotificationService } from '../../../../platform/notification/common/notification.js';
 import { IWorkspaceContextService } from '../../../../platform/workspace/common/workspace.js';
 import { IDshClientService } from '../../../../platform/dshClient/common/dshClientService.js';
 import type { IDshIdeSessionSummary } from '../../../../platform/dshClient/common/dshIdeProtocol.js';
@@ -22,6 +24,7 @@ import { sessionOpenerRegistry } from '../../chat/browser/agentSessions/agentSes
 import { dshChatSessionFor } from './dshChatSession.js';
 import { getDshComposerSource } from './dshComposerRegistry.js';
 import { toPermissionItems } from './dshComposerProjection.js';
+import { withArchived, withRead } from './dshSessionItemState.js';
 
 export const DSH_CHAT_SESSION_TYPE = 'dsh';
 
@@ -71,6 +74,7 @@ export class DshAgentSessionsController extends Disposable implements IChatSessi
 		@IDshClientService private readonly client: IDshClientService,
 		@IWorkspaceContextService private readonly workspace: IWorkspaceContextService,
 		@IChatSessionsService chatSessionsService: IChatSessionsService,
+		@INotificationService private readonly _notifications: INotificationService,
 	) {
 		super();
 
@@ -224,6 +228,59 @@ export class DshAgentSessionsController extends Disposable implements IChatSessi
 		this._items = next;
 		if (addedOrUpdated.length > 0 || removed.length > 0 || previous.size !== seen.size) {
 			this._onDidChangeChatSessionItems.fire({ addedOrUpdated, removed });
+		}
+	}
+
+	/**
+	 * 原生归档入口：`IChatSessionItemController.setChatSessionItemArchived`。
+	 *
+	 * 声明这个方法后，原生 agentSessions 的归档/恢复菜单才会把 DSH 会话交给这里；
+	 * 写回走官方 `archiveSession` / `unarchiveSession`，回读以 Host 的归档集合为准。
+	 */
+	setChatSessionItemArchived(resource: URI, archived: boolean): void {
+		const sessionId = dshSessionIdFromResource(resource);
+		if (sessionId === undefined) {
+			return;
+		}
+		void this.applyArchived(sessionId, archived);
+	}
+
+	/**
+	 * 原生已读入口：`IChatSessionItemController.setChatSessionItemRead`。
+	 *
+	 * DSH 没有已读持久化端点，这里只改本地行状态（明确不假装写回 Host）。
+	 */
+	setChatSessionItemRead(resource: URI, isRead: boolean): void {
+		const key = resource.toString();
+		const next = withRead(this._items, key, isRead);
+		if (next === this._items) {
+			return;
+		}
+		const updated = next.find(item => item.resource.toString() === key);
+		this._items = next;
+		if (updated !== undefined) {
+			this._onDidChangeChatSessionItems.fire({ addedOrUpdated: [updated] });
+		}
+	}
+
+	/** 归档 / 恢复：成功后就地把行状态改掉，失败保留原状并如实提示。 */
+	private async applyArchived(sessionId: string, archived: boolean): Promise<void> {
+		const result = archived
+			? await this.client.call('archiveSession', { sessionId })
+			: await this.client.call('unarchiveSession', { sessionId });
+		if (!result.ok) {
+			this._notifications.warn(localize('dsh.sessions.archiveFailed', "DSH 会话归档失败：{0}", result.error.message));
+			return;
+		}
+		const key = dshSessionResource(sessionId).toString();
+		const next = withArchived(this._items, key, archived);
+		if (next === this._items) {
+			return;
+		}
+		const updated = next.find(item => item.resource.toString() === key);
+		this._items = next;
+		if (updated !== undefined) {
+			this._onDidChangeChatSessionItems.fire({ addedOrUpdated: [updated] });
 		}
 	}
 

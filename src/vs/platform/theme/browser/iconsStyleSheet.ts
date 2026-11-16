@@ -7,6 +7,7 @@ import * as css from '../../../base/browser/cssValue.js';
 import { Emitter, Event } from '../../../base/common/event.js';
 import { DisposableStore, IDisposable } from '../../../base/common/lifecycle.js';
 import { ThemeIcon } from '../../../base/common/themables.js';
+import { getIconReplacement } from '../common/iconReplacement.js';
 import { getIconRegistry, IconContribution, IconFontDefinition } from '../common/iconRegistry.js';
 import { IProductIconTheme, IThemeService } from '../common/themeService.js';
 
@@ -34,9 +35,24 @@ export function getIconsStyleSheet(themeService: IThemeService | undefined): IIc
 
 			const rules = new css.Builder();
 			const rootAttribs = new css.Builder();
+			// 图标替换（DSH 等产品图形）：命中时改输出 mask 规则，未命中保留原 font 规则。
+			// 见 `common/iconReplacement.ts`：这里只消费替换函数，不 import 具体产品的资源。
+			const replacement = getIconReplacement();
 			for (const contribution of iconRegistry.getIcons()) {
 				const definition = productIconTheme.getIcon(contribution);
 				if (!definition) {
+					continue;
+				}
+
+				// 替换只在「默认 codicon 未被产品图标主题改写」时生效：产品主题若显式给了
+				// 另一套字形，说明它有意覆盖，不应再被产品图形盖掉。
+				const maskUrl = definition.font === undefined && replacement !== undefined
+					? replacement(contribution.id)
+					: undefined;
+				if (maskUrl !== undefined) {
+					// 用 mask 保留 currentColor 着色：图形本体作为 alpha 蒙版，颜色仍由 CSS color 决定。
+					// 尺寸用 1em，跟随 font-size 缩放（`codicon.css` 的基础布局仍生效）。
+					rules.push(css.inline`.codicon-${css.className(contribution.id)}:before { content: ''; background-color: currentColor; width: 1em; height: 1em; -webkit-mask: url(${css.stringValue(maskUrl)}) center / contain no-repeat; mask: url(${css.stringValue(maskUrl)}) center / contain no-repeat; }`);
 					continue;
 				}
 

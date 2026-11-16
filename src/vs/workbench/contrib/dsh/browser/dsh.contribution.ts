@@ -32,6 +32,7 @@ import { registerDshChatSessionContent, registerDshAnswerCommands } from './dshC
 import { IDshIdeSessionsService, DshIdeSessionsService } from './dshIdeSessionsService.js';
 import { registerDshSessionSearchCommands } from './dshSessionSearchCommands.js';
 import { registerDshTeamCommands } from './dshTeamCommands.js';
+import { registerDshIconReplacement } from './dshIconReplacement.js';
 import { IQuickInputService } from '../../../../platform/quickinput/common/quickInput.js';
 import { openSessionByResource } from '../../chat/browser/agentSessions/agentSessionsOpener.js';
 import { dshSessionResource } from './dshAgentSessionsController.js';
@@ -69,6 +70,8 @@ class DshClientContribution extends Disposable implements IWorkbenchContribution
 		this._register(registerDshSessionSearchCommands(client, this._sessions, this.quickInputService, this.instantiationService, this.notifications));
 		// DSH 团队开关：原生模型选择器没有对应控件，用命令承接。
 		this._register(registerDshTeamCommands(this.quickInputService, this.notifications));
+		// DSH 图标：把语义对得上的 codicon 换成官方产品图形（混合状态，未命中保留 codicon）。
+		this._register(registerDshIconReplacement());
 		const preset = readComposerPreset();
 		const composer = this._register(new DshComposerSource(client, logService, preset));
 		setDshComposerSource(composer);
