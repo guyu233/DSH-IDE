@@ -58,7 +58,6 @@ class DshClientContribution extends Disposable implements IWorkbenchContribution
 		@ILogService logService: ILogService,
 	) {
 		super();
-		// 聊天画面由 DshChatModelDriver 把 DSH 帧直接写进原生 ChatModel。
 		// 把 DSH 模型目录注册成 Chat 的模型提供方。
 		this._register({ dispose: registerDshLanguageModelProvider(languageModels, client, logService).dispose });
 		// `dsh:/<id>` 会话的聊天内容：没有这个 content provider，原生 ChatWidget
