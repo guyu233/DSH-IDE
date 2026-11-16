@@ -48,9 +48,11 @@ const VALID_ARGS: Record<DshIdeMethod, unknown> = {
 	setPermissionPreset: { preset: 'balanced' },
 	runCommand: { command: 'help', args: ['a', 'b'] },
 	listSessions: {},
+	presentationSettings: {},
 	listModels: { workspace: 'w1' },
 	listCommands: {},
 	fetchRowDetail: { rowId: 'row1' },
+	readAttachment: { attachment: { attachmentId: 'img-1', mediaType: 'image/png', bytes: 3, width: 1, height: 1 } },
 	refreshSnapshot: {},
 	deleteSession: { sessionId: 's1' },
 	archiveSession: { sessionId: 's1' },
@@ -65,8 +67,8 @@ const VALID_ARGS: Record<DshIdeMethod, unknown> = {
 
 const ALL_METHODS = Object.keys(VALID_ARGS) as DshIdeMethod[];
 
-test('method whitelist has the 28 methods (25 previous + composer state, team, preset)', () => {
-	assert.equal(ALL_METHODS.length, 28);
+test('method whitelist has all 30 methods', () => {
+	assert.equal(ALL_METHODS.length, 30);
 	assert.equal(new Set(ALL_METHODS).size, ALL_METHODS.length);
 });
 

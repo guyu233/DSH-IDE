@@ -94,14 +94,14 @@ const WIRED = ['deleteSession', 'setEffort', 'listCommands', 'runCommand', 'setP
 const UNVERIFIED = FINDINGS.filter(f => !WIRED.includes(f.method)).map(f => f.method);
 
 // ---------------------------------------------------------------------------
-// 契约口径：24 method 白名单（20 会话域 + 2 账号域 + 2 归档域）
+// 契约口径：method 白名单（20 会话域 + 2 账号域 + 2 归档域 + 团队/预设/附加 + readAttachment）
 // ---------------------------------------------------------------------------
 
-	test('D16 contract still declares exactly 28 methods', () => {
+	test('D16 contract still declares exactly 30 methods', () => {
 	const block = /const DSH_IDE_METHOD_KEYS[\s\S]*?\n\};/.exec(protocol);
 	assert.ok(block !== null, 'DSH_IDE_METHOD_KEYS must exist in the protocol single source');
 	const keys = [...block[0].matchAll(/^\s*([a-zA-Z]+):/gm)].map(m => m[1]);
-	assert.equal(keys.length, 28, `expected 28 methods, got ${keys.length}`);
+	assert.equal(keys.length, 30, `expected 30 methods, got ${keys.length}`);
 	for (const f of FINDINGS) {
 		assert.ok(keys.includes(f.method), `D16 finding must reference a real whitelist method: ${f.method}`);
 	}
@@ -189,7 +189,7 @@ test('D17 deleteSession calls the approved physical-delete endpoint, never a clo
 test('D59 archive endpoints are official remotes and now wired without third-party approval', () => {
 	const block = /const DSH_IDE_METHOD_KEYS[\s\S]*?\n\};/.exec(protocol);
 	assert.ok(block !== null);
-	assert.equal([...block[0].matchAll(/^\s*([a-zA-Z]+):/gm)].length, 28, 'contract must declare 28 methods after the composer and search wiring');
+	assert.equal([...block[0].matchAll(/^\s*([a-zA-Z]+):/gm)].length, 30, 'contract must declare 30 methods after readAttachment wiring');
 	for (const endpoint of ['archiveSession', 'unarchiveSession']) {
 		assert.ok(protocol.includes(endpoint + ':'), endpoint + ' must be a contract method');
 		// 窗口只经 ide/dispatch 转发；真正调官方 remote 的是内核桥接。
@@ -206,19 +206,18 @@ test('D59 archive endpoints are official remotes and now wired without third-par
 // 防止清单被删空或倒退成无法执行的散文。
 // ---------------------------------------------------------------------------
 
-test('round-24 listen event surface stays snapshot + waterfall', () => {
+test('listen event surface stays an explicit allow-list (snapshot / waterfall / session-notice)', () => {
 	const protocol = read('src/vs/platform/dshClient/common/dshIdeProtocol.ts');
 	const channel = read('src/vs/platform/dshClient/electron-main/dshIdeChannel.ts');
 
 	// 契约里有澄清注释，且明确「当前唯一」「须先改本契约」。
-	assert.match(protocol, /白名单是 `snapshot` 与 `waterfall`/, 'the contract must name both allowed listen events');
+	assert.match(protocol, /白名单是 `snapshot` 与 `waterfall`/, 'the contract must name both allowed snapshot/waterfall events');
 	assert.match(protocol, /须\*\*先改本契约\*\*/, 'the contract must require a contract change before extending');
-	// 通道实现只认这一个名字，其它返回 Event.None（行为未变）。
+	// 通道实现只认白名单里的名字，其它返回 Event.None（行为未变）。
 	assert.match(channel, /export const DSH_IDE_SNAPSHOT_EVENT = 'snapshot'/, 'the snapshot event name must stay "snapshot"');
-	assert.match(channel, /if \(event !== DSH_IDE_SNAPSHOT_EVENT && event !== DSH_IDE_WATERFALL_EVENT\) \{[\s\S]{0,80}?return Event\.None/, 'listen must return Event.None for any other name');
-	// §8.10.2 的「允许」已限定为「须先改契约真源」。
-	// 实现里不得出现第二个 listen 事件名常量。
-	assert.equal((channel.match(/DSH_IDE_[A-Z_]*EVENT\s*=/g) ?? []).length, 2, 'exactly two listen event-name constants may exist');
+	assert.match(channel, /if \(event !== DSH_IDE_SNAPSHOT_EVENT && event !== DSH_IDE_WATERFALL_EVENT && event !== DSH_IDE_SESSION_NOTICE_EVENT\) \{[\s\S]{0,80}?return Event\.None/, 'listen must return Event.None for any other name');
+	// session-notice 不进快照 version，是状态通知的第三条独立事件；常量数随白名单同步。
+	assert.equal((channel.match(/DSH_IDE_[A-Z_]*EVENT\s*=/g) ?? []).length, 3, 'exactly three listen event-name constants may exist');
 });
 
 // ---------------------------------------------------------------------------
@@ -283,12 +282,14 @@ test('D27 CI aggregate entry exists, follows §2 order, and refuses PENDING', ()
 // 本测试钉住「结果已回填、结论包含两个否决项、且未谎称全部完成」。
 // ---------------------------------------------------------------------------
 
-test('D62 workspaceRegistry is an official service and DSH-IDE waits for it via ctx.inject', () => {
+test('D62 workspaceRegistry is optional and the bridge still waits for its core deps via ctx.inject', () => {
 	const host = read('src/vs/platform/dshClient/host/ide-view-host.js');
 	const index = read('src/vs/platform/dshClient/index.js');
 
-	// REQUIRED_SERVICES 必须含 workspaceRegistry：桥接以它为前提。
-	assert.match(host, /REQUIRED_SERVICES = Object\.freeze\(\[[^\]]*'workspaceRegistry'/, 'workspaceRegistry must be a required service');
+	// 核心依赖只有会话跟随必需的两项；workspaceRegistry 只被归档/删除用到，
+	// 列成硬依赖会让缺该插件的 profile 连聊天都打不开（真机实测，见 host 文件注释）。
+	assert.match(host, /REQUIRED_SERVICES = Object\.freeze\(\['sessions', 'sessionController'\]\)/, 'core deps must be sessions + sessionController');
+	assert.doesNotMatch(host, /REQUIRED_SERVICES = Object\.freeze\([^\]]*'workspaceRegistry'/, 'workspaceRegistry must stay optional');
 
 	// 必须用 ctx.inject 等依赖就绪后建桥（这正是「无装载顺序依赖」的依据）。
 	assert.match(index, /ctx\.inject\(REQUIRED_SERVICES,/, 'the bridge must be built inside ctx.inject(REQUIRED_SERVICES, …)');

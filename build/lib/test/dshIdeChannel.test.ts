@@ -44,10 +44,10 @@ const ALL_METHODS: DshIdeMethod[] = [
 	'submit', 'interrupt', 'resume', 'newSession', 'fork', 'rewind', 'loadOlder',
 	'answerApproval', 'answerQuestion', 'cancelRequest', 'setModel', 'setEffort',
 	'setPermissionPreset', 'runCommand', 'listSessions', 'deleteSession', 'listModels',
-	'listCommands', 'fetchRowDetail', 'refreshSnapshot',
+	'listCommands', 'fetchRowDetail', 'readAttachment', 'refreshSnapshot',
 	'accountGetState', 'accountGetProfile',
 	'archiveSession', 'unarchiveSession', 'searchSessions',
-	'composerState', 'setTeamEnabled', 'setAgentPreset',
+	'composerState', 'presentationSettings', 'setTeamEnabled', 'setAgentPreset',
 ];
 
 interface FakeBackend extends DshIdeBackend {
@@ -215,6 +215,7 @@ const VALID: Record<DshIdeMethod, unknown> = {
 	listModels: { workspace: 'w1' },
 	listCommands: { workspace: 'w1' },
 	fetchRowDetail: { rowId: 'row:1' },
+	readAttachment: { attachment: { attachmentId: 'img-1', mediaType: 'image/png', bytes: 3, width: 1, height: 1 } },
 	refreshSnapshot: {},
 	accountGetState: { client: { version: '2.0.0', locale: 'zh-CN', timezoneOffsetSeconds: 28800 } },
 	accountGetProfile: { client: { version: '2.0.0', locale: 'zh-CN', timezoneOffsetSeconds: 28800 } },
@@ -222,6 +223,7 @@ const VALID: Record<DshIdeMethod, unknown> = {
 	unarchiveSession: { sessionId: 's-1' },
 	searchSessions: { query: 'hello' },
 	composerState: {},
+	presentationSettings: {},
 	setTeamEnabled: { enabled: false },
 	setAgentPreset: { preset: 'create' },
 };
@@ -233,7 +235,7 @@ async function openedChannel(backend = fakeBackend()) {
 	return { view, channel, backend, first };
 }
 
-test('channel dispatches all 28 DTO methods through validateDshIdeInput', async () => {
+test('channel dispatches all 30 DTO methods through validateDshIdeInput', async () => {
 	const { channel, backend } = await openedChannel();
 	for (const method of ALL_METHODS) {
 		const output = await channel.call<{ value: unknown }>('ctx-a', method, VALID[method]);

@@ -8,6 +8,7 @@
 		"scripts/test-integration.sh": true,
 	},
 	"chat.editing.explainChanges.enabled": true,
+	"chat.editor.wordWrap": "on",
 	// --- Editor ---
 	"editor.insertSpaces": false,
 	"editor.experimental.asyncTokenization": true,

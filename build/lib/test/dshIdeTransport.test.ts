@@ -373,11 +373,16 @@ test('backend opens one ide/followSession stream and closes it', () => {
 	transport.dispose();
 });
 
-test('backend follows nothing without a bound session', () => {
+test('unbound follow opens one status-only stream and closes it on dispose', () => {
 	const { backend, transport } = backendWithHost(OK);
 	const handle = backend.follow(undefined, () => undefined);
+	// 没有绑定会话时仍要收 api-session/status，否则未开聊的窗口收不到会话状态变化。
+	assert.equal(FakeWebSocket.instances.length, 1, 'unbound follow must open one status stream');
+	const socket = FakeWebSocket.instances[0];
+	socket.open();
+	assert.ok((socket.sent as { type: string }[]).some(s => s.type === 'open'), 'the stream must be opened');
 	handle.dispose();
-	assert.equal(FakeWebSocket.instances.length, 0, 'no session means no stream');
+	assert.ok((socket.sent as { type: string }[]).some(s => s.type === 'cancel'), 'dispose must close the status stream');
 	transport.dispose();
 });
 
