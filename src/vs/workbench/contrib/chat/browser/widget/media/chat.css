@@ -5555,3 +5555,25 @@ have to be updated for changes to the rules above, or to support more deeply nes
 .dsh-session .chat-dsh-copy:hover {
 	background: var(--vscode-button-secondaryHoverBackground);
 }
+
+.dsh-session .dsh-history-pager {
+	position: sticky;
+	top: 0;
+	z-index: 2;
+	display: flex;
+	justify-content: center;
+	padding: 4px 0;
+}
+
+.dsh-session .dsh-history-pager-label {
+	border: 1px solid var(--vscode-widget-border, transparent);
+	background: var(--vscode-editorWidget-background);
+	color: var(--vscode-foreground);
+	border-radius: 4px;
+	padding: 2px 8px;
+	font-size: 12px;
+}
+
+.dsh-session .dsh-history-pager-label:disabled {
+	opacity: 0.8;
+}

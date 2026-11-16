@@ -11,8 +11,8 @@
 import { Emitter, Event } from '../../../../base/common/event.js';
 import { Disposable } from '../../../../base/common/lifecycle.js';
 import { IDshClientService } from '../../../../platform/dshClient/common/dshClientService.js';
-import type { DshIdeWaterfallNotice } from '../../../../platform/dshClient/common/dshIdeProtocol.js';
-import { DshChatModel, type DshChatNode } from './dshChatModel.js';
+import { validateDshIdeLoadOlderResult, type DshIdeLoadOlderResult, type DshIdeWaterfallNotice } from '../../../../platform/dshClient/common/dshIdeProtocol.js';
+import { DshChatModel, type DshChatNode, type DshHistoryStatus } from './dshChatModel.js';
 
 /** 下拉里的一个模型选项。 */
 export interface DshChatModelOption {
@@ -38,6 +38,7 @@ interface ComposerModelCatalog {
 
 export interface IDshChatSession {
 	readonly onDidChangeNodes: Event<readonly [readonly DshChatNode[], boolean]>;
+	readonly onDidChangeHistory: Event<void>;
 	readonly onDidChangeModelMenu: Event<void>;
 	readonly onDidChangePending: Event<readonly DshChatPending[]>;
 	readonly onDidChangeRunning: Event<boolean>;
@@ -61,6 +62,11 @@ export interface IDshChatSession {
 	running(): boolean;
 	/** 发送一句话；成功即交给内核。 */
 	submit(text: string): Promise<boolean>;
+	/** 向更早的历史要一页。true 表示这次真的插入了新节点。 */
+	loadOlder(): Promise<boolean>;
+	hasMore(): boolean;
+	firstSeq(): number | undefined;
+	historyStatus(): DshHistoryStatus;
 	selectModel(provider: string, model: string): Promise<void>;
 	cancel(): Promise<void>;
 	answerApproval(eventId: string, decision: 'approve' | 'reject'): Promise<void>;
@@ -73,6 +79,10 @@ export class DshChatSession extends Disposable implements IDshChatSession {
 	private readonly _onDidChangePending = this._register(new Emitter<readonly DshChatPending[]>());
 	private readonly _onDidChangeRunning = this._register(new Emitter<boolean>());
 	private readonly _onDidChangeNodes = this._register(new Emitter<readonly [readonly DshChatNode[], boolean]>());
+	private readonly _onDidChangeHistory = this._register(new Emitter<void>());
+	/** bind 换会话时递增。过期的 loadOlder 结果不得写入新会话。 */
+	private generation = 0;
+	private _disposed = false;
 	private readonly pendingItems = new Map<string, DshChatPending>();
 	private _models: readonly DshChatModelOption[] = [];
 	private _current: { provider: string; model: string } | undefined;
@@ -83,6 +93,7 @@ export class DshChatSession extends Disposable implements IDshChatSession {
 	readonly onDidChangePending: Event<readonly DshChatPending[]> = this._onDidChangePending.event;
 	readonly onDidChangeRunning: Event<boolean> = this._onDidChangeRunning.event;
 	readonly onDidChangeNodes: Event<readonly [readonly DshChatNode[], boolean]> = this._onDidChangeNodes.event;
+	readonly onDidChangeHistory: Event<void> = this._onDidChangeHistory.event;
 
 	constructor(private readonly client: IDshClientService) {
 		super();
@@ -92,6 +103,7 @@ export class DshChatSession extends Disposable implements IDshChatSession {
 				this._onDidChangeNodes.fire([this.model.list, false]);
 			}
 		}));
+		this._register(this.model.onDidChangeHistory(() => this._onDidChangeHistory.fire()));
 	}
 
 	nodes(): readonly DshChatNode[] {
@@ -131,6 +143,7 @@ export class DshChatSession extends Disposable implements IDshChatSession {
 		if (sessionId === this.boundSessionId) {
 			return;
 		}
+		this.generation++;
 		this.boundSessionId = sessionId;
 		this.model.clear();
 		this.pendingItems.clear();
@@ -189,6 +202,63 @@ export class DshChatSession extends Disposable implements IDshChatSession {
 			});
 		}
 		this._onDidChangePending.fire(this.pending());
+	}
+
+	hasMore(): boolean {
+		return this.model.hasMore();
+	}
+
+	firstSeq(): number | undefined {
+		return this.model.firstSeq();
+	}
+
+	historyStatus(): DshHistoryStatus {
+		return this.model.historyStatus();
+	}
+
+	/**
+	 * 用当前最小 seq 作为 beforeSeq，向 Host 要一页更早的记录。
+	 * 单飞、无游标、没有更多、换会话之后的回包，都直接丢掉。
+	 */
+	async loadOlder(): Promise<boolean> {
+		if (this._disposed || this.boundSessionId === undefined) {
+			return false;
+		}
+		if (this.model.historyStatus() === 'loading' || !this.model.hasMore()) {
+			return false;
+		}
+		const beforeSeq = this.model.firstSeq();
+		if (beforeSeq === undefined) {
+			return false;
+		}
+		const generation = this.generation;
+		const sessionId = this.boundSessionId;
+		this.model.setHistoryStatus('loading');
+		try {
+			const result = await this.client.call<DshIdeLoadOlderResult>('loadOlder', { sessionId, beforeSeq });
+			if (generation !== this.generation) {
+				return false;
+			}
+			if (!result.ok) {
+				this.model.setHistoryStatus('error');
+				return false;
+			}
+			const output = validateDshIdeLoadOlderResult(result.value);
+			if (generation !== this.generation) {
+				return false;
+			}
+			const outcome = this.model.prependPage(output.page);
+			if (generation !== this.generation) {
+				return false;
+			}
+			this.model.setHistoryStatus('idle');
+			return outcome.added > 0;
+		} catch {
+			if (generation === this.generation) {
+				this.model.setHistoryStatus('error');
+			}
+			return false;
+		}
 	}
 
 	/** 发送一句话。成功后交给内核，不做乐观插入。 */
@@ -270,6 +340,12 @@ export class DshChatSession extends Disposable implements IDshChatSession {
 		}
 		this._running = running;
 		this._onDidChangeRunning.fire(running);
+	}
+
+	override dispose(): void {
+		this._disposed = true;
+		this.generation++;
+		super.dispose();
 	}
 }
 

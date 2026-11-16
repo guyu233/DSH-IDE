@@ -20,7 +20,7 @@
 // - 绝不为"给节点找归属"新建只为承载节点的空请求；
 // - 同一 (seq, blockIndex) 恒得同一 id，ChatModel 侧按 id 覆盖而非追加。
 
-import { Disposable, IReference } from '../../../../base/common/lifecycle.js';
+import { Disposable, DisposableStore, IReference } from '../../../../base/common/lifecycle.js';
 import { RunOnceScheduler } from '../../../../base/common/async.js';
 import { stableStringify } from '../../../../base/common/objects.js';
 import { URI } from '../../../../base/common/uri.js';
@@ -32,6 +32,7 @@ import { IParsedChatRequest } from '../../chat/common/requestParser/chatParserTy
 import type { ChatRequestModel, ChatModel } from '../../chat/common/model/chatModel.js';
 import { IDshClientService } from '../../../../platform/dshClient/common/dshClientService.js';
 import { dshChatSessionFor } from './dshChatSession.js';
+import { attachDshHistoryPager } from './dshHistoryPager.js';
 import { dshSessionResource } from './dshAgentSessionsController.js';
 import type { DshChatNode } from './dshChatModel.js';
 
@@ -56,6 +57,30 @@ function requestText(node: DshChatNode): string {
 /** 节点 → 稳定 part id。无块节点用 `:node`，保证单射。 */
 function partIdOf(node: DshChatNode): string {
 	return `dsh:${node.seq}:node`;
+}
+
+/** `dsh:<数字>` 才有 seq；`dsh:head` 匹配不到。 */
+const DSH_REQUEST_SEQ = /^dsh:(\d+)$/;
+
+function seqOfDshRequestId(id: string): number | undefined {
+	const match = DSH_REQUEST_SEQ.exec(id);
+	if (match === null) {
+		return undefined;
+	}
+	return Number(match[1]);
+}
+
+/**
+ * 新 request 的插入点（不带 replace）。
+ * 插到第一个 seq 更大的 request 之前；没有更大的则返回 undefined，调用方不传 insertion，追加到末尾。
+ * 已存在的 request 不经过这里，因此不会被移动。
+ */
+function insertionForNewRequest(requests: readonly { readonly id: string }[], seq: number): { readonly index: number } | undefined {
+	const index = requests.findIndex(request => {
+		const requestSeq = seqOfDshRequestId(request.id);
+		return requestSeq !== undefined && requestSeq > seq;
+	});
+	return index === -1 ? undefined : { index };
 }
 
 /**
@@ -100,6 +125,8 @@ export class DshChatModelDriver extends Disposable implements IWorkbenchContribu
 	private modelRef: IReference<ChatModel> | undefined;
 	/** 已订阅过 onDidChangeViewModel 的 widget，避免重复订阅。 */
 	private boundWidget: IChatWidget | undefined;
+	private readonly historyPager = this._register(new DisposableStore());
+	private historyPagerAttached = false;
 	/** 首次绘制补偿：贡献点构造早于 widget / 快照，需补跑几次。 */
 	private readonly syncSoon = this._register(new RunOnceScheduler(() => this.sync(), 16));
 
@@ -160,13 +187,17 @@ export class DshChatModelDriver extends Disposable implements IWorkbenchContribu
 			const isRequest = node.kind === 'user' || node.kind === 'steering';
 			if (isRequest) {
 				const id = `dsh:${node.seq}`;
-				const existing = model.getRequests().find(request => request.id === id);
+				const requests = model.getRequests();
+				const existing = requests.find(request => request.id === id);
 				if (existing !== undefined) {
+					// 已存在则原位复用，不按 seq 重插。
 					current = existing;
 				} else {
+					const insertion = insertionForNewRequest(requests, node.seq);
 					current = model.addRequest(parsed(requestText(node)), { variables: [] }, 0, undefined, undefined, undefined,
 						undefined, undefined, undefined, undefined, undefined, undefined, id, node.kind === 'steering', undefined,
-						undefined, false, node.time ?? undefined);
+						undefined, false, node.time ?? undefined,
+						undefined, undefined, undefined, undefined, undefined, undefined, insertion);
 					this.requestIds.add(id);
 				}
 				// 先把第一个请求之前积累的节点按源序写进这个真实请求。
@@ -196,9 +227,12 @@ export class DshChatModelDriver extends Disposable implements IWorkbenchContribu
 			const anchorId = `dsh:head`;
 			let anchor = model.getRequests().find(request => request.id === anchorId);
 			if (anchor === undefined) {
+				// 锚点没有 seq，新 request 固定插到最前；已存在则不移动。
+				const insertion = { index: 0 };
 				anchor = model.addRequest(parsed(''), { variables: [] }, 0, undefined, undefined, undefined,
 					undefined, undefined, undefined, undefined, undefined, undefined, anchorId, true, undefined,
-					undefined, false, pendingBeforeFirst[0]?.time ?? undefined, true);
+					undefined, false, pendingBeforeFirst[0]?.time ?? undefined,
+					undefined, undefined, undefined, undefined, undefined, undefined, insertion);
 				this.requestIds.add(anchorId);
 			}
 			for (const pending of pendingBeforeFirst) {
@@ -211,6 +245,10 @@ export class DshChatModelDriver extends Disposable implements IWorkbenchContribu
 		if (widget !== undefined) {
 			// DSH 皮肤作用域：只改 DSH 驱动的这个 widget，不污染 VS Code 其它 chat（§4 保留扩展生态）。
 			widget.domNode.classList.add('dsh-session');
+			if (!this.historyPagerAttached) {
+				this.historyPagerAttached = true;
+				attachDshHistoryPager(widget.domNode, dshChatSessionFor(this.client), this.historyPager);
+			}
 			if (this.boundWidget !== widget) {
 				this.boundWidget = widget;
 				// ChatViewPane 可能在之后把 widget 切到自己的 local session；被换走时重新绑回 DSH model。
