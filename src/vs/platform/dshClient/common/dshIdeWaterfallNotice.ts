@@ -10,10 +10,9 @@
 // 或 `{ type:'waterfall', kind:'cancel', eventId }`。
 // 不认识的事件名、缺标识、请求体不是普通对象，一律丢弃（fail-closed，不猜）。不透传 agent / signal。
 
+import { projectApprovalRequest, projectQuestionRequest } from './dshIdeRequestView.js';
 import type {
 	DshIdeApprovalRequestView,
-	DshIdeQuestionItemView,
-	DshIdeQuestionOptionView,
 	DshIdeQuestionRequestView,
 	DshIdeWaterfallNotice,
 } from './dshIdeProtocol.js';
@@ -41,85 +40,18 @@ export function projectDshIdeWaterfallNotice(raw: unknown): DshIdeWaterfallNotic
 		return undefined;
 	}
 	if (frame['event'] === 'approval/request') {
-		const request = projectApproval(frame['request']);
+		const request = projectApprovalRequest(frame['request']) as DshIdeApprovalRequestView | undefined;
 		if (request === undefined) {
 			return undefined;
 		}
 		return { kind: 'request', eventId, event: 'approval/request', agentId, request };
 	}
 	if (frame['event'] === 'user-questions/request') {
-		const request = projectQuestion(frame['request']);
+		const request = projectQuestionRequest(frame['request']) as DshIdeQuestionRequestView | undefined;
 		if (request === undefined) {
 			return undefined;
 		}
 		return { kind: 'request', eventId, event: 'user-questions/request', agentId, request };
 	}
 	return undefined;
-}
-
-function projectApproval(request: unknown): DshIdeApprovalRequestView | undefined {
-	if (request === null || typeof request !== 'object' || Array.isArray(request)) {
-		return undefined;
-	}
-	const record = request as Record<string, unknown>;
-	if (typeof record['toolName'] !== 'string' || record['toolName'] === '') {
-		return undefined;
-	}
-	return {
-		toolName: record['toolName'],
-		...(typeof record['callId'] === 'string' && record['callId'] !== '' ? { callId: record['callId'] } : {}),
-		...(typeof record['reason'] === 'string' && record['reason'] !== '' ? { reason: record['reason'] } : {}),
-	};
-}
-
-function projectQuestion(request: unknown): DshIdeQuestionRequestView | undefined {
-	if (request === null || typeof request !== 'object' || Array.isArray(request)) {
-		return undefined;
-	}
-	const record = request as Record<string, unknown>;
-	if (!Array.isArray(record['questions'])) {
-		return undefined;
-	}
-	const questions: DshIdeQuestionItemView[] = [];
-	for (const item of record['questions']) {
-		if (item === null || typeof item !== 'object' || Array.isArray(item)) {
-			continue;
-		}
-		const question = item as Record<string, unknown>;
-		if (typeof question['id'] !== 'string' || question['id'] === '') {
-			continue;
-		}
-		const view: DshIdeQuestionItemView = { id: question['id'] };
-		if (typeof question['question'] === 'string' && question['question'] !== '') {
-			questions.push({
-				...view,
-				question: question['question'],
-				...projectOptions(question),
-			});
-			continue;
-		}
-		questions.push({ ...view, ...projectOptions(question) });
-	}
-	if (questions.length === 0) {
-		return undefined;
-	}
-	return { questions };
-}
-
-function projectOptions(question: Record<string, unknown>): Pick<DshIdeQuestionItemView, 'options' | 'multiSelect'> {
-	const options: DshIdeQuestionOptionView[] = [];
-	if (Array.isArray(question['options'])) {
-		for (const option of question['options']) {
-			if (option !== null && typeof option === 'object' && !Array.isArray(option)) {
-				const label = (option as Record<string, unknown>)['label'];
-				if (typeof label === 'string' && label !== '') {
-					options.push({ label });
-				}
-			}
-		}
-	}
-	return {
-		...(options.length > 0 ? { options } : {}),
-		...(question['multiSelect'] === true ? { multiSelect: true as const } : {}),
-	};
 }

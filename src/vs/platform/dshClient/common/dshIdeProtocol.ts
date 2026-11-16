@@ -21,9 +21,10 @@ export const DSH_IDE_API_VERSION = '0.2.2-rc.1';
 
 /**
  * 线协议修订号（快照连续性校验依据；wireRevision 不变则协议相容）。
- * P3 把 `IdeViewSnapshot` 并入 `DshIdeViewState.view`，快照形状变化，故由 1 升到 2。
+ * 4：`DshIdeViewSnapshot` 在保留 `frame` 的同时增加官方聊天页 typed 投影。
+ * 这些字段都可缺省；一旦出现就必须命中白名单，否则 fail-closed。
  */
-export const DSH_IDE_WIRE_REVISION = 3;
+export const DSH_IDE_WIRE_REVISION = 4;
 
 /**
  * `deleteSession` 依赖的社区插件版本（§8.10.8（4）版本绑定）。
@@ -83,7 +84,19 @@ export interface IDshIdeSessionSummary {
  * 或内核转发的批准 / 问卷帧。通道不把它折成另一套行。
  */
 export interface DshIdeViewSnapshot {
+	/** 跟会话的原始帧。typed 字段未齐时渲染器仍可读它；齐了以后以 typed 字段为准。 */
 	readonly frame: Readonly<Record<string, unknown>>;
+	readonly conversation?: DshIdeConversationView;
+	readonly deliverables?: readonly DshIdeDeliverableView[];
+	readonly attachments?: readonly DshIdeImageAttachmentRef[];
+	readonly plan?: DshIdePlanView;
+	readonly goal?: DshIdeGoalView;
+	readonly todos?: readonly DshIdeTodoView[];
+	readonly skills?: readonly DshIdeSkillView[];
+	readonly tokenUsageDelta?: DshIdeTokenUsageDelta;
+	readonly quotaNotice?: DshIdeQuotaNotice;
+	readonly composer?: DshIdeComposerView;
+	readonly pending?: readonly DshIdePendingItem[];
 }
 
 /** 渲染器消费的视图状态：骨架状态 + 可选投影载荷。 */
@@ -113,6 +126,15 @@ export interface DshIdeImageAttachmentRef {
 	readonly width: number;
 	readonly height: number;
 	readonly name?: string;
+	/** 官方 `ImageAttachmentRef.originalDimensions`：归一化缩小之后才出现。 */
+	readonly originalDimensions?: { readonly width: number; readonly height: number };
+}
+
+/** 官方 `FileAttachmentRef`（`packages/attachment/attachment/src/types.ts`）。`attachmentId` 不是路径。 */
+export interface DshIdeFileAttachmentRef {
+	readonly attachmentId: string;
+	readonly name: string;
+	readonly bytes: number;
 }
 
 /** 读取一张 durable 图片附件的字节（base64）与媒体类型。 */
@@ -121,13 +143,208 @@ export interface DshIdeImageAttachmentValue {
 	readonly data: string;
 }
 
+/** 官方 `ContentBlock` 里 IDE 要画的子集。未知 `type` 不进本视图（由投影层丢掉）。 */
+export type DshIdeContentBlock =
+	| { readonly type: 'text'; readonly text: string }
+	| { readonly type: 'reasoning'; readonly text: string }
+	| { readonly type: 'image'; readonly attachment: DshIdeImageAttachmentRef }
+	| { readonly type: 'file'; readonly attachment: DshIdeFileAttachmentRef }
+	| { readonly type: 'tool-call'; readonly id: string; readonly name: string; readonly arguments: string }
+	| { readonly type: 'tool-addition' | 'tool-removal'; readonly toolName: string };
+
+/** 官方 `AssistantBlock`：text / reasoning / image / tool-call / other。 */
+export type DshIdeAssistantBlock =
+	| { readonly kind: 'text'; readonly text: string }
+	| { readonly kind: 'reasoning'; readonly text: string }
+	| { readonly kind: 'image'; readonly attachment: DshIdeImageAttachmentRef }
+	| { readonly kind: 'tool-call'; readonly callId: string; readonly name: string; readonly argsRaw: string }
+	| { readonly kind: 'other'; readonly block: unknown };
+
+interface DshIdeNodeBase {
+	readonly seq: number;
+	readonly time: number;
+	readonly messageId?: string;
+	readonly turn?: number;
+}
+
+/** 结构化会话：Host 投影后的节点，不再由渲染器从裸帧拼装。 */
+export interface DshIdeConversationView {
+	readonly nodes: readonly DshIdeConversationNode[];
+	readonly hasMore: boolean;
+}
+
+export type DshIdeConversationNode =
+	| (DshIdeNodeBase & { readonly kind: 'user' | 'steering'; readonly content: readonly DshIdeContentBlock[] })
+	| (DshIdeNodeBase & { readonly kind: 'context'; readonly content: readonly DshIdeContentBlock[]; readonly form?: string | null })
+	| (DshIdeNodeBase & {
+		readonly kind: 'assistant';
+		readonly turn: number;
+		readonly step: number;
+		readonly blocks: readonly DshIdeAssistantBlock[];
+		readonly usage?: DshIdeTokenUsageDelta;
+		readonly providerMetadata?: { readonly provider: string; readonly model: string };
+		readonly interrupted?: true;
+	})
+	| (DshIdeNodeBase & {
+		readonly kind: 'tool-call';
+		readonly callId: string;
+		readonly parentCallId?: string;
+		readonly name: string;
+		readonly phase: 'preparing' | 'start';
+		readonly step?: number;
+		readonly argsRaw?: string;
+		readonly args?: unknown;
+	})
+	| (DshIdeNodeBase & {
+		readonly kind: 'tool-result';
+		readonly callId: string;
+		readonly parentCallId?: string;
+		readonly name: string;
+		readonly args: unknown;
+		readonly call?: { readonly name: string; readonly argsRaw: string } | null;
+		readonly callTime?: number | null;
+		readonly content: readonly DshIdeContentBlock[];
+		readonly isError: boolean;
+		readonly error?: { readonly name: string; readonly code: string; readonly reason?: string };
+		readonly subCalls: readonly DshIdeConversationNode[];
+	})
+	| (DshIdeNodeBase & {
+		readonly kind: 'command';
+		readonly commandId: string;
+		readonly name: string | null;
+		readonly args: string | null;
+		readonly outcome: { readonly kind: 'success' | 'error'; readonly text?: string } | null;
+	})
+	| (DshIdeNodeBase & {
+		readonly kind: 'compaction';
+		readonly summary: string | null;
+		readonly summaryEventSeq?: number | null;
+		readonly shadowedItemCount?: number | null;
+		readonly shadowedTokenCount?: number | null;
+	})
+	| (DshIdeNodeBase & {
+		readonly kind: 'model-retry';
+		readonly retry?: number;
+		readonly maxRetries?: number;
+		readonly delayMs?: number;
+		readonly mode?: 'normal' | 'always';
+		readonly retryState?: 'scheduled' | 'started' | 'cancelled';
+		readonly failure?: { readonly message: string; readonly code?: string };
+	})
+	| (DshIdeNodeBase & { readonly kind: 'turn-error'; readonly turn: number; readonly step: number; readonly message: string; readonly code?: string })
+	| (DshIdeNodeBase & { readonly kind: 'turn-max-tokens'; readonly turn: number; readonly step: number })
+	| (DshIdeNodeBase & { readonly kind: 'inherited-history' })
+	| (DshIdeNodeBase & {
+		readonly kind: 'subagent-catalog';
+		readonly childId?: string;
+		readonly childCreatedAt?: number;
+		readonly mode?: string;
+		readonly label?: string;
+		readonly name?: string;
+		readonly version?: number;
+	})
+	| (DshIdeNodeBase & { readonly kind: 'subagent-notice'; readonly content: readonly DshIdeContentBlock[] });
+
+/** 官方 `deliverables/presented`。 */
+export interface DshIdeDeliverableView {
+	readonly turn: number;
+	readonly callId: string;
+	readonly files: readonly { readonly path: string; readonly description?: string }[];
+}
+
+/** 官方 `PlanProjection`。 */
+export interface DshIdePlanView {
+	readonly active: boolean;
+	readonly pending: boolean;
+}
+
+/** 官方 `GoalProjection`，外加实时视图才有的 `activation`。 */
+export interface DshIdeGoalView {
+	readonly goal: {
+		readonly id: string;
+		readonly revision: number;
+		readonly objective: string;
+		readonly phase: 'active' | 'paused' | 'blocked' | 'complete';
+		readonly maxGoalRounds: number;
+		readonly blockedReason?: { readonly code: string; readonly message: string };
+	};
+	readonly roundsStarted: number;
+	readonly createdAt: number;
+	readonly updatedAt: number;
+	readonly activation?: 'armed' | 'disarmed';
+}
+
+/** 官方 `TodoItem`。 */
+export interface DshIdeTodoView {
+	readonly content: string;
+	readonly status: 'pending' | 'in_progress' | 'completed';
+}
+
+/** 官方 `SkillSummary` 里一行技能卡要用的字段。不带绝对路径。 */
+export interface DshIdeSkillView {
+	readonly name: string;
+	readonly description: string;
+	readonly whenToUse?: string;
+	readonly modelInvocable: boolean;
+	readonly userInvocable: boolean;
+	readonly provider: string;
+}
+
+/** 官方 `TokenUsage`：单次调用的增量，不是会话累加。 */
+export interface DshIdeTokenUsageDelta {
+	readonly inputTokens: number;
+	readonly outputTokens: number;
+	readonly totalTokens?: number;
+	readonly cacheReadTokens?: number;
+	readonly cacheWriteTokens?: number;
+	readonly reasoningTokens?: number;
+}
+
+/** 官方 `QuotaNoticeState`。`message` 由 Host 填好当前语言的句子，缺省时界面自己用 code。 */
+export interface DshIdeQuotaNotice {
+	readonly code: 'QUOTA' | 'ACCOUNT_QUOTA';
+	readonly seq: number;
+	readonly message?: string;
+}
+
+/** 与 `projectDshIdeComposer` 的返回值同形，可随快照下发。 */
+export interface DshIdeComposerView {
+	readonly model: {
+		readonly current: { readonly provider: string; readonly model: string; readonly effort?: string } | null;
+		readonly groups: readonly {
+			readonly id: string;
+			readonly name: string;
+			readonly models: readonly {
+				readonly id: string;
+				readonly name: string;
+				readonly efforts: readonly { readonly id: string; readonly name: string }[];
+				readonly defaultEffort?: string;
+			}[];
+		}[];
+	};
+	readonly permission: { readonly current: string | null; readonly options: readonly { readonly value: string; readonly name: string }[] } | null;
+	readonly team: { readonly enabled: boolean; readonly confirmDisable: boolean } | null;
+	readonly preset: { readonly current: string | null; readonly options: readonly { readonly id: string; readonly name: string }[] } | null;
+}
+
+/** 官方 `AskUserQuestionAnswer`。多选就是 `selected` 里多于一项。 */
+export interface DshIdeQuestionAnswerItem {
+	readonly id: string;
+	readonly selected: readonly string[];
+	readonly custom?: string;
+}
+
+export interface DshIdeQuestionAnswer {
+	readonly answers: readonly DshIdeQuestionAnswerItem[];
+}
+
 /**
  * 每个 DshIdeMethod 的命名参数 schema。TS 类型侧（这是唯一真源，union 由其派生）。
  * 运行侧用 `DSH_IDE_METHOD_KEYS` 同一份 key 列表做 exactRecord。
  */
 export interface DshIdeMethodArgs {
-	/** 提交一条用户消息。 */
-	submit: { text: string };
+	/** 提交一条用户消息。图片附件跟在正文后面，形状是官方 `ImageAttachmentRef`。 */
+	submit: { text: string; attachments?: readonly DshIdeImageAttachmentRef[] };
 	/** 中断当前生成。 */
 	interrupt: Record<string, never>;
 	/** 恢复一个会话（可选指定）。 */
@@ -154,10 +371,13 @@ export interface DshIdeMethodArgs {
 	 * 下一页游标用已加载记录的最小 `seq` 作为 `beforeSeq`，协议不传官方 `cursor`。
 	 */
 	loadOlder: { sessionId: string; throughSeq?: number; beforeSeq?: number; maxMessages?: number };
-	/** 决议审批请求。 */
-	answerApproval: { requestId: string; decision: 'approve' | 'reject'; reason?: string };
-	/** 决议问卷请求。 */
-	answerQuestion: { requestId: string; answer: unknown };
+	/**
+	 * 决议审批请求。
+	 * `agentId` / `callId` 只用于和通知对上号；真正的 `Agent` 对象与 `AbortSignal` 不进线协议。
+	 */
+	answerApproval: { requestId: string; decision: 'approve' | 'reject'; reason?: string; agentId?: string; callId?: string };
+	/** 决议问卷。`answer` 是官方 `AskUserQuestionAnswer`，多选放在 `selected` 数组里。 */
+	answerQuestion: { requestId: string; answer: DshIdeQuestionAnswer };
 	/** 取消一个进行中的请求（审批/问卷/生成等）。 */
 	cancelRequest: { requestId: string };
 	/** 设置模型。 */
@@ -167,7 +387,7 @@ export interface DshIdeMethodArgs {
 	/** 设置权限预设；预设名作为 `/permission <preset>` 的唯一参数（§8.10.10 前置②，禁空白/斜杠）。 */
 	setPermissionPreset: { preset: string };
 	/** 运行斜杠命令；`command` 为不带前导 `/` 的命令名，`args` 以单空格拼成 rawInput（§8.10.10 前置①②）。 */
-	runCommand: { command: string; args?: readonly string[] };
+	runCommand: { command: string; args?: readonly string[]; attachments?: readonly DshIdeImageAttachmentRef[] };
 	/**
 	 * 列出一个工作区的可见会话，返回 readonly IDshIdeSessionSummary[]。
 	 * workspace 是 IDE 当前打开的文件夹。没给出时才退回已绑定会话所在工作区；
@@ -221,6 +441,35 @@ export interface DshIdeMethodArgs {
 	accountGetState: { client: IDshAccountClientMetadataArgs };
 	/** 读取账号资料（显示名 / 联系方式 / 头像 URL）；仅在 `accountGetState` 为已登录时调用。 */
 	accountGetProfile: { client: IDshAccountClientMetadataArgs };
+	/**
+	 * 把一张已入库的图片放进待发送附件。
+	 * 官方没有独立的 addAttachment remote（附件随 `session/prompt` 的 content 提交），
+	 * 在落点核对完成前 Host 以 FEATURE_UNAVAILABLE 拒绝。
+	 */
+	addAttachment: { attachment: DshIdeImageAttachmentRef };
+	/** 从待发送附件里拿掉一张图片。落点未核对前同样 fail-closed。 */
+	removeAttachment: { attachmentId: string };
+	/**
+	 * 官方 goal 服务的写操作（`goal/create|edit|pause|resume|complete|clear`）。
+	 * `create` 只带 objective；其余动作带 `id` + `revision`（官方 GoalRef）。
+	 * Host 在接线前 fail-closed，不猜测服务名。
+	 */
+	setGoal: {
+		action: 'create' | 'edit' | 'pause' | 'resume' | 'complete' | 'clear';
+		objective?: string;
+		maxGoalRounds?: number;
+		id?: string;
+		revision?: number;
+	};
+	/** 列出当前会话可见的技能摘要。落点未核对前 fail-closed。 */
+	listSkills: Record<string, never>;
+	/**
+	 * 在 DSH 里打开一个目标。官方没有已核对的 open remote，Host fail-closed。
+	 * IDE 自己用编辑器 / `IOpenerService` 打开文件和外链，不走这个 method。
+	 */
+	openInApp: { target: string };
+	/** 关掉一条额度通知。官方 dismiss 是网页客户端本地状态，Host 在有 remote 之前 fail-closed。 */
+	dismissQuotaNotice: { seq: number };
 }
 
 /**
@@ -267,20 +516,20 @@ export type DshIdeMethod = keyof DshIdeMethodArgs;
 
 /** 每个 method 的 exactRecord 允许字段（与 DshIdeMethodArgs 同步；空数组=无字段）。 */
 const DSH_IDE_METHOD_KEYS: Record<DshIdeMethod, readonly string[]> = {
-	submit: ['text'],
+	submit: ['text', 'attachments'],
 	interrupt: [],
 	resume: ['sessionId'],
 	newSession: ['workspace', 'options'],
 	fork: ['sessionId', 'point'],
 	rewind: ['sessionId', 'to'],
 	loadOlder: ['sessionId', 'throughSeq', 'beforeSeq', 'maxMessages'],
-	answerApproval: ['requestId', 'decision', 'reason'],
+	answerApproval: ['requestId', 'decision', 'reason', 'agentId', 'callId'],
 	answerQuestion: ['requestId', 'answer'],
 	cancelRequest: ['requestId'],
 	setModel: ['model'],
 	setEffort: ['effort'],
 	setPermissionPreset: ['preset'],
-	runCommand: ['command', 'args'],
+	runCommand: ['command', 'args', 'attachments'],
 	listSessions: ['workspace'],
 	presentationSettings: [],
 	deleteSession: ['sessionId'],
@@ -297,6 +546,12 @@ const DSH_IDE_METHOD_KEYS: Record<DshIdeMethod, readonly string[]> = {
 	refreshSnapshot: [],
 	accountGetState: ['client'],
 	accountGetProfile: ['client'],
+	addAttachment: ['attachment'],
+	removeAttachment: ['attachmentId'],
+	setGoal: ['action', 'objective', 'maxGoalRounds', 'id', 'revision'],
+	listSkills: [],
+	openInApp: ['target'],
+	dismissQuotaNotice: ['seq'],
 };
 
 // ---------------------------------------------------------------------------
@@ -444,6 +699,12 @@ export function validateDshIdeInput<K extends DshIdeMethod>(command: K, args: un
 	switch (command) {
 		case 'submit':
 			nonEmptyString(record['text'], 'DshIdeInput.submit.text');
+			if (record['attachments'] !== undefined) {
+				if (!Array.isArray(record['attachments'])) {
+					throw new TypeError('DshIdeInput.submit.attachments must be an array');
+				}
+				record['attachments'].forEach((item, index) => imageAttachmentRef(item, `DshIdeInput.submit.attachments[${index}]`));
+			}
 			break;
 		case 'resume':
 			optionalString(record['sessionId'], 'DshIdeInput.resume.sessionId');
@@ -474,10 +735,12 @@ export function validateDshIdeInput<K extends DshIdeMethod>(command: K, args: un
 				throw new TypeError('DshIdeInput.answerApproval.decision must be "approve" or "reject"');
 			}
 			optionalString(record['reason'], 'DshIdeInput.answerApproval.reason');
+			optionalString(record['agentId'], 'DshIdeInput.answerApproval.agentId');
+			optionalString(record['callId'], 'DshIdeInput.answerApproval.callId');
 			break;
 		case 'answerQuestion':
 			nonEmptyString(record['requestId'], 'DshIdeInput.answerQuestion.requestId');
-			jsonValue(record['answer'], 'DshIdeInput.answerQuestion.answer', new Set());
+			validateQuestionAnswer(record['answer'], 'DshIdeInput.answerQuestion.answer');
 			break;
 		case 'cancelRequest':
 			nonEmptyString(record['requestId'], 'DshIdeInput.cancelRequest.requestId');
@@ -506,6 +769,12 @@ export function validateDshIdeInput<K extends DshIdeMethod>(command: K, args: un
 					}
 				}
 			}
+			if (record['attachments'] !== undefined) {
+				if (!Array.isArray(record['attachments'])) {
+					throw new TypeError('DshIdeInput.runCommand.attachments must be an array');
+				}
+				record['attachments'].forEach((attachment, index) => imageAttachmentRef(attachment, `DshIdeInput.runCommand.attachments[${index}]`));
+			}
 			break;
 		case 'listModels':
 			optionalString(record['workspace'], 'DshIdeInput.listModels.workspace');
@@ -516,24 +785,25 @@ export function validateDshIdeInput<K extends DshIdeMethod>(command: K, args: un
 		case 'fetchRowDetail':
 			nonEmptyString(record['rowId'], 'DshIdeInput.fetchRowDetail.rowId');
 			break;
-		case 'readAttachment': {
+		case 'readAttachment':
 			// 逐字段对齐 DSH ImageAttachmentRef；拒绝路径/URL 形状的混入。
-			const attachment = exactRecord(record['attachment'],
-				['attachmentId', 'mediaType', 'bytes', 'width', 'height', 'name'],
-				'DshIdeInput.readAttachment.attachment');
-			nonEmptyString(attachment['attachmentId'], 'DshIdeInput.readAttachment.attachment.attachmentId');
-			const mediaType = attachment['mediaType'];
-			if (mediaType !== 'image/png' && mediaType !== 'image/jpeg' && mediaType !== 'image/webp' && mediaType !== 'image/gif') {
-				throw new TypeError('DshIdeInput.readAttachment.attachment.mediaType must be a supported image media type');
-			}
-			for (const key of ['bytes', 'width', 'height'] as const) {
-				if (typeof attachment[key] !== 'number' || !Number.isSafeInteger(attachment[key]) || (attachment[key] as number) <= 0) {
-					throw new TypeError(`DshIdeInput.readAttachment.attachment.${key} must be a positive integer`);
-				}
-			}
-			optionalString(attachment['name'], 'DshIdeInput.readAttachment.attachment.name');
+			imageAttachmentRef(record['attachment'], 'DshIdeInput.readAttachment.attachment');
 			break;
-		}
+		case 'addAttachment':
+			imageAttachmentRef(record['attachment'], 'DshIdeInput.addAttachment.attachment');
+			break;
+		case 'removeAttachment':
+			nonEmptyString(record['attachmentId'], 'DshIdeInput.removeAttachment.attachmentId');
+			break;
+		case 'setGoal':
+			validateSetGoal(record);
+			break;
+		case 'openInApp':
+			nonEmptyString(record['target'], 'DshIdeInput.openInApp.target');
+			break;
+		case 'dismissQuotaNotice':
+			nonNegativeInteger(record['seq'], 'DshIdeInput.dismissQuotaNotice.seq');
+			break;
 		case 'accountGetState':
 		case 'accountGetProfile':
 			// 官方 `AccountClientMetadata` 四字段必填；缺一个就会让 Host 派生出错误的请求身份。
@@ -569,6 +839,7 @@ export function validateDshIdeInput<K extends DshIdeMethod>(command: K, args: un
 		case 'interrupt':
 		case 'presentationSettings':
 		case 'refreshSnapshot':
+		case 'listSkills':
 			// 无字段，exactRecord 已确保空对象。
 			break;
 	}
@@ -599,10 +870,14 @@ export function validateDshIdeInvokeOutput(value: unknown): { readonly value: un
  * 官方 `SessionPage` 的 IDE 投影：只要 `records` 与 `hasMore`。
  * 不声明 `cursor`——翻页游标由调用方用已加载最小 seq 推导。
  * `records` 保持 JSON 对象，不在协议层复制 DSH 的 `SessionHistoryRecord`。
+ *
+ * `conversation` 是 Host 顺手把这一页投影好的结构化节点：renderer 直接并入节点树，
+ * 不必再解析 `records` 里的裸事件。字段缺省表示该页没有可投影内容。
  */
 export interface DshIdeLoadOlderPage {
 	readonly records: readonly Readonly<Record<string, unknown>>[];
 	readonly hasMore: boolean;
+	readonly conversation?: DshIdeConversationView;
 }
 
 /** `loadOlder` 的 `call` 返回值。`accepted` 只允许 `true`；失败走错误，不走 `accepted: false`。 */
@@ -617,7 +892,7 @@ export function validateDshIdeLoadOlderResult(value: unknown): DshIdeLoadOlderRe
 	if (result['accepted'] !== true) {
 		throw new TypeError('DshIdeLoadOlderResult.accepted must be true');
 	}
-	const page = exactRecord(result['page'], ['records', 'hasMore'], 'DshIdeLoadOlderResult.page');
+	const page = exactRecord(result['page'], ['records', 'hasMore', 'conversation'], 'DshIdeLoadOlderResult.page');
 	if (!Array.isArray(page['records'])) {
 		throw new TypeError('DshIdeLoadOlderResult.page.records must be an array');
 	}
@@ -631,33 +906,75 @@ export function validateDshIdeLoadOlderResult(value: unknown): DshIdeLoadOlderRe
 	if (typeof page['hasMore'] !== 'boolean') {
 		throw new TypeError('DshIdeLoadOlderResult.page.hasMore must be a boolean');
 	}
+	if (page['conversation'] !== undefined) {
+		validateConversation(page['conversation']);
+	}
 	return result as unknown as DshIdeLoadOlderResult;
 }
 
-/** 审批请求的中立视图。不含官方 `agent` / `signal`。 */
+/**
+ * 审批请求的中立视图。
+ * `agent` 对象与 `AbortSignal` 不进线协议；`displayReason` 是官方本地化文案（必须含 `en`）。
+ */
 export interface DshIdeApprovalRequestView {
 	readonly toolName: string;
 	readonly callId?: string;
 	readonly reason?: string;
+	readonly displayReason?: Readonly<Record<string, string>>;
 }
 
-/** 问卷选项只保留用户能点的标签。 */
+/** 问卷选项：标签，以及官方可选的说明。 */
 export interface DshIdeQuestionOptionView {
 	readonly label: string;
+	readonly description?: string;
 }
 
-/** 一条问卷。`multiSelect` 只在为真时出现。 */
+/** 一条问卷。字段对齐官方 `AskUserQuestionItem` 里能进 JSON 的部分。 */
 export interface DshIdeQuestionItemView {
 	readonly id: string;
 	readonly question?: string;
+	readonly detail?: string;
+	readonly header?: string;
 	readonly options?: readonly DshIdeQuestionOptionView[];
-	readonly multiSelect?: true;
+	readonly multiSelect?: boolean;
+	readonly intent?: DshIdeQuestionIntent;
 }
+
+/** 官方 `AskUserQuestionIntent`。不认识的 kind 不进视图。 */
+export type DshIdeQuestionIntent =
+	| { readonly kind: 'plan-review'; readonly approve: string; readonly callId?: string }
+	| {
+		readonly kind: 'approval';
+		readonly approve: string;
+		readonly reject: string;
+		readonly always?: string;
+		readonly subject?: { readonly name: string; readonly icon?: string };
+		readonly display?: {
+			readonly question: Readonly<Record<string, string>>;
+			readonly detail?: Readonly<Record<string, string>>;
+			readonly approve?: Readonly<Record<string, string>>;
+		};
+	};
 
 /** 问卷请求的中立视图。 */
 export interface DshIdeQuestionRequestView {
 	readonly questions: readonly DshIdeQuestionItemView[];
 }
+
+/** 快照里的待决议项。形状与 waterfall 的 request 帧相同，但是快照的一部分。 */
+export type DshIdePendingItem =
+	| {
+		readonly eventId: string;
+		readonly event: 'approval/request';
+		readonly agentId: string;
+		readonly request: DshIdeApprovalRequestView;
+	}
+	| {
+		readonly eventId: string;
+		readonly event: 'user-questions/request';
+		readonly agentId: string;
+		readonly request: DshIdeQuestionRequestView;
+	};
 
 /**
  * `listen('waterfall')` 的帧。请求与取消分开，不并进快照。
@@ -706,14 +1023,18 @@ export function validateDshIdeWaterfallNotice(value: unknown): DshIdeWaterfallNo
 }
 
 function validateApprovalView(value: unknown): DshIdeApprovalRequestView {
-	const request = exactRecord(value, ['toolName', 'callId', 'reason'], 'DshIdeWaterfallNotice.request');
+	const request = exactRecord(value, ['toolName', 'callId', 'reason', 'displayReason'], 'DshIdeWaterfallNotice.request');
 	const toolName = nonEmptyString(request['toolName'], 'DshIdeWaterfallNotice.request.toolName');
 	optionalString(request['callId'], 'DshIdeWaterfallNotice.request.callId');
 	optionalString(request['reason'], 'DshIdeWaterfallNotice.request.reason');
+	const displayReason = request['displayReason'] === undefined
+		? undefined
+		: localeMap(request['displayReason'], 'DshIdeWaterfallNotice.request.displayReason');
 	return {
 		toolName,
 		...(typeof request['callId'] === 'string' ? { callId: request['callId'] } : {}),
 		...(typeof request['reason'] === 'string' ? { reason: request['reason'] } : {}),
+		...(displayReason !== undefined ? { displayReason } : {}),
 	};
 }
 
@@ -728,27 +1049,37 @@ function validateQuestionView(value: unknown): DshIdeQuestionRequestView {
 
 function validateQuestionItem(value: unknown, index: number): DshIdeQuestionItemView {
 	const label = `DshIdeWaterfallNotice.request.questions[${index}]`;
-	const item = exactRecord(value, ['id', 'question', 'options', 'multiSelect'], label);
+	const item = exactRecord(value, ['id', 'question', 'detail', 'header', 'options', 'multiSelect', 'intent'], label);
 	const id = nonEmptyString(item['id'], `${label}.id`);
 	optionalString(item['question'], `${label}.question`);
+	optionalString(item['detail'], `${label}.detail`);
+	optionalString(item['header'], `${label}.header`);
 	let options: readonly DshIdeQuestionOptionView[] | undefined;
 	if (item['options'] !== undefined) {
 		if (!Array.isArray(item['options'])) {
 			throw new TypeError(`${label}.options must be an array`);
 		}
 		options = item['options'].map((option, optionIndex) => {
-			const record = exactRecord(option, ['label'], `${label}.options[${optionIndex}]`);
-			return { label: nonEmptyString(record['label'], `${label}.options[${optionIndex}].label`) };
+			const record = exactRecord(option, ['label', 'description'], `${label}.options[${optionIndex}]`);
+			optionalString(record['description'], `${label}.options[${optionIndex}].description`);
+			return {
+				label: nonEmptyString(record['label'], `${label}.options[${optionIndex}].label`),
+				...(typeof record['description'] === 'string' ? { description: record['description'] } : {}),
+			};
 		});
 	}
-	if (item['multiSelect'] !== undefined && item['multiSelect'] !== true) {
-		throw new TypeError(`${label}.multiSelect must be true when present`);
+	if (item['multiSelect'] !== undefined && typeof item['multiSelect'] !== 'boolean') {
+		throw new TypeError(`${label}.multiSelect must be a boolean`);
 	}
+	const intent = item['intent'] === undefined ? undefined : validateQuestionIntent(item['intent'], `${label}.intent`);
 	return {
 		id,
 		...(typeof item['question'] === 'string' ? { question: item['question'] } : {}),
+		...(typeof item['detail'] === 'string' ? { detail: item['detail'] } : {}),
+		...(typeof item['header'] === 'string' ? { header: item['header'] } : {}),
 		...(options !== undefined ? { options } : {}),
-		...(item['multiSelect'] === true ? { multiSelect: true as const } : {}),
+		...(typeof item['multiSelect'] === 'boolean' ? { multiSelect: item['multiSelect'] } : {}),
+		...(intent !== undefined ? { intent } : {}),
 	};
 }
 
@@ -777,9 +1108,14 @@ export function validateDshIdeSnapshot(value: unknown): DshIdeSnapshot {
 	return s as unknown as DshIdeSnapshot;
 }
 
-/** 跟会话帧校验：必须是带 `type` 字符串的对象，其余字段原样保留。 */
+const DSH_IDE_VIEW_KEYS = [
+	'frame', 'conversation', 'deliverables', 'attachments', 'plan', 'goal', 'todos', 'skills',
+	'tokenUsageDelta', 'quotaNotice', 'composer', 'pending',
+] as const;
+
+/** 跟会话帧校验：`frame` 必填，typed 字段出现时按官方形状 fail-closed。 */
 function validateDshIdeView(value: unknown): asserts value is DshIdeViewSnapshot {
-	const view = exactRecord(value, ['frame'], 'DshIdeSnapshot.state.view');
+	const view = exactRecord(value, DSH_IDE_VIEW_KEYS, 'DshIdeSnapshot.state.view');
 	const frame = view['frame'];
 	if (typeof frame !== 'object' || frame === null || Array.isArray(frame)) {
 		throw new TypeError('DshIdeSnapshot.state.view.frame must be an object');
@@ -787,6 +1123,745 @@ function validateDshIdeView(value: unknown): asserts value is DshIdeViewSnapshot
 	if (typeof (frame as Record<string, unknown>)['type'] !== 'string' || (frame as Record<string, unknown>)['type'] === '') {
 		throw new TypeError('DshIdeSnapshot.state.view.frame.type must be a non-empty string');
 	}
+	if (view['conversation'] !== undefined) {
+		validateConversation(view['conversation']);
+	}
+	if (view['deliverables'] !== undefined) {
+		validateDeliverables(view['deliverables']);
+	}
+	if (view['attachments'] !== undefined) {
+		validateAttachmentList(view['attachments']);
+	}
+	if (view['plan'] !== undefined) {
+		validatePlan(view['plan']);
+	}
+	if (view['goal'] !== undefined) {
+		validateGoal(view['goal']);
+	}
+	if (view['todos'] !== undefined) {
+		validateTodos(view['todos']);
+	}
+	if (view['skills'] !== undefined) {
+		validateSkills(view['skills']);
+	}
+	if (view['tokenUsageDelta'] !== undefined) {
+		validateTokenUsage(view['tokenUsageDelta'], 'DshIdeSnapshot.state.view.tokenUsageDelta');
+	}
+	if (view['quotaNotice'] !== undefined) {
+		validateQuotaNotice(view['quotaNotice']);
+	}
+	if (view['composer'] !== undefined) {
+		validateComposer(view['composer']);
+	}
+	if (view['pending'] !== undefined) {
+		validatePending(view['pending']);
+	}
+}
+
+function imageAttachmentRef(value: unknown, label: string): void {
+	const attachment = exactRecord(value,
+		['attachmentId', 'mediaType', 'bytes', 'width', 'height', 'name', 'originalDimensions'],
+		label);
+	nonEmptyString(attachment['attachmentId'], `${label}.attachmentId`);
+	const mediaType = attachment['mediaType'];
+	if (mediaType !== 'image/png' && mediaType !== 'image/jpeg' && mediaType !== 'image/webp' && mediaType !== 'image/gif') {
+		throw new TypeError(`${label}.mediaType must be a supported image media type`);
+	}
+	for (const key of ['bytes', 'width', 'height'] as const) {
+		positiveInteger(attachment[key], `${label}.${key}`);
+	}
+	optionalString(attachment['name'], `${label}.name`);
+	if (attachment['originalDimensions'] !== undefined) {
+		const dims = exactRecord(attachment['originalDimensions'], ['width', 'height'], `${label}.originalDimensions`);
+		positiveInteger(dims['width'], `${label}.originalDimensions.width`);
+		positiveInteger(dims['height'], `${label}.originalDimensions.height`);
+	}
+}
+
+function fileAttachmentRef(value: unknown, label: string): void {
+	const attachment = exactRecord(value, ['attachmentId', 'name', 'bytes'], label);
+	nonEmptyString(attachment['attachmentId'], `${label}.attachmentId`);
+	nonEmptyString(attachment['name'], `${label}.name`);
+	positiveInteger(attachment['bytes'], `${label}.bytes`);
+}
+
+function positiveInteger(value: unknown, label: string): number {
+	if (typeof value !== 'number' || !Number.isSafeInteger(value) || value <= 0) {
+		throw new TypeError(`${label} must be a positive integer`);
+	}
+	return value;
+}
+
+function anyString(value: unknown, label: string): string {
+	if (typeof value !== 'string') {
+		throw new TypeError(`${label} must be a string`);
+	}
+	return value;
+}
+
+function mustOmit(record: Record<string, unknown>, key: string, label: string): void {
+	if (record[key] !== undefined) {
+		throw new TypeError(`${label} must omit ${key}`);
+	}
+}
+
+function validateSetGoal(record: Record<string, unknown>): void {
+	const action = record['action'];
+	if (action !== 'create' && action !== 'edit' && action !== 'pause' && action !== 'resume' && action !== 'complete' && action !== 'clear') {
+		throw new TypeError('DshIdeInput.setGoal.action must be create, edit, pause, resume, complete, or clear');
+	}
+	if (record['objective'] !== undefined) {
+		nonEmptyString(record['objective'], 'DshIdeInput.setGoal.objective');
+	}
+	if (record['maxGoalRounds'] !== undefined) {
+		positiveInteger(record['maxGoalRounds'], 'DshIdeInput.setGoal.maxGoalRounds');
+	}
+	if (record['id'] !== undefined) {
+		nonEmptyString(record['id'], 'DshIdeInput.setGoal.id');
+	}
+	if (record['revision'] !== undefined) {
+		positiveInteger(record['revision'], 'DshIdeInput.setGoal.revision');
+	}
+	if (action === 'create') {
+		nonEmptyString(record['objective'], 'DshIdeInput.setGoal.objective');
+		mustOmit(record, 'id', 'DshIdeInput.setGoal');
+		mustOmit(record, 'revision', 'DshIdeInput.setGoal');
+		return;
+	}
+	nonEmptyString(record['id'], 'DshIdeInput.setGoal.id');
+	if (record['revision'] === undefined) {
+		throw new TypeError('DshIdeInput.setGoal.revision must be a positive integer');
+	}
+	if (action === 'edit') {
+		if (record['objective'] === undefined && record['maxGoalRounds'] === undefined) {
+			throw new TypeError('DshIdeInput.setGoal edit requires objective and/or maxGoalRounds');
+		}
+		return;
+	}
+	mustOmit(record, 'objective', 'DshIdeInput.setGoal');
+	mustOmit(record, 'maxGoalRounds', 'DshIdeInput.setGoal');
+}
+
+function validateQuestionAnswer(value: unknown, label: string): void {
+	const answer = exactRecord(value, ['answers'], label);
+	if (!Array.isArray(answer['answers']) || answer['answers'].length === 0) {
+		throw new TypeError(`${label}.answers must be a non-empty array`);
+	}
+	answer['answers'].forEach((item, index) => {
+		const itemLabel = `${label}.answers[${index}]`;
+		const record = exactRecord(item, ['id', 'selected', 'custom'], itemLabel);
+		nonEmptyString(record['id'], `${itemLabel}.id`);
+		if (!Array.isArray(record['selected'])) {
+			throw new TypeError(`${itemLabel}.selected must be an array`);
+		}
+		record['selected'].forEach((selected, selectedIndex) => {
+			nonEmptyString(selected, `${itemLabel}.selected[${selectedIndex}]`);
+		});
+		optionalString(record['custom'], `${itemLabel}.custom`);
+		if (record['selected'].length === 0 && record['custom'] === undefined) {
+			throw new TypeError(`${itemLabel} must select an option or provide custom text`);
+		}
+	});
+}
+
+function localeMap(value: unknown, label: string): Readonly<Record<string, string>> {
+	if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+		throw new TypeError(`${label} must be an object`);
+	}
+	const record = value as Record<string, unknown>;
+	for (const key of Object.keys(record)) {
+		if (record[key] === undefined) {
+			throw new TypeError(`${label} must omit explicit undefined field ${JSON.stringify(key)}`);
+		}
+	}
+	if (typeof record['en'] !== 'string' || record['en'].trim() === '') {
+		throw new TypeError(`${label}.en must be a non-empty string`);
+	}
+	const out: Record<string, string> = {};
+	for (const key of Object.keys(record)) {
+		if (key.trim() === '' || /\s/.test(key)) {
+			throw new TypeError(`${label} has an invalid locale key ${JSON.stringify(key)}`);
+		}
+		const item = record[key];
+		if (typeof item !== 'string' || item.trim() === '') {
+			throw new TypeError(`${label}.${key} must be a non-empty string`);
+		}
+		out[key] = item;
+	}
+	return out;
+}
+
+function validateQuestionIntent(value: unknown, label: string): DshIdeQuestionIntent {
+	const preview = asRecord(value, label);
+	if (preview['kind'] === 'plan-review') {
+		const intent = exactRecord(value, ['kind', 'approve', 'callId'], label);
+		optionalString(intent['callId'], `${label}.callId`);
+		return {
+			kind: 'plan-review',
+			approve: nonEmptyString(intent['approve'], `${label}.approve`),
+			...(typeof intent['callId'] === 'string' ? { callId: intent['callId'] } : {}),
+		};
+	}
+	if (preview['kind'] === 'approval') {
+		const intent = exactRecord(value, ['kind', 'approve', 'reject', 'always', 'subject', 'display'], label);
+		optionalString(intent['always'], `${label}.always`);
+		let subject: { readonly name: string; readonly icon?: string } | undefined;
+		if (intent['subject'] !== undefined) {
+			const record = exactRecord(intent['subject'], ['name', 'icon'], `${label}.subject`);
+			optionalString(record['icon'], `${label}.subject.icon`);
+			subject = {
+				name: nonEmptyString(record['name'], `${label}.subject.name`),
+				...(typeof record['icon'] === 'string' ? { icon: record['icon'] } : {}),
+			};
+		}
+		let display: { readonly question: Readonly<Record<string, string>>; readonly detail?: Readonly<Record<string, string>>; readonly approve?: Readonly<Record<string, string>> } | undefined;
+		if (intent['display'] !== undefined) {
+			const record = exactRecord(intent['display'], ['question', 'detail', 'approve'], `${label}.display`);
+			const detail = record['detail'] === undefined ? undefined : localeMap(record['detail'], `${label}.display.detail`);
+			const approve = record['approve'] === undefined ? undefined : localeMap(record['approve'], `${label}.display.approve`);
+			display = {
+				question: localeMap(record['question'], `${label}.display.question`),
+				...(detail !== undefined ? { detail } : {}),
+				...(approve !== undefined ? { approve } : {}),
+			};
+		}
+		return {
+			kind: 'approval',
+			approve: nonEmptyString(intent['approve'], `${label}.approve`),
+			reject: nonEmptyString(intent['reject'], `${label}.reject`),
+			...(typeof intent['always'] === 'string' ? { always: intent['always'] } : {}),
+			...(subject !== undefined ? { subject } : {}),
+			...(display !== undefined ? { display } : {}),
+		};
+	}
+	throw new TypeError(`${label}.kind must be plan-review or approval`);
+}
+
+function asRecord(value: unknown, label: string): Record<string, unknown> {
+	if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+		throw new TypeError(`${label} must be an object`);
+	}
+	return value as Record<string, unknown>;
+}
+
+function validateConversation(value: unknown): void {
+	const view = exactRecord(value, ['nodes', 'hasMore'], 'DshIdeSnapshot.state.view.conversation');
+	if (!Array.isArray(view['nodes'])) {
+		throw new TypeError('DshIdeSnapshot.state.view.conversation.nodes must be an array');
+	}
+	const seen = new Set<object>();
+	view['nodes'].forEach((node, index) => validateConversationNode(node, `DshIdeSnapshot.state.view.conversation.nodes[${index}]`, seen));
+	if (typeof view['hasMore'] !== 'boolean') {
+		throw new TypeError('DshIdeSnapshot.state.view.conversation.hasMore must be a boolean');
+	}
+}
+
+function validateConversationNode(value: unknown, label: string, seen: Set<object>): void {
+	const preview = asRecord(value, label);
+	if (seen.has(preview)) {
+		throw new TypeError(`${label} must not contain cycles`);
+	}
+	seen.add(preview);
+	try {
+		const kind = preview['kind'];
+		switch (kind) {
+			case 'user':
+			case 'steering':
+			case 'subagent-notice': {
+				const node = exactRecord(value, ['kind', 'seq', 'time', 'messageId', 'turn', 'content'], label);
+				readNodeBase(node, label, false);
+				validateContentBlocks(node['content'], `${label}.content`);
+				return;
+			}
+			case 'context': {
+				const node = exactRecord(value, ['kind', 'seq', 'time', 'messageId', 'turn', 'content', 'form'], label);
+				readNodeBase(node, label, false);
+				validateContentBlocks(node['content'], `${label}.content`);
+				if (node['form'] !== undefined && node['form'] !== null) {
+					nonEmptyString(node['form'], `${label}.form`);
+				}
+				return;
+			}
+			case 'assistant': {
+				const node = exactRecord(value, ['kind', 'seq', 'time', 'messageId', 'turn', 'step', 'blocks', 'usage', 'providerMetadata', 'interrupted'], label);
+				readNodeBase(node, label, true);
+				nonNegativeInteger(node['step'], `${label}.step`);
+				validateAssistantBlocks(node['blocks'], `${label}.blocks`);
+				if (node['usage'] !== undefined) {
+					validateTokenUsage(node['usage'], `${label}.usage`);
+				}
+				if (node['providerMetadata'] !== undefined) {
+					const meta = exactRecord(node['providerMetadata'], ['provider', 'model'], `${label}.providerMetadata`);
+					nonEmptyString(meta['provider'], `${label}.providerMetadata.provider`);
+					nonEmptyString(meta['model'], `${label}.providerMetadata.model`);
+				}
+				if (node['interrupted'] !== undefined && node['interrupted'] !== true) {
+					throw new TypeError(`${label}.interrupted must be true when present`);
+				}
+				return;
+			}
+			case 'tool-call': {
+				const node = exactRecord(value, ['kind', 'seq', 'time', 'messageId', 'turn', 'step', 'callId', 'parentCallId', 'name', 'phase', 'argsRaw', 'args'], label);
+				readNodeBase(node, label, false);
+				if (node['step'] !== undefined) {
+					nonNegativeInteger(node['step'], `${label}.step`);
+				}
+				nonEmptyString(node['callId'], `${label}.callId`);
+				optionalString(node['parentCallId'], `${label}.parentCallId`);
+				nonEmptyString(node['name'], `${label}.name`);
+				if (node['phase'] !== 'preparing' && node['phase'] !== 'start') {
+					throw new TypeError(`${label}.phase must be preparing or start`);
+				}
+				if (node['argsRaw'] !== undefined) {
+					anyString(node['argsRaw'], `${label}.argsRaw`);
+				}
+				if (node['args'] !== undefined) {
+					jsonValue(node['args'], `${label}.args`, new Set());
+				}
+				return;
+			}
+			case 'tool-result': {
+				const node = exactRecord(value, ['kind', 'seq', 'time', 'messageId', 'turn', 'callId', 'parentCallId', 'name', 'args', 'call', 'callTime', 'content', 'isError', 'error', 'subCalls'], label);
+				readNodeBase(node, label, false);
+				nonEmptyString(node['callId'], `${label}.callId`);
+				optionalString(node['parentCallId'], `${label}.parentCallId`);
+				nonEmptyString(node['name'], `${label}.name`);
+				jsonValue(node['args'], `${label}.args`, new Set());
+				validateToolCallRef(node['call'], `${label}.call`);
+				if (node['callTime'] !== undefined && node['callTime'] !== null) {
+					nonNegativeInteger(node['callTime'], `${label}.callTime`);
+				}
+				validateContentBlocks(node['content'], `${label}.content`);
+				if (typeof node['isError'] !== 'boolean') {
+					throw new TypeError(`${label}.isError must be a boolean`);
+				}
+				if (node['error'] !== undefined) {
+					const error = exactRecord(node['error'], ['name', 'code', 'reason'], `${label}.error`);
+					nonEmptyString(error['name'], `${label}.error.name`);
+					nonEmptyString(error['code'], `${label}.error.code`);
+					optionalString(error['reason'], `${label}.error.reason`);
+				}
+				if (!Array.isArray(node['subCalls'])) {
+					throw new TypeError(`${label}.subCalls must be an array`);
+				}
+				node['subCalls'].forEach((child, index) => {
+					const childLabel = `${label}.subCalls[${index}]`;
+					validateConversationNode(child, childLabel, seen);
+					const childKind = asRecord(child, childLabel)['kind'];
+					if (childKind !== 'tool-call' && childKind !== 'tool-result') {
+						throw new TypeError(`${childLabel} must be a tool-call or tool-result`);
+					}
+				});
+				return;
+			}
+			case 'command': {
+				const node = exactRecord(value, ['kind', 'seq', 'time', 'messageId', 'turn', 'commandId', 'name', 'args', 'outcome'], label);
+				readNodeBase(node, label, false);
+				nonEmptyString(node['commandId'], `${label}.commandId`);
+				if (node['name'] !== null) {
+					nonEmptyString(node['name'], `${label}.name`);
+				}
+				if (node['args'] !== null && typeof node['args'] !== 'string') {
+					throw new TypeError(`${label}.args must be a string or null`);
+				}
+				validateCommandOutcome(node['outcome'], `${label}.outcome`);
+				return;
+			}
+			case 'compaction': {
+				const node = exactRecord(value, ['kind', 'seq', 'time', 'messageId', 'turn', 'summary', 'summaryEventSeq', 'shadowedItemCount', 'shadowedTokenCount'], label);
+				readNodeBase(node, label, false);
+				if (node['summary'] !== null && typeof node['summary'] !== 'string') {
+					throw new TypeError(`${label}.summary must be a string or null`);
+				}
+				for (const key of ['summaryEventSeq', 'shadowedItemCount', 'shadowedTokenCount'] as const) {
+					if (node[key] !== undefined && node[key] !== null) {
+						nonNegativeInteger(node[key], `${label}.${key}`);
+					}
+				}
+				return;
+			}
+			case 'model-retry': {
+				const node = exactRecord(value, ['kind', 'seq', 'time', 'messageId', 'turn', 'retry', 'maxRetries', 'delayMs', 'mode', 'retryState', 'failure'], label);
+				readNodeBase(node, label, false);
+				for (const key of ['retry', 'maxRetries', 'delayMs'] as const) {
+					if (node[key] !== undefined) {
+						nonNegativeInteger(node[key], `${label}.${key}`);
+					}
+				}
+				if (node['mode'] !== undefined && node['mode'] !== 'normal' && node['mode'] !== 'always') {
+					throw new TypeError(`${label}.mode must be normal or always`);
+				}
+				if (node['retryState'] !== undefined && node['retryState'] !== 'scheduled' && node['retryState'] !== 'started' && node['retryState'] !== 'cancelled') {
+					throw new TypeError(`${label}.retryState must be scheduled, started, or cancelled`);
+				}
+				if (node['failure'] !== undefined) {
+					const failure = exactRecord(node['failure'], ['message', 'code'], `${label}.failure`);
+					nonEmptyString(failure['message'], `${label}.failure.message`);
+					optionalString(failure['code'], `${label}.failure.code`);
+				}
+				return;
+			}
+			case 'turn-error': {
+				const node = exactRecord(value, ['kind', 'seq', 'time', 'messageId', 'turn', 'step', 'message', 'code'], label);
+				readNodeBase(node, label, true);
+				nonNegativeInteger(node['step'], `${label}.step`);
+				nonEmptyString(node['message'], `${label}.message`);
+				optionalString(node['code'], `${label}.code`);
+				return;
+			}
+			case 'turn-max-tokens': {
+				const node = exactRecord(value, ['kind', 'seq', 'time', 'messageId', 'turn', 'step'], label);
+				readNodeBase(node, label, true);
+				nonNegativeInteger(node['step'], `${label}.step`);
+				return;
+			}
+			case 'inherited-history': {
+				const node = exactRecord(value, ['kind', 'seq', 'time', 'messageId', 'turn'], label);
+				readNodeBase(node, label, false);
+				return;
+			}
+			case 'subagent-catalog': {
+				const node = exactRecord(value, ['kind', 'seq', 'time', 'messageId', 'turn', 'childId', 'childCreatedAt', 'mode', 'label', 'name', 'version'], label);
+				readNodeBase(node, label, false);
+				for (const key of ['childId', 'mode', 'label', 'name'] as const) {
+					optionalString(node[key], `${label}.${key}`);
+				}
+				if (node['childCreatedAt'] !== undefined) {
+					nonNegativeInteger(node['childCreatedAt'], `${label}.childCreatedAt`);
+				}
+				if (node['version'] !== undefined) {
+					nonNegativeInteger(node['version'], `${label}.version`);
+				}
+				return;
+			}
+			default:
+				throw new TypeError(`${label}.kind is not an official conversation node`);
+		}
+	} finally {
+		seen.delete(preview);
+	}
+}
+
+function readNodeBase(node: Record<string, unknown>, label: string, turnRequired: boolean): void {
+	nonNegativeInteger(node['seq'], `${label}.seq`);
+	nonNegativeInteger(node['time'], `${label}.time`);
+	optionalString(node['messageId'], `${label}.messageId`);
+	if (turnRequired || node['turn'] !== undefined) {
+		nonNegativeInteger(node['turn'], `${label}.turn`);
+	}
+}
+
+function validateContentBlocks(value: unknown, label: string): void {
+	if (!Array.isArray(value)) {
+		throw new TypeError(`${label} must be an array`);
+	}
+	value.forEach((block, index) => validateContentBlock(block, `${label}[${index}]`));
+}
+
+function validateContentBlock(value: unknown, label: string): void {
+	const type = asRecord(value, label)['type'];
+	switch (type) {
+		case 'text':
+		case 'reasoning': {
+			const block = exactRecord(value, ['type', 'text'], label);
+			anyString(block['text'], `${label}.text`);
+			return;
+		}
+		case 'image': {
+			const block = exactRecord(value, ['type', 'attachment'], label);
+			imageAttachmentRef(block['attachment'], `${label}.attachment`);
+			return;
+		}
+		case 'file': {
+			const block = exactRecord(value, ['type', 'attachment'], label);
+			fileAttachmentRef(block['attachment'], `${label}.attachment`);
+			return;
+		}
+		case 'tool-call': {
+			const block = exactRecord(value, ['type', 'id', 'name', 'arguments'], label);
+			nonEmptyString(block['id'], `${label}.id`);
+			nonEmptyString(block['name'], `${label}.name`);
+			anyString(block['arguments'], `${label}.arguments`);
+			return;
+		}
+		case 'tool-addition':
+		case 'tool-removal': {
+			const block = exactRecord(value, ['type', 'toolName'], label);
+			nonEmptyString(block['toolName'], `${label}.toolName`);
+			return;
+		}
+		default:
+			throw new TypeError(`${label}.type is not an official content block`);
+	}
+}
+
+function validateAssistantBlocks(value: unknown, label: string): void {
+	if (!Array.isArray(value)) {
+		throw new TypeError(`${label} must be an array`);
+	}
+	value.forEach((block, index) => validateAssistantBlock(block, `${label}[${index}]`));
+}
+
+function validateAssistantBlock(value: unknown, label: string): void {
+	const kind = asRecord(value, label)['kind'];
+	switch (kind) {
+		case 'text':
+		case 'reasoning': {
+			const block = exactRecord(value, ['kind', 'text'], label);
+			anyString(block['text'], `${label}.text`);
+			return;
+		}
+		case 'image': {
+			const block = exactRecord(value, ['kind', 'attachment'], label);
+			imageAttachmentRef(block['attachment'], `${label}.attachment`);
+			return;
+		}
+		case 'tool-call': {
+			const block = exactRecord(value, ['kind', 'callId', 'name', 'argsRaw'], label);
+			nonEmptyString(block['callId'], `${label}.callId`);
+			nonEmptyString(block['name'], `${label}.name`);
+			anyString(block['argsRaw'], `${label}.argsRaw`);
+			return;
+		}
+		case 'other': {
+			const block = exactRecord(value, ['kind', 'block'], label);
+			jsonValue(block['block'], `${label}.block`, new Set());
+			return;
+		}
+		default:
+			throw new TypeError(`${label}.kind is not an official assistant block`);
+	}
+}
+
+function validateToolCallRef(value: unknown, label: string): void {
+	if (value === undefined || value === null) {
+		return;
+	}
+	const call = exactRecord(value, ['name', 'argsRaw'], label);
+	nonEmptyString(call['name'], `${label}.name`);
+	anyString(call['argsRaw'], `${label}.argsRaw`);
+}
+
+function validateCommandOutcome(value: unknown, label: string): void {
+	if (value === null) {
+		return;
+	}
+	const outcome = exactRecord(value, ['kind', 'text'], label);
+	if (outcome['kind'] !== 'success' && outcome['kind'] !== 'error') {
+		throw new TypeError(`${label}.kind must be success or error`);
+	}
+	if (outcome['text'] !== undefined) {
+		anyString(outcome['text'], `${label}.text`);
+	}
+}
+
+function validateTokenUsage(value: unknown, label: string): void {
+	const usage = exactRecord(value, ['inputTokens', 'outputTokens', 'totalTokens', 'cacheReadTokens', 'cacheWriteTokens', 'reasoningTokens'], label);
+	nonNegativeInteger(usage['inputTokens'], `${label}.inputTokens`);
+	nonNegativeInteger(usage['outputTokens'], `${label}.outputTokens`);
+	for (const key of ['totalTokens', 'cacheReadTokens', 'cacheWriteTokens', 'reasoningTokens'] as const) {
+		if (usage[key] !== undefined) {
+			nonNegativeInteger(usage[key], `${label}.${key}`);
+		}
+	}
+}
+
+function validateDeliverables(value: unknown): void {
+	if (!Array.isArray(value)) {
+		throw new TypeError('DshIdeSnapshot.state.view.deliverables must be an array');
+	}
+	value.forEach((item, index) => {
+		const label = `DshIdeSnapshot.state.view.deliverables[${index}]`;
+		const delivery = exactRecord(item, ['turn', 'callId', 'files'], label);
+		nonNegativeInteger(delivery['turn'], `${label}.turn`);
+		nonEmptyString(delivery['callId'], `${label}.callId`);
+		if (!Array.isArray(delivery['files']) || delivery['files'].length === 0) {
+			throw new TypeError(`${label}.files must be a non-empty array`);
+		}
+		delivery['files'].forEach((file, fileIndex) => {
+			const fileLabel = `${label}.files[${fileIndex}]`;
+			const record = exactRecord(file, ['path', 'description'], fileLabel);
+			nonEmptyString(record['path'], `${fileLabel}.path`);
+			optionalString(record['description'], `${fileLabel}.description`);
+		});
+	});
+}
+
+function validateAttachmentList(value: unknown): void {
+	if (!Array.isArray(value)) {
+		throw new TypeError('DshIdeSnapshot.state.view.attachments must be an array');
+	}
+	value.forEach((item, index) => imageAttachmentRef(item, `DshIdeSnapshot.state.view.attachments[${index}]`));
+}
+
+function validatePlan(value: unknown): void {
+	const plan = exactRecord(value, ['active', 'pending'], 'DshIdeSnapshot.state.view.plan');
+	if (typeof plan['active'] !== 'boolean' || typeof plan['pending'] !== 'boolean') {
+		throw new TypeError('DshIdeSnapshot.state.view.plan active and pending must be booleans');
+	}
+}
+
+function validateGoal(value: unknown): void {
+	const label = 'DshIdeSnapshot.state.view.goal';
+	const view = exactRecord(value, ['goal', 'roundsStarted', 'createdAt', 'updatedAt', 'activation'], label);
+	const goal = exactRecord(view['goal'], ['id', 'revision', 'objective', 'phase', 'maxGoalRounds', 'blockedReason'], `${label}.goal`);
+	nonEmptyString(goal['id'], `${label}.goal.id`);
+	positiveInteger(goal['revision'], `${label}.goal.revision`);
+	nonEmptyString(goal['objective'], `${label}.goal.objective`);
+	if (goal['phase'] !== 'active' && goal['phase'] !== 'paused' && goal['phase'] !== 'blocked' && goal['phase'] !== 'complete') {
+		throw new TypeError(`${label}.goal.phase must be active, paused, blocked, or complete`);
+	}
+	positiveInteger(goal['maxGoalRounds'], `${label}.goal.maxGoalRounds`);
+	if (goal['phase'] === 'blocked') {
+		const reason = exactRecord(goal['blockedReason'], ['code', 'message'], `${label}.goal.blockedReason`);
+		nonEmptyString(reason['code'], `${label}.goal.blockedReason.code`);
+		nonEmptyString(reason['message'], `${label}.goal.blockedReason.message`);
+	} else if (goal['blockedReason'] !== undefined) {
+		throw new TypeError(`${label}.goal.blockedReason is only allowed when phase is blocked`);
+	}
+	nonNegativeInteger(view['roundsStarted'], `${label}.roundsStarted`);
+	nonNegativeInteger(view['createdAt'], `${label}.createdAt`);
+	nonNegativeInteger(view['updatedAt'], `${label}.updatedAt`);
+	if (view['activation'] !== undefined && view['activation'] !== 'armed' && view['activation'] !== 'disarmed') {
+		throw new TypeError(`${label}.activation must be armed or disarmed`);
+	}
+}
+
+function validateTodos(value: unknown): void {
+	if (!Array.isArray(value)) {
+		throw new TypeError('DshIdeSnapshot.state.view.todos must be an array');
+	}
+	value.forEach((item, index) => {
+		const label = `DshIdeSnapshot.state.view.todos[${index}]`;
+		const todo = exactRecord(item, ['content', 'status'], label);
+		nonEmptyString(todo['content'], `${label}.content`);
+		if (todo['status'] !== 'pending' && todo['status'] !== 'in_progress' && todo['status'] !== 'completed') {
+			throw new TypeError(`${label}.status must be pending, in_progress, or completed`);
+		}
+	});
+}
+
+function validateSkills(value: unknown): void {
+	if (!Array.isArray(value)) {
+		throw new TypeError('DshIdeSnapshot.state.view.skills must be an array');
+	}
+	value.forEach((item, index) => {
+		const label = `DshIdeSnapshot.state.view.skills[${index}]`;
+		const skill = exactRecord(item, ['name', 'description', 'whenToUse', 'modelInvocable', 'userInvocable', 'provider'], label);
+		nonEmptyString(skill['name'], `${label}.name`);
+		nonEmptyString(skill['description'], `${label}.description`);
+		optionalString(skill['whenToUse'], `${label}.whenToUse`);
+		if (typeof skill['modelInvocable'] !== 'boolean' || typeof skill['userInvocable'] !== 'boolean') {
+			throw new TypeError(`${label} invocation flags must be booleans`);
+		}
+		nonEmptyString(skill['provider'], `${label}.provider`);
+	});
+}
+
+function validateQuotaNotice(value: unknown): void {
+	const notice = exactRecord(value, ['code', 'seq', 'message'], 'DshIdeSnapshot.state.view.quotaNotice');
+	if (notice['code'] !== 'QUOTA' && notice['code'] !== 'ACCOUNT_QUOTA') {
+		throw new TypeError('DshIdeSnapshot.state.view.quotaNotice.code must be QUOTA or ACCOUNT_QUOTA');
+	}
+	nonNegativeInteger(notice['seq'], 'DshIdeSnapshot.state.view.quotaNotice.seq');
+	optionalString(notice['message'], 'DshIdeSnapshot.state.view.quotaNotice.message');
+}
+
+function validateComposer(value: unknown): void {
+	const label = 'DshIdeSnapshot.state.view.composer';
+	const composer = exactRecord(value, ['model', 'permission', 'team', 'preset'], label);
+	validateComposerModel(composer['model'], `${label}.model`);
+	validateNullableOptions(composer['permission'], `${label}.permission`, 'value');
+	validateComposerTeam(composer['team'], `${label}.team`);
+	validateNullableOptions(composer['preset'], `${label}.preset`, 'id');
+}
+
+function validateComposerModel(value: unknown, label: string): void {
+	const model = exactRecord(value, ['current', 'groups'], label);
+	if (model['current'] !== null) {
+		const current = exactRecord(model['current'], ['provider', 'model', 'effort'], `${label}.current`);
+		nonEmptyString(current['provider'], `${label}.current.provider`);
+		nonEmptyString(current['model'], `${label}.current.model`);
+		optionalString(current['effort'], `${label}.current.effort`);
+	}
+	if (!Array.isArray(model['groups'])) {
+		throw new TypeError(`${label}.groups must be an array`);
+	}
+	model['groups'].forEach((group, groupIndex) => {
+		const groupLabel = `${label}.groups[${groupIndex}]`;
+		const record = exactRecord(group, ['id', 'name', 'models'], groupLabel);
+		nonEmptyString(record['id'], `${groupLabel}.id`);
+		nonEmptyString(record['name'], `${groupLabel}.name`);
+		if (!Array.isArray(record['models'])) {
+			throw new TypeError(`${groupLabel}.models must be an array`);
+		}
+		record['models'].forEach((entry, modelIndex) => {
+			const modelLabel = `${groupLabel}.models[${modelIndex}]`;
+			const item = exactRecord(entry, ['id', 'name', 'efforts', 'defaultEffort'], modelLabel);
+			nonEmptyString(item['id'], `${modelLabel}.id`);
+			nonEmptyString(item['name'], `${modelLabel}.name`);
+			optionalString(item['defaultEffort'], `${modelLabel}.defaultEffort`);
+			if (!Array.isArray(item['efforts'])) {
+				throw new TypeError(`${modelLabel}.efforts must be an array`);
+			}
+			item['efforts'].forEach((effort, effortIndex) => {
+				const effortLabel = `${modelLabel}.efforts[${effortIndex}]`;
+				const effortRecord = exactRecord(effort, ['id', 'name'], effortLabel);
+				nonEmptyString(effortRecord['id'], `${effortLabel}.id`);
+				nonEmptyString(effortRecord['name'], `${effortLabel}.name`);
+			});
+		});
+	});
+}
+
+function validateNullableOptions(value: unknown, label: string, idKey: 'value' | 'id'): void {
+	if (value === null) {
+		return;
+	}
+	const record = exactRecord(value, ['current', 'options'], label);
+	if (record['current'] !== null) {
+		nonEmptyString(record['current'], `${label}.current`);
+	}
+	if (!Array.isArray(record['options'])) {
+		throw new TypeError(`${label}.options must be an array`);
+	}
+	record['options'].forEach((option, index) => {
+		const optionLabel = `${label}.options[${index}]`;
+		const item = exactRecord(option, [idKey, 'name'], optionLabel);
+		nonEmptyString(item[idKey], `${optionLabel}.${idKey}`);
+		nonEmptyString(item['name'], `${optionLabel}.name`);
+	});
+}
+
+function validateComposerTeam(value: unknown, label: string): void {
+	if (value === null) {
+		return;
+	}
+	const team = exactRecord(value, ['enabled', 'confirmDisable'], label);
+	if (typeof team['enabled'] !== 'boolean' || typeof team['confirmDisable'] !== 'boolean') {
+		throw new TypeError(`${label} flags must be booleans`);
+	}
+}
+
+function validatePending(value: unknown): void {
+	if (!Array.isArray(value)) {
+		throw new TypeError('DshIdeSnapshot.state.view.pending must be an array');
+	}
+	value.forEach((item, index) => {
+		const label = `DshIdeSnapshot.state.view.pending[${index}]`;
+		const record = exactRecord(item, ['eventId', 'event', 'agentId', 'request'], label);
+		nonEmptyString(record['eventId'], `${label}.eventId`);
+		nonEmptyString(record['agentId'], `${label}.agentId`);
+		if (record['event'] === 'approval/request') {
+			validateApprovalView(record['request']);
+			return;
+		}
+		if (record['event'] === 'user-questions/request') {
+			validateQuestionView(record['request']);
+			return;
+		}
+		throw new TypeError(`${label}.event must be approval/request or user-questions/request`);
+	});
 }
 
 /**
