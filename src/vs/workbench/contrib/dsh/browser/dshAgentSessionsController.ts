@@ -17,9 +17,11 @@ import { IDshClientService } from '../../../../platform/dshClient/common/dshClie
 import type { IDshIdeSessionSummary } from '../../../../platform/dshClient/common/dshIdeProtocol.js';
 import { IWorkbenchContribution, registerWorkbenchContribution2, WorkbenchPhase } from '../../../common/contributions.js';
 import { IChatSessionTiming } from '../../chat/common/chatService/chatService.js';
-import { ChatSessionStatus, IChatSessionItem, IChatSessionItemController, IChatSessionItemsDelta, IChatSessionsService } from '../../chat/common/chatSessionsService.js';
+import { ChatSessionStatus, IChatSessionItem, IChatSessionItemController, IChatSessionItemsDelta, IChatSessionProviderOptionGroup, IChatSessionsService } from '../../chat/common/chatSessionsService.js';
 import { sessionOpenerRegistry } from '../../chat/browser/agentSessions/agentSessionsOpener.js';
 import { dshChatSessionFor } from './dshChatSession.js';
+import { getDshComposerSource } from './dshComposerRegistry.js';
+import { toPermissionItems } from './dshComposerProjection.js';
 
 export const DSH_CHAT_SESSION_TYPE = 'dsh';
 
@@ -73,6 +75,18 @@ export class DshAgentSessionsController extends Disposable implements IChatSessi
 		super();
 
 		this._register(chatSessionsService.registerChatSessionItemController(this.chatSessionType, this));
+		// 用户在输入框里改了权限 / 预设：写回 DSH。只有 dsh 会话类型的选项才归这里管。
+		this._register(chatSessionsService.onDidChangeSessionOptions(event => {
+			if (event.sessionResource.scheme !== DSH_CHAT_SESSION_TYPE) {
+				return;
+			}
+			for (const [optionId, value] of event.updates) {
+				const raw = typeof value === 'string' ? value : value?.id;
+				if (typeof raw === 'string' && raw !== '') {
+					void this.applySessionOption(optionId, raw);
+				}
+			}
+		}));
 		this._register(this.workspace.onDidChangeWorkspaceFolders(() => {
 			void this.refresh(CancellationToken.None);
 		}));
@@ -104,6 +118,59 @@ export class DshAgentSessionsController extends Disposable implements IChatSessi
 				return true;
 			},
 		}));
+	}
+
+	/**
+	 * 新会话输入框的选项组：DSH 的权限预设与 agent 预设。
+	 *
+	 * 这是 `dshComposerProjection` 里 `toPermissionItems` / `observeModes` 的生产入口；
+	 * 没有它，权限与预设这两个选择器在原生输入框里根本不出现。
+	 */
+	async getNewChatSessionInputState(_sessionResource: URI, _token: CancellationToken): Promise<readonly IChatSessionProviderOptionGroup[] | undefined> {
+		const source = getDshComposerSource();
+		if (source === undefined) {
+			return undefined;
+		}
+		const state = source.state;
+		const groups: IChatSessionProviderOptionGroup[] = [];
+		const permissionItems = toPermissionItems(state);
+		if (permissionItems.length > 0) {
+			const current = state.permission?.current;
+			const selected = permissionItems.find(item => item.id === current);
+			groups.push({
+				id: 'dsh.permission',
+				name: '权限',
+				...(selected === undefined ? {} : { selected }),
+				items: permissionItems,
+				kind: 'permissions',
+			});
+		}
+		const presets = state.presets;
+		if (presets !== null && presets.options.length > 0) {
+			const selectedPreset = presets.options.find(option => option.id === presets.current);
+			groups.push({
+				id: 'dsh.preset',
+				name: '模式',
+				...(selectedPreset === undefined ? {} : { selected: { id: selectedPreset.id, name: selectedPreset.name } }),
+				items: presets.options.map(option => ({ id: option.id, name: option.name })),
+			});
+		}
+		return groups.length === 0 ? undefined : groups;
+	}
+
+	/** 用户在新会话输入框里改了选项：写回 DSH 的权限 / 预设。 */
+	applySessionOption(optionId: string, value: string): Promise<void> {
+		const source = getDshComposerSource();
+		if (source === undefined) {
+			return Promise.resolve();
+		}
+		if (optionId === 'dsh.permission') {
+			return source.selectPermission(value);
+		}
+		if (optionId === 'dsh.preset') {
+			return source.selectPreset(value);
+		}
+		return Promise.resolve();
 	}
 
 	async refresh(token: CancellationToken): Promise<void> {

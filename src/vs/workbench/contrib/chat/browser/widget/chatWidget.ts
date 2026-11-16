@@ -3478,6 +3478,30 @@ export class ChatWidget extends Disposable implements IChatWidget {
 		}
 	}
 
+	/**
+	 * DSH 会话的发送目标：拿到 `dsh` content provider 产出的会话对象。
+	 *
+	 * 只有注册了 content provider 的 scheme 才会命中；普通原生会话返回 undefined，
+	 * 走原有 `chatService.sendRequest` 链路，互不影响。
+	 */
+	private async _dshSessionContentForSubmit(sessionResource: URI): Promise<{ submit(text: string): Promise<boolean> } | undefined> {
+		const sessionType = getChatSessionType(sessionResource);
+		if (!this.chatSessionsService.getContentProviderSchemes().includes(sessionType)) {
+			return undefined;
+		}
+		try {
+			const session = await this.chatSessionsService.getOrCreateChatSession(sessionResource, CancellationToken.None);
+			const candidate = session as unknown as { submit?: unknown };
+			if (typeof candidate.submit !== 'function') {
+				return undefined;
+			}
+			return session as unknown as { submit(text: string): Promise<boolean> };
+		} catch {
+			// 拿不到 content 就退回原生链路，不把一次发送变成硬失败。
+			return undefined;
+		}
+	}
+
 	async rerunLastRequest(): Promise<void> {
 		if (this._readOnly || this.isTranscriptProgressActive || !this.viewModel || this.viewModel.model.isInputBlocked.get()) {
 			return;
@@ -3898,6 +3922,20 @@ export class ChatWidget extends Disposable implements IChatWidget {
 		}
 		let result: ChatSendResult;
 		try {
+			// DSH 会话不走原生 chatService 的本地 agent 链路：它的内容由 `dsh` content provider
+			// 提供，发送必须交给该 provider 的会话对象（最终走 `DshChatSession.submit`）。
+			const dshSession = await this._dshSessionContentForSubmit(this.viewModel.sessionResource);
+			if (dshSession !== undefined) {
+				const accepted = await dshSession.submit(requestInputs.input);
+				if (!accepted) {
+					if (transcriptContext) {
+						this.setTranscriptContext(transcriptContext);
+					}
+					return;
+				}
+				// 内容由 provider 的 history 推送，这里不再产出原生 response。
+				return undefined;
+			}
 			result = await this.chatService.sendRequest(this.viewModel.sessionResource, requestInputs.input, {
 				onDidCreateResponse,
 				onDidExecuteSlashCommand: clearOwnedForkPromptInput,

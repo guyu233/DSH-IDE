@@ -25,11 +25,22 @@ import { registerDshLanguageModelProvider } from './dshLanguageModelProvider.js'
 import { DshComposerSource } from './dshComposerSource.js';
 import { setDshComposerSource } from './dshComposerRegistry.js';
 import { ILanguageModelsService } from '../../chat/common/languageModels.js';
+import { IChatSessionsService } from '../../chat/common/chatSessionsService.js';
 import { ILogService } from '../../../../platform/log/common/log.js';
 import { Disposable } from '../../../../base/common/lifecycle.js';
+import { registerDshChatSessionContent, registerDshAnswerCommands } from './dshChatSessionContent.js';
+import { IDshIdeSessionsService, DshIdeSessionsService } from './dshIdeSessionsService.js';
+import { registerDshSessionSearchCommands } from './dshSessionSearchCommands.js';
+import { registerDshTeamCommands } from './dshTeamCommands.js';
+import { IQuickInputService } from '../../../../platform/quickinput/common/quickInput.js';
+import { openSessionByResource } from '../../chat/browser/agentSessions/agentSessionsOpener.js';
+import { dshSessionResource } from './dshAgentSessionsController.js';
+import { IInstantiationService } from '../../../../platform/instantiation/common/instantiation.js';
+import { CommandsRegistry } from '../../../../platform/commands/common/commands.js';
 import './dshAgentSessionsController.js';
 
 registerSingleton(IDshClientService, DshClientService, InstantiationType.Delayed);
+registerSingleton(IDshIdeSessionsService, DshIdeSessionsService, InstantiationType.Delayed);
 
 /** 消费 `dshIde` 通道的唯一快照流：`DshIdeConsumer` 负责校验与 fail-closed，
  * 本贡献点负责把帧交给 DSH 聊天面板，并把失败如实提示给用户。
@@ -40,12 +51,25 @@ class DshClientContribution extends Disposable implements IWorkbenchContribution
 		@INotificationService private readonly notifications: INotificationService,
 		@ILanguageFeaturesService languageFeatures: ILanguageFeaturesService,
 		@ILanguageModelsService languageModels: ILanguageModelsService,
+		@IChatSessionsService chatSessionsService: IChatSessionsService,
+		@IDshIdeSessionsService private readonly _sessions: IDshIdeSessionsService,
+		@IQuickInputService private readonly quickInputService: IQuickInputService,
+		@IInstantiationService private readonly instantiationService: IInstantiationService,
 		@ILogService logService: ILogService,
 	) {
 		super();
 		// 聊天画面由 DshChatModelDriver 把 DSH 帧直接写进原生 ChatModel。
 		// 把 DSH 模型目录注册成 Chat 的模型提供方。
 		this._register({ dispose: registerDshLanguageModelProvider(languageModels, client, logService).dispose });
+		// `dsh:/<id>` 会话的聊天内容：没有这个 content provider，原生 ChatWidget
+		// 打开 DSH 会话时拿不到任何 history（「选中会话后消息不显示」的根因）。
+		this._register(registerDshChatSessionContent(client, chatSessionsService));
+		// 原生 history 里的审批 / 问卷按钮调这两个命令，真正走 answerApproval/answerQuestion。
+		this._register(registerDshAnswerCommands(client));
+		// 会话搜索：服务层早就实现，这里补上 quick pick 入口。
+		this._register(registerDshSessionSearchCommands(client, this._sessions, this.quickInputService, this.instantiationService, this.notifications));
+		// DSH 团队开关：原生模型选择器没有对应控件，用命令承接。
+		this._register(registerDshTeamCommands(this.quickInputService, this.notifications));
 		const preset = readComposerPreset();
 		const composer = this._register(new DshComposerSource(client, logService, preset));
 		setDshComposerSource(composer);
@@ -67,7 +91,8 @@ class DshClientContribution extends Disposable implements IWorkbenchContribution
 		// 帧直接交给聊天面板的会话状态；批准 / 问卷帧也走同一处，不弹通知。
 		this._chat = dshChatSessionFor(client);
 		this._register(consumer.onDidChangeFrame(({ state }) => {
-				this._chat.accept(state.frame);
+			// 稳定路径读 typed 视图；`frame` 只作兼容回退（旧 Host 不带 typed 字段时）。
+			this._chat.acceptView(state.view);
 		}));
 		this._register(client.onDidSnapshot(snapshot => consumer.accept(snapshot)));
 		this._register(client.onDidWaterfall(notice => this._chat.acceptWaterfall(notice)));
@@ -86,6 +111,23 @@ class DshClientContribution extends Disposable implements IWorkbenchContribution
 			// 连接已按开窗参数建好：登记绑定并补读输入框目录，不重开流。
 			void this._chat.attach(boundSessionId);
 		});
+		// 覆盖 common 层只「打开聊天面板」的同名命令：真正经内核建会话并切过去。
+		this._register(CommandsRegistry.registerCommand('dsh.newSession', async () => {
+			const created = await this._sessions.createSession();
+			if (!created.ok) {
+				this.notifications.warn(localize('dsh.newSessionFailed', "新建 DSH 会话失败：{0}", created.error));
+				return;
+			}
+			if (created.sessionId !== undefined) {
+				const bound = await this._chat.bind(created.sessionId);
+				if (!bound) {
+					this.notifications.warn(localize('dsh.bindFailed', "DSH 会话已创建，但绑定失败，请重新打开该会话。"));
+					return;
+				}
+				// 按会话资源打开：`workbench.action.chat.open` 不带 `dsh:/<id>`，会停在当前会话。
+				await this.instantiationService.invokeFunction(openSessionByResource, dshSessionResource(created.sessionId));
+			}
+		}));
 	}
 
 	private readonly _chat: DshChatSession;
