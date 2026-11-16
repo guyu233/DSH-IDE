@@ -21,6 +21,7 @@ import { buildDshIdeCommandLine, mapDshIdeCommandExecution } from '../common/dsh
 import { projectDshIdeArchiveSet } from '../common/dshIdeArchiveSet.js';
 import { projectDshIdeSessionSearch } from '../common/dshIdeSessionSearch.js';
 import { projectDshIdeComposer } from '../common/dshIdeComposer.js';
+import { projectApprovalRequest, projectQuestionRequest } from '../common/dshIdeRequestView.js';
 import { safeErrorText } from '../common/dshIdeAuthRedaction.js';
 
 /** 与 common/dshIdeProtocol.ts 同值的错误码（Host 半身为纯 JS，不跨层 import TS）。 */
@@ -457,24 +458,14 @@ export class DshIdeHostBridge {
 	}
 }
 
-/** 只把界面需要的字段送出去，DSH 私有对象（agent / signal / provider 流）不透传。 */
+/** 只把界面需要的字段送出去。agent 对象与 AbortSignal 不进线协议。 */
 function describeRequest(kind, request) {
 	if (kind === 'approval') {
-		return {
-			toolName: typeof request.toolName === 'string' ? request.toolName : '',
-			...(typeof request.callId === 'string' ? { callId: request.callId } : {}),
-			...(typeof request.reason === 'string' ? { reason: request.reason } : {}),
+		return projectApprovalRequest(request) ?? {
+			toolName: typeof request?.toolName === 'string' ? request.toolName : '',
 		};
 	}
-	const questions = Array.isArray(request.questions) ? request.questions : [];
-	return {
-		questions: questions.map(question => ({
-			id: String(question.id ?? ''),
-			...(typeof question.question === 'string' ? { question: question.question } : {}),
-			...(Array.isArray(question.options) ? { options: question.options.map(option => ({ label: String(option.label ?? '') })) } : {}),
-			...(question.multiSelect === true ? { multiSelect: true } : {}),
-		})),
-	};
+	return projectQuestionRequest(request) ?? { questions: [] };
 }
 
 /**
@@ -500,12 +491,15 @@ function createMethodHandlers(bridge) {
 	};
 	/**
 	 * D13（第 34 轮）：`runCommand` / `setPermissionPreset` 共用的官方命令执行。
-	 * Host 半身进程内直调 `commands.execute(agent, line, [], signal)`：
+	 * Host 半身进程内直调 `commands.execute(agent, line, attachments, signal)`：
 	 * `agent` 经 `agents.get(sessionId)` 解析，`signal` 自给（Gateway 路径由框架注入，
-	 * 进程内直调无框架信号），attachments 恒 `[]`（§8.10.10 前置④⑤）。
+	 * 进程内直调无框架信号）。
+	 * 附件按官方 `CommandSubmitAttachment` 的形状传：线上给的是 `ImageAttachmentRef`，
+	 * 这里经 `attachments.readImage()` 取出字节转成 `{ type:'image', mediaType, data }`
+	 * （官方 `EncodedImageAttachment`，`attachment/src/types.ts:85-92`）。
 	 * 结果经共享 `mapDshIdeCommandExecution` 收敛为动作类语义，不静默 accepted。
 	 */
-	const executeCommandLine = async line => {
+	const executeCommandLine = async (line, attachments = []) => {
 		const sessionId = requireSession();
 		const agents = service(bridge.ctx, 'agents');
 		const agent = typeof agents.get === 'function' ? agents.get(sessionId) : undefined;
@@ -516,8 +510,9 @@ function createMethodHandlers(bridge) {
 		if (typeof commands.execute !== 'function') {
 			throw coded(FEATURE_UNAVAILABLE, 'DSH commands service has no execute()', { capability: 'runCommand' });
 		}
+	const submitted = attachments.length === 0 ? [] : await Promise.all(attachments.map(attachment => toCommandSubmitAttachment(bridge.ctx, attachment)));
 		const signal = new AbortController().signal;
-		const execution = await commands.execute(agent, line, [], signal);
+		const execution = await commands.execute(agent, line, submitted, signal);
 		const outcome = mapDshIdeCommandExecution(execution);
 		if ('error' in outcome) {
 			throw coded(outcome.error === 'invalid-argument' ? INVALID_ARGUMENT : FEATURE_UNAVAILABLE, outcome.message, { capability: 'runCommand' });
@@ -527,11 +522,15 @@ function createMethodHandlers(bridge) {
 
 	return {
 		async submit(args) {
+			const attachments = Array.isArray(args.attachments) ? args.attachments : [];
 			await controller().prompt({
 				requestId: randomUUID(),
 				sessionId: requireSession(),
 				mode: 'queue',
-				content: [{ type: 'text', text: args.text }],
+				content: [
+					{ type: 'text', text: args.text },
+					...attachments.map(attachment => ({ type: 'image', attachment: imagePromptRef(attachment) })),
+				],
 			});
 			return { accepted: true };
 		},
@@ -641,8 +640,9 @@ function createMethodHandlers(bridge) {
 			return executeCommandLine(buildDshIdeCommandLine('permission', [args.preset]));
 		},
 		async runCommand(args) {
-			// 契约 `command` 为不带前导斜杠的命令名，`args` 单空格拼入 rawInput。
-			return executeCommandLine(buildDshIdeCommandLine(args.command, args.args));
+			// 契约 `command` 为不带前导斜杠的命令名，`args` 单空格拼入 rawInput；
+			// 附件按官方 `CommandSubmitAttachment` 传给命令执行器。
+			return executeCommandLine(buildDshIdeCommandLine(args.command, args.args), Array.isArray(args.attachments) ? args.attachments : []);
 		},
 		async searchSessions(args) {
 			// D59 分批检索：官方 `session/search`，只读。依赖宿主挂载
@@ -786,8 +786,10 @@ function createMethodHandlers(bridge) {
 			return projectDshIdeCommandList(commands.list(agent));
 		},
 		async fetchRowDetail() {
-			// 折叠行全文由 IDE 侧投影器缓存（第 2 章 E9）；Host 侧不持有第二份全文。
-			return null;
+			// 官方没有对应的只读「行详情」端点：折叠行全文由 IDE 侧投影器缓存
+			// （第 2 章 E9）。按手册 §5.3 第 4 条，这里明确拒绝而不是返回 null，
+			// 让前端按禁用态处理，不把「没有实现」伪装成「没有内容」。
+			throw coded(FEATURE_UNAVAILABLE, 'DSH has no official read-only row-detail endpoint; folded-row text stays in the IDE projection cache', { capability: 'fetchRowDetail' });
 		},
 		async readAttachment(args) {
 			// 官方 `session/attachment` 的进程内等价物：只按 attachmentId 读字节，
@@ -837,6 +839,82 @@ function createMethodHandlers(bridge) {
 			}
 			return projectDshIdeArchiveSet(await registry.unarchiveSession({ sessionId: args.sessionId }));
 		},
+		addAttachment: missing('addAttachment'),
+		removeAttachment: missing('removeAttachment'),
+		async setGoal(args) {
+			// 官方 `goals` 服务（`packages/goal/goal/src/index.ts`）：create/edit/pause/resume/complete/clear。
+			// agent 从绑定会话解析；edit/pause/resume/complete/clear 需要 { id, revision } 这一 CAS 引用。
+			const sessionId = requireSession();
+			const agents = service(bridge.ctx, 'agents');
+			const agent = typeof agents.get === 'function' ? agents.get(sessionId) : undefined;
+			if (agent === undefined || agent === null) {
+				throw coded(FEATURE_UNAVAILABLE, `no live agent for bound session ${sessionId}`, { capability: 'setGoal' });
+			}
+			const goals = service(bridge.ctx, 'goals');
+			switch (args.action) {
+				case 'create': {
+					const request = {
+						...(typeof args.objective === 'string' ? { objective: args.objective } : {}),
+						...(typeof args.maxGoalRounds === 'number' ? { maxGoalRounds: args.maxGoalRounds } : {}),
+					};
+					if (typeof goals.remoteExportCreate === 'function') {
+						return goals.remoteExportCreate(agent, request);
+					}
+					return goals.create(agent, request);
+				}
+				case 'edit': {
+					const ref = { id: args.id, revision: args.revision };
+					const request = {
+						...(typeof args.objective === 'string' ? { objective: args.objective } : {}),
+						...(typeof args.maxGoalRounds === 'number' ? { maxGoalRounds: args.maxGoalRounds } : {}),
+					};
+					return requireGoalView(projectGoalView(goals.edit(agent, ref, request)));
+				}
+				case 'pause':
+					return requireGoalView(projectGoalView(goals.pause(agent, { id: args.id, revision: args.revision })));
+				case 'resume':
+					return requireGoalView(projectGoalView(goals.resume(agent, { id: args.id, revision: args.revision })));
+				case 'complete':
+					return requireGoalView(projectGoalView(goals.complete(agent, { id: args.id, revision: args.revision })));
+				case 'clear':
+					// 官方 `clear` 返回 `GoalRef`（tombstone），不是 `GoalView`：原样透出引用，
+					// 不拿去套 `projectGoalView`（那样只会得到 undefined）。
+					return goals.clear(agent, { id: args.id, revision: args.revision });
+				default:
+					throw coded(INVALID_ARGUMENT, `unknown setGoal action ${JSON.stringify(args.action)}`);
+			}
+		},
+		listSkills: async () => {
+			// 官方 `skills.list({ scope })`：scope 是查看者（此处取绑定会话 id），
+			// 返回官方 `SkillSummary[]`。只投影中立字段，不带绝对路径与 resourceBase。
+			const skills = service(bridge.ctx, 'skills');
+			if (typeof skills.list !== 'function') {
+				throw coded(FEATURE_UNAVAILABLE, 'DSH skills service has no list()', { capability: 'listSkills' });
+			}
+			const summaries = await skills.list(typeof bridge.sessionId === 'string' ? { scope: bridge.sessionId } : {});
+			return (Array.isArray(summaries) ? summaries : []).flatMap(skill => {
+				if (skill === null || typeof skill !== 'object') {
+					return [];
+				}
+				const name = typeof skill.name === 'string' ? skill.name : '';
+				const description = typeof skill.description === 'string' ? skill.description : '';
+				const provider = typeof skill.provider === 'string' ? skill.provider : '';
+				const invocation = skill.invocation !== null && typeof skill.invocation === 'object' ? skill.invocation : {};
+				if (name === '' || description === '' || provider === '') {
+					return [];
+				}
+				return [{
+					name,
+					description,
+					...(typeof skill.whenToUse === 'string' && skill.whenToUse !== '' ? { whenToUse: skill.whenToUse } : {}),
+					modelInvocable: invocation.modelInvocable === true,
+					userInvocable: invocation.userInvocable === true,
+					provider,
+				}];
+			});
+		},
+		openInApp: missing('openInApp'),
+		dismissQuotaNotice: missing('dismissQuotaNotice'),
 		async deleteSession(args) {
 			bridge.assertOwnership(args.sessionId);
 			// 删除链由社区插件承担（§8.10.8 批准的端点），DSH-IDE 只做前置校验、调用与结果判定。
@@ -876,11 +954,86 @@ function createMethodHandlers(bridge) {
 	};
 }
 
+/** 提交给官方 prompt 的图片引用：只留 ImageAttachmentRef 字段，不带 x- 扩展。 */
+function imagePromptRef(attachment) {
+	return {
+		attachmentId: attachment.attachmentId,
+		mediaType: attachment.mediaType,
+		bytes: attachment.bytes,
+		width: attachment.width,
+		height: attachment.height,
+		...(typeof attachment.name === 'string' && attachment.name !== '' ? { name: attachment.name } : {}),
+		...(attachment.originalDimensions && typeof attachment.originalDimensions === 'object'
+			? { originalDimensions: { width: attachment.originalDimensions.width, height: attachment.originalDimensions.height } }
+			: {}),
+	};
+}
+
+/**
+ * 官方 `GoalView` → 契约 `DshIdeGoalView`。
+ * 两者字段同形；`activation` 是进程内的可选扩展，官方视图本来就带，原样透出即可。
+ * 形状不合就返回 undefined，让调用方按「没有目标」处理，不伪造。
+ */
+function projectGoalView(view) {
+	if (view === null || typeof view !== 'object' || typeof view.id !== 'string' || view.id === '') {
+		return undefined;
+	}
+	const blocked = view.blockedReason !== null && typeof view.blockedReason === 'object'
+		? { code: String(view.blockedReason.code ?? ''), message: String(view.blockedReason.message ?? '') }
+		: undefined;
+	return {
+		goal: {
+			id: view.id,
+			revision: view.revision,
+			objective: view.objective,
+			phase: view.phase,
+			maxGoalRounds: view.maxGoalRounds,
+			...(blocked === undefined ? {} : { blockedReason: blocked }),
+		},
+		roundsStarted: view.roundsStarted,
+		createdAt: view.createdAt,
+		updatedAt: view.updatedAt,
+		...(view.activation === 'armed' || view.activation === 'disarmed' ? { activation: view.activation } : {}),
+	};
+}
+
+/** `projectGoalView` 的形状守卫：投影失败时明确报错，不让 `undefined` 混进线协议。 */
+function requireGoalView(view) {
+	if (view === undefined) {
+		throw coded(FEATURE_UNAVAILABLE, 'DSH goals service returned an unrecognized GoalView', { capability: 'setGoal' });
+	}
+	return view;
+}
+
 function splitModel(model) {
 	const slash = model.indexOf('/');
 	return slash <= 0 ? ['deepseek', model] : [model.slice(0, slash), model.slice(slash + 1)];
 }
 
+/**
+ * 线上 `ImageAttachmentRef` → 官方 `CommandSubmitAttachment`。
+ *
+ * 官方只接受编码后的图片（`{ type:'image', mediaType, data, name? }`，
+ * `attachment/src/types.ts:85-92`），所以必须经 `attachments.readImage()` 取字节；
+ * 取不到就明确拒绝，不拿空数据顶替。
+ */
+async function toCommandSubmitAttachment(ctx, attachment) {
+	const store = service(ctx, 'attachments');
+	if (typeof store.readImage !== 'function') {
+		throw coded(FEATURE_UNAVAILABLE, 'DSH attachments service has no readImage()', { capability: 'runCommand' });
+	}
+	const stored = await store.readImage(attachment);
+	const bytes = stored && stored.data;
+	if (!bytes || typeof bytes.length !== 'number') {
+		throw coded(FEATURE_UNAVAILABLE, 'DSH attachments service returned no image bytes', { capability: 'runCommand' });
+	}
+	return {
+		type: 'image',
+		mediaType: (stored.ref && stored.ref.mediaType) || attachment.mediaType,
+		data: Buffer.from(bytes).toString('base64'),
+		...(typeof attachment.name === 'string' && attachment.name !== '' ? { name: attachment.name } : {}),
+	};
+}
 /**
  * 取社区插件 overlay 到官方 `workspaceRegistry` 实例上的 `deleteSession`。
  *

@@ -13,6 +13,8 @@
 // 本类**不再**把帧翻译成另一套行：帧就是 `sessionController.follow` 给出的形状。
 
 import { Disposable } from '../../../base/common/lifecycle.js';
+import { attachmentsOf, createDshIdeConversationState, deliverablesOf, projectDshIdeConversation, quotaNoticeOf } from '../common/dshIdeConversation.js';
+import { projectDshIdeProjections } from '../common/dshIdeProjections.js';
 import { projectDshIdeWaterfallNotice } from '../common/dshIdeWaterfallNotice.js';
 import {
 	DSH_IDE_FEATURE_UNAVAILABLE,
@@ -20,6 +22,7 @@ import {
 	type DshIdeBackend,
 	type DshIdeMethod,
 	type DshIdeOpenSpec,
+	type DshIdePendingItem,
 	type DshIdeSnapshot,
 	type DshIdeViewSnapshot,
 	type DshIdeSessionNotice,
@@ -56,6 +59,10 @@ export class DshIdeViewService extends Disposable implements IdeViewHost {
 	private version = 0;
 	private last: DshIdeSnapshot | undefined;
 	private _boundSessionId: string | undefined;
+	/** 结构化会话投影状态：换会话即重置，保证不把上一个会话的节点带过来。 */
+	private conversation = createDshIdeConversationState();
+	/** 待决议项：按 eventId 聚合，request 加入、cancel 移除。 */
+	private readonly _pending = new Map<string, DshIdePendingItem>();
 
 	private readonly backend: DshIdeBackend;
 
@@ -72,6 +79,7 @@ export class DshIdeViewService extends Disposable implements IdeViewHost {
 		const binding = this.backend.open(spec as unknown as DshIdeOpenSpec);
 		this.channelId = binding.channelId;
 		this.sessionId = binding.sessionId;
+		this.conversation = createDshIdeConversationState();
 		this.subscription = this.backend.follow(
 			binding.sessionId,
 			raw => this.receive(raw),
@@ -100,6 +108,8 @@ export class DshIdeViewService extends Disposable implements IdeViewHost {
 		this.subscription = undefined;
 		this.sessionId = sessionId;
 		this._boundSessionId = sessionId;
+		this.conversation = createDshIdeConversationState();
+		this._pending.clear();
 		this.subscription = this.backend.follow(
 			sessionId,
 			raw => this.receive(raw),
@@ -156,6 +166,8 @@ export class DshIdeViewService extends Disposable implements IdeViewHost {
 		this.channelId = undefined;
 		this.sessionId = undefined;
 		this._boundSessionId = undefined;
+		this.conversation = createDshIdeConversationState();
+		this._pending.clear();
 		this.last = undefined;
 		this.version = 0;
 		return { closed: true };
@@ -194,6 +206,18 @@ export class DshIdeViewService extends Disposable implements IdeViewHost {
 		}
 		const notice = projectDshIdeWaterfallNotice(raw);
 		if (notice !== undefined) {
+			// 待决议项同时并入快照：渲染层读 `pending` 就有完整清单，
+			// 不必自己从独立 waterfall 通路累加。
+			if (notice.kind === 'request') {
+				this._pending.set(notice.eventId, {
+					eventId: notice.eventId,
+					event: notice.event,
+					agentId: notice.agentId,
+					request: notice.request,
+				} as DshIdePendingItem);
+			} else {
+				this._pending.delete(notice.eventId);
+			}
 			for (const listener of [...this._waterfall]) {
 				listener(notice);
 			}
@@ -214,7 +238,41 @@ export class DshIdeViewService extends Disposable implements IdeViewHost {
 			}
 			return;
 		}
-		this.publish({ frame: raw as Record<string, unknown> });
+		// 内容帧同时给出结构化会话；投影失败只退回裸帧，绝不把坏形状送上通道。
+		let conversation: DshIdeViewSnapshot['conversation'];
+		try {
+			conversation = projectDshIdeConversation(this.conversation, raw);
+		} catch {
+			conversation = undefined;
+		}
+		// `snapshot` 帧带着官方投影基线（plan / goal / todos / tokenUsage），一并送出去。
+		const projections = (raw as Record<string, unknown>)['type'] === 'snapshot'
+			? projectDshIdeProjections((raw as Record<string, unknown>)['projections'])
+			: {};
+		// 待决议项是会话级状态：每帧都随快照下发当前清单。
+		const pending = [...this._pending.values()];
+		// 已呈现的交付物同样随快照累计下发。
+		const deliverables = deliverablesOf(this.conversation);
+		const quotaNotice = quotaNoticeOf(this.conversation);
+		const attachments = attachmentsOf(this.conversation);
+		this.publish(conversation === undefined
+			? {
+				frame: raw as Record<string, unknown>,
+				...projections,
+				...(pending.length === 0 ? {} : { pending }),
+				...(deliverables.length === 0 ? {} : { deliverables }),
+				...(quotaNotice === undefined ? {} : { quotaNotice }),
+				...(attachments.length === 0 ? {} : { attachments }),
+			}
+			: {
+				frame: raw as Record<string, unknown>,
+				conversation,
+				...projections,
+				...(pending.length === 0 ? {} : { pending }),
+				...(deliverables.length === 0 ? {} : { deliverables }),
+				...(quotaNotice === undefined ? {} : { quotaNotice }),
+				...(attachments.length === 0 ? {} : { attachments }),
+			});
 	}
 
 	private publish(view: DshIdeViewSnapshot): void {
