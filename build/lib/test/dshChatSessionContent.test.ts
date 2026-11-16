@@ -62,9 +62,10 @@ test('tool results and errors are rendered instead of dropped', () => {
 	const response = history[1];
 	assert.equal(response.type, 'response');
 	if (response.type === 'response') {
-		const texts = response.parts.map(markdownText).filter((text): text is string => text !== undefined);
-		assert.ok(texts.includes('file body'));
-		assert.ok(texts.some(text => text.includes('boom')));
+		// 工具结果现在是原生 toolInvocationSerialized（2-B B1），不再是 markdown；错误走 response.errorDetails。
+		const tool = response.parts.find(part => part.kind === 'toolInvocationSerialized') as { toolSpecificData?: { output?: string } } | undefined;
+		assert.ok(tool?.toolSpecificData?.output?.includes('file body'));
+		assert.equal(response.errorDetails?.message, 'boom');
 	}
 });
 
@@ -149,7 +150,7 @@ test('deliverables render as clickable file references', () => {
 	}
 });
 
-test('quota notice and todos are visible in the transcript', () => {
+test('quota notice is a response-level quota error and todos stay visible', () => {
 	const history = toHistory(session([]), [], {
 		quotaNotice: { code: 'ACCOUNT_QUOTA', seq: 5 },
 		todos: [
@@ -160,7 +161,9 @@ test('quota notice and todos are visible in the transcript', () => {
 	const response = history.find(item => item.type === 'response');
 	assert.ok(response !== undefined && response.type === 'response');
 	if (response?.type === 'response') {
-		assert.ok(response.parts.some(part => part.kind === 'warning'));
+		// 2-B B4：额度提示升级为 response.errorDetails.isQuotaExceeded（带原生配额升级入口）。
+		assert.equal(response.errorDetails?.isQuotaExceeded, true);
+		assert.equal(response.parts.some(part => part.kind === 'warning'), false);
 		const markdown = response.parts.filter(part => part.kind === 'markdownContent') as { content: { value: string } }[];
 		assert.ok(markdown.some(part => part.content.value.includes('[x] 写测试')));
 		assert.ok(markdown.some(part => part.content.value.includes('[-] 跑门禁')));

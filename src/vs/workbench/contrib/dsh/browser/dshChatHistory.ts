@@ -11,21 +11,64 @@
 // 原生 history 是「request / response」成对的行：用户消息开启一条 request，
 // 其后的助手 / 工具内容并进对应的 response；没有 turn 坐标的内容并入当前 response。
 
-import type { DshChatNode } from './dshChatModel.js';
+import type { DshChatNode, DshToolResultNode } from './dshChatModel.js';
 
-/** 原生 chat 进度部件的窄形状（只声明本文件产出的几种）。 */
+/**
+ * 原生 chat 进度部件的窄形状：只声明本文件产出的几种。
+ *
+ * 只保留结构字段：真正渲染时由原生 `ChatListItemRenderer` 按 `kind` 分派，
+ * 本文件不 import 渲染层，也不构造原生类（保持纯映射、可单测）。
+ */
 export type DshHistoryPart =
 	| { readonly kind: 'markdownContent'; readonly content: { readonly value: string } }
 	| { readonly kind: 'thinking'; readonly value: string }
 	| { readonly kind: 'warning'; readonly content: { readonly value: string } }
 	| { readonly kind: 'info'; readonly content: { readonly value: string } }
 	| { readonly kind: 'reference'; readonly reference: string; readonly options?: { readonly status?: { readonly description: string; readonly kind: number } } }
-	| { readonly kind: 'command'; readonly command: { readonly id: string; readonly title: string; readonly arguments?: readonly unknown[] } };
+	| { readonly kind: 'command'; readonly command: { readonly id: string; readonly title: string; readonly arguments?: readonly unknown[] } }
+	| DshToolInvocationPart;
+
+/**
+ * 原生 `toolInvocationSerialized` 的窄形状（`chatService.ts:1216-1236`）。
+ *
+ * 历史里没有运行中状态：序列化形态一律 `isComplete: true`。工具输入输出走
+ * `toolSpecificData.kind === 'simpleToolInvocation'`，因为 `resultDetails` 只接受
+ * URI / Location / 输入输出详情，塞不下 DSH 的纯文本结果。
+ */
+export interface DshToolInvocationPart {
+	readonly kind: 'toolInvocationSerialized';
+	readonly toolCallId: string;
+	readonly toolId: string;
+	readonly source: { readonly type: 'internal'; readonly label: string };
+	readonly invocationMessage: string;
+	readonly originMessage: undefined;
+	readonly pastTenseMessage: string;
+	readonly isComplete: true;
+	readonly isConfirmed: undefined;
+	readonly presentation: undefined;
+	readonly toolSpecificData?: { readonly kind: 'simpleToolInvocation'; readonly input: string; readonly output: string };
+	readonly resultError?: string | true;
+}
+
+/**
+ * `ToolDataSource.Internal` 的原样形状（`languageModelToolsService.ts:139`）。
+ *
+ * 不 import 那个模块：本文件是零 UI 依赖的纯映射，单测要能在没有 workbench 服务
+ * 的环境里直接跑；形状对不上时由 `dshChatHistoryNative.test.ts` 兜住。
+ */
+const INTERNAL_TOOL_SOURCE = { type: 'internal' as const, label: 'Built-In' };
+
+/** 原生 `IChatResponseErrorDetails` 的窄形状（`chatService.ts:70-86`）。 */
+export interface DshHistoryErrorDetails {
+	readonly message: string;
+	readonly code?: string;
+	readonly isQuotaExceeded?: boolean;
+}
 
 /** 原生 `IChatSessionHistoryItem` 的窄形状。 */
 export type DshHistoryItem =
 	| { readonly type: 'request'; readonly prompt: string; readonly participant: string; readonly timestamp?: number }
-	| { readonly type: 'response'; readonly parts: readonly DshHistoryPart[]; readonly participant: string };
+	| { readonly type: 'response'; readonly parts: readonly DshHistoryPart[]; readonly participant: string; readonly errorDetails?: DshHistoryErrorDetails };
 
 /** 只需要 `nodes()` 的会话视图，便于单测注入。 */
 export interface DshHistorySource {
@@ -76,6 +119,10 @@ export function toHistory(
 	const history: DshHistoryItem[] = [];
 	let pending: { prompt: string; participant: string; timestamp?: number } | undefined;
 	let parts: DshHistoryPart[] = [];
+	/** 本 response 的 turn-error（渲染成原生 response 级错误，不再埋进 markdown）。 */
+	let turnError: DshHistoryErrorDetails | undefined;
+	/** 已经有结果的 callId：工具调用块与工具结果只画一行，避免同一调用出现两张卡。 */
+	const settledCallIds = collectSettledCallIds(session.nodes());
 
 	const flush = () => {
 		if (pending === undefined) {
@@ -87,9 +134,15 @@ export function toHistory(
 			participant: pending.participant,
 			...(pending.timestamp === undefined ? {} : { timestamp: pending.timestamp }),
 		});
-		history.push({ type: 'response', parts, participant: pending.participant });
+		history.push({
+			type: 'response',
+			parts,
+			participant: pending.participant,
+			...(turnError === undefined ? {} : { errorDetails: turnError }),
+		});
 		pending = undefined;
 		parts = [];
+		turnError = undefined;
 	};
 
 	for (const node of session.nodes()) {
@@ -107,31 +160,82 @@ export function toHistory(
 			parts.push({ kind: 'markdownContent', content: { value: `> 子智能体：${textOf(node.content)}` } });
 			continue;
 		}
+		if (node.kind === 'turn-error') {
+			// 原生 response 自带 errorDetails（含 code 与配额升级入口），比 markdown 引用块准确。
+			if (pending === undefined) {
+				pending = { prompt: '', participant: 'dsh' };
+			}
+			turnError = { message: node.message, ...(node.code === undefined ? {} : { code: node.code }) };
+			continue;
+		}
 		if (pending === undefined) {
 			// 没有前置用户消息的内容（例如 fork 继承历史）：开一条内容行。
 			pending = { prompt: '', participant: 'dsh' };
 		}
-		appendNode(node, parts);
+		appendNode(node, parts, settledCallIds);
 	}
 	flush();
 	appendDeliverables(extras.deliverables ?? [], history);
 	appendExtras(extras, history);
 	appendPending(pendingItems, history);
+	applyQuotaNotice(extras.quotaNotice, history);
 	return history;
 }
 
+/** 收集所有已有工具结果（含子调用）的 callId。 */
+function collectSettledCallIds(nodes: readonly DshChatNode[]): ReadonlySet<string> {
+	const settled = new Set<string>();
+	const visit = (node: DshChatNode) => {
+		if (node.kind === 'tool-result') {
+			settled.add(node.callId);
+			for (const child of node.subCalls) {
+				visit(child);
+			}
+			return;
+		}
+		if (node.kind === 'tool-call') {
+			for (const child of node.subCalls ?? []) {
+				visit(child);
+			}
+		}
+	};
+	for (const node of nodes) {
+		visit(node);
+	}
+	return settled;
+}
+
 /**
- * 计划 / 目标 / Todo / Skill / 额度 / 附件 → 追加到最后一条 response（没有就单开）。
+ * 额度提示 → 最后一条 response 的 `errorDetails.isQuotaExceeded`。
+ *
+ * 原生错误详情带配额升级入口；继续用 warning 会把可操作的配额问题降级成一条普通告警。
+ */
+function applyQuotaNotice(quotaNotice: DshHistoryExtras['quotaNotice'], history: DshHistoryItem[]): void {
+	if (quotaNotice === undefined) {
+		return;
+	}
+	const errorDetails: DshHistoryErrorDetails = {
+		message: `额度不足（${quotaNotice.code}），请检查账号额度。`,
+		isQuotaExceeded: true,
+	};
+	const last = history[history.length - 1];
+	if (last !== undefined && last.type === 'response') {
+		history[history.length - 1] = { ...last, errorDetails };
+		return;
+	}
+	history.push({ type: 'response', parts: [], participant: 'dsh', errorDetails });
+}
+
+/**
+ * 计划 / 目标 / Todo / Skill / 附件 → 追加到最后一条 response（没有就单开）。
  *
  * 这些是快照级状态，不属于某一条消息；放在尾部保证用户一眼能看到当前进度与提醒。
+ * 额度提示不在这里：它是 response 级 `errorDetails.isQuotaExceeded`（见 `applyQuotaNotice`）。
  */
 function appendExtras(extras: DshHistoryExtras, history: DshHistoryItem[]): void {
 	const parts: DshHistoryPart[] = [];
 	const push = (part: DshHistoryPart) => parts.push(part);
 
-	if (extras.quotaNotice !== undefined) {
-		push({ kind: 'warning', content: { value: `额度不足（${extras.quotaNotice.code}），请检查账号额度。` } });
-	}
 	if (extras.plan !== undefined) {
 		const state = extras.plan.active ? (extras.plan.pending ? '计划模式（等待确认）' : '计划模式已启用') : '计划模式未启用';
 		push({ kind: 'info', content: { value: state } });
@@ -226,7 +330,7 @@ function appendPending(pending: readonly DshHistoryPending[], history: DshHistor
 	history.push({ type: 'response', parts, participant: 'dsh' });
 }
 
-function appendNode(node: DshChatNode, parts: DshHistoryPart[]): void {
+function appendNode(node: DshChatNode, parts: DshHistoryPart[], settledCallIds: ReadonlySet<string>): void {
 	switch (node.kind) {
 		case 'assistant': {
 			for (const block of node.blocks) {
@@ -235,27 +339,30 @@ function appendNode(node: DshChatNode, parts: DshHistoryPart[]): void {
 				} else if (block.kind === 'reasoning') {
 					parts.push({ kind: 'thinking', value: block.text });
 				} else if (block.kind === 'tool-call') {
-					parts.push({ kind: 'markdownContent', content: { value: `\`${block.name}\`` } });
+					// 已经有结果的调用由 tool-result 节点画成完整工具卡，这里不再重复一行。
+					if (!settledCallIds.has(block.callId)) {
+						parts.push(toolInvocationOf(block.callId, block.name, block.argsRaw, undefined));
+					}
 				}
 			}
 			return;
 		}
 		case 'tool-call':
-			parts.push({ kind: 'markdownContent', content: { value: `\`${node.name}\`` } });
+			if (!settledCallIds.has(node.callId)) {
+				parts.push(toolInvocationOf(node.callId, node.name, argsTextOf(node.argsRaw, node.args), undefined));
+			}
 			return;
-		case 'tool-result': {
-			const text = textOf(node.content);
-			parts.push({ kind: 'markdownContent', content: { value: text === '' ? `工具 ${node.name} 已完成` : text } });
+		case 'tool-result':
+			parts.push(toolInvocationOf(node.callId, node.name, argsTextOf(node.call?.argsRaw, node.args), node));
+			for (const child of node.subCalls) {
+				appendNode(child, parts, settledCallIds);
+			}
 			return;
-		}
 		case 'command': {
 			const line = [node.name ?? '', node.args ?? ''].filter(part => part !== '').join(' ');
 			parts.push({ kind: 'markdownContent', content: { value: `\`/${line}\`` } });
 			return;
 		}
-		case 'turn-error':
-			parts.push({ kind: 'markdownContent', content: { value: `> 出错：${node.message}` } });
-			return;
 		case 'turn-max-tokens':
 			parts.push({ kind: 'markdownContent', content: { value: '> 本轮达到 token 上限' } });
 			return;
@@ -278,6 +385,47 @@ function appendNode(node: DshChatNode, parts: DshHistoryPart[]): void {
 			return;
 		default:
 			return;
+	}
+}
+
+/**
+ * 一条工具调用 → 原生 `toolInvocationSerialized`。
+ *
+ * 历史没有运行中状态，一律 `isComplete: true`；输入输出塞进 `simpleToolInvocation`
+ * （`resultDetails` 只收 URI / Location / 输入输出详情，放不下纯文本）。
+ */
+function toolInvocationOf(callId: string, name: string, input: string, result: DshToolResultNode | undefined): DshToolInvocationPart {
+	const output = result === undefined ? '' : textOf(result.content);
+	return {
+		kind: 'toolInvocationSerialized',
+		toolCallId: callId,
+		toolId: name,
+		source: INTERNAL_TOOL_SOURCE,
+		invocationMessage: name,
+		originMessage: undefined,
+		pastTenseMessage: result !== undefined && result.isError ? `${name} 失败` : `${name} 完成`,
+		isComplete: true,
+		isConfirmed: undefined,
+		presentation: undefined,
+		...(input === '' && output === ''
+			? {}
+			: { toolSpecificData: { kind: 'simpleToolInvocation' as const, input, output } }),
+		...(result?.isError === true ? { resultError: result.error?.reason ?? result.error?.code ?? true } : {}),
+	};
+}
+
+/** 工具参数文本：优先用原始 JSON 字符串，否则把已解析的 args 序列化。 */
+function argsTextOf(argsRaw: string | undefined, args: unknown): string {
+	if (typeof argsRaw === 'string' && argsRaw !== '') {
+		return argsRaw;
+	}
+	if (args === undefined) {
+		return '';
+	}
+	try {
+		return JSON.stringify(args);
+	} catch {
+		return '';
 	}
 }
 

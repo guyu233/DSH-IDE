@@ -11,7 +11,7 @@
 import { Emitter, Event } from '../../../../base/common/event.js';
 import { Disposable } from '../../../../base/common/lifecycle.js';
 import { IDshClientService } from '../../../../platform/dshClient/common/dshClientService.js';
-import { validateDshIdeLoadOlderResult, type DshIdeDeliverableView, type DshIdeImageAttachmentRef, type DshIdeLoadOlderResult, type DshIdePendingItem, type DshIdeQuotaNotice, type DshIdeViewSnapshot, type DshIdeWaterfallNotice } from '../../../../platform/dshClient/common/dshIdeProtocol.js';
+import { validateDshIdeLoadOlderResult, type DshIdeDeliverableView, type DshIdeGoalView, type DshIdeImageAttachmentRef, type DshIdeLoadOlderResult, type DshIdePendingItem, type DshIdePlanView, type DshIdeQuotaNotice, type DshIdeSkillView, type DshIdeTodoView, type DshIdeViewSnapshot, type DshIdeWaterfallNotice } from '../../../../platform/dshClient/common/dshIdeProtocol.js';
 import { DshChatModel, type DshChatNode, type DshHistoryStatus } from './dshChatModel.js';
 
 /** 下拉里的一个模型选项。 */
@@ -95,6 +95,11 @@ export class DshChatSession extends Disposable implements IDshChatSession {
 	private _deliverables: readonly DshIdeDeliverableView[] = [];
 	private _attachments: readonly DshIdeImageAttachmentRef[] = [];
 	private _quotaNotice: DshIdeQuotaNotice | undefined;
+	/** typed 视图里的计划 / 目标 / Todo / 技能（单一真源，面板只读）。 */
+	private _plan: DshIdePlanView | undefined;
+	private _goal: DshIdeGoalView | undefined;
+	private _todos: readonly DshIdeTodoView[] = [];
+	private _skills: readonly DshIdeSkillView[] = [];
 	/** typed `pending` 的当前清单。 */
 	private _pendingView: readonly DshIdePendingItem[] = [];
 
@@ -155,6 +160,24 @@ export class DshChatSession extends Disposable implements IDshChatSession {
 
 	quotaNotice(): DshIdeQuotaNotice | undefined {
 		return this._quotaNotice;
+	}
+
+	/** 计划模式状态；`undefined` 表示这次 follow 没带投影。 */
+	plan(): DshIdePlanView | undefined {
+		return this._plan;
+	}
+
+	/** 当前目标；`undefined` 表示未创建目标（不伪造空目标）。 */
+	goal(): DshIdeGoalView | undefined {
+		return this._goal;
+	}
+
+	todos(): readonly DshIdeTodoView[] {
+		return this._todos;
+	}
+
+	skills(): readonly DshIdeSkillView[] {
+		return this._skills;
 	}
 
 	/**
@@ -223,6 +246,10 @@ export class DshChatSession extends Disposable implements IDshChatSession {
 		this._deliverables = [];
 		this._attachments = [];
 		this._quotaNotice = undefined;
+		this._plan = undefined;
+		this._goal = undefined;
+		this._todos = [];
+		this._skills = [];
 		this._onDidChangePending.fire([]);
 		// extras 也被清空：必须通知，否则复用同一个共享会话的 content 会一直显示旧交付物。
 		this._onDidChangeExtras.fire();
@@ -267,12 +294,24 @@ export class DshChatSession extends Disposable implements IDshChatSession {
 		const nextDeliverables = view.deliverables ?? [];
 		const nextAttachments = view.attachments ?? [];
 		const nextQuota = view.quotaNotice;
+		const nextPlan = view.plan;
+		const nextGoal = view.goal;
+		const nextTodos = view.todos ?? [];
+		const nextSkills = view.skills ?? [];
 		const extrasChanged = !sameDeliverables(this._deliverables, nextDeliverables)
 			|| !sameAttachments(this._attachments, nextAttachments)
-			|| !sameQuota(this._quotaNotice, nextQuota);
+			|| !sameQuota(this._quotaNotice, nextQuota)
+			|| !samePlan(this._plan, nextPlan)
+			|| !sameGoal(this._goal, nextGoal)
+			|| !sameTodos(this._todos, nextTodos)
+			|| !sameSkills(this._skills, nextSkills);
 		this._deliverables = nextDeliverables;
 		this._attachments = nextAttachments;
 		this._quotaNotice = nextQuota;
+		this._plan = nextPlan;
+		this._goal = nextGoal;
+		this._todos = nextTodos;
+		this._skills = nextSkills;
 		if (extrasChanged) {
 			this._onDidChangeExtras.fire();
 		}
@@ -507,4 +546,58 @@ function sameQuota(
 		return left === right;
 	}
 	return left.code === right.code && left.seq === right.seq;
+}
+
+/** 计划状态是否与上一帧相同。 */
+function samePlan(left: DshIdePlanView | undefined, right: DshIdePlanView | undefined): boolean {
+	if (left === undefined || right === undefined) {
+		return left === right;
+	}
+	return left.active === right.active && left.pending === right.pending;
+}
+
+/** 目标是否与上一帧相同（逐字段比较，避免目标进度变化被静默吞掉）。 */
+function sameGoal(left: DshIdeGoalView | undefined, right: DshIdeGoalView | undefined): boolean {
+	if (left === undefined || right === undefined) {
+		return left === right;
+	}
+	return left.roundsStarted === right.roundsStarted
+		&& left.createdAt === right.createdAt
+		&& left.updatedAt === right.updatedAt
+		&& left.activation === right.activation
+		&& left.goal.id === right.goal.id
+		&& left.goal.revision === right.goal.revision
+		&& left.goal.objective === right.goal.objective
+		&& left.goal.phase === right.goal.phase
+		&& left.goal.maxGoalRounds === right.goal.maxGoalRounds
+		&& left.goal.blockedReason?.code === right.goal.blockedReason?.code
+		&& left.goal.blockedReason?.message === right.goal.blockedReason?.message;
+}
+
+/** Todo 列表是否与上一帧相同。 */
+function sameTodos(left: readonly DshIdeTodoView[], right: readonly DshIdeTodoView[]): boolean {
+	if (left.length !== right.length) {
+		return false;
+	}
+	for (let i = 0; i < left.length; i++) {
+		if (left[i].content !== right[i].content || left[i].status !== right[i].status) {
+			return false;
+		}
+	}
+	return true;
+}
+
+/** 技能列表是否与上一帧相同。 */
+function sameSkills(left: readonly DshIdeSkillView[], right: readonly DshIdeSkillView[]): boolean {
+	if (left.length !== right.length) {
+		return false;
+	}
+	for (let i = 0; i < left.length; i++) {
+		const a = left[i];
+		const b = right[i];
+		if (a.name !== b.name || a.description !== b.description || a.whenToUse !== b.whenToUse) {
+			return false;
+		}
+	}
+	return true;
 }

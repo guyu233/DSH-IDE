@@ -22,6 +22,7 @@ import { CommandsRegistry } from '../../../../platform/commands/common/commands.
 import { IChatSession, IChatSessionContentProvider, IChatSessionHistoryItem, IChatSessionsService } from '../../chat/common/chatSessionsService.js';
 import { DshChatSession, dshChatSessionFor } from './dshChatSession.js';
 import { toHistory } from './dshChatHistory.js';
+import type { DshHistoryExtras } from './dshChatHistory.js';
 import { IDshClientService } from '../../../../platform/dshClient/common/dshClientService.js';
 import { dshSessionIdFromResource } from './dshAgentSessionsController.js';
 
@@ -49,18 +50,10 @@ export class DshChatSessionContent extends Disposable implements IChatSession {
 		super();
 		this._session = session;
 		const rebuild = () => {
-			this._history = toHistory(session, session.pending(), {
-				deliverables: session.deliverables(),
-				attachments: session.attachments(),
-				quotaNotice: session.quotaNotice(),
-			}) as readonly IChatSessionHistoryItem[];
+			this._history = toHistory(session, session.pending(), extrasOf(session)) as readonly IChatSessionHistoryItem[];
 			this._onDidChangeHistory.fire(this._history);
 		};
-		this._history = toHistory(session, session.pending(), {
-			deliverables: session.deliverables(),
-			attachments: session.attachments(),
-			quotaNotice: session.quotaNotice(),
-		}) as readonly IChatSessionHistoryItem[];
+		this._history = toHistory(session, session.pending(), extrasOf(session)) as readonly IChatSessionHistoryItem[];
 		this._register(session.onDidChangeNodes(rebuild));
 		this._register(session.onDidChangeHistory(rebuild));
 		// 待决议项也必须进 history，否则审批 / 问卷卡在原生面板里根本不出现。
@@ -91,6 +84,24 @@ export class DshChatSessionContent extends Disposable implements IChatSession {
 	get isDisposed(): boolean {
 		return this._store.isDisposed;
 	}
+}
+
+/**
+ * 把会话状态里的 typed extras（交付物 / 附件 / 额度 / 计划 / 目标 / Todo / 技能）收成一份。
+ *
+ * 集中在唯一入口：content provider 的两处构造历史上曾各写一遍，漏传过
+ * `plan/goal/todos/skills`（手册 §9.5 的 2-A 记录的真缺陷）。
+ */
+function extrasOf(session: DshChatSession): DshHistoryExtras {
+	return {
+		deliverables: session.deliverables(),
+		attachments: session.attachments(),
+		quotaNotice: session.quotaNotice(),
+		plan: session.plan(),
+		goal: session.goal(),
+		todos: session.todos(),
+		skills: session.skills(),
+	};
 }
 
 /**

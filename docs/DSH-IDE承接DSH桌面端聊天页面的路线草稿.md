@@ -4,7 +4,7 @@
 >
 > 分析日期：2026-11-16。
 >
-> 参考：`docs/DSH-core内容进入桌面前端的全部入口.md`、DSH 源码 `E:/deepseek-harness/`、当前 DSH-IDE 源码 `E:/DSH-IDE/src/`。
+> 参考：`docs/DSH-core内容进入桌面前端的全部入口.md`、`docs/DSH-IDE内容接收与ChatSession面板架构分析.md`、`docs/DSH聊天页面全量构成与插件显示机制.md`、DSH 源码 `E:/deepseek-harness/`、当前 DSH-IDE 源码 `E:/DSH-IDE/src/`。
 
 ---
 
@@ -15,9 +15,10 @@
 **在现有原生 chat 面板（`dshChatSession.ts` / `dshChatModel.ts`）上改造，只承接 DSH 源码内置的官方聊天内容。**
 
 - 不用 WebviewView，不在 IDE 里跑 DSH Web renderer。
-- 不做 slot 化，不做描述性 slot registry，不做规则表。
+- 不引入 DSH 的 React slot 运行时，不加载插件 UI bundle。
 - 不扫描非官方插件资源，不做插件内容告警。
 - 非官方插件产生的额外效果一律过滤，不在 IDE chat 中显示。
+- **渲染采用"翻译层"方案**：把 DSH 节点数据翻译成 VS Code 原生 content kind，用 VS Code 原生模具显示，保留 VS Code 原生视觉风格（详见第 5 章）。
 
 ### 0.2 目标基线
 
@@ -33,7 +34,9 @@
 | 插件资源扫描 / `clientModules` 软依赖 / slot 名静态扫描 | 复杂度高，收益不在目标内 |
 | Cordis inspect 活页面查询 slot / props | 需跑 client runtime，与选定路线冲突 |
 | WebviewView 承载 DSH Web UI（重版 B） | 等于新建第二套前端运行时，放弃 |
-| 轻量 slot / 描述性 slot 投影 / 通用卡片规则表 | 放弃自动扩展，改为逐类写死 |
+| 轻量 slot / 描述性 slot 投影 / 通用卡片规则表 | 不引入第二套 UI 运行时 |
+| 把 VS Code 渲染工厂重写成 slot 等价注册表 | 用户目标是"原生风格正确渲染"而非"像素级还原/插件可扩展"，注册表属过度设计（见 5.4） |
+| 卡片像素级还原 DSH 外观 | 用户明确不做，保留 VS Code 原生风格更好 |
 
 ### 0.4 判别标准
 
@@ -41,7 +44,17 @@
 
 1. **数据承接**：Host 侧拿到 DSH core 产生的官方内容。
 2. **投影承接**：经唯一 `dshIde` 通道，以契约允许的形状送到 renderer。
-3. **UI 承接**：IDE chat 视图把它渲染出来并提供交互。
+3. **UI 承接**：翻译层把 DSH 节点映射成原生 content kind，原生列表渲染出来并提供交互。
+
+### 0.5 关键澄清：渲染目标是"原生风格"，不是"像素级还原"
+
+用户已明确：
+
+> "让卡片长得和 DSH 一模一样不是我的目标……相反要是保留一些 VS Code 原生的风格更好。"
+
+因此本方案的核心不是"改造模具"，而是"**把 DSH 的数据翻译成 VS Code 模具认识的格式**"。改的是**数据层（driver / 翻译层）**，不是 UI 层。验收标准是"不丢内容、能交互、不串不卡"，而不是"长得像"。
+
+DSH 特有但 VS Code 无对应的纯装饰（鲸鱼运行动画、TurnNavigator、PixelWhale、onboarding 等）本轮不做，详见第 6 章。图标全局替换是独立议题，见第 7 章。
 
 ---
 
@@ -118,6 +131,8 @@
 | 附件、交付物、Plan/Goal/Todo/Skill 卡片 | 无投影、无渲染器 |
 | token delta 流式渲染 | frame 是快照式 |
 | DSH 原生事件 allowlist 任意订阅、Electron IPC | 只消费过滤后的 frame/notice；IDE 跑在 VS Code Electron 外壳 |
+
+**最关键的一条现状**（见 `DSH-IDE内容接收与ChatSession面板架构分析.md:14`）：**DSH 消息正文当前不显示**——`dshChatModelDriver.ts:6-7` 明确停用，节点模型没有对应的 DOM part；当前聊天列表渲染消费的是原生 `IChatViewModel`，不是 `DshChatNode`。这正是第 5 章翻译层要解决的核心问题。
 
 ---
 
@@ -238,17 +253,28 @@
 当前 `IDshChatSession` 只有 13 个方法（`:39-74`），需补：
 
 - `submit(text, attachments)`、`addAttachment/removeAttachment`
-- `forkAt(seq)` / `loadThrough(seq)`、`search(query)`、`resume/fork/rewind`
+- `resume/fork/rewind`、`search(query)`、历史分页（`loadOlder` / `throughSeq`）
 - `deliverables()`、`plan()/goal()/skills()`、`tokenUsageDelta()`
 - 全量 `pending()` 与多选支持
 
+方法命名以《DSH-IDE改造开发手册》与层 1 契约为准，不另造 `forkAt` / `loadThrough` 别名。
+
 移除 renderer 自己从裸 follow 帧拼节点的旧逻辑，直接消费层 1 的结构化会话视图。代码遵循 VS Code 风格：制表符、单引号、分号、`I` 前缀接口、`_` 前缀私有成员、`DisposableStore`/`this._register`、错误走 `onUnexpectedError`。
 
-### 4.4 层 4：chat 视图补 UI
+### 4.4 层 4：chat 视图接原生渲染（翻译层，非自绘）
 
 目录：`src/vs/workbench/contrib/dsh/browser/` 及 chat contribution。
 
-按 §3 逐类写死渲染器（不做通用规则表）：附件缩略图/上传/移除、交付物与工作区变更卡、Plan/Goal/Todo/Skill 卡、reasoning 展开体、turn 级 token/usage 面板、quota notice、命令卡、完整审批/问卷（多选）。`forkAt`/`openFile`/`openExternal` 接 VS Code `IOpenerService` / `IWorkbenchFileService`。复用 codicons、主题样式、列表/树组件；Mermaid 与 Markdown 完整保留。
+**核心**：恢复 `dshChatModelDriver.ts` 那条线，但做对一件事——把 `DshChatNode[]` **翻译**成原生 `ChatModel` 的 request/response + content kind，用原生 content part 显示。不改原生渲染器、不写新模具、不注册表。详细映射表与验收标准见第 5 章。
+
+要点：
+
+- 订阅 `DshChatSession.onDidChangeNodes`；
+- 写翻译函数 `DshChatNode[] → IChatRendererContent[]`（对照 5.3 映射表）；
+- 把翻译结果写进原生 ChatModel 的 response；
+- 输入发送入口从原生 `IChatService.sendRequest()` 切到 `DshChatSession.submit()`；
+- 附件走 `IChatAttachmentWidgetRegistry`；
+- 图标替换见第 7 章。
 
 ### 4.5 门禁同步
 
@@ -258,7 +284,246 @@
 
 ---
 
-## 5. 实施顺序与优先级
+## 5. Chat / Session 面板改造详述（翻译层方案）
+
+本章是本次讨论的核心产出：解释"两边渲染体系的差别是什么、为什么选翻译层、具体怎么映射、怎么验收、session 面板怎么改"。
+
+### 5.1 两边渲染体系的本质差别
+
+用"搭积木 vs 固定模具"来理解：
+
+**DSH = 自由拼装（无限积木）**
+
+DSH 用 React + slot 系统渲染聊天页。规则是"想显示一种新东西，写一个 React 卡片组件注册进 slot 就行"：
+
+- 读文件工具 → 注册 `ReadRow`；运行命令 → `BashRow`；审批 → `ApprovalCard`；思考折叠 → `ReasoningRow`。
+- keyed slot `conversation.chat.node`（按节点类型）、`tool.call.toolview`（按工具名）负责派发（`DSH聊天页面全量构成与插件显示机制.md:881-889`）。
+- 卡片可任意嵌套、折叠、定制外观，因为每个卡就是一个 React 组件，组件里可以再放组件。
+
+**VS Code = 固定模具（写死的抽屉）**
+
+VS Code 的聊天渲染链是封闭的：
+
+- VM item 只有三种：request / response / pending divider（`chatViewModel.ts:96`、`:386-388`）。
+- 内容类型是封闭联合 `IChatRendererContent`（`chatViewModel.ts:203`），没有 `custom` / `part` 字段。
+- 渲染是硬编码 `if (content.kind === '...')` 工厂（`chatListRenderer.ts:4568-4653`），未知 kind 落到 `renderNoContent`（`:4653`）。
+- 全仓搜不到 `registerChatRenderer` / `IChatRenderer` / `registerContentPart` 注册表。
+
+一句话：**DSH 想画什么画什么；VS Code 只能用提前定好的那几种模具，加新种类要改 VS Code 自己的代码。**
+
+### 5.2 一个具体例子：审批卡
+
+**在 DSH 里**：
+
+```
+收到 approval/request 事件
+  → ui-approval 插件写一个 ApprovalCard（React 组件）
+  → 注册到审批 slot
+  → 界面出现一张审批卡，长什么样由插件决定
+```
+
+**在 DSH-IDE（VS Code 原生）里**：
+
+```
+收到审批数据
+  → 判断是审批
+  → 翻译成原生 confirmation kind（chatListRenderer.ts:4585）
+  → 用 VS Code 已有的确认卡显示
+```
+
+显示出来是 **VS Code 风格的确认卡**，不是 DSH 的 `ApprovalCard`。这正是用户想要的（保留 VS Code 原生风格）。
+
+### 5.3 翻译层映射表（DshChatNode → 原生 content kind）
+
+这是要实现的全部映射。标"已接"的两项当前已工作，不用动；其余是翻译层要做的事。
+
+| DSH-Core 入口内容 | DshChatNode / 数据 | 原生 content kind | 显示效果 | file:line |
+|---|---|---|---|---|
+| §4.1 正文 | `DshAssistantMessageNode` / `DshUserMessageNode` | `markdownContent` | 原生 Markdown 气泡 | `chatListRenderer.ts:4593` |
+| §4.1 思考 | assistant block 里的 reasoning | `thinking` | 原生可折叠思考卡 | `:4638` |
+| §4.3 工具调用 | `DshToolCallBlock` / `DshToolResultNode` | `toolInvocation` | 原生工具卡，自带展开 | `:4603` |
+| §4.6 审批 | waterfall pending | `confirmation` | 原生确认卡，可点允许/拒绝 | `:4585` |
+| §4.6 问卷 | waterfall pending | `questionCarousel` | 原生多选卡 | `:4615` |
+| §4.7 模型/权限 | `composerState` | 原生模型选择器 | 已接（DshLanguageModelProvider） | `dshLanguageModelProvider.ts:131-170` |
+| §4.4 变更文件 | deliverables | `changesSummary` / `multiDiffData` | 原生变更摘要 | `:4619` / `:4570` |
+| §4.9 错误/状态 | `DshTurnErrorNode` | `errorDetails` / `warning` | 原生错误行 | `:4611` / `:4587` |
+| §4.9 running | session status | `working` | 原生进度提示 | `:4577` |
+| §4.10 Plan | plan projection | `planReview` | 原生计划卡 | `:4617` |
+| §4.10 Todo | todo 工具结果 | 原生 todo 列表 | 原生列表 | `chatTodoListWidget.ts:59` |
+| §4.5 附件 | attachment ref | `IChatAttachmentWidgetRegistry` | 原生附件 chip | `chatAttachmentWidgetRegistry.ts:35-43` |
+| §4.2 会话列表 | `listSessions` | `DshAgentSessionsController` | 已接 | `dshAgentSessionsController.ts:75` |
+
+### 5.4 为什么不做"注册表重构"
+
+讨论中曾提出：把 VS Code 硬编码工厂改造成"内容部件渲染器注册表"（renderer registry / content part factory registry），使其像 DSH slot 一样可注册拼装。这在专业上叫"注册表 + 工厂方法模式"。
+
+结论：**不做**。理由：
+
+- 用户目标是"正确渲染各类消息、保留 VS Code 原生风格"，不是"像素级还原"或"插件可扩展"。
+- 注册表是为"便于扩展新卡类型"服务的；本路线只承接固定的官方内容类型，映射表（5.3）写死即可，不需要运行时注册机制。
+- 注册表要改 `chatViewModel.ts:203` 联合类型 + `chatListRenderer.ts:4568-4653` 工厂，属高侵入，破坏上游 diff。
+
+因此采用最小方案：**只写翻译层，不动渲染器**。若将来用户改主意要"插件可扩展/像素还原"，再重新评估注册表。
+
+### 5.5 验收标准：什么叫"正确渲染"
+
+不是长得像，而是三条：
+
+1. **不丢内容**：DSH 里有的消息、工具、审批、计划，IDE 里都出现（哪怕外观不同）。
+2. **能交互**：审批能点、工具能展开、问卷能选，且操作能回传 DSH core（走 `answerApproval` / `answerQuestion` 等）。
+3. **不串不卡**：滚动/重渲染不错位，断线时保持上次一致状态（现有 `DshIdeConsumer.fail-closed` 已保证）。
+
+### 5.6 实施顺序（翻译层）
+
+1. 恢复 `dshChatModelDriver.ts`，订阅 `DshChatSession.onDidChangeNodes`。
+2. 写翻译函数 `DshChatNode[] → IChatRendererContent[]`（对照 5.3）。
+3. 把翻译结果写进原生 `ChatModel` 的 response。
+4. 发送入口从原生 `IChatService.sendRequest()` 切到 `DshChatSession.submit()`（`dshChatSession.ts:264-275` 已有实现，当前无 UI 调用方）。
+5. 附件接 `IChatAttachmentWidgetRegistry`。
+6. 逐类验收：正文 → 工具 → 审批 → 计划。
+7. 跑 `tsc --noEmit` + 相关测试；真机 GUI 由用户验证。
+
+### 5.7 Session 面板改造
+
+**现状**：Session 面板已能工作。`DshAgentSessionsController` 把 `listSessions` 转成 `dsh` scheme 的 `IChatSessionItem`，原生 `AgentSessionsControl` 渲染，点击 rebind（`DSH-IDE内容接收与ChatSession面板架构分析.md:10.3`、`dshAgentSessionsController.ts:75,97-106`）。
+
+**要改的缺口**（都是数据接线 + 控件替换，无渲染体系问题）：
+
+| 缺口 | 改法 | 依据 |
+|---|---|---|
+| New Session 按钮名不副实 | 接到 `DshIdeSessionsService.createSession()`，当前只执行 `workbench.action.chat.open` | `chatViewPane.ts:904-912`、`dshIdeSessionsService.ts:99-110` |
+| 会话图标是 `Codicon.comment` | 换 DSH 图标（见第 7 章） | `dshAgentSessionsController.ts:189-209` |
+| 搜索 | 接 `searchSessions`，用原生 `AgentSessionsFilter` | `dshIdeSessionsService.ts:130-139` |
+| running/unread 状态 | 已有 `onDidSessionNotice → applyRunning`，补 unread 展示 | `dshAgentSessionsController.ts:90-96` |
+| 归档/恢复 | 接 `archiveSession` / `unarchiveSession` 到会话右键菜单 | 协议已有 method |
+
+**两套会话链的取舍**：当前显示走 `DshAgentSessionsController → IChatSessionsService → AgentSessionsControl`；另有 `DshIdeSessionsService + DshIdeSessionListModel + DshClientSessionListSource` 完整链未被 UI 消费（`DSH-IDE内容接收与ChatSession面板架构分析.md:10.4`）。翻译层路线以 `DshAgentSessionsController` 为显示主链，用 `DshIdeSessionsService` 补 create/search/archive 等操作。
+
+---
+
+## 6. DSH 特有内容分级（对翻译层的影响）
+
+按"VS Code 原生有没有对应模具"分级，决定哪些写新 kind、哪些复用、哪些放弃。
+
+### 6.1 A 级：VS Code 完全没有，本轮放弃或降级
+
+| DSH 特有 | 是什么 | 处理 | 出处 |
+|---|---|---|---|
+| TurnNavigator / TurnMark | 右侧虚拟 turn 导轨 | 放弃（纯装饰） | `DSH聊天页面全量构成与插件显示机制.md:240` |
+| RunningWhaleTail + RunningStatus 动画 | 鲸尾运行动画 | 降级为原生 `working`，放弃动画 | 同上 `:245,335` |
+| PixelWhale canvas | 首页鲸鱼逐帧动画 | 放弃（纯装饰） | 同上 `:202,332` |
+| onboarding 全套步骤 | 首次引导 9 步 | 放弃（非聊天内容） | 同上 `:340,557-571` |
+| ReviewTab 评审侧栏 | 右侧栏看 turn 前后 diff | 放弃（可用 diff 编辑器替代） | 同上 `:465` |
+| ImageGallery / ImageLightbox | 图片画廊/大图灯箱 | 降级为原生图片展示 | 同上 `:360,446` |
+| ContextMeter | 上下文用量条/环 | 可后续做，非 P0 | 同上 `:285` |
+| TurnUsagePanel 明细 | token 用量明细 | 可后续做，非 P0 | 同上 `:244` |
+| KaTeX 公式渲染 | 行内/块级公式 | 可后续做，非 P0；**注意不是 Mermaid** | 同上 `:640-645` |
+
+### 6.2 B 级：VS Code 有近似模具，改一改（复用原生 kind）
+
+| DSH 卡 | 原生模具 | 差别 |
+|---|---|---|
+| 思考折叠卡 `ReasoningRow` | `thinking`（`:4638`） | 原生已有折叠，DSH 分组标题更丰富 |
+| 步骤分组 `ChatGroupSeat` | `ChatCollapsibleContentPart`（`:31`）+ 嵌套（`:3542-3563`） | 原生能嵌套，DSH 按 14 类活动组合文案 |
+| 工具卡 12 种 | `toolInvocation`（`:4603`）+ `ToolDetails` | 原生通用工具卡，DSH 视觉不同（用户接受） |
+| 审批卡 `ApprovalCard` | `confirmation`（`:4585`） | 原生无 DSH 警告条/始终允许 |
+| 计划卡 `PlanCard` | `planReview`（`:4617`） | 原生有 plan，DSH 多 plan mode chip |
+| 变更文件 `ChangedFiles` | `changesSummary`（`:4619`）+ `multiDiffData`（`:4570`） | 原生有聚合变更 |
+| 问卷 `QuestionComposer` | `questionCarousel`（`:4615`） | 原生有多选轮播 |
+| 附件 `FileCard/MessageImage` | `IChatAttachmentWidgetRegistry` | 原生有附件 chip 注册点 |
+
+### 6.3 C 级：VS Code 已有，直接映射（工作量最小）
+
+正文 Markdown → `markdownContent`（`:4593`）；代码块/diff → `codeBlockPart` / `DiffEditorPool`；用户消息 → request VM；错误/警告 → `errorDetails`（`:4611`）/ `warning`（`:4587`）。
+
+### 6.4 重要澄清：Mermaid 不是 DSH 聊天页特性
+
+之前草稿写过"保留 Mermaid"，需纠正：**DSH 聊天页 Markdown 不含 Mermaid，公式用 KaTeX**（`DSH聊天页面全量构成与插件显示机制.md:647`、附录 C `:1091`）。VS Code 自身的 Mermaid 支持要保留（AGENTS.md 构建约束），但不属于"要承接的 DSH 内容"；真正要从 DSH 搬的是 KaTeX，列为 A 级可后续项。
+
+### 6.5 非卡片的特有内容（不进翻译层，但影响实现）
+
+- **i18n**：DSH 100% 走 `t('key')`（`:503`），VS Code 用 `localize`。新代码文案用 `localize`，内容可参考 DSH 字典（`:526-588`）。
+- **图标**：DSH 的 `dsw-icon-*` sprite 不引入，采用第 7 章全局 SVG mask 替换。
+- **子智能体递归**：DSH `ToolCallTree` 递归子调用（`:393`），VS Code 也有 subagent part（`:4555`），折叠策略不同，属 B 级最复杂项。
+
+---
+
+## 7. 图标全局替换方案（改 getCSS + SVG mask）
+
+用户明确："把所有图标换成 DSH 的，这个难也要做。" 本章给出系统方案，不去逐处改按钮。
+
+### 7.1 现状与机制
+
+**VS Code codicon = 字体字符**：
+
+- `codicon.css:6-10`：`@font-face` 加载 `codicon.ttf`。
+- `codicon.css:12-23`：`.codicon[class*='codicon-']` 用 16px codicon 字体渲染。
+- codicon 的可见字形来自动态生成的 `::before content`（PUA 码点），由 `iconsStyleSheet.ts:52` 生成规则。
+
+**DSH 图标 = SVG sprite**：
+
+- `artwork.ts:22` 的 `ICON_ARTWORK` 定义每个 glyph 的 `svg: (strokeWidth) => string`。
+- 描边风格（`<path stroke="currentColor">`），不是填充字形。
+- DSH-IDE 当前**没有** `dsw-icon-*` sprite 注入代码，src 里只有 `dsh-whale.svg` 等少数品牌资产。
+
+**全局单点**：所有 codicon CSS 都从 `getIconsStyleSheet().getCSS()` 生成，注入到 `<style id="codiconStyles">`（`workbenchThemeService.ts:187-196`、`iconsStyleSheet.ts:31-74`）。**改这一处即可全局替换，业务代码零改动。**
+
+### 7.2 方案选择：SVG mask，不换字体文件
+
+| 方案 | 做法 | 判断 |
+|---|---|---|
+| 换 `codicon.ttf` | SVG 转字体字形 | DSH 是 stroke 描边，字体是 fill 轮廓，转换易失真，不推荐 |
+| **改 `getCSS()` 用 SVG mask（选定）** | `::before` 用 `mask-image: url(data URI)` | 直接用 DSH SVG 原样，stroke 正常，颜色跟主题，推荐 |
+
+### 7.3 生成的 CSS 规则
+
+`iconsStyleSheet.ts:52` 原本：
+
+```css
+.codicon-search:before { content: '\e???'; font-family: codicon; }
+```
+
+命中 DSH 映射时改为：
+
+```css
+.codicon-search:before {
+  content: '';
+  display: inline-block;
+  width: 1em;
+  height: 1em;
+  background-color: currentColor;
+  -webkit-mask: url("data:image/svg+xml,...") center / contain no-repeat;
+  mask: url("data:image/svg+xml,...") center / contain no-repeat;
+  vertical-align: middle;
+}
+```
+
+两个关键细节：
+
+1. **SVG 内联成 data URI**：`getCSS()` 返回的是注入 `<style>` 的字符串，写文件路径会按文档 URL 解析而失效，必须用 `data:image/svg+xml,...`。
+2. **尺寸用 `1em` 不用固定 16px**：codicon 很多地方用 `font-size` 缩放图标，用 `1em` 才能继承缩放。
+
+**为什么能跟随主题色**：SVG 作为 mask 只取 alpha 通道形成形状，实际颜色来自 `background-color: currentColor`，它继承按钮文字色，自动适配浅色/深色/高对比度主题（HC 需实测）。
+
+### 7.4 实施步骤
+
+1. **构建脚本**：从 `artwork.ts:22` 的 `ICON_ARTWORK` 读每个 glyph，用 `strokeWidth=1`（regular）生成 SVG → URL-encoded data URI，产出 `dshIconDataUris.ts`（`{ glyphName: dataUri }`）。这是复用官方资源，不手绘，符合 AGENTS.md 资源复用优先。
+2. **映射表** `dshCodiconMap.ts`：`codicon id → DSH glyph`，如 `search→search-outline`、`plus→plus-outline`、`close→close-outline`、`copy→copy-outline`、`branch→branch-outline`、`check→check-outline`。只映射语义对得上的。
+3. **改 `getCSS()`**：查映射，命中输出 mask 规则，未命中保留原字体规则（fallback）。用 `css.inline` + `css.stringValue` 保证 data URI 特殊字符正确编码。
+4. **保留** `codicon.css:12-23` 的 `.codicon` 基础布局，只覆盖 `::before`。
+5. **验证**：浅色/深色/高对比度主题 + spin 动画 + 不同 `font-size` 场景。
+6. **门禁**：`tsc --noEmit` + 主题相关测试；改 `iconsStyleSheet.ts` 需同步 `dshIdeContract.ts:48-77` patch 点哈希。
+
+### 7.5 必须接受的事实
+
+- **混合状态**：codicon 有几百个（git/debug/scm/terminal…），DSH artwork 只有 100+ 个（聊天/会话/工具场景）。DSH 没有的图标保留 codicon 原样，最终是"DSH 图标 + 少量残留 codicon"，不是 100% 纯 DSH。
+- **stroke 风格统一**：替换后整款产品图标观感统一变成 DSH 细线风格，包括 VS Code 原生按钮。
+- **上游 diff**：改 `iconsStyleSheet.ts` 是核心文件，改动要最小化（只加查表分支），并同步契约门禁哈希。
+- **高对比度**：mask + currentColor 通常跟随，但要实测 HC 主题与 spin 动画。
+
+---
+
+## 8. 实施顺序与优先级
 
 **P0 — 聊天主闭环（不做则基本不可用）**
 
@@ -285,23 +550,26 @@
 1. 契约真源扩字段（层 1），同步 bump wire revision 与 endpoint 测试断言。
 2. 内核桥投影结构化会话（层 2），复用官方 assembler，不重写第二套。
 3. `DshChatSession` / `DshChatModel` 改消费结构化会话（层 3）。
-4. chat 视图按 §3 逐类补渲染器（层 4）。
-5. 每步跑 `tsc --noEmit` 和相关测试；真机验证由用户执行。
+4. 恢复翻译层（层 4）：`DshChatNode → IChatRendererContent`（见 5.6），输入切到 `submit()`。
+5. Session 面板缺口接线（见 5.7）。
+6. 图标全局替换（第 7 章）：构建脚本 → 映射表 → 改 `getCSS()` → 主题验证。
+7. 每步跑 `tsc --noEmit` 和相关测试；真机 GUI 验证由用户执行。
 
 ---
 
-## 6. 不变量与边界
+## 9. 不变量与边界
 
 - **身份**：bundle 插件、共用 `dshCtx`、唯一 `dshIde` 通道，不新建 Cordis 根/会话/协议。
 - **契约**：契约先行；`exactRecord` 白名单、`version` 严格 +1、gap 倒退 fail-closed 三条不变量不动。
-- **复用**：内核侧复用官方会话装配器；UI 复用 VS Code 组件与 codicons；保留原许可证与版权头。
+- **复用**：内核侧复用官方会话装配器；UI 复用 VS Code 原生 content part；图标复用 DSH 官方 artwork（第 7 章）；保留原许可证与版权头。
 - **风格**：VS Code 既有约定（制表符、单引号、分号、`I`/`_` 命名、`DisposableStore`、`onUnexpectedError`）。
-- **资源**：Mermaid 与 Markdown 完整保留；native 模块按 Electron 44.7.0 的 `NODE_MODULE_VERSION` 编译。
+- **资源**：VS Code 自身 Mermaid / Markdown 支持完整保留（构建约束）；DSH 聊天页用 KaTeX 而非 Mermaid（见 6.4）；native 模块按 Electron 44.7.0 的 `NODE_MODULE_VERSION` 编译。
 - **过滤**：非官方插件独有内容在内核桥层过滤，IDE 不感知、不告警。
+- **视觉**：卡片保留 VS Code 原生风格，不像素级还原 DSH；图标按第 7 章全局替换为 DSH SVG（混合状态，DSH 无对应者保留 codicon）。
 
 ---
 
-## 7. 待确认问题
+## 10. 待确认问题
 
 - `rewind` 当前官方落点为 null（`build/lib/test/dshIdeEndpoints.test.ts:48-52`），本阶段是否必须实现？若必须，需先在 DSH 侧确认可用的官方 remote/事件，不能凭 IDE 侧臆造。
 - §4.2 的 `resume/fork/rewind` 若官方基线本就不可用，IDE 侧是否只保留入口禁用态而不做实际调用？
