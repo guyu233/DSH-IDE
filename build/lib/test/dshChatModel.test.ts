@@ -324,3 +324,103 @@ test('非记录内容块不被丢弃（落 plugin 块并保留原值）', () => 
 		assert.equal(node.content[0].type, 'plugin');
 	}
 });
+
+test('prependPage inserts older records before the opening window and keeps seq order', () => {
+	const model = new DshChatModel();
+	const opening = snapshot([
+		entry(4, { type: 'user/message', data: { content: [{ type: 'text', text: 'now' }] } }),
+	]);
+	opening['hasMore'] = true;
+	model.accept(opening);
+	assert.equal(model.hasMore(), true);
+	assert.equal(model.firstSeq(), 4);
+
+	const outcome = model.prependPage({
+		records: [
+			entry(1, { type: 'turn/start', data: { turn: 1 } }),
+			entry(2, { type: 'user/message', data: { content: [{ type: 'text', text: 'earlier' }] } }),
+		] as readonly Readonly<Record<string, unknown>>[],
+		hasMore: false,
+	});
+
+	assert.equal(outcome.added, 1);
+	assert.equal(outcome.firstSeq, 1);
+	assert.equal(outcome.hasMore, false);
+	assert.equal(outcome.conflicts, 0);
+	assert.deepEqual(model.list.map(node => node.seq), [2, 4]);
+	const located = model.located;
+	assert.equal(located[0].node.seq, 2);
+	assert.equal(located[0].turn, 1, 'a prepended turn/start must locate the older user message');
+	assert.equal(located[1].turn, 1);
+	assert.equal(model.hasMore(), false);
+});
+
+test('prependPage skips records that are not strictly older and does not replace a conflicting seq', () => {
+	const model = new DshChatModel();
+	model.accept(snapshot([
+		entry(2, { type: 'user/message', data: { content: [{ type: 'text', text: 'kept' }] } }),
+		entry(3, { type: 'user/message', data: { content: [{ type: 'text', text: 'tail' }] } }),
+	]));
+	const outcome = model.prependPage({
+		records: [
+			entry(2, { type: 'user/message', data: { content: [{ type: 'text', text: 'replaced' }] } }),
+			entry(3, { type: 'user/message', data: { content: [{ type: 'text', text: 'tail' }] } }),
+			entry(1, { type: 'user/message', data: { content: [{ type: 'text', text: 'older' }] } }),
+		] as readonly Readonly<Record<string, unknown>>[],
+		hasMore: true,
+	});
+	assert.equal(outcome.added, 1);
+	assert.equal(outcome.conflicts, 0, 'seq >= firstSeq is ignored, not counted as a conflict');
+	assert.equal(model.list[0].seq, 1);
+	const kept = model.list[1];
+	assert.equal(kept.kind, 'user');
+	if (kept.kind === 'user') {
+		assert.deepEqual(kept.content, [{ type: 'text', text: 'kept' }]);
+	}
+});
+
+test('prependPage counts a same-seq payload mismatch inside one page and keeps the first event', () => {
+	const model = new DshChatModel();
+	const outcome = model.prependPage({
+		records: [
+			entry(1, { type: 'user/message', data: { content: [{ type: 'text', text: 'first' }] } }),
+			entry(1, { type: 'user/message', data: { content: [{ type: 'text', text: 'other' }] } }),
+		] as readonly Readonly<Record<string, unknown>>[],
+		hasMore: true,
+	});
+	assert.equal(outcome.conflicts, 1);
+	assert.equal(outcome.added, 1);
+	const node = model.list[0];
+	assert.equal(node.kind, 'user');
+	if (node.kind === 'user') {
+		assert.deepEqual(node.content, [{ type: 'text', text: 'first' }]);
+	}
+});
+
+test('an empty history page forces hasMore false', () => {
+	const model = new DshChatModel();
+	model.accept(snapshot([
+		entry(2, { type: 'user/message', data: { content: [{ type: 'text', text: 'only' }] } }),
+	]));
+	const outcome = model.prependPage({ records: [], hasMore: true });
+	assert.equal(outcome.hasMore, false);
+	assert.equal(model.hasMore(), false);
+	assert.equal(model.list.length, 1);
+});
+
+test('a later snapshot drops history events from the previous session window', () => {
+	const model = new DshChatModel();
+	model.prependPage({
+		records: [
+			entry(1, { type: 'user/message', data: { content: [{ type: 'text', text: 'old' }] } }),
+		] as readonly Readonly<Record<string, unknown>>[],
+		hasMore: true,
+	});
+	model.accept(snapshot([
+		entry(9, { type: 'user/message', data: { content: [{ type: 'text', text: 'fresh' }] } }),
+	]));
+	assert.equal(model.firstSeq(), 9);
+	assert.equal(model.list.length, 1);
+	assert.equal(model.list[0].seq, 9);
+	assert.equal(model.hasMore(), false);
+});

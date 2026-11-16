@@ -19,7 +19,9 @@
 
 import { Emitter, Event } from '../../../../base/common/event.js';
 import { Disposable } from '../../../../base/common/lifecycle.js';
+import { stableStringify } from '../../../../base/common/objects.js';
 import { indexLocations } from '../../../../platform/dshClient/common/dshIdeLocationIndex.js';
+import type { DshIdeLoadOlderPage } from '../../../../platform/dshClient/common/dshIdeProtocol.js';
 
 /**
  * DSH 的全部会话节点与内容块。
@@ -261,6 +263,17 @@ export interface DshChatChange {
 	readonly added: boolean;
 }
 
+/** 历史翻页请求的状态。模型不发请求，只保存会话层写入的值。 */
+export type DshHistoryStatus = 'idle' | 'loading' | 'error';
+
+/** `prependPage` 的结果。`conflicts` 是同 seq 载荷不一致、因而未替换的条数。 */
+export interface DshHistoryPrepend {
+	readonly added: number;
+	readonly firstSeq?: number;
+	readonly hasMore: boolean;
+	readonly conflicts: number;
+}
+
 /**
  * 会话帧解码器：produce DSH 的 `UserMessageNode` / `AssistantMessageNode`。
  *
@@ -280,6 +293,16 @@ export class DshChatModel extends Disposable {
 
 	/** 按 seq 升序的**原始事件流**：定位索引要从头扫，不能只看节点。 */
 	private readonly rawEvents: { seq: number; type: string; data: unknown }[] = [];
+
+	/**
+	 * 开口 snapshot 之前未知，允许再要一页。
+	 * snapshot / prependPage 用官方 `hasMore` 覆盖；空页强制 false，避免死循环。
+	 */
+	private _hasMore = true;
+	/** 翻页请求的状态。模型不发请求，只记下会话层报来的状态。 */
+	private _historyStatus: DshHistoryStatus = 'idle';
+	private readonly _onDidChangeHistory = this._register(new Emitter<void>());
+	readonly onDidChangeHistory: Event<void> = this._onDidChangeHistory.event;
 
 	/** 按 identity 索引：durable 用 `seq:<n>`，流式用 `stream:<attemptId>`。 */
 	private readonly nodes = new Map<string, DshChatNode>();
@@ -351,6 +374,101 @@ export class DshChatModel extends Disposable {
 		return changes;
 	}
 
+	/** 已加载事件里最小的 seq。没有事件时为 undefined，调用方省略 beforeSeq。 */
+	firstSeq(): number | undefined {
+		let min: number | undefined;
+		for (const event of this.rawEvents) {
+			if (min === undefined || event.seq < min) {
+				min = event.seq;
+			}
+		}
+		return min;
+	}
+
+	/** 官方分页是否还有更早的记录。 */
+	hasMore(): boolean {
+		return this._hasMore;
+	}
+
+	historyStatus(): DshHistoryStatus {
+		return this._historyStatus;
+	}
+
+	/** 会话层在发出 loadOlder 前后写入。相同状态不重复通知。 */
+	setHistoryStatus(status: DshHistoryStatus): void {
+		if (this._historyStatus === status) {
+			return;
+		}
+		this._historyStatus = status;
+		this._onDidChangeHistory.fire();
+	}
+
+	/**
+	 * 把一页更早的官方历史并进当前模型。
+	 *
+	 * `records` 与 opening snapshot 相同，是 `{ type:'event', event }`。
+	 * 只收 seq 严格小于当前最小 seq 的记录，插到 rawEvents 前面再投影，
+	 * 这样定位扫描仍然按 seq 升序。已有 seq 不覆盖；载荷不同只计数，不替换。
+	 */
+	prependPage(page: DshIdeLoadOlderPage): DshHistoryPrepend {
+		const floor = this.firstSeq();
+		const known = new Map(this.rawEvents.map(event => [event.seq, event]));
+		const accepted: Record<string, unknown>[] = [];
+		let conflicts = 0;
+		for (const record of page.records) {
+			if (!isRecord(record) || record['type'] !== 'event' || !isRecord(record['event'])) {
+				continue;
+			}
+			const event = record['event'];
+			const seq = numberOf(event['seq']);
+			const type = stringOf(event['type']);
+			if (seq === undefined || type === undefined) {
+				continue;
+			}
+			if (floor !== undefined && seq >= floor) {
+				continue;
+			}
+			const data = isRecord(event['data']) ? event['data'] : {};
+			const prior = known.get(seq);
+			if (prior !== undefined) {
+				if (prior.type !== type || stableStringify(prior.data) !== stableStringify(data)) {
+					conflicts++;
+				}
+				continue;
+			}
+			known.set(seq, { seq, type, data });
+			accepted.push(event);
+		}
+		accepted.sort((a, b) => (numberOf(a['seq']) ?? 0) - (numberOf(b['seq']) ?? 0));
+		for (const event of accepted) {
+			const seq = numberOf(event['seq'])!;
+			const type = stringOf(event['type'])!;
+			const data = isRecord(event['data']) ? event['data'] : {};
+			this.rawEvents.push({ seq, type, data });
+		}
+		this.rawEvents.sort((a, b) => a.seq - b.seq);
+		const changes: DshChatChange[] = [];
+		for (const event of accepted) {
+			changes.push(...this.applyDurable(event, false));
+		}
+		const hasMore = page.records.length === 0 ? false : page.hasMore;
+		const historyChanged = hasMore !== this._hasMore || this._historyStatus !== 'idle';
+		this._hasMore = hasMore;
+		this._historyStatus = 'idle';
+		if (changes.length > 0) {
+			this._onDidChange.fire(changes);
+		}
+		if (historyChanged) {
+			this._onDidChangeHistory.fire();
+		}
+		return {
+			added: changes.reduce((count, change) => count + (change.added ? 1 : 0), 0),
+			...(this.firstSeq() === undefined ? {} : { firstSeq: this.firstSeq() }),
+			hasMore: this._hasMore,
+			conflicts,
+		};
+	}
+
 	/** 换会话：旧会话的记录与流式状态全部作废。 */
 	clear(): void {
 		this.usage.inputTokens = 0;
@@ -359,13 +477,19 @@ export class DshChatModel extends Disposable {
 		this.usage.cacheWriteTokens = 0;
 		this.usageSeen = false;
 		this.nodes.clear();
+		this.rawEvents.length = 0;
 		this.attempts.clear();
 		this.settledAttempts.clear();
+		this._hasMore = true;
+		this._historyStatus = 'idle';
 		this._onDidReset.fire();
 	}
 
 	private applySnapshot(frame: Readonly<Record<string, unknown>>): readonly DshChatChange[] {
 		this.clear();
+		if (typeof frame['hasMore'] === 'boolean') {
+			this._hasMore = frame['hasMore'];
+		}
 		const records = Array.isArray(frame['records']) ? frame['records'] : [];
 		const changes: DshChatChange[] = [];
 		for (const record of records) {
@@ -392,8 +516,11 @@ export class DshChatModel extends Disposable {
 		return changes;
 	}
 
-	/** durable 事件：按 DSH 自己的事件类型分派；**任何**事件都先留 `raw`，再决定投影形状。 */
-	private applyDurable(event: Record<string, unknown>): readonly DshChatChange[] {
+	/**
+	 * durable 事件：按 DSH 自己的事件类型分派；**任何**事件都先留 `raw`，再决定投影形状。
+	 * `recordRaw` 为 false 时调用方已经按 seq 插好 rawEvents（历史页），这里只投影节点。
+	 */
+	private applyDurable(event: Record<string, unknown>, recordRaw = true): readonly DshChatChange[] {
 		const seq = numberOf(event['seq']);
 		if (seq === undefined) {
 			return [];
@@ -402,7 +529,7 @@ export class DshChatModel extends Disposable {
 		const data = isRecord(event['data']) ? event['data'] : {};
 		const time = numberOf(event['time']) ?? 0;
 		// 原始事件留档：定位索引要按 seq 顺序重扫（user/message 自己不带 turn）。
-		if (typeof type === 'string' && type !== '') {
+		if (recordRaw && typeof type === 'string' && type !== '') {
 			this.rawEvents.push({ seq, type, data });
 		}
 		const turn = numberOf(event['turn']) ?? numberOf(data['turn']) ?? 0;
