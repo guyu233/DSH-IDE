@@ -5,6 +5,10 @@
 export const DSH_IDE_ENDPOINT_ENV = 'DSH_IDE_ENDPOINT';   // Host Web origin，如 http://127.0.0.1:56188
 export const DSH_IDE_COOKIE_ENV = 'DSH_IDE_COOKIE';       // 已换取的 host cookie（name=value）
 export const DSH_IDE_LAUNCH_URL_ENV = 'DSH_IDE_LAUNCH_URL'; // 官方 launch URL（origin/?token=…）
+// Host 端点文件的绝对路径。DSH 每次重启都会换 pid，端口通常也会变（监听 0 端口时不一定变），
+// 因此 IDE 进程不能把启动时拿到的 origin 当成永久地址：失联后要重新读这个文件，
+// 拿新的 origin / launchUrl 再连一次。Host 侧每次发布都会覆写它（含新的 pid / port）。
+export const DSH_IDE_ENDPOINT_FILE_ENV = 'DSH_IDE_ENDPOINT_FILE';
 export const DSH_IDE_SESSION_ENV = 'DSH_IDE_SESSION';     // 本窗口要跟随的 DSH 会话 id（由开窗方决定）
 // 开窗时由 Host 预先取好的 `composerState` 快照（JSON）。IDE 第一帧就直接用它渲染
 // 模型 / 推理档 / 权限 / 预设，不再「先空着、等一次往返再变出来」。

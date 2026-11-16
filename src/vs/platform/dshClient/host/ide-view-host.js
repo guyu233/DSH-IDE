@@ -15,7 +15,7 @@
 //   approval/request 结果值：'allowed-once' | 'rejected' | 'cancelled' | 'unavailable'
 
 import { randomUUID } from 'node:crypto';
-import { projectDshIdeSessionList } from '../common/dshIdeSessionList.js';
+import { projectDshIdeSessionList, projectDshIdeWorkspaceSessions } from '../common/dshIdeSessionList.js';
 import { projectDshIdeCommandList } from '../common/dshIdeCommandList.js';
 import { buildDshIdeCommandLine, mapDshIdeCommandExecution } from '../common/dshIdeCommandLine.js';
 import { projectDshIdeArchiveSet } from '../common/dshIdeArchiveSet.js';
@@ -30,10 +30,15 @@ export const ALREADY_RESOLVED = 'ALREADY_RESOLVED';
 export const SESSION_SWITCHED = 'SESSION_SWITCHED';
 
 /**
- * 本桥接依赖的官方服务（缺任一即按 feature-unavailable 拒绝）。
- * 入口的顶层 inject 与延迟 ctx.inject 共同满足本表；延迟注入直接复用本表，避免清单漂移。
+ * 本桥接的**核心**依赖：缺任一即无法跟随会话，桥接拒绝建立。
+ *
+ * `workspaceRegistry` 故意不在本表里：它只被归档 / 取消归档 / 删除这三条边角方法用到，
+ * 而会话跟随、发送、批准、提问、模型切换都不需要它。把它列成硬依赖的后果是——
+ * 一旦某套 profile 没装载提供该服务的 `@deepseek-ai/dsh-workspace`，整个桥接永远不就绪，
+ * `ide/dispatch` 全量返回 "host bridge is not attached"，连聊天都开不了（真机实测）。
+ * 那三条边角方法改为调用时按需校验：缺服务只让该能力失败，不拖垮整个桥接。
  */
-export const REQUIRED_SERVICES = Object.freeze(['sessions', 'sessionController', 'workspaceRegistry']);
+export const REQUIRED_SERVICES = Object.freeze(['sessions', 'sessionController']);
 
 function coded(code, message, details) {
 	const error = new Error(message);
@@ -56,6 +61,25 @@ function service(ctx, name) {
 function optionalService(ctx, name) {
 	const value = typeof ctx.get === 'function' ? ctx.get(name) : undefined;
 	return value === undefined || value === null ? undefined : value;
+}
+
+function sectionValue(rows, namespace) {
+	if (!Array.isArray(rows)) {
+		return {};
+	}
+	const row = rows.find(item => item && (item.ns === namespace || item.namespace === namespace));
+	const value = row && typeof row.value === 'object' && row.value !== null ? row.value : {};
+	return value;
+}
+
+function transcriptViewOf(value) {
+	if (value === 'compact' || value === 'standard' || value === 'detailed' || value === 'verbose') {
+		return value;
+	}
+	if (value === 'normal' || value === 'expanded') {
+		return 'detailed';
+	}
+	return 'standard';
 }
 
 function optionalCall(ctx, name, method) {
@@ -154,7 +178,10 @@ export class DshIdeHostBridge {
 		this._sessionReads = new Set();
 		/** @type {Map<string, { abort: AbortController, listeners: Set<(frame: unknown) => void>, ref: number }>} */
 		this._follows = new Map();
+		/** 没有绑定会话的窗口也要收到状态变化，不能只塞进某一次 follow。 */
+		this._statusListeners = new Set();
 		this._armWaterfalls();
+		this._armSessionStatus();
 	}
 
 	open(spec) {
@@ -175,7 +202,8 @@ export class DshIdeHostBridge {
 	 */
 	follow(sessionId, onEvent) {
 		if (typeof sessionId !== 'string' || sessionId === '') {
-			return { dispose() {} };
+			this._statusListeners.add(onEvent);
+			return { dispose: () => { this._statusListeners.delete(onEvent); } };
 		}
 		this.sessionId = sessionId;
 		const shared = this._ensureFollow(sessionId);
@@ -197,13 +225,10 @@ export class DshIdeHostBridge {
 
 	/** 给官方流式 remote 用：帧原样送出，不改写成行。 */
 	async *followSession(sessionId, signal) {
-		if (typeof sessionId !== 'string' || sessionId === '') {
-			return;
-		}
 		const queue = [];
 		let wake = () => undefined;
 		let closed = false;
-		const handle = this.follow(sessionId, frame => {
+		const handle = this.follow(typeof sessionId === 'string' ? sessionId : '', frame => {
 			queue.push(frame);
 			const notify = wake;
 			wake = () => undefined;
@@ -284,6 +309,22 @@ export class DshIdeHostBridge {
 		this.disposers.push(this.ctx.on('user-questions/request', (request, next) => this._share('question', request, next)));
 	}
 
+	/** 官方 api-session 事件。状态变化只转发 sessionId 和 running，不重拉名单。 */
+	_armSessionStatus() {
+		if (typeof this.ctx.on !== 'function') {
+			return;
+		}
+		this.disposers.push(this.ctx.on('api-session/status', (sessionId, running) => {
+			if (typeof sessionId !== 'string' || sessionId === '') {
+				return;
+			}
+			this._fanout({ type: 'session-status', sessionId, running: running === true });
+		}));
+		const listChanged = () => this._fanout({ type: 'session-list' });
+		this.disposers.push(this.ctx.on('api-session/added', listChanged));
+		this.disposers.push(this.ctx.on('api-session/removed', listChanged));
+	}
+
 	async _share(kind, request, next) {
 		const requestId = request && request.requestId;
 		if (typeof requestId !== 'string' || requestId === '') {
@@ -327,13 +368,15 @@ export class DshIdeHostBridge {
 	}
 
 	_fanout(frame) {
+		const listeners = [...this._statusListeners];
 		for (const shared of this._follows.values()) {
-			for (const listener of [...shared.listeners]) {
-				try {
-					listener(frame);
-				} catch {
-					// 同 _ensureFollow：一个视图失败不打断其它视图。
-				}
+			listeners.push(...shared.listeners);
+		}
+		for (const listener of listeners) {
+			try {
+				listener(frame);
+			} catch {
+				// 同 _ensureFollow：一个视图失败不打断其它视图。
 			}
 		}
 	}
@@ -602,10 +645,25 @@ function createMethodHandlers(bridge) {
 			// `@deepseek-ai/dsh-session-query`；未挂载时官方抛 gateway/internal，原样透传。
 			return projectDshIdeSessionSearch(await controller().search({ query: args.query }));
 		},
-		async listSessions() {
+		async presentationSettings() {
+			const settings = optionalService(bridge.ctx, 'settings');
+			const rows = settings !== undefined && typeof settings.describe === 'function'
+				? settings.describe({ redactSecrets: true })
+				: [];
+			const chat = sectionValue(rows, 'ui-chat');
+			const tools = sectionValue(rows, 'ui-settings');
+			return {
+				transcriptView: transcriptViewOf(chat.transcriptView),
+				collapseTiming: chat.collapseTiming === 'next-input' ? 'next-input' : 'completion',
+				foldedReplies: chat.foldedReplies === 'final' ? 'final' : 'all',
+				developerTools: tools.enabled !== false,
+			};
+		},
+		async listSessions(args) {
 			const sessionId = bridge.sessionId;
 			const channelId = bridge.channelId;
-			if (sessionId === undefined || sessionId === '') {
+			const workspacePath = args && typeof args.workspace === 'string' && args.workspace !== '' ? args.workspace : undefined;
+			if ((sessionId === undefined || sessionId === '') && workspacePath === undefined) {
 				return [];
 			}
 			const abort = new AbortController();
@@ -625,10 +683,20 @@ function createMethodHandlers(bridge) {
 					abort.signal.throwIfAborted();
 					return controller().list({}, abort.signal);
 				}), cancelled]);
-				if (bridge.sessionId !== sessionId || bridge.channelId !== channelId) {
+				if (bridge.channelId !== channelId || (workspacePath === undefined && bridge.sessionId !== sessionId)) {
 					throw coded(SESSION_SWITCHED, 'DSH-IDE session changed while listing sessions');
 				}
-				return projectDshIdeSessionList(sessionId, service(bridge.ctx, 'workspaceRegistry').list(), value.items);
+				// workspaceRegistry 是可选服务：没装时退化为「只按绑定会话投影」。
+				// 列表本身来自官方 session/list，没有它也照样能列出来。
+				const registry = optionalService(bridge.ctx, 'workspaceRegistry');
+				if (registry === undefined) {
+					return projectDshIdeSessionList(sessionId, [], value.items);
+				}
+				if (workspacePath !== undefined && typeof registry.resolveByPath === 'function') {
+					const workspace = await registry.resolveByPath(workspacePath);
+					return projectDshIdeWorkspaceSessions(workspace, value.items);
+				}
+				return projectDshIdeSessionList(sessionId, registry.list(), value.items);
 			} finally {
 				bridge._sessionReads.delete(cancel);
 			}
@@ -716,6 +784,23 @@ function createMethodHandlers(bridge) {
 		async fetchRowDetail() {
 			// 折叠行全文由 IDE 侧投影器缓存（第 2 章 E9）；Host 侧不持有第二份全文。
 			return null;
+		},
+		async readAttachment(args) {
+			// 官方 `session/attachment` 的进程内等价物：只按 attachmentId 读字节，
+			// 不接受路径/URL。依据 packages/api/session-controller/src/commands.ts:427-433。
+			const attachments = service(bridge.ctx, 'attachments');
+			if (typeof attachments.readImage !== 'function') {
+				throw coded(FEATURE_UNAVAILABLE, 'DSH attachments service has no readImage()', { capability: 'readAttachment' });
+			}
+			const stored = await attachments.readImage(args.attachment);
+			const bytes = stored && stored.data;
+			if (!bytes || typeof bytes.length !== 'number') {
+				throw coded(FEATURE_UNAVAILABLE, 'DSH attachments service returned no image bytes', { capability: 'readAttachment' });
+			}
+			return {
+				mediaType: (stored.ref && stored.ref.mediaType) || args.attachment.mediaType,
+				data: Buffer.from(bytes).toString('base64'),
+			};
 		},
 		async refreshSnapshot() {
 			bridge.emitToUi({ type: 'refresh' });

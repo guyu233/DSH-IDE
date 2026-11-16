@@ -141,6 +141,9 @@ export class IdeRemoteService extends Service {
       delete env.ELECTRON_RUN_AS_NODE;
       env.DSH_IDE_ENDPOINT = endpoint.origin;
       env.DSH_IDE_LAUNCH_URL = endpoint.launchUrl;
+      // 端点文件路径（本插件的 runtime 目录）：IDE 失联后据此重新发现新的 origin。
+      // 不传的话，IDE 只能把启动时那一个端口当成永久地址，DSH 一重启换端口就再也连不上。
+      env.DSH_IDE_ENDPOINT_FILE = join(this.pluginRoot, 'runtime', 'host-endpoint.json');
       // 会话由 DSH 决定（不变量 I4）：把开窗方给的 sessionId 交给子进程，IDE 侧据此
       // `openView({ view:'chat', params:{ sessionId } })`；缺它时后端只订阅 `$events`，
       // Chat 面板拿不到任何会话内容（K5 的缺口）。

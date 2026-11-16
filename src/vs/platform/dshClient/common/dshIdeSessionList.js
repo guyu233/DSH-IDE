@@ -23,20 +23,41 @@ export function projectDshIdeSessionList(sessionId, workspaces, items) {
 	}
 	const owner = owners[0];
 	const sessionIds = new Set(owner.sessionIds);
-	return items.filter(item => sessionIds.has(item.sessionId)).map(item => {
-		const title = item.projections?.values.title;
-		return {
-			sessionId: item.sessionId,
-			workspaceId: owner.id,
-			...(title === undefined || title === null ? {} : { title }),
-			updatedAt: item.updatedAt,
-			running: item.running,
-			blank: item.blank,
-			agentAvailable: item.agentAvailable,
-			...(item.formatStatus === undefined ? {} : { formatStatus: item.formatStatus }),
-			...(item.cwd === undefined ? {} : { cwd: item.cwd }),
-			...(item.parentSessionId === undefined ? {} : { parentSessionId: item.parentSessionId }),
-			...(item.origin === undefined ? {} : { origin: item.origin }),
-		};
-	});
+	return items.filter(item => sessionIds.has(item.sessionId)).map(item => toSummary(owner, item));
+}
+
+/**
+ * 按已经解析出的工作区列会话。IDE 打开了文件夹、窗口还没绑会话时走这里。
+ *
+ * @param {{ readonly id: string; readonly sessionIds?: readonly string[] } | undefined | null} workspace
+ * @param {Parameters<typeof projectDshIdeSessionList>[2]} items
+ * @returns {import('./dshIdeProtocol.js').IDshIdeSessionSummary[]}
+ */
+export function projectDshIdeWorkspaceSessions(workspace, items) {
+	if (workspace == null || !Array.isArray(workspace.sessionIds)) {
+		return [];
+	}
+	const sessionIds = new Set(workspace.sessionIds);
+	return items.filter(item => sessionIds.has(item.sessionId)).map(item => toSummary(workspace, item));
+}
+
+/**
+ * @param {{ readonly id: string }} owner
+ * @param {Parameters<typeof projectDshIdeSessionList>[2][number]} item
+ */
+function toSummary(owner, item) {
+	const title = item.projections?.values.title;
+	return {
+		sessionId: item.sessionId,
+		workspaceId: owner.id,
+		...(title === undefined || title === null ? {} : { title }),
+		updatedAt: item.updatedAt,
+		running: item.running,
+		blank: item.blank,
+		agentAvailable: item.agentAvailable,
+		...(item.formatStatus === undefined ? {} : { formatStatus: item.formatStatus }),
+		...(item.cwd === undefined ? {} : { cwd: item.cwd }),
+		...(item.parentSessionId === undefined ? {} : { parentSessionId: item.parentSessionId }),
+		...(item.origin === undefined ? {} : { origin: item.origin }),
+	};
 }

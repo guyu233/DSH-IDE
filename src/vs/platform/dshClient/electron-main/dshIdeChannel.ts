@@ -23,6 +23,7 @@ import {
 	exactRecord,
 	validateDshIdeInput,
 	validateDshIdeInvokeOutput,
+	type DshIdeSessionNotice,
 	type DshIdeSnapshot,
 	type DshIdeWaterfallNotice,
 	type DshRemoteError,
@@ -55,6 +56,8 @@ export interface DshIdeLauncher {
 export const DSH_IDE_SNAPSHOT_EVENT = 'snapshot';
 /** waterfall 事件名（审批 / 问卷；`listen` 白名单之二）。 */
 export const DSH_IDE_WATERFALL_EVENT = 'waterfall';
+/** 会话状态事件名。不进快照 version。 */
+export const DSH_IDE_SESSION_NOTICE_EVENT = 'session-notice';
 
 interface DshIdeConnection {
 	/** 该连接绑定的窗口级通道 id，守恒。 */
@@ -65,6 +68,7 @@ interface DshIdeConnection {
 	readonly subscription: { dispose(): void };
 	/** waterfall 订阅句柄。与快照分开，不参与 version 过滤。 */
 	readonly waterfall: { dispose(): void };
+	readonly sessionNotice: { dispose(): void };
 }
 
 function toDshIdeError(error: unknown, code: string): DshRemoteError {
@@ -75,6 +79,7 @@ function toDshIdeError(error: unknown, code: string): DshRemoteError {
 export class DshIdeChannel extends Disposable implements IServerChannel<string> {
 	private readonly _onDidSnapshot = this._register(new Emitter<{ readonly ctx: string; readonly snapshot: DshIdeSnapshot }>());
 	private readonly _onDidWaterfall = this._register(new Emitter<{ readonly ctx: string; readonly notice: DshIdeWaterfallNotice }>());
+	private readonly _onDidSessionNotice = this._register(new Emitter<{ readonly ctx: string; readonly notice: DshIdeSessionNotice }>());
 	private readonly _connections = new Map<string, DshIdeConnection>();
 	/** 每个连接已发出的最大 version：丢弃重复/倒退帧，保证消费者看到严格 +1。 */
 	private readonly _lastSentVersion = new Map<string, number>();
@@ -94,8 +99,14 @@ export class DshIdeChannel extends Disposable implements IServerChannel<string> 
 	 * waterfall 没有 version，不做第③层。
 	 */
 	listen<T>(ctx: string, event: string, _arg?: unknown): Event<T> {
-		if (event !== DSH_IDE_SNAPSHOT_EVENT && event !== DSH_IDE_WATERFALL_EVENT) {
+		if (event !== DSH_IDE_SNAPSHOT_EVENT && event !== DSH_IDE_WATERFALL_EVENT && event !== DSH_IDE_SESSION_NOTICE_EVENT) {
 			return Event.None as Event<T>;
+		}
+		if (event === DSH_IDE_SESSION_NOTICE_EVENT) {
+			return Event.map(
+				Event.filter(this._onDidSessionNotice.event, emitted => emitted.ctx === ctx),
+				emitted => emitted.notice as unknown as T,
+			);
 		}
 		if (event === DSH_IDE_WATERFALL_EVENT) {
 			return Event.map(
@@ -175,6 +186,12 @@ export class DshIdeChannel extends Disposable implements IServerChannel<string> 
 			}
 			this._onDidWaterfall.fire({ ctx, notice });
 		});
+		const sessionNotice = this.view.subscribeSessionNotice(notice => {
+			if (!this._connections.has(ctx)) {
+				return;
+			}
+			this._onDidSessionNotice.fire({ ctx, notice });
+		});
 		const subscription = this.view.subscribe(snapshot => {
 			const connection = this._connections.get(ctx);
 			if (connection === undefined || snapshot.channelId !== connection.channelId) {
@@ -190,7 +207,7 @@ export class DshIdeChannel extends Disposable implements IServerChannel<string> 
 			connection.last = snapshot;
 			this._onDidSnapshot.fire({ ctx, snapshot });
 		});
-		this._connections.set(ctx, { channelId: first.channelId, last: first, subscription, waterfall });
+		this._connections.set(ctx, { channelId: first.channelId, last: first, subscription, waterfall, sessionNotice });
 		return first;
 	}
 
@@ -246,6 +263,7 @@ export class DshIdeChannel extends Disposable implements IServerChannel<string> 
 		this._lastSentVersion.delete(ctx);
 		connection.subscription.dispose();
 		connection.waterfall.dispose();
+		connection.sessionNotice.dispose();
 		return 1;
 	}
 

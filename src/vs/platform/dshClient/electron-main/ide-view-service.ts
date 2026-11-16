@@ -22,6 +22,7 @@ import {
 	type DshIdeOpenSpec,
 	type DshIdeSnapshot,
 	type DshIdeViewSnapshot,
+	type DshIdeSessionNotice,
 	type DshIdeWaterfallNotice,
 	type IdeViewHost,
 } from '../common/dshIdeProtocol.js';
@@ -47,6 +48,7 @@ export class UnavailableDshIdeBackend implements DshIdeBackend {
 export class DshIdeViewService extends Disposable implements IdeViewHost {
 	private readonly _listeners = new Set<(snapshot: DshIdeSnapshot) => void>();
 	private readonly _waterfall = new Set<(notice: DshIdeWaterfallNotice) => void>();
+	private readonly _sessionNotices = new Set<(notice: DshIdeSessionNotice) => void>();
 	private subscription: { dispose(): void } | undefined;
 	private channelId: string | undefined;
 	private sessionId: string | undefined;
@@ -70,7 +72,11 @@ export class DshIdeViewService extends Disposable implements IdeViewHost {
 		const binding = this.backend.open(spec as unknown as DshIdeOpenSpec);
 		this.channelId = binding.channelId;
 		this.sessionId = binding.sessionId;
-		this.subscription = this.backend.follow(binding.sessionId, raw => this.receive(raw));
+		this.subscription = this.backend.follow(
+			binding.sessionId,
+			raw => this.receive(raw),
+			error => this.publishDisconnected(error),
+		);
 		const first: DshIdeSnapshot = {
 			wireRevision: DSH_IDE_WIRE_REVISION,
 			channelId: binding.channelId,
@@ -94,7 +100,11 @@ export class DshIdeViewService extends Disposable implements IdeViewHost {
 		this.subscription = undefined;
 		this.sessionId = sessionId;
 		this._boundSessionId = sessionId;
-		this.subscription = this.backend.follow(sessionId, raw => this.receive(raw));
+		this.subscription = this.backend.follow(
+			sessionId,
+			raw => this.receive(raw),
+			error => this.publishDisconnected(error),
+		);
 		this.version += 1;
 		const next: DshIdeSnapshot = {
 			wireRevision: DSH_IDE_WIRE_REVISION,
@@ -117,6 +127,11 @@ export class DshIdeViewService extends Disposable implements IdeViewHost {
 	subscribeWaterfall(onNotice: (notice: DshIdeWaterfallNotice) => void): { dispose(): void } {
 		this._waterfall.add(onNotice);
 		return { dispose: () => { this._waterfall.delete(onNotice); } };
+	}
+
+	subscribeSessionNotice(onNotice: (notice: DshIdeSessionNotice) => void): { dispose(): void } {
+		this._sessionNotices.add(onNotice);
+		return { dispose: () => { this._sessionNotices.delete(onNotice); } };
 	}
 
 	async invoke(method: string, args?: unknown): Promise<unknown> {
@@ -146,6 +161,32 @@ export class DshIdeViewService extends Disposable implements IdeViewHost {
 		return { closed: true };
 	}
 
+	/**
+	 * 传输断开：公布一个 `rebuild` 快照，让界面如实显示「正在重连」。
+	 *
+	 * 为什么必须公布：DSH 重启会换端口，重连需要时间。若什么都不发，界面会停在
+	 * 最后一帧上，用户无法区分「模型在思考」与「连接已经断了」。这里只改状态，
+	 * 不推任何伪造的会话内容；重连成功后由下一帧真实内容接管。
+	 * @param error - 传输层给出的断开原因（只用于日志，不外泄凭据）。
+	 */
+	private publishDisconnected(error: unknown): void {
+		if (this.channelId === undefined || this.last === undefined) {
+			return;
+		}
+		void error;
+		this.version += 1;
+		const next: DshIdeSnapshot = {
+			wireRevision: DSH_IDE_WIRE_REVISION,
+			channelId: this.channelId,
+			version: this.version,
+			state: { state: 'rebuild', message: 'DSH 连接已断开，正在重新连接…' },
+		};
+		this.last = next;
+		for (const listener of [...this._listeners]) {
+			listener(next);
+		}
+	}
+
 	/** 收一帧跟会话结果：内容帧直接发布，批准 / 问卷帧交给独立订阅者。 */
 	private receive(raw: unknown): void {
 		if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) {
@@ -160,6 +201,17 @@ export class DshIdeViewService extends Disposable implements IdeViewHost {
 		}
 		if ((raw as Record<string, unknown>)['type'] === 'waterfall') {
 			// 形状不合的批准 / 问卷帧丢弃，不能混进会话内容流。
+			return;
+		}
+		const kind = (raw as Record<string, unknown>)['type'];
+		if (kind === 'session-status' || kind === 'session-list') {
+			const sessionId = (raw as Record<string, unknown>)['sessionId'];
+			const notice: DshIdeSessionNotice = kind === 'session-list' || typeof sessionId !== 'string'
+				? { kind: 'list' }
+				: { kind: 'status', sessionId, running: (raw as Record<string, unknown>)['running'] === true };
+			for (const listener of [...this._sessionNotices]) {
+				listener(notice);
+			}
 			return;
 		}
 		this.publish({ frame: raw as Record<string, unknown> });

@@ -90,8 +90,12 @@ function bridgeWith(services = {}) {
 	return { ctx, bridge, live };
 }
 
-test('required services include the workspace ownership source', () => {
-	assert.deepEqual([...REQUIRED_SERVICES], ['sessions', 'sessionController', 'workspaceRegistry']);
+test('required services are only the ones session following needs', () => {
+	// workspaceRegistry 只在归档 / 删除用得到；把它列成硬依赖会让整条桥接在本就
+	// 没有该服务的 profile 里永远不就绪，`ide/dispatch` 全量拒绝（真机实测）。
+	assert.deepEqual([...REQUIRED_SERVICES], ['sessions', 'sessionController']);
+	assert.ok(!REQUIRED_SERVICES.includes('workspaceRegistry'),
+		'workspaceRegistry must stay optional so the bridge still attaches without it');
 });
 
 test('createDshIdeHostBridge rejects when a required service is missing', () => {
@@ -264,6 +268,26 @@ test('submit and interrupt use the verified sessionController shapes', async () 
 	assert.equal(controller.calls.find(call => call.name === 'cancel').request.sessionId, 's-1');
 });
 
+test('readAttachment projects only image bytes through the official attachment service', async () => {
+	const ref = { attachmentId: 'img-1', mediaType: 'image/png', bytes: 3, width: 1, height: 1 };
+	const { bridge } = bridgeWith({ attachments: {
+		readImage: async request => {
+			assert.deepEqual(request, ref, 'Host must read by the opaque attachment ref, never a path');
+			return { ref, data: Uint8Array.from([1, 2, 3]) };
+		},
+	} });
+	bridge.open({ view: 'chat', params: { sessionId: 's-1' } });
+	assert.deepEqual(await bridge.invoke('readAttachment', { attachment: ref }), { mediaType: 'image/png', data: 'AQID' });
+});
+
+test('readAttachment refuses when the official attachment service is unavailable', async () => {
+	const { bridge } = bridgeWith();
+	bridge.open({ view: 'chat', params: { sessionId: 's-1' } });
+	await assert.rejects(() => bridge.invoke('readAttachment', { attachment: {
+		attachmentId: 'img-1', mediaType: 'image/png', bytes: 1, width: 1, height: 1,
+	} }), error => error.code === FEATURE_UNAVAILABLE && /attachments/.test(error.message));
+});
+
 test('list methods project only neutral fields', async () => {
 	const { bridge } = bridgeWith();
 	bridge.open({ view: 'chat', params: { sessionId: 's-1' } });
@@ -363,10 +387,18 @@ test('closing the Host view cancels a session read even when its source ignores 
 	assert.equal(receivedSignal.aborted, true);
 });
 
-test('bridge startup waits for workspaceRegistry', () => {
-	assert.throws(
-		() => createDshIdeHostBridge(fakeCtx({ sessions: {}, sessionController: sessionControllerStub() })),
-		error => error.code === FEATURE_UNAVAILABLE && error.details.missing.includes('workspaceRegistry'),
+test('bridge startup does not require workspaceRegistry', () => {
+	// 没有 workspaceRegistry 时桥接必须照常建立：会话跟随 / 发送 / 批准都不需要它。
+	const bridge = createDshIdeHostBridge(fakeCtx({ sessions: {}, sessionController: sessionControllerStub() }));
+	assert.ok(bridge !== undefined, 'the bridge must attach without the optional workspace registry');
+});
+
+test('workspace-registry capabilities fail alone, not the whole bridge', async () => {
+	const bridge = createDshIdeHostBridge(fakeCtx({ sessions: {}, sessionController: sessionControllerStub() }));
+	await assert.rejects(
+		() => bridge.invoke('archiveSession', { sessionId: 's-1' }),
+		error => error.code === FEATURE_UNAVAILABLE,
+		'archiving still refuses when the registry is absent, but only that call',
 	);
 });
 

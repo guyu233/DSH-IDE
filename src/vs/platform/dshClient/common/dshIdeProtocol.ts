@@ -103,6 +103,25 @@ export interface DshIdeSnapshot {
 }
 
 /**
+ * DSH `ImageAttachmentRef`（`packages/attachment/attachment/src/types.ts:11-32`）。
+ * attachmentId 是不透明存储 id，**不是**文件路径或 URL；媒体类型字段叫 mediaType。
+ */
+export interface DshIdeImageAttachmentRef {
+	readonly attachmentId: string;
+	readonly mediaType: 'image/png' | 'image/jpeg' | 'image/webp' | 'image/gif';
+	readonly bytes: number;
+	readonly width: number;
+	readonly height: number;
+	readonly name?: string;
+}
+
+/** 读取一张 durable 图片附件的字节（base64）与媒体类型。 */
+export interface DshIdeImageAttachmentValue {
+	readonly mediaType: DshIdeImageAttachmentRef['mediaType'];
+	readonly data: string;
+}
+
+/**
  * 每个 DshIdeMethod 的命名参数 schema。TS 类型侧（这是唯一真源，union 由其派生）。
  * 运行侧用 `DSH_IDE_METHOD_KEYS` 同一份 key 列表做 exactRecord。
  */
@@ -145,8 +164,14 @@ export interface DshIdeMethodArgs {
 	setPermissionPreset: { preset: string };
 	/** 运行斜杠命令；`command` 为不带前导 `/` 的命令名，`args` 以单空格拼成 rawInput（§8.10.10 前置①②）。 */
 	runCommand: { command: string; args?: readonly string[] };
-	/** 列出绑定工作区的可见会话，返回 readonly IDshIdeSessionSummary[]；未绑定或归属不明返回空数组。 */
-	listSessions: Record<string, never>;
+	/**
+	 * 列出一个工作区的可见会话，返回 readonly IDshIdeSessionSummary[]。
+	 * workspace 是 IDE 当前打开的文件夹。没给出时才退回已绑定会话所在工作区；
+	 * 两条都对不上，或工作区归属不明，返回空数组。
+	 */
+	listSessions: { workspace?: string };
+	/** 桌面端聊天展示设置：工作步骤、收起时机、收起后的回复、代码工作视图。 */
+	presentationSettings: Record<string, never>;
 	/** 删除会话（直接删除，不入回收站）。 */
 	deleteSession: { sessionId: string };
 	/** 归档一个已知会话（官方 `workspaceRegistry.archiveSession`）；返回**完整**归档集合。 */
@@ -181,6 +206,11 @@ export interface DshIdeMethodArgs {
 	listCommands: { workspace?: string };
 	/** 取某行的完整内容（折叠行回 Host 取详情）。 */
 	fetchRowDetail: { rowId: string };
+	/**
+	 * 读取一张 durable 图片附件的字节（官方 `session/attachment` 的进程内等价物）。
+	 * 只按 attachmentId 授权读取，不接受路径/URL；返回 base64，绝不返回本地文件路径。
+	 */
+	readAttachment: { attachment: DshIdeImageAttachmentRef };
 	/** 主动刷新快照。 */
 	refreshSnapshot: Record<string, never>;
 	/** 读取 DeepSeek 账号投影（登录态）；`client` 为官方 `AccountClientMetadata` 三元组。 */
@@ -247,7 +277,8 @@ const DSH_IDE_METHOD_KEYS: Record<DshIdeMethod, readonly string[]> = {
 	setEffort: ['effort'],
 	setPermissionPreset: ['preset'],
 	runCommand: ['command', 'args'],
-	listSessions: [],
+	listSessions: ['workspace'],
+	presentationSettings: [],
 	deleteSession: ['sessionId'],
 	archiveSession: ['sessionId'],
 	unarchiveSession: ['sessionId'],
@@ -258,6 +289,7 @@ const DSH_IDE_METHOD_KEYS: Record<DshIdeMethod, readonly string[]> = {
 	listModels: ['workspace'],
 	listCommands: ['workspace'],
 	fetchRowDetail: ['rowId'],
+	readAttachment: ['attachment'],
 	refreshSnapshot: [],
 	accountGetState: ['client'],
 	accountGetProfile: ['client'],
@@ -480,6 +512,24 @@ export function validateDshIdeInput<K extends DshIdeMethod>(command: K, args: un
 		case 'fetchRowDetail':
 			nonEmptyString(record['rowId'], 'DshIdeInput.fetchRowDetail.rowId');
 			break;
+		case 'readAttachment': {
+			// 逐字段对齐 DSH ImageAttachmentRef；拒绝路径/URL 形状的混入。
+			const attachment = exactRecord(record['attachment'],
+				['attachmentId', 'mediaType', 'bytes', 'width', 'height', 'name'],
+				'DshIdeInput.readAttachment.attachment');
+			nonEmptyString(attachment['attachmentId'], 'DshIdeInput.readAttachment.attachment.attachmentId');
+			const mediaType = attachment['mediaType'];
+			if (mediaType !== 'image/png' && mediaType !== 'image/jpeg' && mediaType !== 'image/webp' && mediaType !== 'image/gif') {
+				throw new TypeError('DshIdeInput.readAttachment.attachment.mediaType must be a supported image media type');
+			}
+			for (const key of ['bytes', 'width', 'height'] as const) {
+				if (typeof attachment[key] !== 'number' || !Number.isSafeInteger(attachment[key]) || (attachment[key] as number) <= 0) {
+					throw new TypeError(`DshIdeInput.readAttachment.attachment.${key} must be a positive integer`);
+				}
+			}
+			optionalString(attachment['name'], 'DshIdeInput.readAttachment.attachment.name');
+			break;
+		}
 		case 'accountGetState':
 		case 'accountGetProfile':
 			// 官方 `AccountClientMetadata` 四字段必填；缺一个就会让 Host 派生出错误的请求身份。
@@ -506,9 +556,14 @@ export function validateDshIdeInput<K extends DshIdeMethod>(command: K, args: un
 				throw new TypeError('DshIdeInput.setAgentPreset.preset must not contain whitespace or slash');
 			}
 			break;
+		case 'listSessions':
+			if (record['workspace'] !== undefined) {
+				nonEmptyString(record['workspace'], 'DshIdeInput.listSessions.workspace');
+			}
+			break;
 		case 'composerState':
 		case 'interrupt':
-		case 'listSessions':
+		case 'presentationSettings':
 		case 'refreshSnapshot':
 			// 无字段，exactRecord 已确保空对象。
 			break;
@@ -565,6 +620,11 @@ export interface DshIdeQuestionRequestView {
  * `listen('waterfall')` 的帧。请求与取消分开，不并进快照。
  * `event` 只允许官方两条 waterfall：`approval/request` 与 `user-questions/request`。
  */
+/** 官方 api-session 事件：状态只改一行；名单变化才重新 listSessions。 */
+export type DshIdeSessionNotice =
+	| { readonly kind: 'status'; readonly sessionId: string; readonly running: boolean }
+	| { readonly kind: 'list' };
+
 export type DshIdeWaterfallNotice =
 	| {
 		readonly kind: 'request';
@@ -734,7 +794,19 @@ export interface DshIdeBackend {
 	 * 不是展开后的单条事件：解包由 `IdeViewHost` 实现负责（`unwrapFollowFrame`），
 	 * 这样端口两侧的职责边界只划一次，不出现「一半帧、一半事件」的混合契约。
 	 */
-	follow(sessionId: string | undefined, onFrame: (frame: unknown) => void): { dispose(): void };
+	follow(
+		sessionId: string | undefined,
+		onFrame: (frame: unknown) => void,
+		/**
+		 * 订阅因传输原因中断（DSH 重启、socket 断开）时的回调。
+		 *
+		 * 为什么端口要暴露它：DSH 每次重启都会换 pid/端口，物理连接必然断一次。
+		 * 若端口只把「断线」当普通错误吞掉，上层就永远不知道该重新 `follow`——
+		 * 界面会停在最后一帧，用户看到的是「不动了」而不是「重连中」。
+		 * 上层据此重新发现端点并重建订阅，不把断线当业务失败。
+		 */
+		onDisconnect?: (error: unknown) => void,
+	): { dispose(): void };
 	/** 执行一个 DTO method（参数已过 `validateDshIdeInput`）。 */
 	invoke(method: DshIdeMethod, args: unknown): Promise<unknown>;
 	/** 释放传输资源；不取消 DSH 会话。 */
@@ -750,8 +822,10 @@ export interface IdeViewHost {
 	/** 换一个会话继续跟：停旧流、按新地址重开。 */
 	rebind(sessionId: string): DshIdeSnapshot;
 	subscribe(onSnapshot: (snapshot: DshIdeSnapshot) => void): { dispose(): void };
-	/** 订阅官方 waterfall 通知。与快照流分开，不推进 `version`。 */
+	/** 订阅官方 waterfall 通知。与快照流分开，不推进 version。 */
 	subscribeWaterfall(onNotice: (notice: DshIdeWaterfallNotice) => void): { dispose(): void };
+	/** 订阅会话状态。只含官方 api-session 事件，不推进 version，也不进聊天帧。 */
+	subscribeSessionNotice(onNotice: (notice: DshIdeSessionNotice) => void): { dispose(): void };
 	invoke(method: DshIdeMethod | string, args?: unknown): Promise<unknown>;
 	close(): { closed: true };
 }

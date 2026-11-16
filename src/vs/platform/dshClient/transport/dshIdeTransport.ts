@@ -393,12 +393,20 @@ export class DshIdeTransportBackend implements DshIdeBackend {
 		return { channelId: this.channelId, sessionId: this.sessionId };
 	}
 
-	follow(sessionId: string | undefined, onEvent: (raw: unknown) => void): { dispose(): void } {
-		// 会话帧和批准帧都由内核的 followSession 送出。窗口不再自己开 session/follow 或 $events。
-		if (sessionId === undefined || sessionId === '') {
-			return { dispose() {} };
-		}
-		const content = this.transport.openStream('ide/followSession', { sessionId }, frame => onEvent(frame));
+	follow(
+		sessionId: string | undefined,
+		onEvent: (raw: unknown) => void,
+		onDisconnect?: (error: unknown) => void,
+	): { dispose(): void } {
+		// 会话帧和批准帧都由内核的 followSession 送出。没有绑定会话时这条流只收 api-session 状态。
+		// 传输层断开会回调 onError：这里必须把它交给 onDisconnect，
+		// 否则 DSH 重启后这条流就永久消失，上层无从得知需要重连。
+		const content = this.transport.openStream(
+			'ide/followSession',
+			{ sessionId: sessionId ?? '' },
+			frame => onEvent(frame),
+			error => { onDisconnect?.(error); },
+		);
 		this.streams.add(content);
 		return {
 			dispose: () => {

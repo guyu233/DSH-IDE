@@ -14,7 +14,7 @@
 // 官方包的等价线协议由 `transport/dshIdeTransport.ts` 手写实现，这里只做装配。
 
 import { env } from '../../../base/common/process.js';
-import { DSH_IDE_COOKIE_ENV, DSH_IDE_ENDPOINT_ENV, DSH_IDE_LAUNCH_URL_ENV } from '../common/env.js';
+import { DSH_IDE_COOKIE_ENV, DSH_IDE_ENDPOINT_ENV, DSH_IDE_ENDPOINT_FILE_ENV, DSH_IDE_LAUNCH_URL_ENV } from '../common/env.js';
 import { DshIdeTransport, DshIdeTransportBackend, authenticateHost } from '../transport/dshIdeTransport.js';
 import { UnavailableDshIdeBackend, type DshIdeBackend } from './ide-view-service.js';
 
@@ -23,13 +23,16 @@ import { UnavailableDshIdeBackend, type DshIdeBackend } from './ide-view-service
  * 有 cookie 直接用；只有 launch URL 时按「先换 cookie」的记录在首次 `follow` 前完成交换。
  */
 export function createDshIdeBackendFromEnv(processEnv: Record<string, string | undefined> = env as Record<string, string | undefined>): DshIdeBackend {
+	const endpointFile = processEnv[DSH_IDE_ENDPOINT_FILE_ENV];
 	const origin = processEnv[DSH_IDE_ENDPOINT_ENV];
-	if (origin === undefined || origin === '') {
+	// 知道端点文件就足够建立后端：即使启动时没有 DSH_IDE_ENDPOINT（IDE 可能比 DSH 活得久），
+	// 也能在第一次调用时按文件里的新端点解析。两者都没有才是真的不可用。
+	if ((origin === undefined || origin === '') && (endpointFile === undefined || endpointFile === '')) {
 		return new UnavailableDshIdeBackend();
 	}
 	const cookie = processEnv[DSH_IDE_COOKIE_ENV];
 	const launchUrl = processEnv[DSH_IDE_LAUNCH_URL_ENV];
-	return new LazyDshIdeTransportBackend(origin, cookie, launchUrl);
+	return new LazyDshIdeTransportBackend(origin ?? '', cookie, launchUrl, endpointFile);
 }
 
 /**
@@ -38,16 +41,55 @@ export function createDshIdeBackendFromEnv(processEnv: Record<string, string | u
  * 绝不伪造成功。
  */
 class LazyDshIdeTransportBackend implements DshIdeBackend {
-	private readonly origin: string;
-	private readonly cookie: string | undefined;
-	private readonly launchUrl: string | undefined;
+	/** 当前实际使用的端点。DSH 重启可能换端口，所以不能当常量用。 */
+	private origin: string;
+	private cookie: string | undefined;
+	private launchUrl: string | undefined;
+	/** Host 端点文件路径（由 Host 在拉窗时注入）；缺省时无法重新发现端点。 */
+	private readonly endpointFile: string | undefined;
 	private impl: DshIdeTransportBackend | undefined;
 	private authenticating: Promise<DshIdeTransportBackend> | undefined;
 
-	constructor(origin: string, cookie: string | undefined, launchUrl: string | undefined) {
+	constructor(origin: string, cookie: string | undefined, launchUrl: string | undefined, endpointFile?: string) {
 		this.origin = origin;
 		this.cookie = cookie;
 		this.launchUrl = launchUrl;
+		this.endpointFile = endpointFile;
+	}
+
+	/**
+	 * 重新读 Host 端点文件，端点变了就丢掉旧连接并按新端点重连。
+	 *
+	 * 为什么需要：IDE 进程可能比 DSH 活得久。用户在 IDE 里继续工作，DSH 重启后
+	 * 换了 pid/端口——若一直用启动时那个 origin，聊天会永久失联且界面只表现为空白。
+	 * @returns true 表示端点确实换了（调用方可据此重试一次）。
+	 */
+	private async refreshEndpoint(): Promise<boolean> {
+		if (this.endpointFile === undefined || this.endpointFile === '') {
+			return false;
+		}
+		try {
+			const { readFile } = await import('node:fs/promises');
+			const parsed: unknown = JSON.parse(await readFile(this.endpointFile, 'utf8'));
+			if (typeof parsed !== 'object' || parsed === null) {
+				return false;
+			}
+			const endpoint = parsed as { origin?: unknown; launchUrl?: unknown };
+			const nextOrigin = typeof endpoint.origin === 'string' ? endpoint.origin : undefined;
+			// 启动时 origin 为空也算变化：那是首次解析。
+			if (nextOrigin === undefined || nextOrigin === ''
+				|| (this.origin !== '' && nextOrigin === this.origin)) {
+				return false;
+			}
+			this.origin = nextOrigin;
+			this.launchUrl = typeof endpoint.launchUrl === 'string' ? endpoint.launchUrl : undefined;
+			// 旧 cookie 属于旧端口，必须作废。
+			this.cookie = undefined;
+			this.close();
+			return true;
+		} catch {
+			return false;
+		}
 	}
 
 	open(spec: Parameters<DshIdeBackend['open']>[0]): ReturnType<DshIdeBackend['open']> {
@@ -60,29 +102,93 @@ class LazyDshIdeTransportBackend implements DshIdeBackend {
 
 	private pendingOpen: { channelId: string; sessionId?: string } | undefined;
 
-	follow(sessionId: string | undefined, onEvent: (raw: unknown) => void): { dispose(): void } {
-		// 同步无法等待鉴权：先登记回调，鉴权完成后补开流。
+	follow(
+		sessionId: string | undefined,
+		onEvent: (raw: unknown) => void,
+		onDisconnect?: (error: unknown) => void,
+	): { dispose(): void } {
 		let disposed = false;
 		let handle: { dispose(): void } | undefined;
-		void this.ensureImpl().then(impl => {
+		let retryTimer: ReturnType<typeof setTimeout> | undefined;
+		let attempt = 0;
+
+		/**
+		 * 建立（或重建）订阅。DSH 重启会换端口：先重新发现端点，再重连。
+		 *
+		 * 这是「不管 DSH 重启几次都能接上」的核心：断线不再是一条流的终点，
+		 * 而是一次重连的起点。退避上限 5s，避免 DSH 长时间不在时打爆本机 CPU。
+		 */
+		const connect = async (): Promise<void> => {
 			if (disposed) {
 				return;
 			}
-			handle = impl.follow(sessionId, onEvent);
-		}).catch(() => {
-			// 鉴权失败：不推任何伪造事件；上层调用会以同样错误码拒绝。
-		});
+			try {
+				const impl = await this.ensureImpl();
+				if (disposed) {
+					return;
+				}
+				attempt = 0;
+				handle = impl.follow(sessionId, onEvent, error => {
+					// 传输断开（DSH 重启）：立刻排一次重连，并把原因交给上层显示。
+					onDisconnect?.(error);
+					scheduleRetry();
+				});
+			} catch (error) {
+				onDisconnect?.(error);
+				scheduleRetry();
+			}
+		};
+
+		const scheduleRetry = (): void => {
+			if (disposed || retryTimer !== undefined) {
+				return;
+			}
+			attempt += 1;
+			const delay = Math.min(5000, 250 * 2 ** Math.min(attempt - 1, 5));
+			retryTimer = setTimeout(() => {
+				retryTimer = undefined;
+				if (disposed) {
+					return;
+				}
+				void (async () => {
+					// 端点变了就丢旧连接；没变也照样重试（可能只是瞬间断线）。
+					await this.refreshEndpoint();
+					if (disposed) {
+						return;
+					}
+					handle?.dispose();
+					handle = undefined;
+					await connect();
+				})();
+			}, delay);
+		};
+
+		void connect();
 		return {
 			dispose: () => {
 				disposed = true;
+				if (retryTimer !== undefined) {
+					clearTimeout(retryTimer);
+					retryTimer = undefined;
+				}
 				handle?.dispose();
+				handle = undefined;
 			},
 		};
 	}
-
 	async invoke(method: Parameters<DshIdeBackend['invoke']>[0], args: unknown): Promise<unknown> {
-		const impl = await this.ensureImpl();
-		return impl.invoke(method, args);
+		try {
+			const impl = await this.ensureImpl();
+			return await impl.invoke(method, args);
+		} catch (error) {
+			// 端点变了才重试一次：DSH 可能就是刚重启换端口，旧连接必然失败。
+			// 端点没变说明是真正的业务失败，不做无意义重放。
+			if (await this.refreshEndpoint()) {
+				const impl = await this.ensureImpl();
+				return await impl.invoke(method, args);
+			}
+			throw error;
+		}
 	}
 
 	close(): void {
