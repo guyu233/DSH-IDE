@@ -14,7 +14,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { DshChatSession } from '../../../out/vs/workbench/contrib/dsh/browser/dshChatSession.js';
-import { toHistory } from '../../../out/vs/workbench/contrib/dsh/browser/dshChatHistory.js';
+import { extrasOf, toHistory } from '../../../out/vs/workbench/contrib/dsh/browser/dshChatHistory.js';
 
 /** 只实现 `DshChatSession` 用到的调用：这些单测不碰通道。 */
 function fakeClient() {
@@ -104,6 +104,32 @@ test('2-A: a skill permission change fires even when the name is unchanged', () 
 		// 只改 modelInvocable：若 sameSkills 漏字段，这里不会 fire（真缺陷）。
 		session.acceptView(view({ skills: [{ name: 'dsh-doc', description: 'x', modelInvocable: false, userInvocable: true, provider: 'bundled' }] }));
 		assert.equal(fired, 2, 'a permission/provider change must not be swallowed');
+	} finally {
+		session.dispose();
+	}
+});
+
+test('2-A: extrasOf reads all seven typed extras from the session (the provider wiring itself)', () => {
+	const session = new DshChatSession(fakeClient());
+	try {
+		session.acceptView(view({
+			plan: PLAN,
+			goal: GOAL,
+			todos: TODOS,
+			skills: SKILLS,
+			quotaNotice: { code: 'ACCOUNT_QUOTA', seq: 9 },
+			deliverables: [{ turn: 1, callId: 'p1', files: [{ path: 'a.md' }] }],
+			attachments: [{ attachmentId: 'att-1', mediaType: 'image/png', bytes: 1, width: 1, height: 1 }],
+		}));
+		const extras = extrasOf(session);
+		// 逐项断言，任何一项被 provider 漏掉都会红（历史上漏过 plan/goal/todos/skills）。
+		assert.deepEqual(extras.plan, PLAN);
+		assert.equal(extras.goal?.goal.objective, '完成手册');
+		assert.deepEqual(extras.todos, TODOS);
+		assert.deepEqual(extras.skills, SKILLS);
+		assert.equal(extras.quotaNotice?.seq, 9);
+		assert.equal(extras.deliverables?.[0].callId, 'p1');
+		assert.equal(extras.attachments?.[0].attachmentId, 'att-1');
 	} finally {
 		session.dispose();
 	}

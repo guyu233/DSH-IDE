@@ -491,9 +491,9 @@ DshChatSession.acceptView / acceptConversation → DshChatModel（typed 节点�
 | 层 3 状态层 | 完成并冻结（§8.1） | `DshChatModel.acceptConversation` 只吃 typed 节点树（约 1150→730 行）；裸帧解析删除 |
 | 层 4 逐类 UI（降级翻译） | 完成（§8.1） | `dshChatHistory.ts` / `dshChatSessionContent.ts` / `dshSessionSearchCommands.ts` / `dshTeamCommands.ts` |
 
-门禁：`verify:dsh-ide-ci` 五步全 PASS（`DSH_INSTALLED_VERSION=0.2.2-rc.3`）；`test-dsh:all` PASS——本轮实测 `node --test` 369 项全过、mocha 7 项全过。全量 `tsc --noEmit` 仍 FAIL（既有 VS Code 文件，本批改动文件零错误，按 §5.5 记录）。
+门禁：`verify:dsh-ide-ci` 五步全 PASS（`DSH_INSTALLED_VERSION=0.2.2-rc.3`）；`test-dsh:all` PASS——本轮实测 `node --test` 370 项全过、mocha 7 项全过。全量 `tsc --noEmit` 仍 FAIL（既有 VS Code 文件，本批改动文件零错误，按 §5.5 记录）。
 
-> **口径说明**：§8.3 的「352 项」是第一阶段当时记录的计数，本轮未复算；本轮以实测的 `node --test 369 + mocha 7` 为准（新增 31 项：`dshChatSessionExtras` 5 + `dshChatHistoryNative` 10 + `dshSessionItemState` 5 + `dshIconArtwork` 4 + `dshIconReplacement` 3 + `dshIconsStyleSheet` 4）。
+> **口径说明**：§8.3 的「352 项」是第一阶段当时记录的计数，本轮未复算；本轮以实测的 `node --test 370 + mocha 7` 为准（新增 32 项：`dshChatSessionExtras` 6 + `dshChatHistoryNative` 10 + `dshSessionItemState` 5 + `dshIconArtwork` 4 + `dshIconReplacement` 3 + `dshIconsStyleSheet` 4）。
 
 ### 9.3 现状核对：草稿与新计划的差异（必须先认清）
 
@@ -538,11 +538,11 @@ DshChatSession.acceptView / acceptConversation → DshChatModel（typed 节点�
 **落地结果（本轮已完成）**：
 
 1. **状态层**：`DshChatSession` 增加 `_plan`/`_goal`/`_todos`/`_skills` 字段与 `plan()`/`goal()`/`todos()`/`skills()` 只读 getter；`acceptView` 读取 `view.plan`/`view.goal`/`view.todos`/`view.skills` 并纳入 `extrasChanged`（新增 `samePlan`/`sameGoal`/`sameTodos`/`sameSkills` 四个判重）；`bind()` 一并清空并触发 `onDidChangeExtras`。
-2. **content provider**：两处 extras 构造收成一个 `extrasOf(session)` 私有函数，七项（交付物/附件/额度/计划/目标/Todo/技能）一次取齐，避免再次各写一遍漏字段。
-3. **单测**：新增 `build/lib/test/dshChatSessionExtras.test.ts`（4 项：保存+getter、判重不重复 fire、bind 清空并通知、四字段到 history part 全程可达）；`dshChatSessionContent.test.ts` 同步覆盖 history 映射。
+2. **content provider**：两处 extras 构造收成一个 `extrasOf(source)` 纯函数（位于 `dshChatHistory.ts`，唯一装配入口），七项（交付物/附件/额度/计划/目标/Todo/技能）一次取齐；下沉成纯函数是为了让单测能直接注入假来源、覆盖「provider 装配」本身。
+3. **单测**：新增 `build/lib/test/dshChatSessionExtras.test.ts`（6 项：保存+getter、判重不重复 fire、bind 清空并通知、技能权限变化必 fire、`extrasOf` 七项装配、四字段到 history part 全程可达）；`dshChatSessionContent.test.ts` 同步覆盖 history 映射。
 4. **契约边界**：不改协议/通道/Host，只补层 3 冻结边界允许的只读暴露（§5 例外条款）。
 
-**验收（实测）**：`test-dsh:all` PASS（369 项 node --test 全过 + mocha 7 项全过）；`verify:dsh-ide-ci` 五步全 PASS（contract 在 `DSH_INSTALLED_VERSION=0.2.2-rc.3` 下 PASS）。
+**验收（实测）**：`test-dsh:all` PASS（370 项 node --test 全过 + mocha 7 项全过）；`verify:dsh-ide-ci` 五步全 PASS（contract 在 `DSH_INSTALLED_VERSION=0.2.2-rc.3` 下 PASS）。
 
 > **对抗式复核补记（子智能体 `glm-5.3-flash` + `hy4flash`）**：复核报出 3 个真缺陷并已修：① running 阶段 assistant 的 tool-call 块与独立 `tool-call` 节点会画两张卡（改为按 response 记账 `drawnCallIds`）；② 同一 response 内连续 `turn-error` 互相覆盖（第二次失败前先 `flush`）；③ `sameSkills` 只比 3/6 字段，`modelInvocable`/`userInvocable`/`provider` 变化被吞（已补齐）。另有 1 处低危：`quotaNotice` 会覆盖真实 `turn-error` 的 errorDetails（改为「已有错误时降级为 warning，不覆盖」）。四项均补了回归单测。
 
@@ -609,7 +609,7 @@ DshChatSession.acceptView / acceptConversation → DshChatModel（typed 节点�
 > **本轮修掉的真实回归**：替换分支最初直接 `continue`，把 `--vscode-icon-<id>-content` 根变量一起吞掉；`style.css` 等处直接消费这些变量（如 chevron-down），会让那些伪元素变空。现已改为「根变量照旧输出、只换 `::before` 规则」，并由上述集成单测钉住。
 5. **验证边界（未做，需用户真机）**：浅色/深色/高对比度、spin 动画、不同 font-size 的实际观感按 AGENTS §6 由用户在 2-E 执行；AI 不以代码推断观测结论。直接覆盖 `::before` 的 CSS 点（如 `chat.css:1436`）本轮未逐条加 mask 覆盖，记录为「已知混合状态」，与草稿 §7.5 的预期一致。
 
-**门禁（实测）**：`test-dsh:all` PASS（369 项 node --test 全过 + mocha 7 项全过）；`verify:dsh-ide-ci` 五步全 PASS；生成脚本 `--check` PASS（无漂移）。
+**门禁（实测）**：`test-dsh:all` PASS（370 项 node --test 全过 + mocha 7 项全过）；`verify:dsh-ide-ci` 五步全 PASS；生成脚本 `--check` PASS（无漂移）。
 
 #### 阶段 2-E：真机验收与收尾
 

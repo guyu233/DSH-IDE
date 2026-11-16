@@ -105,6 +105,36 @@ export interface DshHistoryExtras {
 	readonly deliverables?: readonly DshHistoryDeliverable[];
 }
 
+/** 会话状态里 extras 的最小读取面（`DshChatSession` 满足它，单测可注入假对象）。 */
+export interface DshHistoryExtrasSource {
+	deliverables(): readonly DshHistoryDeliverable[];
+	attachments(): readonly { readonly attachmentId: string; readonly name?: string; readonly mediaType: string }[];
+	quotaNotice(): { readonly code: string; readonly seq: number } | undefined;
+	plan(): DshHistoryExtras['plan'];
+	goal(): DshHistoryExtras['goal'];
+	todos(): readonly { readonly content: string; readonly status: string }[];
+	skills(): readonly { readonly name: string; readonly description: string }[];
+}
+
+/**
+ * 把会话状态里的七项 typed extras 收成一份。
+ *
+ * 唯一装配入口：content provider 的两处构造历史上曾各写一遍，漏传过
+ * `plan/goal/todos/skills`（手册 §9.5 的 2-A 记录的真缺陷）。下沉成纯函数后
+ * 单测可以直接注入假来源，不必实例化 content provider。
+ */
+export function extrasOf(source: DshHistoryExtrasSource): DshHistoryExtras {
+	return {
+		deliverables: source.deliverables(),
+		attachments: source.attachments(),
+		quotaNotice: source.quotaNotice(),
+		plan: source.plan(),
+		goal: source.goal(),
+		todos: source.todos(),
+		skills: source.skills(),
+	};
+}
+
 /**
  * 把结构化节点树折成原生 history。
  *
