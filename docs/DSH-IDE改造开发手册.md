@@ -455,7 +455,7 @@ DshChatSession.acceptView / acceptConversation → DshChatModel（typed 节点�
 |---|---|
 | protocol-single-source / boundary / projection-golden / contract | PASS |
 | release-gate（四门禁聚合） | PASS |
-| `test-dsh:all` | PASS（352 项） |
+| `test-dsh:all` | PASS（352 项，第一阶段当时计数；当前实测见 §9.2） |
 | `verify:dsh-ide-ci` | PASS（all steps passed） |
 | 全量 `tsc --noEmit` | FAIL——报错均在既有 VS Code 文件（如 `chatWidget.ts` 的 `product` 未使用），本批改动文件零类型错误；按 §5.5 记录，不写成 PASS |
 
@@ -532,7 +532,7 @@ DshChatSession.acceptView / acceptConversation → DshChatModel（typed 节点�
 | §4.4 / §5.6「恢复 `dshChatModelDriver.ts`，把 `DshChatNode[]` 写进原生 `ChatModel` response」 | 项目已用更好的 `IChatSessionContentProvider.history` 路径：`dshChatSessionContent.ts:34,109-111,113-139,163-165` 注册 provider，产出 history，native restorer（`remoteChatSessionRestorer.ts:489-508`）把 parts 喂给 `ChatModel.acceptResponseProgress` | **保留 content provider 路径，不恢复 driver**；翻译层升级只改 `dshChatHistory.ts` 的 part 映射 |
 | §5.3 列的原生 content kind 表 | 多数真实存在（`chatListRenderer.ts:4568-4653`：确认 `:4585`、thinking `:4638`、toolInvocation `:4603`、planReview `:4617`、changesSummary `:4619`、questionCarousel `:4615`、working `:4577`、errorDetails `:4611`、multiDiffData `:4570`、warning `:4587`），但**没有 `codeBlockPart` 分支**，也没有 `registerChatRenderer`/内容部件注册表 | 翻译层只能用这些真实 kind；不做注册表、不用不存在的 kind |
 | §5.3「标已接的两项当前已工作」模型/会话列表（`:347,354`） | 属实：`dshLanguageModelProvider` 与 `DshAgentSessionsController` 已工作 | 不动 |
-| 草稿未提 | **当前 `dshChatHistory.ts` 只发 6 种 part**：`markdownContent` / `thinking` / `warning` / `info` / `reference` / `command`（`dshChatHistory.ts:17-23`）。工具、审批、问卷、plan 都降成 markdown/warning/info；更严重的是 `plan/goal/todos/skills` 在状态层（`dshChatSession.ts:254-277`）就没保存、content provider（`:52-56,59-63`）也没传，数据链整条断 | 这是第二阶段首要缺口：先修状态层存储 + getter + content 补传，再把降级 part 升级为真原生 kind |
+| 草稿未提 | **改造前 `dshChatHistory.ts` 只发 6 种 part**：`markdownContent` / `thinking` / `warning` / `info` / `reference` / `command`（`dshChatHistory.ts:17-23`）。工具、审批、问卷、plan 都降成 markdown/warning/info；更严重的是 `plan/goal/todos/skills` 在状态层（`dshChatSession.ts:254-277`）就没保存、content provider（`:52-56,59-63`）也没传，数据链整条断 | 这是第二阶段首要缺口：先修状态层存储 + getter + content 补传，再把降级 part 升级为真原生 kind。**现状**：2-A 与 2-B 可行项已落地（§9.5） |
 | §6.4「Mermaid 不是 DSH 特性，DSH 用 KaTeX」 | 属实，且 KaTeX 属 A 级可后续项 | 第二阶段不引入 KaTeX；保留 VS Code 自身 Mermaid/Markdown |
 | §7.4「改 `iconsStyleSheet.ts` 需同步 `dshIdeContract.ts:48-77` patch 哈希」 | **错误**：`VSCODE_PATCH_POINTS`（`dshIdeContract.ts:48-77`）只覆盖 chat-viewlet / inline-completion / terminal / command-palette 四处，不含 `iconsStyleSheet.ts` | 图标改动不触发 contract hash 门禁，但仍需跑主题测试 |
 | §7「改 `getCSS()` 是单一全局点，业务代码零改动」 | 部分成立：`getIconsStyleSheet().getCSS()`（`iconsStyleSheet.ts:31-74`）是动态 `::before` 规则生成点，但 `codicon.css:6-23` 字体加载/基础布局、若干 CSS 直接覆盖 `::before`（如 `chat.css:1436`）、24 处 `var(--vscode-icon-...)` 消费点都绕过它 | 图标方案按"先覆盖 getCSS 高收益面，再补直接覆盖点"分步做，承认混合状态 |
