@@ -621,8 +621,8 @@ DshChatSession.acceptView / acceptConversation → DshChatModel（typed 节点�
 
 | 项 | 实测值 |
 |---|---|
-| 构建 | `npx gulp dsh-ide-pack` 成功；`dist/dsh-ide-2.0.0.tgz` **142,014,035 B**（含对抗复核修复后的重建） |
-| 产物 sha256 | `5bc2136ad6533f856f622ddb5732f64d6445662ecd7f8f9a69e3305addbdecc0` |
+| 构建 | `npx gulp dsh-ide-pack` 成功；`dist/dsh-ide-2.0.0.tgz` **142,011,142 B**（含复核修复与 extrasOf 下沉后的最终重建） |
+| 产物 sha256 | `514f996778a45e4fbd4451162ec7d5d37de374bd54b9a54f094495f3ad8b62d7` |
 | `verify:dsh-artifact` | PASS（common 11 个模块、Host 入口含 archiveSession/unarchiveSession/searchSessions/loadOlder/throughSeq、node-pty 随包） |
 | profile 精确覆盖 | 已按手册 §5/§6 的「按包内路径精确覆盖」把插件层（`index.js`/`client.js`/`package.json`/`icon.svg`/`cordis.patch.yml`/`LICENSE-DSH`/`PROVENANCE.md`/`host/`/`common/`/`locale/`）覆盖到 `$DSH_PROFILE_DIR/node_modules/dsh-ide/`；**未覆盖 `runtime/`**（随包 app） |
 | `verify:dsh-install-drift` | **PASS**：24/24 文件逐字节一致、0 漂移、装载配置链完整、入口语法/导出形状合规 |
