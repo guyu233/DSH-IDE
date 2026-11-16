@@ -19,20 +19,11 @@ import { IChatRendererContent } from '../../../common/model/chatViewModel.js';
 import { IChatContentPart } from './chatContentParts.js';
 import { DshRawJsonView } from './dsh/dshRawJsonView.js';
 import { DshViewKind, DshNodeViewInput } from './dsh/dshNodeTypes.js';
-import { DshUserView } from './dsh/dshUserView.js';
-import { DshAssistantView } from './dsh/dshAssistantView.js';
-import { DshToolView } from './dsh/dshToolView.js';
-import { DshContextView } from './dsh/dshContextView.js';
-import { DshCommandView } from './dsh/dshCommandView.js';
-import { DshCompactionView } from './dsh/dshCompactionView.js';
-import { DshModelRetryView } from './dsh/dshModelRetryView.js';
-import { DshTurnErrorView } from './dsh/dshTurnErrorView.js';
-import { DshTurnMaxTokensView } from './dsh/dshTurnMaxTokensView.js';
-import { DshInheritedHistoryView } from './dsh/dshInheritedHistoryView.js';
+import { dshChatNodeSlotRegistry, type IDshChatNodeSlotContext } from './dsh/dshSlotContributions.js';
 import { DshUnknownView } from './dsh/dshUnknownView.js';
 
 /**
- * DSH 会话节点的原生渲染部件（按 kind 分派）。
+ * DSH 会话节点的原生渲染部件（按 kind 经 conversation.chat.node 槽位分派）。
  *
  * 两个真值的分工（由 `verifyProjectionBinding` 绑定）：
  * - `encoded` = 源载荷 canonical，**校验真值**；用于「原始载荷」详情与解码兜底。
@@ -56,6 +47,7 @@ export class ChatDshNodeContentPart extends Disposable implements IChatContentPa
 	private _render(part: IChatDshNodePart): HTMLElement {
 		const container = dom.$('.chat-dsh-node');
 		container.setAttribute('data-dsh-node-id', part.id);
+		container.setAttribute('data-dsh-paging-anchor', '');
 
 		// 解码：只解一次，两个视图共用；失败则原样显示 encoded（不丢信息）。
 		let encodedParsed: unknown;
@@ -97,8 +89,21 @@ export class ChatDshNodeContentPart extends Disposable implements IChatContentPa
 			readAttachment: this._makeAttachmentReader(),
 		};
 
-		const view = this._createView(kind, input, stores);
-		container.appendChild(view.domNode);
+		const context: IDshChatNodeSlotContext = {
+			input,
+			renderer: this.renderer,
+			stores,
+		};
+		// 精确 key 不退回无 key 贡献。未登记的 kind 仍用 DshUnknownView，禁止空节点。
+		const view = dshChatNodeSlotRegistry.renderSlot('conversation.chat.node', context, {
+			key: kind,
+			fallback: (ctx) => new DshUnknownView(ctx.input, ctx.stores),
+		});
+		const node = view.domNode;
+		if (!dom.isHTMLElement(node)) {
+			throw new Error('DshSlotRegistry.renderSlot must not return null');
+		}
+		container.appendChild(node);
 
 		// 每个节点都必须有「原始载荷」详情：专用视图不能成为唯一出口。
 		container.appendChild(this._renderRawDetails(input, stores));
@@ -123,36 +128,6 @@ export class ChatDshNodeContentPart extends Disposable implements IChatContentPa
 			return 'unknown';
 		}
 		return 'unknown';
-	}
-
-	private _createView(kind: DshViewKind, input: DshNodeViewInput, stores: DisposableStore): { domNode: HTMLElement } {
-		switch (kind) {
-			case 'user':
-			case 'steering':
-				return new DshUserView(input, this.renderer, stores);
-			case 'assistant':
-				return new DshAssistantView(input, this.renderer, stores);
-			case 'tool-call':
-			case 'tool-result':
-				return new DshToolView(input, this.renderer, stores);
-			case 'context':
-				return new DshContextView(input, this.renderer, stores);
-			case 'command':
-				return new DshCommandView(input, stores);
-			case 'compaction':
-				return new DshCompactionView(input, this.renderer, stores);
-			case 'model-retry':
-				return new DshModelRetryView(input, stores);
-			case 'turn-error':
-				return new DshTurnErrorView(input, this.renderer, stores);
-			case 'turn-max-tokens':
-				return new DshTurnMaxTokensView(input, stores);
-			case 'inherited-history':
-				return new DshInheritedHistoryView(input, stores);
-			case 'unknown':
-			default:
-				return new DshUnknownView(input, stores);
-		}
 	}
 
 	/** 「原始载荷」详情：永远显示 encoded 原文，保证专用视图不隐藏任何字段。 */
