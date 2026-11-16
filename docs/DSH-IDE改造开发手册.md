@@ -1,10 +1,10 @@
-# DSH-IDE 改造开发手册（第一阶段已落地；第二阶段原生渲染与图标替换待做）
+# DSH-IDE 改造开发手册（第一阶段已落地；第二阶段 2-A/2-B/2-C/2-D 已落地，2-E 真机验收待用户执行）
 
 > 编写日期：2026-11-16。依据：`docs/DSH-IDE承接DSH桌面端聊天页面的路线草稿.md`（22:23 更新版）、`docs/DSH-core内容进入桌面前端的全部入口.md`、`docs/DSH-IDE内容接收与ChatSession面板架构分析.md`、`docs/DSH聊天页面全量构成与插件显示机制.md`，以及只读核对的 DSH 源码 `E:/deepseek-harness`、DSH-IDE 源码 `E:/DSH-IDE/src/`。
 >
 > 本文是静态源码证据推导的实施方案，不是真机观测结论；所有 `file:line` 以快照为准，动手前复核。真机 GUI 验证由用户执行，AI 不代跑。
 >
-> **阅读顺序**：§0–§7 是目标、基线与冻结边界；§8 是第一阶段做完内容的压缩摘要；§9 是第二阶段的当前计划（待做）。
+> **阅读顺序**：§0–§7 是目标、基线与冻结边界；§8 是已完成内容的压缩摘要；§9 是第二阶段状态与计划（2-A~2-D 已落地，2-E 真机验收待用户执行）。
 
 ---
 
@@ -562,7 +562,7 @@ DshChatSession.acceptView / acceptConversation → DshChatModel（typed 节点�
 
 约束：
 
-- 每条映射先在 `dshChatHistory.test.ts` 写"输入 DSH 节点 → 期望原生 part kind"的单测，再改实现（TDD），保证不丢内容。本轮新增 `build/lib/test/dshChatHistoryNative.test.ts`（7 项）覆盖 B1/B2/B4 的可行与不可行边界。
+- 每条映射先在 `dshChatHistory.test.ts` 写"输入 DSH 节点 → 期望原生 part kind"的单测，再改实现（TDD），保证不丢内容。本轮新增 `build/lib/test/dshChatHistoryNative.test.ts`（10 项）覆盖 B1/B2/B4 的可行与不可行边界。
 - 审批/问卷升级为 `confirmation`/`questionCarousel` 时，必须确认其点击回调能走 `dsh.answerApproval/answerQuestion`；若原生 confirmation 只支持 `sendRequest`（§8.2 已记录的坑），则**保留 `warning + command`**，在手册记录"原生 kind 不支持本语义"的例外，不强行降级交互。
 - 未知/无对应的节点继续用 `markdownContent` 兜底，不新增自定义 kind，不触发 `renderNoContent`。
 - 每批跑 `test-dsh:all` + 相关单测；本批文件零类型错误。
