@@ -626,6 +626,7 @@ DshChatSession.acceptView / acceptConversation → DshChatModel（typed 节点�
 | `verify:dsh-artifact` | PASS（common 11 个模块、Host 入口含 archiveSession/unarchiveSession/searchSessions/loadOlder/throughSeq、node-pty 随包） |
 | profile 精确覆盖 | 已按手册 §5/§6 的「按包内路径精确覆盖」把插件层（`index.js`/`client.js`/`package.json`/`icon.svg`/`cordis.patch.yml`/`LICENSE-DSH`/`PROVENANCE.md`/`host/`/`common/`/`locale/`）覆盖到 `$DSH_PROFILE_DIR/node_modules/dsh-ide/`；**未覆盖 `runtime/`**（随包 app） |
 | `verify:dsh-install-drift` | **PASS**：24/24 文件逐字节一致、0 漂移、装载配置链完整、入口语法/导出形状合规 |
+| 产物内含本轮改动 | **已核对**：解包 `package/runtime/app/out/vs/workbench/workbench.desktop.main.js`（40,358,667 B），可见 `DSH_CODICON_GLYPH_MAP` / `dshIconDataUris` / `registerDshIconReplacement` / `drawnCallIds` / `extrasOf` / `sameSkills` / `withArchived` / `dshSessionItemState` / `answerApproval` / `planReview` 等符号，确认 2-A/2-B/2-C/2-D 代码已进包 |
 | 运行时加载 | `cordis_inspect_query(Config.listConfigs{name:"dsh-ide"})` 返回 **`status: "absent"`** —— **仍未加载**，须重启 DSH 才生效。**重启会终止当前会话，AI 不自行执行** |
 
 ### 9.6 第二阶段实施顺序（已定）
