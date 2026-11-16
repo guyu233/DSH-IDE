@@ -901,14 +901,11 @@ export class ChatViewPane extends ViewPane implements IViewWelcomeDelegate {
 			sessionsToolbarContainer.classList.toggle('filtered', !sessionsFilter.isDefault());
 		}));
 
-		// New Session Button —— DSH 集成：先在本工作区新建一个 DSH 会话，再开一个新聊天（列表由 DSH 拉取，新会话会随之出现）
+		// New Session Button
 		const newSessionButtonContainer = this.sessionsNewButtonContainer = append(sessionsContainer, $('.agent-sessions-new-button-container'));
 		const newSessionButton = this._register(new Button(newSessionButtonContainer, { ...defaultButtonStyles, secondary: true }));
 		newSessionButton.label = localize('newSession', "New Session");
-		const createNewChat = () => {
-			void this.commandService.executeCommand('dsh.newSession').catch(() => { /* ignore */ });
-			return this.commandService.executeCommand(ACTION_ID_NEW_CHAT, this.getActionsContext());
-		};
+		const createNewChat = () => this.commandService.executeCommand(ACTION_ID_NEW_CHAT, this.getActionsContext());
 		this._register(newSessionButton.onDidClick(createNewChat));
 
 		// Sessions Control
@@ -929,7 +926,9 @@ export class ChatViewPane extends ViewPane implements IViewWelcomeDelegate {
 				return openEvent;
 			},
 		}));
-		this._register(this.onDidChangeBodyVisibility(visible => sessionsControl.setVisible(visible)));
+		this._register(this.onDidChangeBodyVisibility(() => {
+			sessionsControl.setVisible(this.isBodyVisible() && this.sessionsViewerVisible);
+		}));
 
 		sessionsToolbar.context = sessionsControl;
 
@@ -1016,6 +1015,7 @@ export class ChatViewPane extends ViewPane implements IViewWelcomeDelegate {
 		setVisibility(newSessionsContainerVisible, this.sessionsContainer);
 		this.sessionsViewerVisible = newSessionsContainerVisible;
 		this.sessionsViewerVisibilityContext.set(newSessionsContainerVisible);
+		this.sessionsControl?.setVisible(this.isBodyVisible() && newSessionsContainerVisible);
 
 		return {
 			changed: sessionsContainerVisible !== newSessionsContainerVisible,

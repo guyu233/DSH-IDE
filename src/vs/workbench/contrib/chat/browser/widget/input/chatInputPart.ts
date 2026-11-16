@@ -3509,12 +3509,14 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 						dom.h('.interactive-input-and-side-toolbar@inputAndSideToolbar', [
 							dom.h('.chat-input-container@inputContainer', [
 								dom.h('.chat-editor-container@editorContainer'),
-								dom.h('.chat-input-toolbars@inputToolbars'),
+								// 权限模式选择器放进输入框内部（用户要求）：与框内工具栏同一行。
+								dom.h('.chat-input-toolbars@inputToolbars', [
+									dom.h('.chat-responsive-picker-container@responsivePickerContainer'),
+								]),
 							]),
 						]),
 					]),
 					dom.h('.chat-secondary-toolbar@secondaryToolbar', [
-						dom.h('.chat-responsive-picker-container@responsivePickerContainer'),
 						dom.h('.chat-context-usage-container@contextUsageWidgetContainer'),
 						dom.h('.chat-input-status-container@statusToolbarContainer'),
 					]),
@@ -3548,12 +3550,14 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 								dom.h('.chat-attached-context@attachedContextContainer'),
 							]),
 							dom.h('.chat-editor-container@editorContainer'),
-							dom.h('.chat-input-toolbars@inputToolbars'),
+							// 权限模式选择器放进输入框内部（用户要求）：与框内工具栏同一行。
+							dom.h('.chat-input-toolbars@inputToolbars', [
+								dom.h('.chat-responsive-picker-container@responsivePickerContainer'),
+							]),
 						]),
 					]),
 				]),
 				dom.h('.chat-secondary-toolbar@secondaryToolbar', [
-					dom.h('.chat-responsive-picker-container@responsivePickerContainer'),
 					dom.h('.chat-context-usage-container@contextUsageWidgetContainer'),
 					dom.h('.chat-input-status-container@statusToolbarContainer'),
 				]),

@@ -55,6 +55,12 @@ export function shouldWarnForSessionShutdown(session: ShutdownWarningSession, re
 		return false;
 	}
 
+	// DSH-IDE：会话真源在 DSH Host 进程，IDE 只是插件窗口。关掉/重载窗口不会
+	// 停止 Host 里的会话，因此不该弹「会话将停止」确认（AGENTS.md §1 身份前提）。
+	if (session.providerType === 'dsh') {
+		return false;
+	}
+
 	if (isLocalAgentHostTarget(session.providerType)) {
 		return reason === ShutdownReason.QUIT;
 	}

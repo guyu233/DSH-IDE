@@ -479,6 +479,8 @@ export interface IChatWidget {
 	readonly parsedInput: IParsedChatRequest;
 	readonly lockedAgentId: string | undefined;
 	lastSelectedAgent: IChatAgentData | undefined;
+	/** 把 widget 绑定到指定的会话模型；外部数据源（DSH-IDE）据此共用同一 ChatModel。 */
+	setModel(model: IChatModel | undefined): void;
 	readonly scopedContextKeyService: IContextKeyService;
 	readonly input: ChatInputPart;
 	/** The main input part at the bottom of the widget. Unlike `input`, this always returns the main input, not the inline editing input. */

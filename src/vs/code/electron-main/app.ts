@@ -152,7 +152,8 @@ import ErrorTelemetry from '../../platform/telemetry/electron-main/errorTelemetr
 import { IProtocolMainService } from '../../platform/protocol/electron-main/protocol.js';
 import { createRemoteResourceRequestHandler } from '../../platform/protocol/electron-main/remoteResourceProtocol.js';
 import { DshIdeChannel, type DshIdeLauncher } from '../../platform/dshClient/electron-main/dshIdeChannel.js';
-import { DSH_IDE_COOKIE_ENV, DSH_IDE_ENDPOINT_ENV, DSH_IDE_LAUNCH_URL_ENV, DSH_IDE_SESSION_ENV, DSH_IDE_COMPOSER_ENV } from '../../platform/dshClient/common/env.js';
+import { DSH_IDE_COOKIE_ENV, DSH_IDE_ENDPOINT_ENV, DSH_IDE_LAUNCH_URL_ENV, DSH_IDE_ENDPOINT_FILE_ENV, DSH_IDE_SESSION_ENV, DSH_IDE_COMPOSER_ENV } from '../../platform/dshClient/common/env.js';
+import { readFile as readFileText } from 'node:fs/promises';
 import { DshIdeTransport, authenticateHost } from '../../platform/dshClient/transport/dshIdeTransport.js';
 import { DshIdeLaunchListener } from '../../platform/dshClient/transport/dshIdeLaunchListener.js';
 import { createDshIdeBackendFromEnv } from '../../platform/dshClient/electron-main/dshIdeBackendFactory.js';
@@ -1525,8 +1526,13 @@ export class CodeApplication extends Disposable {
 		// 延迟解析器：拿到之前接单器一直重试，拿到之后自动接单（不阻塞启动、不假装成功）。
 		{
 			const endpointOrigin = process.env[DSH_IDE_ENDPOINT_ENV];
-			if (typeof endpointOrigin === 'string' && endpointOrigin !== '') {
-				const caller = createLazyLaunchCaller(endpointOrigin);
+			const endpointFile = process.env[DSH_IDE_ENDPOINT_FILE_ENV];
+			// 只要知道「去哪里找端点」就启动接单器。不能只看启动时的 DSH_IDE_ENDPOINT：
+			// IDE 可能在 DSH 重启之后仍然存活，那时旧端点已失效，但端点文件里有新的。
+			const hasEntry = (typeof endpointOrigin === 'string' && endpointOrigin !== '')
+				|| (typeof endpointFile === 'string' && endpointFile !== '');
+			if (hasEntry) {
+				const caller = createLazyLaunchCaller(endpointOrigin ?? '', endpointFile);
 				const listener = new DshIdeLaunchListener(
 					caller,
 					`ide-${process.pid}`,
@@ -2000,39 +2006,107 @@ function getPACScriptStats(content: string): { characterCount: number; lineCount
  * 首次调用时才换取 cookie 并建立 `DshIdeTransport`，之前一律 reject（接单器会重试）。
  * 拿不到鉴权就永远不可用——不伪造、不绕过。
  */
-function createLazyLaunchCaller(origin: string): { call(namespace: string, method: string, args: Record<string, unknown>): Promise<unknown> } {
+function createLazyLaunchCaller(origin: string, endpointFile?: string): { call(namespace: string, method: string, args: Record<string, unknown>): Promise<unknown> } {
 	let transport: DshIdeTransport | undefined;
 	let pending: Promise<DshIdeTransport> | undefined;
-	const resolve = (): Promise<DshIdeTransport> => {
+	// 当前实际连着的 origin。DSH 每次重启都可能换端口（pid 必变），
+	// 所以它不能是闭包里那个启动时的常量。
+	let currentOrigin = origin;
+
+	/**
+	 * 重新读一次 Host 端点文件，拿到新的 origin + launchUrl。
+	 *
+	 * 为什么必须有这一步：IDE 进程可能比 DSH 活得久。用户在 IDE 里继续工作，
+	 * DSH 重启后换了端口——若一直沿用启动时那个 origin，接单与聊天都会永久失联，
+	 * 而界面上只表现为「没反应」。这里按端点文件（Host 每次发布都会覆写，含新 pid/port）
+	 * 重新发现，不引入任何私有握手。
+	 * @returns true 表示端点被刷新（可能指向新端口）。
+	 */
+	const refreshEndpoint = async (): Promise<boolean> => {
+		const file = endpointFile ?? process.env[DSH_IDE_ENDPOINT_FILE_ENV];
+		if (file === undefined || file === '') {
+			return false;
+		}
+		try {
+			const raw = await readFileText(file, 'utf8');
+			const parsed: unknown = JSON.parse(raw);
+			if (typeof parsed !== 'object' || parsed === null) {
+				return false;
+			}
+			const endpoint = parsed as { origin?: unknown; launchUrl?: unknown };
+			const nextOrigin = typeof endpoint.origin === 'string' ? endpoint.origin : undefined;
+			const nextLaunchUrl = typeof endpoint.launchUrl === 'string' ? endpoint.launchUrl : undefined;
+			if (nextOrigin === undefined || nextOrigin === '') {
+				return false;
+			}
+			// 启动时没有 origin（空串）也算「变」：那是首次解析，不是无变化。
+			if (currentOrigin !== '' && nextOrigin === currentOrigin) {
+				return false;
+			}
+			// 端口变了：丢掉旧传输与旧 cookie，按新 launchUrl 重新换一次。
+			currentOrigin = nextOrigin;
+			transport?.dispose();
+			transport = undefined;
+			// 进行中的鉴权属于旧端点，必须一起作废，否则新请求会拿到旧端口换来的 cookie。
+			pending = undefined;
+			delete process.env[DSH_IDE_COOKIE_ENV];
+			if (nextLaunchUrl !== undefined && nextLaunchUrl !== '') {
+				process.env[DSH_IDE_LAUNCH_URL_ENV] = nextLaunchUrl;
+			}
+			return true;
+		} catch {
+			// 文件暂不可读（正在被覆写 / 尚未发布）：当作没刷新，由调用方重试。
+			return false;
+		}
+	};
+
+	const resolve = async (): Promise<DshIdeTransport> => {
 		if (transport !== undefined) {
-			return Promise.resolve(transport);
+			return transport;
 		}
 		if (pending !== undefined) {
 			return pending;
 		}
+		// 启动时可能没拿到 origin（IDE 活得比 DSH 久）：先按端点文件补一次。
+		if (currentOrigin === '') {
+			await refreshEndpoint();
+			if (currentOrigin === '') {
+				throw new Error('DSH-IDE launch caller: host endpoint is not known yet');
+			}
+		}
 		const launchUrl = process.env[DSH_IDE_LAUNCH_URL_ENV];
 		const cookie = process.env[DSH_IDE_COOKIE_ENV];
 		if (cookie !== undefined && cookie !== '') {
-			transport = new DshIdeTransport({ origin, cookie });
-			return Promise.resolve(transport);
+			transport = new DshIdeTransport({ origin: currentOrigin, cookie });
+			return transport;
 		}
 		if (launchUrl === undefined || launchUrl === '') {
-			return Promise.reject(new Error('DSH-IDE launch caller: neither cookie nor launch URL is available'));
+			throw new Error('DSH-IDE launch caller: neither cookie nor launch URL is available');
 		}
-		pending = authenticateHost(origin, launchUrl).then(issued => {
+		pending = authenticateHost(currentOrigin, launchUrl).then(issued => {
 			// D55：cookie 到手后立刻清掉环境变量里的 launch token，
 			// 避免它继续留在进程环境里（可被子进程 / 崩溃转储 / 诊断读取）。
 			delete process.env[DSH_IDE_LAUNCH_URL_ENV];
 			process.env[DSH_IDE_COOKIE_ENV] = issued;
-			transport = new DshIdeTransport({ origin, cookie: issued });
+			transport = new DshIdeTransport({ origin: currentOrigin, cookie: issued });
 			return transport;
 		}).finally(() => { pending = undefined; });
 		return pending;
 	};
 	return {
 		call: async (namespace, method, args) => {
-			const ready = await resolve();
-			return ready.call(namespace, method, args);
+			try {
+				const ready = await resolve();
+				return await ready.call(namespace, method, args);
+			} catch (error) {
+				// 第一次失败后再探一次端点：DSH 可能刚重启并换了端口。
+				// 探到新端点时才重试一次，避免对真正的业务失败做无意义重放。
+				if (await refreshEndpoint()) {
+					const ready = await resolve();
+					return await ready.call(namespace, method, args);
+				}
+				throw error;
+			}
 		},
 	};
 }
