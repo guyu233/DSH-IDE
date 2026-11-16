@@ -38,6 +38,13 @@ export interface DshNodeViewInput {
 	readonly projectionAvailable: boolean;
 	readonly id: string;
 	readonly kind: DshViewKind;
+	/**
+	 * 可选的附件字节读取入口（官方 `readAttachment` 契约）。
+	 *
+	 * 只用于「载荷只有 attachmentId、没有内联数据」时的只读解析；
+	 * 不读会话状态、不读 model。未注入时视图必须显示原始 attachment JSON。
+	 */
+	readonly readAttachment?: (attachment: unknown) => Promise<{ mediaType: string; data: string } | undefined>;
 }
 
 /** 视图统一接口。 */

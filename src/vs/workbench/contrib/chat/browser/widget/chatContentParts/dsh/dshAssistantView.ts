@@ -7,8 +7,9 @@ import * as dom from '../../../../../../../base/browser/dom.js';
 import { Codicon } from '../../../../../../../base/common/codicons.js';
 import { DisposableStore } from '../../../../../../../base/common/lifecycle.js';
 import { IMarkdownRenderer } from '../../../../../../../platform/markdown/browser/markdownRenderer.js';
-import { DshNodeViewInput, IDshNodeView, asArray, asBoolean, asString, isRecord, jsonText } from './dshNodeTypes.js';
+import { DshNodeViewInput, IDshNodeView, asArray, asBoolean, asString, isRecord } from './dshNodeTypes.js';
 import { createBadge, createCard, createDisclosure, createField, createTitleRow, renderMarkdown } from './dshViewParts.js';
+import { DshAttachmentView } from './dshAttachmentView.js';
 
 /**
  * `assistant` 视图。
@@ -21,7 +22,7 @@ import { createBadge, createCard, createDisclosure, createField, createTitleRow,
 export class DshAssistantView implements IDshNodeView {
 	readonly domNode: HTMLElement;
 
-	constructor(input: DshNodeViewInput, renderer: IMarkdownRenderer, stores: DisposableStore) {
+	constructor(private readonly input: DshNodeViewInput, renderer: IMarkdownRenderer, stores: DisposableStore) {
 		const card = createCard('default');
 		card.classList.add('chat-dsh-assistant');
 
@@ -74,12 +75,7 @@ export class DshAssistantView implements IDshNodeView {
 				return root;
 			}
 			case 'image': {
-				const box = dom.$('.chat-dsh-attachment');
-				const name = dom.append(box, dom.$('.chat-dsh-attachment-name'));
-				name.textContent = 'image';
-				const detail = dom.append(box, dom.$('.chat-dsh-attachment-detail'));
-				detail.textContent = jsonText(block['attachment']);
-				return box;
+				return new DshAttachmentView({ ...block, type: 'image' }, this.input, stores).domNode;
 			}
 			case 'tool-call': {
 				const { root, body } = createDisclosure(stores, asString(block['name']) ?? 'tool-call', Codicon.tools);
@@ -112,4 +108,7 @@ function readField(input: DshNodeViewInput, key: string): unknown {
 	}
 	return undefined;
 }
+
+
+
 

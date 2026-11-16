@@ -8,6 +8,7 @@ import { Codicon } from '../../../../../../../base/common/codicons.js';
 import { DisposableStore } from '../../../../../../../base/common/lifecycle.js';
 import { ThemeIcon } from '../../../../../../../base/common/themables.js';
 import { localize } from '../../../../../../../nls.js';
+import { IClipboardService } from '../../../../../../../platform/clipboard/common/clipboardService.js';
 import { DshNodeViewInput, IDshNodeView } from './dshNodeTypes.js';
 
 /**
@@ -22,7 +23,7 @@ import { DshNodeViewInput, IDshNodeView } from './dshNodeTypes.js';
 export class DshRawJsonView implements IDshNodeView {
 	readonly domNode: HTMLElement;
 
-	constructor(input: DshNodeViewInput, stores: DisposableStore) {
+	constructor(input: DshNodeViewInput, stores: DisposableStore, clipboard?: IClipboardService) {
 		const details = dom.$('details.chat-dsh-raw');
 		const summary = dom.append(details, dom.$('summary.chat-dsh-raw-summary'));
 
@@ -33,11 +34,26 @@ export class DshRawJsonView implements IDshNodeView {
 		const label = dom.append(summary, dom.$('span.chat-dsh-raw-label'));
 		label.textContent = localize('chat.dshNode.rawPayload', "Raw payload");
 
+		// 复制按钮：复制的是 encoded 原文，逐字不加工。
+		if (clipboard !== undefined) {
+			const copy = dom.append(summary, dom.$('button.chat-dsh-copy')) as HTMLButtonElement;
+			copy.type = 'button';
+			copy.title = localize('chat.dshNode.copyRaw', "Copy raw payload");
+			copy.setAttribute('aria-label', localize('chat.dshNode.copyRaw', "Copy raw payload"));
+			copy.textContent = 'copy';
+			const handler = () => { void clipboard.writeText(input.encoded); };
+			copy.addEventListener('click', handler);
+			stores.add({ dispose: () => copy.removeEventListener('click', handler) });
+			// 阻止点击按钮时切换 details。
+			const stop = (e: Event) => e.preventDefault();
+			copy.addEventListener('click', stop);
+			stores.add({ dispose: () => copy.removeEventListener('click', stop) });
+		}
+
 		const pre = dom.append(details, dom.$('pre.chat-dsh-raw-json'));
 		// 逐字显示 encoded：不解码、不重排、不裁剪。
 		pre.textContent = input.encoded;
 
 		this.domNode = details;
-		void stores;
 	}
 }

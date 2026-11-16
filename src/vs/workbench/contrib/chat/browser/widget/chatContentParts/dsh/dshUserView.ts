@@ -6,8 +6,9 @@
 import * as dom from '../../../../../../../base/browser/dom.js';
 import { DisposableStore } from '../../../../../../../base/common/lifecycle.js';
 import { IMarkdownRenderer } from '../../../../../../../platform/markdown/browser/markdownRenderer.js';
-import { DshNodeViewInput, IDshNodeView, asArray, asString, dataOf, isRecord, jsonText } from './dshNodeTypes.js';
+import { DshNodeViewInput, IDshNodeView, asArray, asString, dataOf, isRecord } from './dshNodeTypes.js';
 import { createCard, createField, createTitleRow, renderMarkdown } from './dshViewParts.js';
+import { DshAttachmentView } from './dshAttachmentView.js';
 import { Codicon } from '../../../../../../../base/common/codicons.js';
 
 /**
@@ -19,7 +20,7 @@ import { Codicon } from '../../../../../../../base/common/codicons.js';
 export class DshUserView implements IDshNodeView {
 	readonly domNode: HTMLElement;
 
-	constructor(input: DshNodeViewInput, renderer: IMarkdownRenderer, stores: DisposableStore) {
+	constructor(private readonly input: DshNodeViewInput, renderer: IMarkdownRenderer, stores: DisposableStore) {
 		const steering = input.kind === 'steering';
 		const card = createCard('default');
 		card.classList.add('chat-dsh-user');
@@ -70,13 +71,7 @@ export class DshUserView implements IDshNodeView {
 			}
 			case 'image':
 			case 'file': {
-				const box = dom.$('.chat-dsh-attachment');
-				const name = attachmentName(block['attachment']);
-				const label = dom.append(box, dom.$('.chat-dsh-attachment-name'));
-				label.textContent = name ?? type;
-				const detail = dom.append(box, dom.$('.chat-dsh-attachment-detail'));
-				detail.textContent = jsonText(block['attachment']);
-				return box;
+				return new DshAttachmentView({ ...block, type }, this.input, stores).domNode;
 			}
 			case 'tool-call':
 			case 'tool-addition':
@@ -90,19 +85,6 @@ export class DshUserView implements IDshNodeView {
 	}
 }
 
-/** attachment 的显示名只从载荷读；读不到返回 undefined（由调用方回退到 type，不编造）。 */
-function attachmentName(attachment: unknown): string | undefined {
-	if (!isRecord(attachment)) {
-		return undefined;
-	}
-	const name = asString(attachment['name']);
-	if (name !== undefined && name !== '') {
-		return name;
-	}
-	const id = asString(attachment['attachmentId']);
-	return id !== undefined && id !== '' ? id : undefined;
-}
-
 /** 从 projection 的 data 层或顶层读字段（两种形状都容忍，不伪造）。 */
 function readField(input: DshNodeViewInput, key: string): unknown {
 	const data = dataOf(input.parsed);
@@ -114,3 +96,4 @@ function readField(input: DshNodeViewInput, key: string): unknown {
 	}
 	return undefined;
 }
+

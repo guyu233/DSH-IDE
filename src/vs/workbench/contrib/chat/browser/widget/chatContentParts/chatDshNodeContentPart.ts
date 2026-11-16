@@ -12,6 +12,8 @@ import { ThemeIcon } from '../../../../../../base/common/themables.js';
 import { localize } from '../../../../../../nls.js';
 import { IInstantiationService } from '../../../../../../platform/instantiation/common/instantiation.js';
 import { IMarkdownRenderer } from '../../../../../../platform/markdown/browser/markdownRenderer.js';
+import { IDshClientService } from '../../../../../../platform/dshClient/common/dshClientService.js';
+import { IClipboardService } from '../../../../../../platform/clipboard/common/clipboardService.js';
 import { IChatDshNodePart } from '../../../common/chatService/chatService.js';
 import { IChatRendererContent } from '../../../common/model/chatViewModel.js';
 import { IChatContentPart } from './chatContentParts.js';
@@ -46,14 +48,11 @@ export class ChatDshNodeContentPart extends Disposable implements IChatContentPa
 	constructor(
 		private readonly part: IChatDshNodePart,
 		private readonly renderer: IMarkdownRenderer,
-		@IInstantiationService instantiationService: IInstantiationService,
+		@IInstantiationService private readonly instantiationService: IInstantiationService,
 	) {
 		super();
-		// 视图目前都用显式构造；保留注入点供后续子视图按需 createInstance。
-		void instantiationService;
 		this.domNode = this._render(part);
 	}
-
 	private _render(part: IChatDshNodePart): HTMLElement {
 		const container = dom.$('.chat-dsh-node');
 		container.setAttribute('data-dsh-node-id', part.id);
@@ -95,6 +94,7 @@ export class ChatDshNodeContentPart extends Disposable implements IChatContentPa
 			projectionAvailable: projectionOk,
 			id: part.id,
 			kind,
+			readAttachment: this._makeAttachmentReader(),
 		};
 
 		const view = this._createView(kind, input, stores);
@@ -157,7 +157,37 @@ export class ChatDshNodeContentPart extends Disposable implements IChatContentPa
 
 	/** 「原始载荷」详情：永远显示 encoded 原文，保证专用视图不隐藏任何字段。 */
 	private _renderRawDetails(input: DshNodeViewInput, stores: DisposableStore): HTMLElement {
-		return new DshRawJsonView(input, stores).domNode;
+		let clipboard: IClipboardService | undefined;
+		try {
+			clipboard = this.instantiationService.invokeFunction(accessor => accessor.get(IClipboardService));
+		} catch {
+			clipboard = undefined;
+		}
+		return new DshRawJsonView(input, stores, clipboard).domNode;
+	}
+
+	/**
+	 * 附件字节读取入口（官方 `readAttachment` 契约）。
+	 *
+	 * 通过可选的 `IDshClientService` 注入取得；未装载该服务时返回 undefined，
+	 * 视图据此显示原始 attachment JSON，而不是空白或伪造图片。
+	 */
+	private _makeAttachmentReader(): DshNodeViewInput['readAttachment'] {
+		let client: IDshClientService | undefined;
+		try {
+			client = this.instantiationService.invokeFunction(accessor => accessor.get(IDshClientService));
+		} catch {
+			// 未注册该服务（例如单元测试宿主）：不伪造能力。
+			return undefined;
+		}
+		if (client === undefined) {
+			return undefined;
+		}
+		const service = client;
+		return async (attachment: unknown) => {
+			const result = await service.call<{ mediaType: string; data: string }>('readAttachment', { attachment });
+			return result.ok ? result.value : undefined;
+		};
 	}
 
 	hasSameContent(other: IChatRendererContent): boolean {
@@ -202,3 +232,5 @@ function readString(value: unknown, key: string): string | undefined {
 
 void Codicon;
 void ThemeIcon;
+
+
