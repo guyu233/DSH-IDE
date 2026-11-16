@@ -472,6 +472,17 @@ DshChatSession.acceptView / acceptConversation → DshChatModel（typed 节点�
 
 产出落 `.build/dsh-part-contracts.md` 与 `.build/dsh-2b-audit.md`（本地核对材料，不入库）。关键结论：`confirmation` 按钮点击走 `chatService.sendRequest`，**不能**回传 `dsh.answerApproval`；`questionCarousel` 回传依赖 `resolveId` 与 `notifyQuestionCarouselAnswer`，当前数据链不具备；`planReview` / `changesSummary` / `multiDiffData` 需要正文与真实 URI，DSH 侧只有 `active/pending` 与字符串 path。以上判定为本轮「保留降级形态」的依据。
 
+### 8.6 第二阶段第二轮：子智能体对抗式复核（workflow + 两个模型）
+
+同一 `workflow` 机制的第二次并行工作流，仍是 `workbuddylocal` 目录里的两个模型：
+
+- `glm-5.3-flash` → 对抗式代码审查（`dshChatHistory` / `dshChatSession` / `dshChatSessionContent` 的全部改动）；
+- `hy4flash` → 测试有效性 + 文档一致性（6 个新测试文件的「假守护」风险、手册计数与实测是否一致）。
+
+产出落 `.build/review-a.md` / `.build/review-b.md`（本地材料，不入库）。复核报出并经主智能体逐条核实、修复的**真缺陷 4 个**：running 阶段工具双卡、连续 `turn-error` 互相覆盖、`sameSkills` 漏比 3 个字段、`quotaNotice` 覆盖真实错误。另指出 1 个测试盲点（`extrasOf` 装配未被触达），已把该函数下沉为纯函数并直接单测。
+
+> **如实记录**：`hy4flash` 的报告中「mocha 13 项」「365 项已被 376/377/378 取代且 r92 日志有失败」等说法来自它读到的工作区其他日志，不是本轮实测；主智能体复跑 `npm run test-dsh` 得 **7 passing**，`test-dsh:all` 得 **370 项全过**，以实测为准（手册 §9.2/§9.5 已按实测回写）。
+
 ---
 ## 9. 当前状态：第一阶段完成；第二阶段 2-A/2-B/2-C/2-D 已落地，2-E 真机验收待用户执行
 
