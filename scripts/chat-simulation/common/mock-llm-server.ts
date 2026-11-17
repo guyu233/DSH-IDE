@@ -20,10 +20,7 @@
 
 const http: typeof import('http') = require('http');
 const https: typeof import('https') = require('https');
-const path: typeof import('path') = require('path');
 const { EventEmitter }: typeof import('events') = require('events');
-
-const ROOT = path.join(__dirname, '..', '..', '..');
 
 let _log: (msg: string) => void = console.log;
 let _verbose = false;
@@ -179,13 +176,6 @@ class ScenarioBuilderImpl {
 			this.chunks.push({ content, delayMs });
 		}
 		return this;
-	}
-
-	/**
-	 * Emit multiple chunks with no delay (burst).
-	 */
-	burst(contents: string[]): this {
-		return this.stream(contents, 0);
 	}
 
 	build(): StreamChunk[] {

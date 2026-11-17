@@ -747,23 +747,6 @@ function robustStats(raw) {
 }
 
 /**
- * Simple linear regression slope (y per unit x).
- * @param {number[]} values
- */
-function linearRegressionSlope(values) {
-	const n = values.length;
-	if (n < 2) { return 0; }
-	let sumX = 0, sumY = 0, sumXY = 0, sumX2 = 0;
-	for (let i = 0; i < n; i++) {
-		sumX += i;
-		sumY += values[i];
-		sumXY += i * values[i];
-		sumX2 += i * i;
-	}
-	return (n * sumXY - sumX * sumY) / (n * sumX2 - sumX * sumX);
-}
-
-/**
  * Format a single metric line for console output.
  * @param {number[]} values
  * @param {string} label
@@ -837,7 +820,6 @@ module.exports = {
 	removeOutliers,
 	robustStats,
 	welchTTest,
-	linearRegressionSlope,
 	summarize,
 	markDuration,
 	launchVSCode,
