@@ -239,40 +239,6 @@ export default defineConfig(
 			]
 		}
 	},
-	{
-		files: [
-			'src/vs/platform/agentHost/test/**/missionControl*.test.ts',
-			'src/vs/platform/agentHost/test/**/protocolServerHandler.test.ts',
-			'src/vs/platform/agentHost/test/**/agentHostProtocolClient.test.ts',
-			'src/vs/platform/agentHost/test/**/webPubSubRelayTransport.test.ts',
-			'src/vs/platform/agentHost/test/common/webPubSub/*.test.ts',
-			'src/vs/workbench/contrib/chat/test/browser/remoteAgentHost/cloudSandbox*.test.ts',
-			'src/vs/sessions/contrib/providers/remoteAgentHost/test/browser/remoteAgentHost.contribution.test.ts',
-		],
-		plugins: {
-			'agent-host-test': {
-				rules: {
-					'no-nested-tests': {
-						meta: {
-							type: 'problem',
-							schema: [],
-							messages: { nested: 'Declare tests in the suite, not inside another test; Mocha does not execute nested declarations.' },
-						},
-						create(context) {
-							return {
-								'CallExpression[callee.name="test"] CallExpression[callee.name="test"]'(node) {
-									context.report({ node, messageId: 'nested' });
-								},
-							};
-						},
-					},
-				},
-			},
-		},
-		rules: {
-			'agent-host-test/no-nested-tests': 'error',
-		},
-	},
 	// Disallow common telemetry properties in event data
 	{
 		files: [
@@ -436,7 +402,6 @@ export default defineConfig(
 			'src/vs/workbench/services/remote/common/tunnelModel.ts',
 			'src/vs/workbench/services/search/common/textSearchManager.ts',
 			'src/vs/workbench/test/browser/workbenchTestServices.ts',
-			'src/vs/platform/agentHost/common/state/protocol/**',
 			'test/automation/src/playwrightDriver.ts',
 			'.eslint-plugin-local/**/*',
 		],
@@ -450,10 +415,8 @@ export default defineConfig(
 	// Guard the agent host protocol `_meta` bag: no untyped field access or casts.
 	{
 		files: [
-			'src/vs/platform/agentHost/**/*.ts',
 			'src/vs/workbench/contrib/chat/browser/agentSessions/**/*.ts',
 			'src/vs/workbench/services/agentHost/**/*.ts',
-			'src/vs/sessions/**/*.ts',
 		],
 		ignores: [
 			// Tests assert on the raw `_meta` wire shape on purpose (verifying
@@ -461,14 +424,6 @@ export default defineConfig(
 			'**/test/**',
 			'**/*.test.ts',
 			'**/*.integrationTest.ts',
-			// This directory is the validation boundary for typed metadata
-			// readers. Callers elsewhere must consume those readers.
-			'src/vs/platform/agentHost/common/meta/**',
-			// Copilot SDK metadata is already typed and is not an AHP `_meta`
-			// bag. Keep its access isolated in one adapter.
-			'src/vs/platform/agentHost/node/copilot/copilotSdkMeta.ts',
-			// Codex's own generated app-server protocol (not AHP `_meta`).
-			'src/vs/platform/agentHost/node/codex/protocol/**',
 		],
 		plugins: {
 			'local': pluginLocal,
@@ -1210,7 +1165,6 @@ export default defineConfig(
 			'local/code-no-static-node-module-import': [
 				'error',
 				// Files that run in separate processes, not on the electron-main startup path
-				'src/vs/platform/agentHost/node/**/*.ts',
 				'src/vs/platform/files/node/watcher/**/*.ts',
 				'src/vs/platform/terminal/node/**/*.ts',
 				// Files that use small, safe modules
@@ -1757,50 +1711,6 @@ export default defineConfig(
 					'restrictions': [
 						'vs/base/~',
 						'vs/base/parts/*/~'
-					]
-				},
-				{
-					'target': 'src/vs/platform/agentHost/node/diffWorkerMain.ts',
-					'layer': 'node',
-					'restrictions': [
-						'vs/base/~',
-						'vs/base/parts/*/~',
-						'vs/platform/*/~',
-						'vs/editor/common/diff/**', // diffing logic used by the agent host
-					]
-				},
-				{
-					'target': 'src/vs/platform/agentHost/~',
-					'restrictions': [
-						'vs/base/~',
-						'vs/base/parts/*/~',
-						'vs/platform/*/~',
-						'tas-client', // node module allowed even in /common/
-						'@microsoft/1ds-core-js', // node module allowed even in /common/
-						'@microsoft/1ds-post-js', // node module allowed even in /common/
-						'@xterm/headless', // node module allowed even in /common/
-						'@vscode/fs-copyfile', // used by agentHost for file copying after worktree creation
-						'@vscode/tree-sitter-wasm', // used by agentHost for command auto-approval
-						'@vscode/copilot-api', // used by agentHost for Copilot API requests
-						'@anthropic-ai/sdk', // used by agentHost for Anthropic API requests
-						'@anthropic-ai/claude-agent-sdk', // used by agentHost for Claude Agent SDK session enumeration / queries
-						'@modelcontextprotocol/sdk/**/*', // used by agentHost for Claude client-tool MCP result types (Phase 10)
-						'@github/copilot-sdk',
-						'zod', // used by agentHost for Claude client-tool MCP input schemas
-						{ 'when': 'hasNode', 'pattern': 'libsodium-wrappers' },
-						{ 'when': 'hasNode', 'pattern': '@hpke/core' },
-						{
-							'when': 'test',
-							'pattern': 'events'
-						},
-						{
-							'when': 'test',
-							'pattern': 'module'
-						},
-						{
-							'when': 'test',
-							'pattern': 'websocket'
-						}
 					]
 				},
 				{

@@ -4,7 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 // Copies type definitions from the sibling `agent-host-protocol` repo into
-// `src/vs/platform/agentHost/common/state/protocol/`. Run via:
+// `src/vs/platform/chatContracts/common/state/protocol/`. Run via:
 //
 //   npx tsx scripts/sync-agent-host-protocol.ts
 //
@@ -30,7 +30,7 @@ import * as ts from 'typescript';
 const ROOT = path.resolve(__dirname, '..');
 const PROTOCOL_REPO = process.env['AHP_PROTOCOL_REPO'] ?? path.resolve(ROOT, '../agent-host-protocol');
 const TYPES_DIR = path.join(PROTOCOL_REPO, 'types');
-const DEST_DIR = path.join(ROOT, 'src/vs/platform/agentHost/common/state/protocol');
+const DEST_DIR = path.join(ROOT, 'src/vs/platform/chatContracts/common/state/protocol');
 
 // Load tsfmt.json formatting options once
 const TSFMT_PATH = path.join(ROOT, 'tsfmt.json');

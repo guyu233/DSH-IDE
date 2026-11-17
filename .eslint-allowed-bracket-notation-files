@@ -41,7 +41,7 @@ src/vs/workbench/contrib/mcp/common/mcpSandboxService.ts
 src/vs/workbench/contrib/mcp/common/mcpServer.ts
 src/vs/workbench/services/chat/common/chatEntitlementService.ts
 
-# Build, CI, and scripts (30 files)
+# Build, CI, and scripts (29 files)
 build/darwin/create-dmg.ts
 build/darwin/create-universal-app.ts
 build/darwin/sign-server.ts
@@ -67,7 +67,6 @@ build/npm/postinstall.ts
 build/npm/preinstall.ts
 build/npm/update-localization-extension.ts
 build/win32/explorer-dll-fetcher.ts
-scripts/code-agent-host.js
 scripts/code-server.js
 scripts/code-sessions-web.js
 scripts/code-web.js
