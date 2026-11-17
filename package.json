@@ -89,8 +89,7 @@
 		"verify:dsh-ide-release-gate": "node build/lib/dsh/verify/dshIdeVerify.mjs release-gate",
 		"verify:dsh-ide-ci": "node build/lib/dsh/verify/dshIdeCi.mjs",
 		"verify:dsh-artifact": "node build/lib/dsh/verify/dshArtifactContents.mjs",
-		"verify:dsh-install-drift": "node build/lib/dsh/verify/dshInstallDrift.mjs",
-		"verify:dsh-real-p95": "node --experimental-strip-types build/lib/dsh/verify/dshRealSampleP95.mjs"
+		"verify:dsh-install-drift": "node build/lib/dsh/verify/dshInstallDrift.mjs"
 	},
 	"dependencies": {
 		"@devcontainers/cli": "0.88.0",

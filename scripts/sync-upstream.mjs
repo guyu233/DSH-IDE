@@ -9,7 +9,7 @@
  *   1) 渲染复用件：`packages/client/ui-chat` 的 20 个源文件 + 8 个 CSS 模块 + 1 个 APNG；
  *   2) 传输/契约：connection / gateway / session-controller / llm / client-modules / typert 的关键契约文件。
  *
- * 用法（在仓库根 E:\vscode-dsh 下）：
+ * 用法（在仓库根执行）：
  *   node scripts/sync-upstream.mjs                       # 用默认源 clone，base=当前 vendored 版本，target=最新 dsh-v* tag
  *   node scripts/sync-upstream.mjs --fetch               # 先从官方 upstream 抓取最新 tags 再比对
  *   node scripts/sync-upstream.mjs --target dsh-v0.2.2-rc.1
@@ -74,9 +74,9 @@ const CONTRACT_FILES = [
 
 function readVendoredVersion() {
 	try {
-		const p = fs.readFileSync(path.join(ROOT, 'vscode-1.143.1/build/lib/dsh/PROVENANCE.md'), 'utf8')
-		const m = p.match(/\|\s*版本\s*\|\s*`?([0-9][^`|\s]*)`?\s*\|/)
-		if (m) return m[1]
+		const p = fs.readFileSync(path.join(ROOT, 'build/lib/dsh/PROVENANCE.md'), 'utf8')
+		const m = p.match(/\|\s*版本\s*\|\s*`?([0-9][^`|（(]*)`?/)
+		if (m) return m[1].trim()
 	} catch { /* ignore */ }
 	return undefined
 }
@@ -175,7 +175,7 @@ function main() {
 		lines.push('- base 与 target 相同，无需动作。')
 	} else {
 		if (changedUi.length === 0 && changedCss.length === 0 && changedAsset.length === 0) {
-			lines.push('- DSH 渲染样式：无变化，无需改 `vscode-1.143.1/src/vs/workbench/contrib/chat/browser/widget/media/chat.css` 的 DSH 皮肤段。')
+			lines.push('- DSH 渲染样式：无变化，无需改 `src/vs/workbench/contrib/chat/browser/widget/media/chat.css` 的 DSH 皮肤段。')
 		} else {
 			lines.push('- **DSH 渲染样式有变化**：聊天内容由 `DshChatModelDriver` 直接写进原生 ChatModel，观感在 `chat.css` 的 `.dsh-session` 段维护；逐项对照上游 CSS 数值更新该段，不新增 sidecar。')
 			for (const [p, s] of changedUi) lines.push(`  - ${s} \`${rel(p)}\``)
@@ -185,11 +185,11 @@ function main() {
 		if (changedContract.length === 0) {
 			lines.push('- 传输/契约：逐字相同，无需改传输复刻（`dshClientProtocol`/`dshEventMap`/`inlineCompletion`/`launch-guard`/host 插件）。')
 		} else {
-			lines.push('- **传输/契约有变化**：逐项核对线格式/类型形状，必要时改 `vscode-1.143.1/src/vs/platform/dshClient/**` 与 `src/vs/platform/dshClient/host/**`。')
+			lines.push('- **传输/契约有变化**：逐项核对线格式/类型形状，必要时改 `src/vs/platform/dshClient/**` 与 `src/vs/platform/dshClient/host/**`。')
 			for (const [p, s] of changedContract) lines.push(`  - ${s} \`${p}\``)
 		}
 		lines.push('- 跑 `verify:dsh-ide-contract` 与 `verify:dsh-ide-protocol-single-source`，确认无破坏性变更。')
-		lines.push('- 按 `VSCODE_PATCH_POINTS` 重核指纹；更新 `vscode-1.143.1/build/lib/dsh/PROVENANCE.md` 版本/commit/sha256。')
+		lines.push('- 按 `VSCODE_PATCH_POINTS` 重核指纹；更新 `build/lib/dsh/PROVENANCE.md` 版本/commit/sha256。')
 	}
 	lines.push('')
 
