@@ -200,13 +200,15 @@ export class TunnelProxy extends Disposable {
 			throw new Error('HTTP module not initialized');
 		}
 		const agent = new this._http.Agent({ keepAlive: true });
-		agent.createConnection = (options, oncreate) => {
+		// Node 允许 `oncreate` 回调式实现返回 void，但 `Agent.createConnection` 的类型仍声明返回 socket；
+		// 这里只做类型断言，运行时依旧只走回调。
+		agent.createConnection = ((options, oncreate) => {
 			const host = options.hostname || options.host || '';
 			const port = Number(options.port) || 80;
 			this._createTunnelSocket(host, port)
 				.then(socket => oncreate?.(null, socket))
 				.catch(err => oncreate?.(err, null!));
-		};
+		}) as typeof agent.createConnection;
 		return agent;
 	}
 

@@ -45,7 +45,7 @@ suite('Lazy tryout presentations', () => {
 	test('resolving a command initializes only its presentation once and does not execute', () => {
 		const instantiation = store.add(new TestInstantiationService());
 		let executed = 0;
-		instantiation.stub(ICommandService, { executeCommand: async () => { executed++; } });
+		instantiation.stub(ICommandService, { executeCommand: async <R = unknown>(): Promise<R | undefined> => { executed++; return undefined; } });
 		instantiation.stub(IContextKeyService, { onDidChangeContext: Event.None, contextMatchesRules: () => true });
 		const create = sinon.spy(instantiation, 'createInstance');
 		store.add(new OnboardingTryoutContribution(instantiation, upcastPartial<ITextModelService>({

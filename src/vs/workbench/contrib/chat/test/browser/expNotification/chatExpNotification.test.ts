@@ -219,7 +219,7 @@ suite('ChatExpNotification', () => {
 					getCurrentExperiments: async () => [],
 					getTreatmentWithAssignment: async () => ({ value: undefined, hasAssignment: Promise.resolve(false) }),
 					addTelemetryAssignmentFilter(_filter: IAssignmentFilter): void { },
-					getTreatment: async <T extends string | number | boolean>() => (treatments.length > 1 ? treatments.shift() : treatments[0]) as T,
+					getTreatment: async <T extends string | number | boolean>(): Promise<T | undefined> => (treatments.length > 1 ? treatments.shift() : treatments[0]) as T | undefined,
 				} satisfies IWorkbenchAssignmentService,
 				notificationService,
 				{ getChatSessionContribution: (type: string) => type === 'agent-host-copilotcli' ? { agentHostProviderId: 'copilotcli' } : undefined } as IChatSessionsService,

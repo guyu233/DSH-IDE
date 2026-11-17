@@ -3974,7 +3974,7 @@ export class AICustomizationManagementEditor extends EditorPane {
 
 		this.editorMigrationDetailActions = this.createMigrationDetailActions(editorHeader);
 
-		this.editorModeButton = DOM.append(editorHeader, $('button.editor-mode-button'));
+		this.editorModeButton = DOM.append(editorHeader, $('button.editor-mode-button')) as HTMLButtonElement;
 		this.editorModeButton.type = 'button';
 		this.editorModeButton.setAttribute('aria-pressed', 'false');
 		this.editorDisposables.add(this.hoverService.setupManagedHover(getDefaultHoverDelegate('element'), this.editorModeButton, () => this.getEditorModeButtonTooltip()));

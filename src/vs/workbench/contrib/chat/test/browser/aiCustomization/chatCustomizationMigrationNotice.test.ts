@@ -97,7 +97,7 @@ suite('ChatCustomizationMigrationNotice', () => {
 		instantiation.stub(IStorageService, storage);
 		instantiation.stub(IUriIdentityService, { extUri });
 		instantiation.stub(IChatEntitlementService, { sentimentObs: sentiment });
-		instantiation.stub(ICommandService, { executeCommand: async (id: string, ...args: unknown[]) => { commands.push({ id, args }); } });
+		instantiation.stub(ICommandService, { executeCommand: async <R = unknown>(id: string, ...args: unknown[]): Promise<R | undefined> => { commands.push({ id, args }); return undefined; } });
 		instantiation.stub(ILogService, new class extends mock<ILogService>() { }());
 		instantiation.stub(IHoverService, new class extends mock<IHoverService>() { }());
 		instantiation.stub(IOpenerService, new class extends mock<IOpenerService>() { }());

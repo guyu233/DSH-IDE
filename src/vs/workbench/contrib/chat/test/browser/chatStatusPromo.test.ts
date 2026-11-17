@@ -91,8 +91,8 @@ suite('ChatStatusPromo', () => {
 		const viewVisibility = store.add(new Emitter<{ id: string; visible: boolean }>());
 		instantiation.stub(IViewsService, {
 			onDidChangeViewVisibility: viewVisibility.event, isViewVisible: () => state.chatVisible,
-			getViewWithId: <T extends IView>() => state.view as T,
-			openView: async <T extends IView>() => state.view as T,
+			getViewWithId: <T extends IView>(_id: string): T | null => (state.view ?? null) as T | null,
+			openView: async <T extends IView>(_id: string, _focus?: boolean): Promise<T | null> => (state.view ?? null) as T | null,
 		});
 		const widgets = new TestChatWidgetService();
 		const widgetAdded = store.add(new Emitter<IChatWidget>());

@@ -17,7 +17,8 @@ import { IAgentHostResourceUriMapper } from '../../../../../../platform/chatCont
 import { AMBIENT_AGENT_HOST_AUTHORITY, IAgentHostConnectionsService, IAgentHostSessionResolution } from '../../../../../../platform/chatContracts/common/agentHostConnectionsService.js';
 import { getEffectiveAgents } from '../../../../../../platform/chatContracts/common/customAgents.js';
 import { readMcpServerControllingSetting, readMcpServerDisplayName, readMcpServerSource, readMcpServerSourcePlugin } from '../../../../../../platform/chatContracts/common/meta/mcpCustomizationMeta.js';
-import { getCustomizationDisabledReason, isCustomizationEnabled, withCustomizationEnablement } from '../../../../../../platform/chatContracts/common/customizationEnablement.js';
+import { getCustomizationDisabledReason, isCustomizationEnabled, withCustomizationEnablement, type CustomizationDisabledReason } from '../../../../../../platform/chatContracts/common/customizationEnablement.js';
+import { type TextRange } from '../../../../../../platform/chatContracts/common/state/protocol/common/state.js';
 import { type IAgentSubscription } from '../../../../../../platform/chatContracts/common/state/agentSubscription.js';
 import { ActionType } from '../../../../../../platform/chatContracts/common/state/protocol/actions.js';
 import { CustomizationEnablementKind, CustomizationType, McpServerCustomization, McpServerStatus, type Customization, type CustomizationEnablement, type McpServerState, type PluginCustomization, type RootConfigState, type SessionState } from '../../../../../../platform/chatContracts/common/state/protocol/state.js';
@@ -33,8 +34,36 @@ import { isUntitledChatSession } from '../../../common/model/chatUri.js';
 import { IAgentHostUntitledProvisionalSessionService } from './agentHostUntitledProvisionalSessionService.js';
 import { IAgentHostActiveClientService } from './agentHostActiveClientService.js';
 // DSH integration: the Agents-window source tree (vs/sessions) was removed.
-// Keep a local structural alias for the few fields this editor module reads.
-type IAgentHostMcpServer = { readonly id: string; readonly name: string; readonly displayName?: string; readonly enabled?: boolean; readonly status?: unknown; readonly [key: string]: unknown };
+// This structural type mirrors the fields `getMcpServers()` actually builds below;
+// keeping it weak (`[key: string]: unknown`) made every downstream field `unknown`.
+type IAgentHostMcpServer = {
+	readonly id: string;
+	readonly name: string;
+	readonly displayName?: string;
+	readonly source?: string;
+	readonly sourcePluginName?: string;
+	readonly hostConfiguration?: IMcpServerConfiguration;
+	readonly controllingSettingId?: string;
+	readonly enabled: boolean;
+	readonly enablement?: readonly CustomizationEnablement[];
+	readonly isPluginProvided?: boolean;
+	readonly pluginId?: string;
+	readonly isClientBundled?: boolean;
+	readonly owningPluginClientId?: string;
+	readonly disabledReason?: CustomizationDisabledReason;
+	/** 官方 `McpServerStatus` 的 kind 字面量；和下面的 `state` 同源。 */
+	readonly status: McpServerStatus;
+	readonly authenticating?: boolean;
+	readonly state: McpServerState;
+	readonly sourceUri?: URI;
+	readonly sourceRange?: TextRange;
+	readonly logOutputChannelId?: string;
+	readonly background?: () => void;
+	readonly setEnabled: (enabled: boolean) => void;
+	readonly start: () => void;
+	readonly stop: () => void;
+	readonly listTools?: () => Promise<readonly MCP.Tool[]>;
+};
 import { resolveMcpServerAuthentication, agentHostMcpServerId, autoAuthenticateMcpServer } from './agentHostAuth.js';
 import { IOutputService } from '../../../../../services/output/common/output.js';
 import { IMcpService } from '../../../../../contrib/mcp/common/mcpTypes.js';

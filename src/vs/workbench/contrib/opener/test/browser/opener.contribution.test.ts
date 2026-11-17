@@ -39,7 +39,7 @@ suite('WorkbenchOpenerContribution', () => {
 			},
 		}));
 		instantiation.stub(ICommandService, upcastPartial<ICommandService>({
-			executeCommand: async (id, uri: URI) => { calls.push({ command: id, uri: uri.toString() }); },
+			executeCommand: async <R = unknown>(id: string, uri: URI): Promise<R | undefined> => { calls.push({ command: id, uri: uri.toString() }); return undefined; },
 		}));
 		instantiation.stub(IWorkbenchEnvironmentService, upcastPartial<IWorkbenchEnvironmentService>({ isSessionsWindow: options.sessions ?? true }));
 		instantiation.stub(IWorkspaceContextService, upcastPartial<IWorkspaceContextService>({

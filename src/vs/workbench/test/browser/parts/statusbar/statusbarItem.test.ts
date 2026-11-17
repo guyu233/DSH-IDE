@@ -41,7 +41,7 @@ suite('StatusbarEntryItem', () => {
 		});
 		const commands: { id: string; args: string[] }[] = [];
 		instantiationService.stub(ICommandService, {
-			executeCommand: async (id: string, ...args: string[]) => { commands.push({ id, args }); },
+			executeCommand: async <R = unknown>(id: string, ...args: string[]): Promise<R | undefined> => { commands.push({ id, args }); return undefined; },
 		});
 		const hoverService = store.add(instantiationService.createInstance(HoverService));
 		instantiationService.stub(IHoverService, hoverService);

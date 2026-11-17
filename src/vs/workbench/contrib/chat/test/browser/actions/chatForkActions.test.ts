@@ -87,8 +87,9 @@ suite('ForkConversationAction', () => {
 			}
 		}();
 		const commandService = upcastPartial<ICommandService>({
-			executeCommand: async (_commandId: string, _resource: URI, options?: unknown) => {
+			executeCommand: async <R = unknown>(_commandId: string, _resource: URI, options?: unknown): Promise<R | undefined> => {
 				commandCalls.push({ options });
+				return undefined;
 			},
 		});
 		const configurationService = new TestConfigurationService();

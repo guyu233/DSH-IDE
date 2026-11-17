@@ -34,7 +34,7 @@ suite('Notebook cell status command lifetime', () => {
 
 	setup(() => {
 		const commands = new class extends mock<ExtHostCommands>() {
-			override readonly converter = new CommandsConverter(this, () => undefined, new NullLogService());
+			override readonly converter: CommandsConverter = new CommandsConverter(this as ExtHostCommands, () => undefined, new NullLogService());
 			override registerCommand(): Disposable { return store.add(new Disposable(() => { })); }
 			override registerApiCommand(): Disposable { return this.registerCommand(); }
 			override registerArgumentProcessor(): void { }

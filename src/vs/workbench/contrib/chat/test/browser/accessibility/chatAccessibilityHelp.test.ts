@@ -28,7 +28,7 @@ suite('Chat Accessibility Help', () => {
 
 	test('documents the session working set while preserving existing editor guidance', () => {
 		const read = (sessionWorkingSetUndo: boolean) => {
-			const help = getAccessibilityHelpText('agentView', new MockKeybindingService(), true, false, false, true, false, ChatSessionArchiveActionWording.Archive, false, false, undefined, true, sessionWorkingSetUndo);
+			const help = getAccessibilityHelpText('agentView', new MockKeybindingService(), true, false, false, true, false, ChatSessionArchiveActionWording.Archive, false, false, true, sessionWorkingSetUndo);
 			return {
 				sessionChanges: help.includes('changes across the whole session instead of showing a Changes pill'),
 				disclosure: help.includes('Enter or Space to expand or collapse it'),

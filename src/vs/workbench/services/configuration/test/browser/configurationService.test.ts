@@ -353,7 +353,7 @@ suite('ConfigurationDefaultOverridesContribution', () => {
 	test('applies developer override defaults without waiting for assignment metadata', async () => {
 		const contribution = createTestContribution({});
 		const assignment = new DeferredPromise<boolean>();
-		contribution.workbenchAssignmentService.getTreatmentWithAssignment = async <T extends string | number | boolean>() => ({
+		contribution.workbenchAssignmentService.getTreatmentWithAssignment = async <T extends string | number | boolean>(_name: string): Promise<ITreatmentWithAssignment<T>> => ({
 			value: 'override' as T,
 			hasAssignment: assignment.p,
 		});
@@ -427,7 +427,7 @@ suite('ConfigurationDefaultOverridesContribution', () => {
 			configurationRegistry.registerConfiguration(configuration);
 			try {
 				await contribution.processExperimentalSettings([firstSetting], false);
-				contribution.workbenchAssignmentService.getTreatmentWithAssignment = async <T extends string | number | boolean>() => {
+				contribution.workbenchAssignmentService.getTreatmentWithAssignment = async <T extends string | number | boolean>(_name: string): Promise<ITreatmentWithAssignment<T>> => {
 					if (!metadataOnly) {
 						throw new CancellationError();
 					}
@@ -486,7 +486,7 @@ suite('ConfigurationDefaultOverridesContribution', () => {
 		};
 		const contribution = createTestContribution({});
 		const gate = new DeferredPromise<void>();
-		contribution.workbenchAssignmentService.getTreatmentWithAssignment = async <T extends string | number | boolean>() => {
+		contribution.workbenchAssignmentService.getTreatmentWithAssignment = async <T extends string | number | boolean>(_name: string): Promise<ITreatmentWithAssignment<T>> => {
 			await gate.p;
 			return { value: true as T, hasAssignment: Promise.resolve(true) };
 		};
@@ -512,7 +512,7 @@ suite('ConfigurationDefaultOverridesContribution', () => {
 	test('ignores assignment metadata from a superseded resolution', async () => {
 		const contribution = createTestContribution({ testFirstAutoExperimentalSetting: 'control' });
 		const assignment = new DeferredPromise<boolean>();
-		contribution.workbenchAssignmentService.getTreatmentWithAssignment = async <T extends string | number | boolean>() => ({
+		contribution.workbenchAssignmentService.getTreatmentWithAssignment = async <T extends string | number | boolean>(_name: string): Promise<ITreatmentWithAssignment<T>> => ({
 			value: 'control' as T,
 			hasAssignment: assignment.p,
 		});
