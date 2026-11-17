@@ -1062,7 +1062,7 @@ DshChatSession.acceptView / acceptConversation → DshChatModel（typed 节点�
 
 #### 9.11.9 第 6 轮：chat-simulation / mock-policy-server 的清理与 Bug 修复（已执行，2026-11-18）
 
-> 上一轮只对 `scripts/chat-simulation/**`（15 文件 / 266 KB）与 `scripts/mock-policy-server/**`（5 文件 / 159 KB）做了模式扫描，本轮全覆盖。另核对第 5 轮文档的定量声明。区间 `2b4f2504..09b5fe5c`：**8 个文件，+343 / -62 行**，6 个提交。
+> 上一轮只对 `scripts/chat-simulation/**`（15 文件 / 266 KB）与 `scripts/mock-policy-server/**`（5 文件 / 159 KB）做了模式扫描，本轮全覆盖。另核对第 5 轮文档的定量声明。代码改动 **4 个文件，+143 / -56 行**；文档 4 份；提交数见 `git log 2b4f2504..HEAD`。
 
 > **可删符号（3 个）**：`utils.js` 的 `linearRegressionSlope()`（全仓仅定义+导出项）、`mock-llm-server.ts` 的 `ROOT` 常量（文件内仅定义本身）+ 随之无用的 `path` require、`ScenarioBuilderImpl.burst()`（全仓 `.burst(` 零命中）。
 >
