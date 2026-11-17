@@ -1020,3 +1020,17 @@ DshChatSession.acceptView / acceptConversation → DshChatModel（typed 节点�
 >
 > **累计（三轮）**：约 111 个文件变更、净减约 4,200 行（+945 / -5,143）、20 余个提交；tsc 137→0；dependencies 68→66、devDependencies 100→93、scripts 86→80；锁文件 -113 条目（零新增、零版本变更）。
 
+#### 9.11.6 第 4 轮：已删目录的断链与残留（已执行，2026-11-17）
+
+> 第 4 轮由 3 个子智能体并行扫描（配置残留 / 重复实现 / 手册一致性），重点查「`src/vs/platform/agentHost/**`、`extensions/copilot/**`、`src/vs/sessions/**` 已删但仍有引用」的地方。区间 `d75b1fc1..7a0e6f1e`：**22 个文件，+108 / -1,289 行**，5 个提交。
+>
+> **真实断链（7 处，11 行）**：`scripts/test-integration.sh:200` / `.bat:130` 无条件 import 已删的 `agentHostTestProfile.ts`（`set -e` 中断整个默认集成测试）；`scripts/code-agent-host.js/.sh` spawn 不存在的 `out/.../agentHostServerMain.js`；`scripts/test-agent-host-e2e.sh/.bat` exec 不存在的 `test/integration/agentHost/runner.ts`；`scripts/code-sessions-web.js/.sh` import 不存在的 `src/vs/sessions/sessions.web.main.internal`。
+>
+> **删除**：上述 6 个脚本（422 行）、`scripts/chat-simulation/merge-ci-summary.js`（571 行，零引用）、`.vscode/launch.json` 的「VS Code Agent Host」启动项、`build/lib/i18n.resources.json` 的 `sessions` 段（38 条 / 154 行）、`eslint.config.js` 90 行（14 行 glob + 27 行空插件块 + 49 行 import-pattern）、`build/filters.ts` 3 处、`.eslint-ignore` 1 处、`.vscode/settings.json` 3 处、`.gitignore` 1 处、`.eslint-allowed-*-files` 6 条。
+>
+> **修正**：`sync-agent-host-protocol.ts` 的 `DEST_DIR` 改到 `chatContracts`（61 个 generated 文件的真实位置）；`dshIdeProtocol.ts:25` 的 wireRevision 注释去掉撤销的 5 号方案残留；手册 13 处行号/定量声明（§2 校验器 6 处、§4.5 附件 1 处、§2 状态层 3 处、§9.7 图标大小 1 处、§9.9.2 表头与 5 个真实行号）。
+>
+> **门禁**：tsc 0 error、`test-dsh:all` 384 PASS、`verify:dsh-ide-ci` 五项 PASS、`verify:dsh-artifact` PASS、`npm run compile` PASS（0 errors，49 s）、三份 `.vscode` JSONC 解析 PASS、`bash -n` / `node --check` 全部 PASS、`.eslint-allowed-*-files` 0 missing、`build/lib/test/i18n.test.ts` 3/3 PASS。详见 `docs/DSH-IDE瘦身报告-第4轮.md`。
+>
+> **保留**：`test/smoke/src/areas/agentsWindow/**`（5 文件 108 KB）整块保留——它测的 Dev Container / packaged AgentHost 已随 `src/vs/sessions/**` 与 `src/vs/platform/agentHost/**` 消失，但删除属测试裁剪，不在「行为不变」的清理范围。
+
