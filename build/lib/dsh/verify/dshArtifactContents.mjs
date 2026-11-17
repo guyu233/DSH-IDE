@@ -6,12 +6,12 @@
 // 第 45 轮：核对打包产物是否真的包含前几轮修复的内容（只读检查，不改产物）。
 //
 // 背景：第 36 轮发现磁盘上的 `dist/dsh-ide-2.0.0.tgz` 是**早于第 19 轮的陈旧产物**
-// （`package/common/` 里只有 `env.js`，缺 6 个共享模块）。此后第 37–39 轮修了三处
+// （`package/common/` 里只有 `env.js`，缺多个共享模块）。此后第 37–39 轮修了三处
 // 终端相关的真实阻塞（desktop 入口、NAPI 已证、node-pty 依赖分类），但**从未重新打包**，
 // 因此那些修复是否真的落进产物，此前一直没有证据。
 //
 // 本脚本对产物做三项可静态判定、且与「代码是否进包」有关的检查：
-//   ① `package/common/` 下 7 个共享模块是否齐全（对应第 19/22/34 轮新增的投影模块）；
+//   ① `package/common/` 下 10 个共享模块是否齐全（对应第 19/22/34 轮新增的投影模块与后续 3 个投影）；
 //   ② Host 入口是否含 `archiveSession` / `searchSessions` / `loadLater` 等新 method 痕迹；
 //   ③ `node-pty` 是否随包（对应第 39 轮的依赖分类修复）。
 //
@@ -48,6 +48,9 @@ const EXPECTED_COMMON = [
 	'dshIdeCommandLine.js',
 	'dshIdeArchiveSet.js',
 	'dshIdeSessionSearch.js',
+	'dshIdeComposer.js',
+	'dshIdeWaterfallNotice.js',
+	'dshIdeRequestView.js',
 ];
 
 const present = new Set(list.filter(m => m.startsWith('package/common/')).map(m => path.basename(m)));
@@ -75,7 +78,7 @@ if (!hasNodePty) { failures.push('node-pty 未随包（.moduleignore 的 node-pt
 if (hasNodePty && !hasNodePtyAsar) { failures.push('产物缺 node_modules.asar，node-pty 的 JS 代码可能没进去'); }
 
 console.log(`  tar 成员数              : ${list.length}`);
-console.log(`  package/common/ 模块    : ${present.size} 个（期望 7）`);
+console.log(`  package/common/ 模块    : ${present.size} 个（期望 ${EXPECTED_COMMON.length}）`);
 console.log(`  Host 入口新 method 痕迹 : ${methodTraces.join(', ') || '（无）'}`);
 console.log(`  node-pty 二进制（unpacked）: ${nodePtyUnpacked.length} 个`);
 console.log(`  node_modules.asar 归档  : ${hasNodePtyAsar ? '在' : '缺'}`);
