@@ -100,8 +100,6 @@ export class DshChatSession extends Disposable implements IDshChatSession {
 	private _goal: DshIdeGoalView | undefined;
 	private _todos: readonly DshIdeTodoView[] = [];
 	private _skills: readonly DshIdeSkillView[] = [];
-	/** typed `pending` 的当前清单。 */
-	private _pendingView: readonly DshIdePendingItem[] = [];
 
 	readonly onDidChangeModelMenu: Event<void> = this._onDidChangeModelMenu.event;
 	readonly onDidChangePending: Event<readonly DshChatPending[]> = this._onDidChangePending.event;
@@ -145,11 +143,6 @@ export class DshChatSession extends Disposable implements IDshChatSession {
 		return [...this.pendingItems.values()];
 	}
 
-	/** typed `pending` 的当前清单（面板渲染待决议卡用）。 */
-	pendingItemsView(): readonly DshIdePendingItem[] {
-		return this._pendingView;
-	}
-
 	deliverables(): readonly DshIdeDeliverableView[] {
 		return this._deliverables;
 	}
@@ -186,7 +179,6 @@ export class DshChatSession extends Disposable implements IDshChatSession {
 	 * typed 字段是唯一真源：Host 已经按 eventId 聚合过，前端不再自己累加或去重。
 	 */
 	private acceptPending(pending: readonly DshIdePendingItem[]): void {
-		this._pendingView = pending;
 		const before = this.pendingItems.size;
 		const beforeIds = [...this.pendingItems.keys()].join('\u0000');
 		this.pendingItems.clear();
@@ -223,10 +215,6 @@ export class DshChatSession extends Disposable implements IDshChatSession {
 		return this._running;
 	}
 
-	boundId(): string | undefined {
-		return this.boundSessionId;
-	}
-
 	/** 换会话：清空旧记录、重读目录、重开跟进流。 */
 	/**
 	 * 换会话：清空旧记录、重读目录、重开跟进流。
@@ -242,7 +230,6 @@ export class DshChatSession extends Disposable implements IDshChatSession {
 		this.boundSessionId = sessionId;
 		this.model.clear();
 		this.pendingItems.clear();
-		this._pendingView = [];
 		this._deliverables = [];
 		this._attachments = [];
 		this._quotaNotice = undefined;
@@ -506,15 +493,6 @@ export class DshChatSession extends Disposable implements IDshChatSession {
 			? { provider, model }
 			: undefined;
 		this._onDidChangeModelMenu.fire();
-	}
-
-	/** 运行态由 Stream 帧以外的信号也能确认：有流式条目即算在跑。 */
-	noteRunning(running: boolean): void {
-		if (this._running === running) {
-			return;
-		}
-		this._running = running;
-		this._onDidChangeRunning.fire(running);
 	}
 
 	override dispose(): void {

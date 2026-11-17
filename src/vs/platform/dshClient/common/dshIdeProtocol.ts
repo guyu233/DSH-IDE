@@ -151,12 +151,6 @@ export interface DshIdeFileAttachmentRef {
 	readonly bytes: number;
 }
 
-/** 读取一张 durable 图片附件的字节（base64）与媒体类型。 */
-export interface DshIdeImageAttachmentValue {
-	readonly mediaType: DshIdeImageAttachmentRef['mediaType'];
-	readonly data: string;
-}
-
 /** 官方 `ContentBlock` 里 IDE 要画的子集。未知 `type` 不进本视图（由投影层丢掉）。 */
 export type DshIdeContentBlock =
 	| { readonly type: 'text'; readonly text: string }

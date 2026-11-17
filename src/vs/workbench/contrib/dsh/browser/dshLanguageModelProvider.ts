@@ -24,10 +24,7 @@ import type {
 	ILanguageModelChatResponse,
 	ILanguageModelsService,
 } from '../../chat/common/languageModels.js';
-import { toLanguageModel } from './dshComposerProjection.js';
-
-/** 提供方厂商 id：与 DSH 会话自报的 provider 分开，避免和 Copilot 等厂商撞名。 */
-export const DSH_MODEL_VENDOR = 'dsh';
+import { DSH_MODEL_VENDOR, toLanguageModel } from './dshComposerProjection.js';
 
 interface ComposerModel {
 	readonly id: string;

@@ -137,7 +137,7 @@ export class DshAgentSessionsController extends Disposable implements IChatSessi
 	/**
 	 * 新会话输入框的选项组：DSH 的权限预设与 agent 预设。
 	 *
-	 * 这是 `dshComposerProjection` 里 `toPermissionItems` / `observeModes` 的生产入口；
+	 * 这是 `dshComposerProjection` 里 `toPermissionItems` 的生产入口；
 	 * 没有它，权限与预设这两个选择器在原生输入框里根本不出现。
 	 */
 	async getNewChatSessionInputState(_sessionResource: URI, _token: CancellationToken): Promise<readonly IChatSessionProviderOptionGroup[] | undefined> {
