@@ -1048,3 +1048,15 @@ DshChatSession.acceptView / acceptConversation → DshChatModel（typed 节点�
 >
 > **门禁**：tsc 0 error、`build-dsh-tests` PASS、`test-dsh:all` 388 PASS、`verify:dsh-ide-ci` 五项 PASS、`npm run compile` PASS（0 errors，36 s）。
 
+#### 9.11.8 第 5 轮：上一轮修复的回归 + sessions 残留 + 脚本缺陷（已执行，2026-11-18）
+
+> 两个子智能体并行扫描：sessions 残留网络（规则实现 / eslint 配置 / stylelint / i18n / smoke / scripts）与构建测试缺陷（含对第 4 轮 11 处修复的逐项复查）。区间 `9919cd20..90e19ae1`：**37 个文件，+226 / -3,910 行**，3 个代码提交 + 文档。
+
+> **上一轮修复引入的回归（5 处，全部修复）**：① **高危** `bind()` 失败回滚与「相同 id 短路」组合成死锁——A 已绑定 → bind(B) 失败 → 再 bind(A) 直接 return true，但 `model.clear()` 已执行 → 面板永久空白；修法是新增 `_boundDirty` 标志（短路条件加 `&& !this._boundDirty`）。② `consumer.reset()` 挂在 `onDidChangeState({connected:true})`，但 `_connected` 无置 false 路径 → 每窗口最多触发一次，重连不 reset；修法是在 snapshot 监听里按 Host 的 `rebuild` 快照调新增 `markDisconnected()`。③ `throwIfAborted()` 在 `try` 外导致 abort 监听器泄漏。④ `authenticating` 的 catch 无条件清空可能抹掉新 promise。⑤ plan/goal/todos 的「缺席即保留」语义未在契约里固化。
+
+> **清理**：删 12 个纯 `src/vs/sessions/**` 的 eslint 配置块（236 行，规则只做 minimatch 不 stat 磁盘）、`stylelint.ts` 的死正则、`i18n.ts` 的 sessions 分支（与测试成对删）、`tsec.exemptions.json` 2 条、`test/smoke/src/areas/agentsWindow/**` 6 文件 164 KB（被测源码与 out 产物全不存在）、`build/next/devTunnelsWeb*` 7 文件 + npm script（outDir 写死已删 feature）。**保留** `eslint.config.js:1863` 的 `'vs/sessions/~'`（在活 target 的允许清单里，删=收窄语义）。
+
+> **脚本/测试缺陷（6 处）**：`dshIdeEndpoints.test.ts` 的 `UNVERIFIED` 恒为空数组导致守护恒真（改为显式空数组 + 覆盖断言）；`dshStageNumbering.test.ts` 扫描根拼错且 `catch { return }` 吞错（改正 + `missingRoots` 断言）；`compareVersion` 与 `dshIdeVerify.mjs` 把 prerelease 整段字符串比（`rc.10 < rc.9`，改为逐段数字比较）；`dshInstallDrift.mjs` 跳过空文件、缺 `host/` 时抛 ENOENT；`dshArtifactContents.mjs` 依赖 `process.cwd()`；`genDshIconDataUris --check` 未接线（改用生成物 sha256 指纹测试）。
+
+> **门禁**：tsc 0 error、`build-dsh-tests` PASS、`test-dsh:all` **391** PASS（389 → 391）、`verify:dsh-ide-ci` 五项 PASS、`verify:dsh-artifact` PASS、`npm run compile` PASS（37 s）。`verify:dsh-install-drift` **FAIL（预先存在）**：`host/ide-service.js` / `host/ide-view-host.js` 与 2026-11-17 00:38 的旧产物不一致，本轮未改这两个文件、也未打包（按 §0.0 打包推迟）。详见 `docs/DSH-IDE瘦身与Bug修复报告-第5轮.md`。
+
