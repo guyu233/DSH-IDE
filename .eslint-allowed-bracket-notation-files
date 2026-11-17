@@ -68,7 +68,6 @@ build/npm/preinstall.ts
 build/npm/update-localization-extension.ts
 build/win32/explorer-dll-fetcher.ts
 scripts/code-server.js
-scripts/code-sessions-web.js
 scripts/code-web.js
 scripts/sync-agent-host-protocol.ts
 

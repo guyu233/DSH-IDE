@@ -52,7 +52,6 @@ scripts/chat-simulation/test-chat-mem-leaks.js
 scripts/chat-simulation/test-chat-perf-regression.js
 scripts/code-perf.js
 scripts/code-server.js
-scripts/code-sessions-web.js
 scripts/code-web.js
 scripts/xterm-update.js
 src/vs/base/browser/dompurify/dompurify.js
