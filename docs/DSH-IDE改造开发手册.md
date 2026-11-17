@@ -1,10 +1,10 @@
-# DSH-IDE 改造开发手册（第一/第二阶段代码完成；2-E 真机验收与子智能体会话树待定）
+# DSH-IDE 改造开发手册（第一/第二阶段代码完成；开发版 Electron 逐批验证中，打包推迟到开发完成后）
 
 > 编写日期：2026-11-16；进度更新：2026-11-17。依据：`docs/DSH-IDE承接DSH桌面端聊天页面的路线草稿.md`（2026-11-17 14:11 进度版）、`docs/DSH-core内容进入桌面前端的全部入口.md`、`docs/DSH-IDE内容接收与ChatSession面板架构分析.md`、`docs/DSH聊天页面全量构成与插件显示机制.md`，以及只读核对的 DSH 源码 `E:/deepseek-harness`、DSH-IDE 源码 `E:/DSH-IDE/src/`。
 >
 > 本文是静态源码证据推导的实施方案，不是真机观测结论；所有 `file:line` 以快照为准，动手前复核。真机 GUI 验证由用户执行，AI 不代跑。
 >
-> **阅读顺序**：§0–§7 是目标、基线与冻结边界；§8 是已完成内容的压缩摘要；§9.1–§9.8 是第二阶段状态（2-A~2-D 代码完成并打包，2-E 真机验收待用户执行）；**§9.9 是子智能体会话树（2026-11-17 已按确认决策实现，全量门禁 PASS）**。
+> **阅读顺序**：§0–§7 是目标、基线与冻结边界；§8 是已完成内容的压缩摘要；§9.1–§9.8 是第二阶段状态（2-A~2-D 代码完成，2-E 按 §0.0 用开发版 Electron 逐批验证）；**§9.9 是子智能体会话树（2026-11-17 已按确认决策实现，全量门禁 PASS）**。
 
 ---
 
@@ -132,7 +132,7 @@ DshChatSession.acceptView / acceptConversation → DshChatModel（typed 节点�
 ### 1.5 协议现状（改动前记住这些数字）
 
 - `DSH_IDE_WIRE_REVISION = 4`（`dshIdeProtocol.ts`）。保留 `frame` 并增加 typed 投影后，由 3 升到 4。
-- `DshIdeMethodArgs` 共 **36 个 method**。相对动手前的 30 个，最终仍 `missing()` 的是 4 个（`addAttachment`、`removeAttachment`、`openInApp`、`dismissQuotaNotice`，均无官方 remote）；`setGoal` / `listSkills` 已分别接官方 `goals` / `skills` 服务（见 §8.1）。
+- `DshIdeMethodArgs` 共 **42 个 method**（2026-11-17 新增 6 个会话操作：`renameSession` / `setSessionFavorite` / `setSessionPinned` / `listWorkspaces` / `moveSession` / `openSessionPath`）。仍 `missing()` 的是 4 个（`addAttachment`、`removeAttachment`、`openInApp`、`dismissQuotaNotice`，均无官方 remote）；`setGoal` / `listSkills` 已分别接官方 `goals` / `skills` 服务（见 §8.1）。
 - 旧稿点名要新增的 `searchSessions` / `resumeSession` / `forkAt` / `loadThrough` **不另增**：`searchSessions` 与 `resume` 已在白名单；`fork.point` 已映射官方 `atSeq`；`loadOlder.throughSeq` 已是官方切点。
 - `validateDshIdeSnapshot`（`:755-778`）、`assertSnapshotContinuity`（`:797-816`，version 严格 +1）、`validateDshIdeInvokeOutput` 只允许 `{value}`（`:592-596`）。
 - `DshIdeWaterfallNotice`（`:671-706`）、`DshIdeSessionNotice`（`:667-669`）形状固定；扩展 listen 事件面必须先改契约并同步测试（`:209-221`）。
@@ -225,7 +225,7 @@ DshChatSession.acceptView / acceptConversation → DshChatModel（typed 节点�
    - **不新增** `searchSessions`、`resumeSession`、`forkAt`、`loadThrough`（见 §1.5）。
 3. 形状变化已经把 `DSH_IDE_WIRE_REVISION` 升到 4，并同步了 `validateDshIdeView` / `validateDshIdeSnapshot` / `assertSnapshotContinuity`。
 4. 三条不变量：`exactRecord` 白名单（拒绝未知字段与显式 `undefined`，`:306-324`）、`version` 严格 +1、gap/倒退 fail-closed。
-5. 门禁已改到 36 个 method。listen 白名单仍是 snapshot / waterfall / session-notice 这 3 个事件。
+5. 门禁已改到 42 个 method。listen 白名单仍是 snapshot / waterfall / session-notice 这 3 个事件。
 
 **本层完成标志（已实测，2026-11-16）**：协议/通道/waterfall/Host 桥测试 PASS（133），dshIdeConsumer 与 endpoints 本轮断言 PASS。`src/tsconfig.json` 全量 `tsc --noEmit` 仍 FAIL，但报错在既有 VS Code 文件里，本轮改过的协议文件无类型错误——不把既有 FAIL 记成 PASS。
 
@@ -252,7 +252,7 @@ DshChatSession.acceptView / acceptConversation → DshChatModel（typed 节点�
 
 文件：`src/vs/workbench/contrib/dsh/browser/dshChatSession.ts`、`dshChatModel.ts`。
 
-1. `IDshChatSession`（`:39-74`）接口按契约 36 method 对齐：`submit(text, attachments)`、`answerApproval/answerQuestion`（多选答案）、`listSessions/searchSessions/loadOlder{throughSeq,beforeSeq,maxMessages}`、`resume`/`fork.point`/`rewind`（rewind 走已装载的 `dsh-rewind-plugin`，不是 core remote）、`deliverables`、`tokenUsageDelta`、`quotaNotice`、`pending`。4 个无官方 remote 的 `missing()` method 只暴露禁用态或明确失败提示，不伪造成功。**注意**：`plan/goal/todos/skills` 虽已在契约与 Host 投影层就绪，但状态层 `DshChatSession` 尚未保存/暴露（真缺陷，见 §9.5 阶段 2-A）。
+1. `IDshChatSession`（`:39-74`）接口按契约 42 method 对齐：`submit(text, attachments)`、`answerApproval/answerQuestion`（多选答案）、`listSessions/searchSessions/loadOlder{throughSeq,beforeSeq,maxMessages}`、`resume`/`fork.point`/`rewind`（rewind 走已装载的 `dsh-rewind-plugin`，不是 core remote）、`deliverables`、`tokenUsageDelta`、`quotaNotice`、`pending`。4 个无官方 remote 的 `missing()` method 只暴露禁用态或明确失败提示，不伪造成功。**注意**：`plan/goal/todos/skills` 虽已在契约与 Host 投影层就绪，但状态层 `DshChatSession` 尚未保存/暴露（真缺陷，见 §9.5 阶段 2-A）。
 2. 移除 renderer 从裸 follow 帧拼节点的逻辑（`dshChatModel.ts:388-403,516-941`），直接消费层 1 的结构化 conversation。
 3. `tokenUsage` 唯一真源在 `DshChatModel`（`:318-320,375-386`），`pending` 在 `DshChatSession.pendingItems`（`:86`），`running` 在 `_running`（`:89`）；扩展时**保持单一真源**。
 4. 风格：tab、单引号、分号、`I` 接口前缀、`_` 私有、`this._register`/`DisposableStore`，错误走 `onUnexpectedError`。
@@ -354,7 +354,7 @@ DshChatSession.acceptView / acceptConversation → DshChatModel（typed 节点�
 1. `DshChatSession` / `DshChatModel` 已改成消费 typed 字段，`DshChatModel.accept()` 直接从 `snapshot.conversation` 建节点树，不再解析裸帧。
 2. 四类独立通路已合并到 typed 字段和统一 state：`nodes`（conversation）、`pending`、`composer`（modelMenu）、session notice；前端通过统一会话状态读取，不再各自订阅裸事件。
 3. 单一真源明确：`tokenUsage` 在模型层、`pending` 在会话层、`running` 在会话层；前端只读，不再累加或二次推导。
-4. `IDshChatSession` 暴露前端所需的全部读接口与 36 method 的调用入口（含 4 个禁用）；接口冻结后前端只调用，不改签名。
+4. `IDshChatSession` 暴露前端所需的全部读接口与 42 method 的调用入口（含 4 个禁用）；接口冻结后前端只调用，不改签名。
 5. `DshIdeConsumer` 已把 16ms 合并、version 连续性、fail-closed 处理完，前端不再做协议校验。
 
 ### 5.5 冻结验收（移交前端前的 gate）
