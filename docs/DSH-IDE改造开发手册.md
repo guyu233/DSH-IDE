@@ -933,7 +933,7 @@ DshChatSession.acceptView / acceptConversation → DshChatModel（typed 节点�
 
 > 用户要求：一边做一边项目瘦身，用不到的都删掉；在不影响 DSH-IDE 功能前提下把全量 tsc 的 137 条错误清零。原则：**能删就删**（优先删瘦身残留死代码），其次做类型对齐；所有改动都不改变运行时行为。执行期间不碰 §9.10 的契约文件，避免与其冲突。
 >
-> **执行结果**：tsc 137 → **0**；`npm run compile` PASS；`test-dsh:all` 384/384 PASS；`verify:dsh-ide-ci` 五项全 PASS（`DSH_INSTALLED_VERSION=0.2.2-rc.1`）。变更 89 个文件（26 删除 / 63 修改），+156 / -4,620 行；依赖 68→66（dependencies）、100→93（devDependencies）；锁文件条目 1,649→1,536（-113，零新增、零版本变更）。详细清单见 `docs/DSH-IDE瘦身报告-第1轮.md`，逐项证据见 `docs/DSH-IDE瘦身问题清单-第1轮.md`。
+> **执行结果**：tsc 137 → **0**；`npm run compile` PASS；`test-dsh:all` 384/384 PASS；`verify:dsh-ide-ci` 五项全 PASS（`DSH_INSTALLED_VERSION=0.2.2-rc.1`）。变更 92 个文件（26 删除 / 64 修改 / 2 新增），+456 / -4,621 行；依赖 68→66（dependencies）、100→93（devDependencies）；锁文件条目 1,649→1,536（-113，零新增、零版本变更）。详细清单见 `docs/DSH-IDE瘦身报告-第1轮.md`，逐项证据见 `docs/DSH-IDE瘦身问题清单-第1轮.md`。
 >
 > **落地要点与手册原方案的偏差**：
 > 1. `DSH_IDE_CONTRACT_API_VERSION` / `DSH_IDE_CONTRACT_WIRE_REVISION` **未删**——`verify:dsh-ide-protocol-single-source` 显式断言 contract 必须 import protocol 常量，删则门禁 FAIL。
@@ -1002,4 +1002,16 @@ DshChatSession.acceptView / acceptConversation → DshChatModel（typed 节点�
 > **修正**：`sync-upstream.mjs` 的 PROVENANCE 路径与版本正则（原恒返回 undefined → 报告恒为 SAME）；`dshArtifactContents.mjs` 的 `EXPECTED_COMMON` 7 → 10；手册 method 计数 42/36 → 43（6 处）；README 两处过期描述；4 处 `DshChatModelDriver` 注释改为 `dshChatSessionContent` content provider。
 >
 > **门禁**：tsc 0 error、`test-dsh:all` 384 PASS、`verify:dsh-ide-ci` 五项 PASS、`verify:dsh-artifact` PASS、`.vscode` 两份 JSONC 解析与依赖引用全部可解析。详见 `docs/DSH-IDE瘦身报告-第2轮.md`。
+
+#### 9.11.5 第 3 轮复检（已执行，2026-11-17）
+
+> 第 3 轮全量复扫 DSH 两目录（55 文件）：零引用导出 **0**、零引用模块 **0**（4 个测试入口由 script 直接指定）、`TODO/FIXME/XXX/HACK/debugger` **0**、0 字节文件 **0**、`node_modules` 零引用依赖 **0**。即 DSH 自有代码的可删面已清完，本轮只剩配置层残留。区间 `ad638615..cd7aeb4b`：**3 个文件，+7 / -28 行**。
+>
+> **删除**：空目录 `src/vs/workbench/contrib/dsh/test/browser`；`.eslint-ignore` 的 17 条 `**/extensions/copilot/**` 与 2 条 `lit-html/**`/`signals-core/**`（两目录 git 历史从未存在）；`build/filters.ts` 两处 copilot 注释与排除项。
+>
+> **修正**：`scripts/sync-upstream.mjs` 的「渲染复用件」段改为「历史渲染复用件」，注明本地复制件与 sidecar 已删除、仅作历史对照。
+>
+> **门禁**：tsc 0 error、`test-dsh:all` 384 PASS、`verify:dsh-ide-ci` 五项 PASS、`.eslint-ignore` 死条目 0、`node --check scripts/sync-upstream.mjs` PASS。详见 `docs/DSH-IDE瘦身报告-第3轮.md`。
+>
+> **累计（三轮）**：`ce668543..cd7aeb4b` = 109 个文件、+749 / -5,143 行、19 个提交；tsc 137→0；dependencies 68→66、devDependencies 100→93、scripts 86→80；锁文件 -113 条目（零新增、零版本变更）。
 

@@ -44,7 +44,7 @@
 | C1 | `docs/DSH-IDE改造开发手册.md:145,238,265,367` | 「42 个 method」 | 实测 `DSH_IDE_METHOD_KEYS` = **43**（含 `capabilities`）；`dshIdeProtocol.test.ts:85-86`、`dshIdeEndpoints.test.ts:104,212` 也都断言 43 | 改为 43（4 处） |
 | C2 | `docs/DSH-IDE改造开发手册.md:350,385` | 「36 个 `DshIdeMethodArgs`」「36 个 `ide/dispatch` method，32 可用 + 4 禁用」 | 实测 43（39 可用 + 4 禁用） | 改为 43 / 39+4 |
 | C3 | `docs/DSH-IDE改造开发手册.md:799` | `dshSessionItemState.ts:14,24-34,42-52,55-64` 行号引用 | 该文件已在 `ece6e68c` 删除 | 标注为历史，或改为指向 controller 内联实现 |
-| C4 | `docs/DSH-IDE改造开发手册.md:936` | 「删除 89 个文件 / 减 4,620 行」 | 实测 `git diff --shortstat ce668543..980bcf5b` = `89 files changed, 156 insertions(+), 4620 deletions(-)`；其中 **D=26、M=63、A=0** | 改为「89 个文件变更（26 删除 / 63 修改），+156 / -4,620 行」 |
+| C4 | `docs/DSH-IDE改造开发手册.md:936` | 「删除 89 个文件 / 减 4,620 行」 | 实测 `git diff --shortstat ce668543..980bcf5b` = `89 files changed, 156 insertions(+), 4620 deletions(-)`；其中 **D=26、M=63、A=0**。注：`980bcf5b` 不是第 1 轮终点，完整区间 `ce668543..36521cd0` 为 **92 files / +456 / -4,621**（D=26、M=64、A=2） | 改为「92 个文件（26 删除 / 64 修改 / 2 新增），+456 / -4,621 行」 |
 | C5 | `README.md:86` | 「DSH 集成层（Agent、输入框数据源、模型菜单）」 | `dshModelMenu.ts` 已删，模型/effort 走原生选择器 | 改为「Agent、输入框数据源、会话树」 |
 | C6 | `README.md:90` | 「`build/dsh/chat-render/` 聊天渲染 sidecar 及其来源凭据」 | 目录只剩 `PROVENANCE.md` + `LICENSE-DSH`，sidecar 链已删 | 改为「聊天渲染复用件的历史来源凭据（只读，不随构建）」 |
 | C7 | `build/gulpfile.vscode.ts:546,676`；`build/next/index.ts:405`；`build/lib/dshBuildProvenance.ts:21` | 4 处注释称「DSH 帧由 `DshChatModelDriver` 直接写进原生 ChatModel」 | 该类已在 `ece6e68c` 删除；实际走 `IChatSessionContentProvider.history`（`dshChatSessionContent.ts`） | 改为「由 `dshChatSessionContent` 的 content provider 提供历史」 |

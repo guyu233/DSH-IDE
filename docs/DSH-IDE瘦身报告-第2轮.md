@@ -1,8 +1,8 @@
 # DSH-IDE 瘦身报告（第 2 轮）
 
 > 编制时间：2026-11-17 21:40（Asia/Shanghai）
-> 起点：`36521cd0`（第 1 轮结束）　终点：`2d7a1b02`
-> 全区间：**20 个文件，+42 / -496 行**；5 个提交
+> 起点：`36521cd0`（第 1 轮结束）　终点：`ad638615`
+> 全区间：**22 个文件，+288 / -496 行**（2 删除 / 18 修改 / 2 新增）；6 个提交（含本文档提交）
 
 ## 1. 门禁总览
 
@@ -62,7 +62,7 @@
 | `build/lib/dsh/verify/dshArtifactContents.mjs:43-51,81` | `EXPECTED_COMMON` 只列 7 个，实际 stage 10 个；日志硬编码「期望 7」 | 补齐 `dshIdeComposer.js` / `dshIdeWaterfallNotice.js` / `dshIdeRequestView.js`；日志改用 `EXPECTED_COMMON.length` |
 | `docs/DSH-IDE改造开发手册.md:145,238,265,350,367,385` | method 计数 42 / 36 | 42 → 43（4 处）、36 → 43（2 处，32 可用 → 39 可用） |
 | `docs/DSH-IDE改造开发手册.md:799` | `dshSessionItemState.ts` 行号引用 | 改为「已删除，等价逻辑内联在 controller」 |
-| `docs/DSH-IDE改造开发手册.md:936` | 「删除 89 个文件」 | 改为「变更 89 个文件（26 删除 / 63 修改），+156 / -4,620 行」 |
+| `docs/DSH-IDE改造开发手册.md:936` | 「删除 89 个文件」 | 改为「变更 92 个文件（26 删除 / 64 修改 / 2 新增），+456 / -4,621 行」 |
 | `README.md:86,90` | 「模型菜单」「聊天渲染 sidecar」 | 改为「会话树」「历史来源凭据（只读，不参与构建）」 |
 | `build/gulpfile.vscode.ts:546,676`；`build/next/index.ts:405`；`build/lib/dshBuildProvenance.ts:21` | 4 处注释称 DSH 帧由 `DshChatModelDriver` 写入 | 改为 `dshChatSessionContent` content provider |
 | `dshTeamCommands.ts:8-9` | 提及已删的 `dshModelMenu.ts` | 改为直接说明「原生选择器没有团队控件」 |
