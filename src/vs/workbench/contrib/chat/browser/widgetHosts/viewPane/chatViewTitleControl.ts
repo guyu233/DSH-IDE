@@ -20,7 +20,6 @@ import { IChatViewTitleActionContext } from '../../../common/actions/chatActions
 import { IChatModel } from '../../../common/model/chatModel.js';
 import { ActionViewItem, IActionViewItemOptions } from '../../../../../../base/browser/ui/actionbar/actionViewItems.js';
 import { IAction } from '../../../../../../base/common/actions.js';
-import { IChatSessionsService } from '../../../common/chatSessionsService.js';
 
 export interface IChatViewTitleDelegate {
 	focusChat(): void;
@@ -54,7 +53,6 @@ export class ChatViewTitleControl extends Disposable {
 		private readonly delegate: IChatViewTitleDelegate,
 		resizeObserverCtor: typeof ResizeObserver | undefined,
 		@IInstantiationService private readonly instantiationService: IInstantiationService,
-		@IChatSessionsService private readonly chatSessionsService: IChatSessionsService,
 	) {
 		super();
 

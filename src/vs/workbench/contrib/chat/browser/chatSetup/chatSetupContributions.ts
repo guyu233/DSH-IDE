@@ -3,8 +3,7 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import * as dom from '../../../../../base/browser/dom.js';
-import { IAction, WorkbenchActionExecutedClassification, WorkbenchActionExecutedEvent } from '../../../../../base/common/actions.js';
+import { WorkbenchActionExecutedClassification, WorkbenchActionExecutedEvent } from '../../../../../base/common/actions.js';
 import { CancellationToken } from '../../../../../base/common/cancellation.js';
 import { Event } from '../../../../../base/common/event.js';
 import { Lazy } from '../../../../../base/common/lazy.js';
@@ -17,39 +16,32 @@ import { ServicesAccessor } from '../../../../../editor/browser/editorExtensions
 import { ICodeEditorService } from '../../../../../editor/browser/services/codeEditorService.js';
 import { EditorContextKeys } from '../../../../../editor/common/editorContextKeys.js';
 import { localize, localize2 } from '../../../../../nls.js';
-import { IActionViewItemService } from '../../../../../platform/actions/browser/actionViewItemService.js';
 import { Action2, MenuId, MenuRegistry, registerAction2 } from '../../../../../platform/actions/common/actions.js';
 import { CommandsRegistry, ICommandService } from '../../../../../platform/commands/common/commands.js';
 import { ConfigurationTarget, IConfigurationService } from '../../../../../platform/configuration/common/configuration.js';
 import { ContextKeyExpr, IContextKeyService } from '../../../../../platform/contextkey/common/contextkey.js';
-import { IsWebContext } from '../../../../../platform/contextkey/common/contextkeys.js';
 import { IDialogService } from '../../../../../platform/dialogs/common/dialogs.js';
 import { IEnvironmentService } from '../../../../../platform/environment/common/environment.js';
 import { ExtensionIdentifier } from '../../../../../platform/extensions/common/extensions.js';
 import { IInstantiationService } from '../../../../../platform/instantiation/common/instantiation.js';
 import { ILogService } from '../../../../../platform/log/common/log.js';
-import { IMarkerService } from '../../../../../platform/markers/common/markers.js';
 import { IOpenerService } from '../../../../../platform/opener/common/opener.js';
 import product from '../../../../../platform/product/common/product.js';
 import { GitHubPaths, IDefaultAccountService } from '../../../../../platform/defaultAccount/common/defaultAccount.js';
 import { IProductService } from '../../../../../platform/product/common/productService.js';
 import { ITelemetryService } from '../../../../../platform/telemetry/common/telemetry.js';
-import { ToggleTitleBarConfigAction } from '../../../../browser/parts/titlebar/titlebarActions.js';
-import { ACCOUNTS_SHARED_SIGN_IN_GROUP } from '../../../../common/activity.js';
 import { IWorkbenchContribution } from '../../../../common/contributions.js';
 import { IViewDescriptorService, ViewContainerLocation } from '../../../../common/views.js';
-import { ChatEntitlement, ChatEntitlementContext, ChatEntitlementContextKeys, ChatEntitlementRequests, ChatEntitlementService, IChatEntitlementService, isProUser } from '../../../../services/chat/common/chatEntitlementService.js';
+import { ChatEntitlement, ChatEntitlementContext, ChatEntitlementRequests, ChatEntitlementService, IChatEntitlementService, isProUser } from '../../../../services/chat/common/chatEntitlementService.js';
 import { EnablementState, IWorkbenchExtensionEnablementService } from '../../../../services/extensionManagement/common/extensionManagement.js';
 import { ExtensionUrlHandlerOverrideRegistry, IExtensionUrlHandlerOverride } from '../../../../services/extensions/browser/extensionUrlHandler.js';
 import { IExtensionService } from '../../../../services/extensions/common/extensions.js';
 import { CONTEXT_DEFAULT_ACCOUNT_STATE, DefaultAccountStatus } from '../../../../services/accounts/browser/defaultAccount.js';
 import { IHostService } from '../../../../services/host/browser/host.js';
 import { IWorkbenchLayoutService, Parts } from '../../../../services/layout/browser/layoutService.js';
-import { InEditorZenModeContext } from '../../../../common/contextkeys.js';
 import { ILifecycleService } from '../../../../services/lifecycle/common/lifecycle.js';
 import { IPreferencesService } from '../../../../services/preferences/common/preferences.js';
 import { IExtension, IExtensionsWorkbenchService } from '../../../extensions/common/extensions.js';
-import { UpdateTitleBarEditorVisibleContext } from '../../../update/common/update.js';
 import { ChatContextKeys } from '../../common/actions/chatContextKeys.js';
 import { IChatSessionsService } from '../../common/chatSessionsService.js';
 import { ChatAIDisabledSettingId, ChatAgentLocation, ChatConfiguration, ChatModeKind } from '../../common/constants.js';
@@ -60,7 +52,7 @@ import { chatViewsWelcomeRegistry } from '../viewsWelcome/chatViewsWelcome.js';
 import { buildUpgradeUrlWithRedirect, ChatSetupAnonymous, ChatSetupSource, ChatSetupStrategy, IChatSetupCommandOptions, IChatSetupResult, refreshTokens } from './chatSetup.js';
 import { ChatSetupController } from './chatSetupController.js';
 import { GrowthSessionController, registerGrowthSession } from './chatSetupGrowthSession.js';
-import { AICodeActionsHelper, AINewSymbolNamesProvider, ChatCodeActionsProvider, SetupAgent } from './chatSetupProviders.js';
+import { AINewSymbolNamesProvider, ChatCodeActionsProvider, SetupAgent } from './chatSetupProviders.js';
 import { ChatSetup } from './chatSetupRunner.js';
 
 const defaultChat = {

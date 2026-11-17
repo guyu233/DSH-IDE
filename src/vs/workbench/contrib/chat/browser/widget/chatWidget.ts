@@ -19,7 +19,7 @@ import { Emitter, Event } from '../../../../../base/common/event.js';
 import { hash } from '../../../../../base/common/hash.js';
 import { IMarkdownString, MarkdownString } from '../../../../../base/common/htmlContent.js';
 import { Iterable } from '../../../../../base/common/iterator.js';
-import { Disposable, DisposableStore, IDisposable, MutableDisposable, thenIfNotDisposed, toDisposable } from '../../../../../base/common/lifecycle.js';
+import { Disposable, DisposableStore, IDisposable, MutableDisposable, toDisposable } from '../../../../../base/common/lifecycle.js';
 import { ResourceSet } from '../../../../../base/common/map.js';
 import { Schemas } from '../../../../../base/common/network.js';
 import { IsSessionsWindowContext } from '../../../../common/contextkeys.js';
@@ -50,7 +50,6 @@ import { ServiceCollection } from '../../../../../platform/instantiation/common/
 import { ILogService } from '../../../../../platform/log/common/log.js';
 import { bindContextKey } from '../../../../../platform/observable/common/platformObservableUtils.js';
 import { Link } from '../../../../../platform/opener/browser/link.js';
-import product from '../../../../../platform/product/common/product.js';
 import { Progress } from '../../../../../platform/progress/common/progress.js';
 import { ITelemetryService } from '../../../../../platform/telemetry/common/telemetry.js';
 import { IThemeService } from '../../../../../platform/theme/common/themeService.js';
@@ -88,8 +87,8 @@ import { MarshalledId } from '../../../../../base/common/marshallingIds.js';
 import { IChatGoalSummaryService } from '../chatGoalSummaryService.js';
 import { ILanguageModelToolsService, isToolSet } from '../../common/tools/languageModelToolsService.js';
 import { IHandOff, PromptHeader } from '../../common/promptSyntax/promptFileParser.js';
-import { IPromptsService, PromptsStorage } from '../../common/promptSyntax/service/promptsService.js';
-import { GENERATE_AGENT_INSTRUCTIONS_COMMAND_ID, handleModeSwitch } from '../actions/chatActions.js';
+import { PromptsStorage } from '../../common/promptSyntax/service/promptsService.js';
+import { handleModeSwitch } from '../actions/chatActions.js';
 import { ChatTreeItem, ChatViewPaneTarget, IChatAcceptInputOptions, IChatAccessibilityService, IChatCodeBlockInfo, IChatFileTreeInfo, IChatFindController, IChatListItemRendererOptions, IChatPasteTargetService, IChatWidget, IChatWidgetService, IChatWidgetViewContext, IChatWidgetViewModelChangeEvent, IChatWidgetViewOptions, IChatWidgetViewState, isIChatResourceViewContext, isIChatViewViewContext } from '../chat.js';
 import { ChatAttachmentModel } from '../attachments/chatAttachmentModel.js';
 import { IChatAttachmentResolveService } from '../attachments/chatAttachmentResolveService.js';
@@ -473,9 +472,6 @@ export class ChatWidget extends Disposable implements IChatWidget {
 	private _readOnly = false;
 	private readonly _draftOnly = observableValue(this, false);
 
-	private _instructionFilesCheckPromise: Promise<boolean> | undefined;
-	private _instructionFilesExist: boolean | undefined;
-
 	private _isRenderingWelcome = false;
 	private _isLoading = false;
 
@@ -622,7 +618,6 @@ export class ChatWidget extends Disposable implements IChatWidget {
 		@IChatSlashCommandService private readonly chatSlashCommandService: IChatSlashCommandService,
 		@IChatEditingService chatEditingService: IChatEditingService,
 		@ITelemetryService private readonly telemetryService: ITelemetryService,
-		@IPromptsService private readonly promptsService: IPromptsService,
 		@ICustomizationHarnessService private readonly customizationHarnessService: ICustomizationHarnessService,
 		@ILanguageModelToolsService private readonly toolsService: ILanguageModelToolsService,
 		@IChatLayoutService private readonly chatLayoutService: IChatLayoutService,
@@ -1719,54 +1714,6 @@ export class ChatWidget extends Disposable implements IChatWidget {
 		this._gettingStartedTip.value?.clear();
 	}
 
-
-	private _getGenerateInstructionsMessage(): IMarkdownString {
-		// Start checking for instruction files immediately if not already done
-		if (!this._instructionFilesCheckPromise) {
-			this._instructionFilesCheckPromise = this._checkForAgentInstructionFiles();
-			// Use VS Code's idiomatic pattern for disposal-safe promise callbacks
-			this._register(thenIfNotDisposed(this._instructionFilesCheckPromise, hasFiles => {
-				this._instructionFilesExist = hasFiles;
-				// Only re-render if the current view still doesn't have items and we're showing the welcome message
-				const hasViewModelItems = this.viewModel?.getItems().length ?? 0;
-				if (hasViewModelItems === 0) {
-					this.renderWelcomeViewContentIfNeeded();
-				}
-			}));
-		}
-
-		// If we already know the result, use it
-		if (this._instructionFilesExist === true) {
-			// Don't show generate instructions message if files exist
-			return new MarkdownString('');
-		} else if (this._instructionFilesExist === false) {
-			// Show generate instructions message if no files exist
-			return new MarkdownString(localize(
-				'chatWidget.instructions',
-				"[Generate Agent Instructions]({0}) to onboard AI onto your codebase.",
-				`command:${GENERATE_AGENT_INSTRUCTIONS_COMMAND_ID}`
-			), { isTrusted: { enabledCommands: [GENERATE_AGENT_INSTRUCTIONS_COMMAND_ID] } });
-		}
-
-		// While checking, don't show the generate instructions message
-		return new MarkdownString('');
-	}
-
-	/**
-	 * Checks if any agent instruction files (.github/copilot-instructions.md or AGENTS.md) exist in the workspace.
-	 * Used to determine whether to show the "Generate Agent Instructions" hint.
-	 *
-	 * @returns true if instruction files exist OR if instruction features are disabled (to hide the hint)
-	 */
-	private async _checkForAgentInstructionFiles(): Promise<boolean> {
-		try {
-			return (await this.promptsService.listAgentInstructions(CancellationToken.None)).length > 0;
-		} catch (error) {
-			// On error, assume no instruction files exist to be safe
-			this.logService.warn('[ChatWidget] Error checking for instruction files:', error);
-			return false;
-		}
-	}
 
 	private getWelcomeViewContent(additionalMessage: string | IMarkdownString | undefined): IChatViewWelcomeContent {
 		if (this.isLockedToCodingAgent && !this._lockedAgent?.agentHostProviderId) {

@@ -14,7 +14,6 @@ import { AgentSandboxSettingId } from '../../../../../platform/sandbox/common/se
 import { TerminalSettingId } from '../../../../../platform/terminal/common/terminal.js';
 import { registerWorkbenchContribution2, WorkbenchPhase, type IWorkbenchContribution } from '../../../../common/contributions.js';
 import { IChatWidgetService } from '../../../chat/browser/chat.js';
-import { ChatContextKeys } from '../../../chat/common/actions/chatContextKeys.js';
 import { ILanguageModelToolsService } from '../../../chat/common/tools/languageModelToolsService.js';
 import { IToolResultCompressor } from '../../../chat/common/tools/toolResultCompressor.js';
 import { registerActiveInstanceAction, sharedWhenClause } from '../../../terminal/browser/terminalActions.js';

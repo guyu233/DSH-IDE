@@ -22,7 +22,6 @@ import { IInstantiationService } from '../../../../../platform/instantiation/com
 import { KeybindingWeight } from '../../../../../platform/keybinding/common/keybindingsRegistry.js';
 import { ILogService } from '../../../../../platform/log/common/log.js';
 import { ITelemetryService } from '../../../../../platform/telemetry/common/telemetry.js';
-import { AgentHostAllowSignedOutWhenUsableSettingId } from '../../../../../platform/chatContracts/common/agentService.js';
 import { AGENT_HOST_EXISTING_SESSION_HARNESS_PICKER_ENABLED_CONTEXT_KEY } from '../../../../../platform/chatContracts/common/agentHostEnablementService.js';
 import { IsSessionsWindowContext } from '../../../../common/contextkeys.js';
 import { ChatContextKeyExprs, ChatContextKeys } from '../../common/actions/chatContextKeys.js';

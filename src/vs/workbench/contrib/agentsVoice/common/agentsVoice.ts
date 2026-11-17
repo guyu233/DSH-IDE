@@ -7,7 +7,6 @@ import { createDecorator } from '../../../../platform/instantiation/common/insta
 import { ContextKeyExpr, RawContextKey } from '../../../../platform/contextkey/common/contextkey.js';
 import { IPolicyData } from '../../../../base/common/defaultAccount.js';
 import { Event } from '../../../../base/common/event.js';
-import { ChatContextKeys } from '../../chat/common/actions/chatContextKeys.js';
 
 import './agentsVoiceColors.js'; // Register custom voice theme colors
 

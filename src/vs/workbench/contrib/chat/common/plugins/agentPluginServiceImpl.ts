@@ -13,7 +13,7 @@ import { Schemas } from '../../../../../base/common/network.js';
 import { equals } from '../../../../../base/common/objects.js';
 import { autorun, derived, derivedOpts, IObservable, IReader, ISettableObservable, ITransaction, observableFromEvent, ObservablePromise, observableSignal, observableValue, transaction } from '../../../../../base/common/observable.js';
 import {
-	basename, dirname, extUriBiasedIgnorePathCase, isEqual, isEqualOrParent, joinPath
+	basename, dirname, isEqual, isEqualOrParent, joinPath
 } from '../../../../../base/common/resources.js';
 import { hasKey } from '../../../../../base/common/types.js';
 import { URI } from '../../../../../base/common/uri.js';

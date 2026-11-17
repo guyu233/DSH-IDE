@@ -26,7 +26,6 @@ import { URI } from '../../../../../base/common/uri.js';
 import { IChatWidget, IChatWidgetService } from '../../../chat/browser/chat.js';
 import { IChatService } from '../../../chat/common/chatService/chatService.js';
 import { IChatRequestVariableEntry } from '../../../chat/common/attachments/chatVariableEntries.js';
-import { ChatContextKeys } from '../../../chat/common/actions/chatContextKeys.js';
 import { BrowserElementSelectionMode, IBrowserElementSelectionOptions, IElementData, IElementAncestor, BrowserViewCommandId } from '../../../../../platform/browserView/common/browserView.js';
 import { IBrowserViewModel, BrowserViewSharingState } from '../../../browserView/common/browserView.js';
 import { BrowserEditorInput } from '../../common/browserEditorInput.js';

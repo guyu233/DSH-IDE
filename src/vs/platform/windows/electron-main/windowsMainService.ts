@@ -19,7 +19,7 @@ import { basename, join, normalize, posix } from '../../../base/common/path.js';
 import { getMarks, mark } from '../../../base/common/performance.js';
 import { IProcessEnvironment, isMacintosh, isWindows, OS } from '../../../base/common/platform.js';
 import { cwd } from '../../../base/common/process.js';
-import { extUriBiasedIgnorePathCase, isEqual, isEqualAuthority, normalizePath, originalFSPath, removeTrailingPathSeparator } from '../../../base/common/resources.js';
+import { extUriBiasedIgnorePathCase, isEqualAuthority, normalizePath, originalFSPath, removeTrailingPathSeparator } from '../../../base/common/resources.js';
 import { assertReturnsDefined } from '../../../base/common/types.js';
 import { URI } from '../../../base/common/uri.js';
 import { getNLSLanguage, getNLSMessages, localize } from '../../../nls.js';

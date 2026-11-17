@@ -14,7 +14,6 @@ import { Registry } from '../../../../platform/registry/common/platform.js';
 import { EditorPaneDescriptor, IEditorPaneRegistry } from '../../../browser/editor.js';
 import { EditorExtensions } from '../../../common/editor.js';
 import { IWorkbenchContribution, registerWorkbenchContribution2, WorkbenchPhase } from '../../../common/contributions.js';
-import { ChatContextKeys } from '../../chat/common/actions/chatContextKeys.js';
 import { IEditorService } from '../../../services/editor/common/editorService.js';
 import { ICanvasService, CanvasInput } from '../common/canvas.js';
 import { registerCanvasCommands } from './canvasCommands.js';

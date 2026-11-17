@@ -11,14 +11,12 @@ import { Action2, registerAction2 } from '../../../../platform/actions/common/ac
 import { ContextKeyExpr, ContextKeyExpression, IContextKeyService, RawContextKey } from '../../../../platform/contextkey/common/contextkey.js';
 import { Disposable } from '../../../../base/common/lifecycle.js';
 import { URI } from '../../../../base/common/uri.js';
-import { joinPath } from '../../../../base/common/resources.js';
 import { FileAccess } from '../../../../base/common/network.js';
 import { ThemeIcon } from '../../../../base/common/themables.js';
 import { ILink, LinkedText, parseLinkedText } from '../../../../base/common/linkedText.js';
 import { InstantiationType, registerSingleton } from '../../../../platform/instantiation/common/extensions.js';
 import { coalesce } from '../../../../base/common/arrays.js';
-import { localize, localize2 } from '../../../../nls.js';
-import { asWebviewUri } from '../../webview/common/webview.js';
+import { localize2 } from '../../../../nls.js';
 
 export const HasMultipleNewFileEntries = new RawContextKey<boolean>('hasMultipleNewFileEntries', false);
 
@@ -28,8 +26,6 @@ export const hiddenEntriesConfigurationKey = 'workbench.welcomePage.hiddenCatego
 
 export const walkthroughMetadataConfigurationKey = 'workbench.welcomePage.walkthroughMetadata';
 export type WalkthroughMetaDataType = Map<string, { firstSeen: number; stepIDs: string[]; manaullyOpened: boolean }>;
-
-const BUILT_IN_SOURCE = localize('builtin', "Built-In");
 
 export interface IWalkthrough {
 	id: string;
@@ -119,8 +115,6 @@ export class WalkthroughsService extends Disposable implements IWalkthroughsServ
 
 	private gettingStartedContributions = new Map<string, IWalkthrough>();
 	private steps = new Map<string, IWalkthroughStep>();
-
-	private sessionInstalledExtensions: Set<string> = new Set<string>();
 
 	private categoryVisibilityContextKeys = new Set<string>();
 	private stepCompletionContextKeyExpressions = new Set<ContextKeyExpression>();
@@ -371,42 +365,6 @@ export const parseDescription = (desc: string): LinkedText[] => desc.split('\n')
 export const convertInternalMediaPathToFileURI = (path: string) => path.startsWith('https://')
 	? URI.parse(path, true)
 	: FileAccess.asFileUri(`vs/workbench/contrib/welcomeGettingStarted/common/media/${path}`);
-
-const convertInternalMediaPathToBrowserURI = (path: string) => path.startsWith('https://')
-	? URI.parse(path, true)
-	: FileAccess.asBrowserUri(`vs/workbench/contrib/welcomeGettingStarted/common/media/${path}`);
-const convertInternalMediaPathsToBrowserURIs = (path: string | { hc: string; hcLight?: string; dark: string; light: string }): { hcDark: URI; hcLight: URI; dark: URI; light: URI } => {
-	if (typeof path === 'string') {
-		const converted = convertInternalMediaPathToBrowserURI(path);
-		return { hcDark: converted, hcLight: converted, dark: converted, light: converted };
-	} else {
-		return {
-			hcDark: convertInternalMediaPathToBrowserURI(path.hc),
-			hcLight: convertInternalMediaPathToBrowserURI(path.hcLight ?? path.light),
-			light: convertInternalMediaPathToBrowserURI(path.light),
-			dark: convertInternalMediaPathToBrowserURI(path.dark)
-		};
-	}
-};
-
-const convertRelativeMediaPathsToWebviewURIs = (basePath: URI, path: string | { hc: string; hcLight?: string; dark: string; light: string }): { hcDark: URI; hcLight: URI; dark: URI; light: URI } => {
-	const convertPath = (path: string) => path.startsWith('https://')
-		? URI.parse(path, true)
-		: asWebviewUri(joinPath(basePath, path));
-
-	if (typeof path === 'string') {
-		const converted = convertPath(path);
-		return { hcDark: converted, hcLight: converted, dark: converted, light: converted };
-	} else {
-		return {
-			hcDark: convertPath(path.hc),
-			hcLight: convertPath(path.hcLight ?? path.light),
-			light: convertPath(path.light),
-			dark: convertPath(path.dark)
-		};
-	}
-};
-
 
 registerAction2(class extends Action2 {
 	constructor() {

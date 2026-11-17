@@ -10,7 +10,7 @@ import { debounce, memoize } from '../../../../base/common/decorators.js';
 import { DynamicListEventMultiplexer, Emitter, Event, IDynamicListEventMultiplexer } from '../../../../base/common/event.js';
 import { Disposable, DisposableMap, DisposableStore, toDisposable } from '../../../../base/common/lifecycle.js';
 import { Schemas } from '../../../../base/common/network.js';
-import { isMacintosh, isWeb, OS, OperatingSystem } from '../../../../base/common/platform.js';
+import { isMacintosh, isWeb } from '../../../../base/common/platform.js';
 import { URI } from '../../../../base/common/uri.js';
 import { IKeyMods } from '../../../../platform/quickinput/common/quickInput.js';
 import * as nls from '../../../../nls.js';
@@ -35,7 +35,7 @@ import { TerminalEditorInput } from './terminalEditorInput.js';
 import { getColorStyleContent, getUriClasses } from './terminalIcon.js';
 import { TerminalProfileQuickpick } from './terminalProfileQuickpick.js';
 import { getInstanceFromResource, getTerminalUri, parseTerminalUri } from './terminalUri.js';
-import { IRemoteTerminalAttachTarget, IStartExtensionTerminalRequest, ITerminalProcessExtHostProxy, ITerminalProfileResolverService, ITerminalProfileService } from '../common/terminal.js';
+import { IRemoteTerminalAttachTarget, IStartExtensionTerminalRequest, ITerminalProcessExtHostProxy, ITerminalProfileService } from '../common/terminal.js';
 import { TerminalContextKeys } from '../common/terminalContextKey.js';
 import { columnToEditorGroup } from '../../../services/editor/common/editorGroupColumn.js';
 import { IEditorGroupsService } from '../../../services/editor/common/editorGroupsService.js';
@@ -57,8 +57,6 @@ import { isAuxiliaryWindow, mainWindow } from '../../../../base/browser/window.j
 import { GroupIdentifier } from '../../../common/editor.js';
 import { getActiveWindow } from '../../../../base/browser/dom.js';
 import { hasKey, isString } from '../../../../base/common/types.js';
-import * as terminalEnvironment from '../common/terminalEnvironment.js';
-import { generateUuid } from '../../../../base/common/uuid.js';
 
 interface IBackgroundTerminal {
 	instance: ITerminalInstance;
@@ -183,7 +181,6 @@ export class TerminalService extends Disposable implements ITerminalService {
 		@ITerminalInstanceService private readonly _terminalInstanceService: ITerminalInstanceService,
 		@IEditorGroupsService private readonly _editorGroupsService: IEditorGroupsService,
 		@ITerminalProfileService private readonly _terminalProfileService: ITerminalProfileService,
-		@ITerminalProfileResolverService private readonly _terminalProfileResolverService: ITerminalProfileResolverService,
 		@IExtensionService private readonly _extensionService: IExtensionService,
 		@INotificationService private readonly _notificationService: INotificationService,
 		@IWorkspaceContextService private readonly _workspaceContextService: IWorkspaceContextService,
@@ -1278,11 +1275,6 @@ export class TerminalService extends Disposable implements ITerminalService {
 			return location;
 		}
 		return undefined;
-	}
-
-	/** P5：给 profile resolver 用的宿主 OS（= 本机运行平台；远程场景下 P5 只在同机生效）。 */
-	private _dshOperatingSystem(): OperatingSystem {
-		return OS;
 	}
 
 	private _evaluateLocalCwd(shellLaunchConfig: IShellLaunchConfig) {

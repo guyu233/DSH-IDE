@@ -148,10 +148,7 @@ export function getCommentCommandInfo(keybindingService: IKeybindingService, con
 }
 
 export function getChatCommandInfo(keybindingService: IKeybindingService, contextKeyService: IContextKeyService): string | undefined {
-	if (true) {
-		return [AccessibilityHelpNLS.quickChat, AccessibilityHelpNLS.startInlineChat].join('\n');
-	}
-	return;
+	return [AccessibilityHelpNLS.quickChat, AccessibilityHelpNLS.startInlineChat].join('\n');
 }
 
 export function getChatEditInfo(keybindingService: IKeybindingService, contextKeyService: IContextKeyService, editor: ICodeEditor): string | undefined {
