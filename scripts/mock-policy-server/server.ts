@@ -735,7 +735,9 @@ async function loadSchema(): Promise<{ source: string; resolved: string; ok: boo
 
 		const filePath = source.startsWith('file://')
 			? fileURLToPath(source)
-			: path.resolve(process.cwd(), source);
+			// 相对路径以仓库根（ROOT）为基准，不用 cwd：从 scripts/ 或任意目录启动时
+			// cwd 会把相对路径解析到别处，导致 /api/schema 恒 ok:false。
+			: path.resolve(path.isAbsolute(source) ? '/' : ROOT, source);
 
 		// Guard against relative path traversal.
 		if (!path.isAbsolute(source) && filePath.includes('..')) {
@@ -764,9 +766,10 @@ function resolveDefaultSchemaSource(): string {
 	if (primaryCheckout) {
 		candidates.push(path.join(path.dirname(primaryCheckout), DEFAULT_SCHEMA_RELATIVE_PATH));
 	}
+	// 仓库根优先于 cwd：从 scripts/ 或任意目录启动时 cwd 会指向别处。
 	candidates.push(
-		path.resolve(process.cwd(), DEFAULT_SCHEMA_RELATIVE_PATH),
-		path.resolve(ROOT, DEFAULT_SCHEMA_RELATIVE_PATH)
+		path.resolve(ROOT, DEFAULT_SCHEMA_RELATIVE_PATH),
+		path.resolve(process.cwd(), DEFAULT_SCHEMA_RELATIVE_PATH)
 	);
 
 	return candidates.find(candidate => fs.existsSync(candidate)) ?? candidates[0];

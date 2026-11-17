@@ -24,8 +24,43 @@ const DATA_DIR = path.join(ROOT, '.chat-simulation-data');
 
 // -- Config loading ----------------------------------------------------------
 
-/** @param {string} text */
-function stripJsoncComments(text) { return text.replace(/\/\/.*/g, '').replace(/\/\*[\s\S]*?\*\//g, ''); }
+/**
+ * 去 JSONC 注释。
+ *
+ * 不能用「斜杠斜杠点星」的正则一把梭：它会把字符串字面量里的 URL 协议头、路径里的双斜杠也砍掉，
+ * 结果 JSON 直接损坏（或被解析成错值）。这里按字符扫描，只在字符串外识别注释。
+ *
+ * @param {string} text
+ */
+function stripJsoncComments(text) {
+	let out = '';
+	let inString = false;
+	let inLineComment = false;
+	let inBlockComment = false;
+	for (let i = 0; i < text.length; i++) {
+		const ch = text[i];
+		const next = text[i + 1];
+		if (inLineComment) {
+			if (ch === '\n') { inLineComment = false; out += ch; }
+			continue;
+		}
+		if (inBlockComment) {
+			if (ch === '*' && next === '/') { inBlockComment = false; i++; }
+			continue;
+		}
+		if (inString) {
+			out += ch;
+			if (ch === '\\') { out += next ?? ''; i++; }
+			else if (ch === '"') { inString = false; }
+			continue;
+		}
+		if (ch === '"') { inString = true; out += ch; continue; }
+		if (ch === '/' && next === '/') { inLineComment = true; i++; continue; }
+		if (ch === '/' && next === '*') { inBlockComment = true; i++; continue; }
+		out += ch;
+	}
+	return out;
+}
 
 /**
  * Load a namespaced section from config.jsonc.
@@ -33,9 +68,24 @@ function stripJsoncComments(text) { return text.replace(/\/\/.*/g, '').replace(/
  * @returns {Record<string, any>}
  */
 function loadConfig(section) {
-	const raw = fs.readFileSync(path.join(__dirname, '..', 'config.jsonc'), 'utf-8');
-	const config = JSON.parse(stripJsoncComments(raw));
-	return config[section] ?? {};
+	const file = path.join(__dirname, '..', 'config.jsonc');
+	const raw = fs.readFileSync(file, 'utf-8');
+	let config;
+	try {
+		config = JSON.parse(stripJsoncComments(raw));
+	} catch (error) {
+		// 损坏的 config 必须报错：静默回退默认值会让 benchmark 用错阈值跑完整轮，
+		// 结果比直接失败更难发现。
+		throw new Error(`无法解析 ${path.relative(process.cwd(), file)}（section=${section}）：${error.message}`);
+	}
+	const value = config[section];
+	if (value === undefined) {
+		return {};
+	}
+	if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+		throw new Error(`config.jsonc 的 ${section} 必须是对象`);
+	}
+	return value;
 }
 
 // -- Electron path resolution ------------------------------------------------
@@ -387,7 +437,13 @@ async function connectToExtHostInspector(port, opts = {}) {
 	const eventListeners = new Map();
 
 	ws.on('message', (/** @type {Buffer} */ data) => {
-		const msg = JSON.parse(data.toString());
+		let msg;
+		try {
+			msg = JSON.parse(data.toString());
+		} catch {
+			// inspector 可能发非 JSON 控制帧；解析失败只丢这一帧，不能把事件回调炸掉。
+			return;
+		}
 		if (msg.id !== undefined) {
 			const p = pending.get(msg.id);
 			if (p) {

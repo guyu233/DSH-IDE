@@ -22,6 +22,27 @@ const http: typeof import('http') = require('http');
 const https: typeof import('https') = require('https');
 const { EventEmitter }: typeof import('events') = require('events');
 
+/**
+ * 统一的 async handler 包装：`readBody()` 之后的处理链一旦抛错，
+ * 没有 catch 会变成 unhandled rejection，Node 24 默认直接终止 mock server，
+ * 整轮 benchmark 就废了。这里把失败转成 500（或 res 已断开时静默结束）。
+ */
+function handleBody(res: import('http').ServerResponse, work: (body: string) => unknown): void {
+	readBody().then(body => work(body)).catch((error: unknown) => {
+		_log(`[mock-llm-server] request handler failed: ${error instanceof Error ? error.message : String(error)}`);
+		try {
+			if (!res.headersSent) {
+				res.writeHead(500, { 'content-type': 'application/json' });
+				res.end(JSON.stringify({ error: { message: 'mock server handler failed' } }));
+			} else {
+				res.end();
+			}
+		} catch {
+			// res 已经断开：无法再写，忽略。
+		}
+	});
+}
+
 let _log: (msg: string) => void = console.log;
 let _verbose = false;
 
@@ -692,7 +713,7 @@ function handleRequest(req: import('http').IncomingMessage, res: import('http').
 	// -- Model Router (DomainService.capiModelRouterURL = /models/session/intent) --
 	// The automode service POSTs here to get the best model for a request.
 	if (path === '/models/session/intent' && req.method === 'POST') {
-		readBody().then(() => {
+		handleBody(res, () => {
 			json(200, { model: MODEL });
 		});
 		return;
@@ -701,7 +722,7 @@ function handleRequest(req: import('http').IncomingMessage, res: import('http').
 	// -- Auto Models / Model Session (DomainService.capiAutoModelURL = /models/session) --
 	// Returns AutoModeAPIResponse: { available_models, session_token, expires_at }
 	if (path === '/models/session' && req.method === 'POST') {
-		readBody().then(() => {
+		handleBody(res, () => {
 			json(200, {
 				available_models: [MODEL, 'gpt-4o-mini', ...EXTRA_MODELS.map(m => m.id)],
 				selected_model: 'gpt-5.3-codex',
@@ -786,7 +807,7 @@ function handleRequest(req: import('http').IncomingMessage, res: import('http').
 
 	// -- Chat Completions (DomainService.capiChatURL = /chat/completions) --
 	if (path === '/chat/completions' && req.method === 'POST') {
-		readBody().then((body: string) => {
+		handleBody(res, (body: string) => {
 			serverEvents.emit('capturedRequest', { path, method: 'POST', body });
 			return handleChatCompletions(body, res);
 		});
@@ -798,7 +819,7 @@ function handleRequest(req: import('http').IncomingMessage, res: import('http').
 	// The SDK expects events like response.created, response.output_item.added,
 	// response.output_text.delta, response.output_item.done, response.completed.
 	if (path === '/responses' && req.method === 'POST') {
-		readBody().then((body: string) => {
+		handleBody(res, (body: string) => {
 			serverEvents.emit('capturedRequest', { path, method: 'POST', body });
 			return handleResponsesApi(body, res);
 		});
@@ -810,13 +831,13 @@ function handleRequest(req: import('http').IncomingMessage, res: import('http').
 	// a different SSE dialect than OpenAI Chat Completions, so dispatch to a
 	// dedicated handler that emits `message_start` / `content_block_*` events.
 	if (path === '/v1/messages' && req.method === 'POST') {
-		readBody().then((body: string) => handleMessagesApi(body, res));
+		handleBody(res, (body: string) => handleMessagesApi(body, res));
 		return;
 	}
 
 	// -- Proxy completions (/v1/engines/*/completions) ----------------
 	if (path.includes('/v1/engines/') && req.method === 'POST') {
-		readBody().then((body: string) => handleChatCompletions(body, res));
+		handleBody(res, (body: string) => handleChatCompletions(body, res));
 		return;
 	}
 
@@ -828,7 +849,7 @@ function handleRequest(req: import('http').IncomingMessage, res: import('http').
 
 	// -- Catch-all: any remaining POST with messages → chat completions
 	if (req.method === 'POST') {
-		readBody().then((body: string) => {
+		handleBody(res, (body: string) => {
 			try {
 				const parsed = JSON.parse(body);
 				if (parsed.messages && Array.isArray(parsed.messages)) {
@@ -1202,7 +1223,11 @@ async function sendResponsesNonStreaming(
 			output = turn.toolCalls.map((call, i) => {
 				let toolName = requestToolNames.find(name => call.toolNamePattern.test(name));
 				if (!toolName) {
-					toolName = call.toolNamePattern.source.replace(/[\\.|?*+^${}()\[\]]/g, '');
+					// 不能把正则源码「反解」成工具名：`/read.*file/` 会变成 `readfile` 这种不存在的名字，
+					// 客户端会报 unknown tool 然后一直等到超时。取不到匹配就退回请求里的第一个真实工具名，
+					// 并明确记一条日志（scenario 没写对，但至少不会卡死）。
+					toolName = requestToolNames[0];
+					_log(`[mock-llm-server] scenario tool pattern ${call.toolNamePattern} matched none of ${requestToolNames.join(', ')}; falling back to ${toolName}`);
 				}
 				const callId = `call_${scenarioId}_${i}_${Date.now()}`;
 				const argsJson = JSON.stringify(resolveScenarioToolCallArguments(call.arguments, input));
@@ -1370,7 +1395,8 @@ async function streamResponsesApiToolCalls(
 		const call = toolCalls[i];
 		let toolName = requestToolNames.find(name => call.toolNamePattern.test(name));
 		if (!toolName) {
-			toolName = call.toolNamePattern.source.replace(/[\\.|?*+^${}()\[\]]/g, '');
+			// 反解正则源码会得到 `readfile` 这种不存在的工具名；退回请求里的第一个真实工具名。
+			toolName = requestToolNames[0];
 			_log(`[mock-llm]   No matching tool for pattern ${call.toolNamePattern}, using fallback: ${toolName}`);
 		}
 
@@ -1802,7 +1828,8 @@ async function streamAnthropicToolCalls(
 		const call = toolCalls[i];
 		let toolName = requestToolNames.find(name => call.toolNamePattern.test(name));
 		if (!toolName) {
-			toolName = call.toolNamePattern.source.replace(/[\\.|?*+^${}()\[\]]/g, '');
+			// 反解正则源码会得到 `readfile` 这种不存在的工具名；退回请求里的第一个真实工具名。
+			toolName = requestToolNames[0];
 			_log(`[mock-llm]   No matching tool for pattern ${call.toolNamePattern}, using fallback: ${toolName}`);
 		}
 
@@ -1896,7 +1923,8 @@ async function streamToolCalls(
 		// Find the matching tool name from the request's tools array
 		let toolName = requestToolNames.find(name => call.toolNamePattern.test(name));
 		if (!toolName) {
-			toolName = call.toolNamePattern.source.replace(/[\\.|?*+^${}()\[\]]/g, '');
+			// 反解正则源码会得到 `readfile` 这种不存在的工具名；退回请求里的第一个真实工具名。
+			toolName = requestToolNames[0];
 			_log(`[mock-llm]   No matching tool for pattern ${call.toolNamePattern}, using fallback: ${toolName}`);
 		}
 
@@ -2164,5 +2192,9 @@ if (require.main === module) {
 	_startServer(port).then((handle: MockLlmServerHandle) => {
 		_log(`Mock LLM server listening at ${handle.url}`);
 		_log(`Scenarios: ${Object.keys(SCENARIOS).join(', ')}`);
+	}).catch((error: unknown) => {
+		// 端口被占等启动失败：显式退出码，别留一个静默挂起的进程。
+		_log(`Mock LLM server failed to start: ${error instanceof Error ? error.message : String(error)}`);
+		process.exitCode = 1;
 	});
 }

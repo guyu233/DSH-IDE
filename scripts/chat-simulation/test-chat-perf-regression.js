@@ -32,6 +32,30 @@ const {
 const { getUserTurns, getScenarioIds } = require('./common/mock-llm-server.ts');
 const { registerPerfScenarios, getScenarioDescription } = require('./common/perf-scenarios');
 
+/**
+ * 读 JSON 文件并把「文件损坏」转成可读错误。
+ *
+ * 上一轮中断会留下截断的 baseline/cache JSON：裸 `JSON.parse(fs.readFileSync(...))` 会抛
+ * 一个没有文件名的 SyntaxError，整轮 benchmark 起不来且看不出是哪份缓存坏了。
+ *
+ * @param {string} file
+ * @param {string} what - 用途（出现在错误信息里）
+ * @returns {any}
+ */
+function readJsonFile(file, what) {
+	let text;
+	try {
+		text = fs.readFileSync(file, 'utf-8');
+	} catch (error) {
+		throw new Error(`无法读取${what} ${file}: ${error.message}`);
+	}
+	try {
+		return JSON.parse(text);
+	} catch (error) {
+		throw new Error(`${what} ${file} 不是合法 JSON（可能是上次运行中断留下的截断文件）；删除后重跑：${error.message}`);
+	}
+}
+
 // -- Config (edit config.jsonc to change defaults) ---------------------------
 
 const CONFIG = loadConfig('perfRegression');
@@ -247,8 +271,8 @@ function buildProductionBuild() {
 		}
 		const packagedProductPath = path.join(appDir, 'product.json');
 		if (fs.existsSync(packagedProductPath)) {
-			const packagedProduct = JSON.parse(fs.readFileSync(packagedProductPath, 'utf-8'));
-			const overrides = JSON.parse(fs.readFileSync(overridesPath, 'utf-8'));
+			const packagedProduct = readJsonFile(packagedProductPath, 'packaged product.json');
+			const overrides = readJsonFile(overridesPath, '产品覆盖配置');
 			const merged = Object.assign(packagedProduct, overrides);
 			fs.writeFileSync(packagedProductPath, JSON.stringify(merged, null, '\t'));
 			console.log('[chat-simulation] Merged product.overrides.json into packaged product.json');
@@ -377,7 +401,7 @@ async function runOnce(electronPath, scenario, mockServer, verbose, runIndex, ru
 	// Production:   ../VSCode-darwin-arm64/Code - OSS.app/.../Code - OSS → "production"
 	let buildLabel = 'dev';
 	if (!isDevBuild) {
-		const vscodeTestMatch = electronPath.match(/vscode-test\/vscode-[^/]*?-(\d+\.\d+\.\d+)/);
+		const vscodeTestMatch = electronPath.match(/vscode-test[\\/]vscode-[^/\\]*?-(\d+\.\d+\.\d+)/);
 		if (vscodeTestMatch) {
 			buildLabel = vscodeTestMatch[1];
 		} else if (electronPath.includes('VSCode-')) {
@@ -849,7 +873,7 @@ async function runOnce(electronPath, scenario, mockServer, verbose, runIndex, ru
 	/** @type {Array<any>} */
 	let traceEvents = [];
 	try {
-		const traceData = JSON.parse(fs.readFileSync(tracePath, 'utf-8'));
+		const traceData = readJsonFile(tracePath, '性能 trace');
 		traceEvents = traceData.traceEvents || [];
 	} catch {
 		// Trace file may not exist if VS Code crashed before shutdown
@@ -1355,13 +1379,13 @@ async function main() {
 			console.error(`[chat-simulation] Resume file not found: ${opts.resume}`);
 			process.exit(1);
 		}
-		const prevResults = JSON.parse(fs.readFileSync(opts.resume, 'utf-8'));
+		const prevResults = readJsonFile(opts.resume, 'resume 结果');
 		const prevDir = path.dirname(opts.resume);
 
 		// Find the associated baseline JSON in the same directory
 		const baselineFiles = fs.readdirSync(prevDir).filter((/** @type {string} */ f) => f.startsWith('baseline-') && f.endsWith('.json'));
 		const baselineFile = baselineFiles.length > 0 ? path.join(prevDir, baselineFiles[0]) : null;
-		const prevBaseline = baselineFile ? JSON.parse(fs.readFileSync(baselineFile, 'utf-8')) : null;
+		const prevBaseline = baselineFile ? readJsonFile(baselineFile, 'baseline') : null;
 
 		// Determine which scenarios to resume (default: all from previous run)
 		const resumeScenarios = opts.scenarios.length > 0
@@ -1526,7 +1550,7 @@ async function main() {
 		// Version strings: use caching as before
 		const cachedPath = isBaselineLocalPath ? null : path.join(DATA_DIR, `baseline-${baselineLabel}.json`);
 		const cachedBaseline = cachedPath && !opts.noCache && fs.existsSync(cachedPath)
-			? JSON.parse(fs.readFileSync(cachedPath, 'utf-8'))
+			? readJsonFile(cachedPath, '缓存的 baseline')
 			: null;
 
 		if (cachedBaseline?.baselineBuildVersion === opts.baselineBuild) {
@@ -1779,7 +1803,7 @@ async function printComparison(jsonReport, opts) {
 	/** @type {Set<string>} */
 	const regressedScenarios = new Set();
 	if (opts.baseline && fs.existsSync(opts.baseline)) {
-		const baseline = JSON.parse(fs.readFileSync(opts.baseline, 'utf-8'));
+		const baseline = readJsonFile(opts.baseline, 'baseline');
 		console.log('');
 		console.log(`[chat-simulation] =========== Baseline Comparison (threshold: ${(opts.threshold * 100).toFixed(0)}%) ===========`);
 		console.log(`[chat-simulation] Baseline: ${baseline.baselineBuildVersion || baseline.timestamp}`);
@@ -1914,7 +1938,7 @@ async function printComparison(jsonReport, opts) {
 	// -- CI summary ------------------------------------------------------
 	if (opts.ci) {
 		const ciBaseline = opts.baseline && fs.existsSync(opts.baseline)
-			? JSON.parse(fs.readFileSync(opts.baseline, 'utf-8'))
+			? readJsonFile(opts.baseline, 'baseline')
 			: null;
 		const summary = generateCISummary(jsonReport, ciBaseline, {
 			threshold: opts.threshold,
