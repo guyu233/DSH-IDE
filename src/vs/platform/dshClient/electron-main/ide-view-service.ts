@@ -20,6 +20,7 @@ import {
 	DSH_IDE_FEATURE_UNAVAILABLE,
 	DSH_IDE_WIRE_REVISION,
 	type DshIdeBackend,
+	type DshIdeCapabilities,
 	type DshIdeMethod,
 	type DshIdeOpenSpec,
 	type DshIdePendingItem,
@@ -63,6 +64,8 @@ export class DshIdeViewService extends Disposable implements IdeViewHost {
 	private conversation = createDshIdeConversationState();
 	/** 待决议项：按 eventId 聚合，request 加入、cancel 移除。 */
 	private readonly _pending = new Map<string, DshIdePendingItem>();
+	/** 依赖插件能力快照：开窗后由 Host 的 capability 帧写入，之后每帧沿用。 */
+	private _capabilities: DshIdeCapabilities | undefined;
 
 	private readonly backend: DshIdeBackend;
 
@@ -79,6 +82,8 @@ export class DshIdeViewService extends Disposable implements IdeViewHost {
 		const binding = this.backend.open(spec as unknown as DshIdeOpenSpec);
 		this.channelId = binding.channelId;
 		this.sessionId = binding.sessionId;
+		// 能力随绑定一起返回：视图级信息，不进 follow 帧序列。
+		this._capabilities = binding.capabilities;
 		this.conversation = createDshIdeConversationState();
 		this.subscription = this.backend.follow(
 			binding.sessionId,
@@ -168,6 +173,7 @@ export class DshIdeViewService extends Disposable implements IdeViewHost {
 		this._boundSessionId = undefined;
 		this.conversation = createDshIdeConversationState();
 		this._pending.clear();
+		this._capabilities = undefined;
 		this.last = undefined;
 		this.version = 0;
 		return { closed: true };
@@ -203,8 +209,7 @@ export class DshIdeViewService extends Disposable implements IdeViewHost {
 	private receive(raw: unknown): void {
 		if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) {
 			return;
-		}
-		const notice = projectDshIdeWaterfallNotice(raw);
+		}		const notice = projectDshIdeWaterfallNotice(raw);
 		if (notice !== undefined) {
 			// 待决议项同时并入快照：渲染层读 `pending` 就有完整清单，
 			// 不必自己从独立 waterfall 通路累加。
@@ -263,6 +268,7 @@ export class DshIdeViewService extends Disposable implements IdeViewHost {
 				...(deliverables.length === 0 ? {} : { deliverables }),
 				...(quotaNotice === undefined ? {} : { quotaNotice }),
 				...(attachments.length === 0 ? {} : { attachments }),
+				...(this._capabilities === undefined ? {} : { capabilities: this._capabilities }),
 			}
 			: {
 				frame: raw as Record<string, unknown>,
@@ -272,6 +278,7 @@ export class DshIdeViewService extends Disposable implements IdeViewHost {
 				...(deliverables.length === 0 ? {} : { deliverables }),
 				...(quotaNotice === undefined ? {} : { quotaNotice }),
 				...(attachments.length === 0 ? {} : { attachments }),
+				...(this._capabilities === undefined ? {} : { capabilities: this._capabilities }),
 			});
 	}
 

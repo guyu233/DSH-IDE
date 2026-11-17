@@ -23,6 +23,7 @@ import { IDshClientService } from '../../../../platform/dshClient/common/dshClie
 import { ChatContextKeys } from '../../chat/common/actions/chatContextKeys.js';
 import { openSessionByResource } from '../../chat/browser/agentSessions/agentSessionsOpener.js';
 import { dshSessionIdFromResource, dshSessionResource } from './dshAgentSessionsController.js';
+import { dshCapsContext } from './dshCapabilities.js';
 
 const DSH_SESSION = ChatContextKeys.agentSessionType.isEqualTo('dsh');
 
@@ -49,6 +50,7 @@ function registerSessionAction(options: {
 	readonly order: number;
 	readonly group: string;
 	readonly icon?: typeof Codicon.star;
+	readonly capability?: 'rewind' | 'sessionFavorite' | 'sessionMove' | 'sessionDelete';
 	readonly keybinding?: number;
 	readonly run: (accessor: ServicesAccessor, sessionId: string) => Promise<void>;
 }): void {
@@ -69,7 +71,7 @@ function registerSessionAction(options: {
 					id: MenuId.AgentSessionsContext,
 					group: options.group,
 					order: options.order,
-					when: DSH_SESSION,
+					when: ContextKeyExpr.and(DSH_SESSION, options.capability === undefined ? undefined : dshCapsContext(options.capability)),
 				},
 			});
 		}
@@ -90,6 +92,7 @@ export function registerDshSessionMenu(): void {
 		title: localize2('dsh.session.favorite', "收藏"),
 		order: 1,
 		group: '1_dsh',
+		capability: 'sessionFavorite',
 		icon: Codicon.star,
 		run: async (accessor, sessionId) => {
 			const result = await accessor.get(IDshClientService).call('setSessionFavorite', { sessionId });
@@ -174,6 +177,7 @@ export function registerDshSessionMenu(): void {
 		title: localize2('dsh.session.move', "移动到工作区"),
 		order: 2,
 		group: '3_dsh',
+		capability: 'sessionMove',
 		run: async (accessor, sessionId) => {
 			const client = accessor.get(IDshClientService);
 			const notifications = accessor.get(INotificationService);
@@ -219,6 +223,7 @@ export function registerDshSessionMenu(): void {
 		title: localize2('dsh.session.delete', "删除会话"),
 		order: 1,
 		group: '5_dsh',
+		capability: 'sessionDelete',
 		run: async (accessor, sessionId) => {
 			const confirmed = await accessor.get(IDialogService).confirm({
 				message: localize('dsh.session.deleteConfirm', "删除这个会话？此操作不能撤销。"),

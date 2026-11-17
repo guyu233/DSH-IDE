@@ -237,6 +237,18 @@ test('validateDshIdeSnapshot rejects unknown fields', () => {
 	assert.throws(() => validateDshIdeSnapshot(snapshot({ state: { state: 'ready', __extra: 1 } })), /unknown field/);
 });
 
+test('capabilities 快照四项必填布尔，缺项或非布尔一律拒绝', () => {
+	const withCaps = (capabilities: unknown) => snapshot({
+		version: 1,
+		state: { state: 'ready', view: { frame: { type: 'snapshot' }, capabilities } },
+	});
+	assert.doesNotThrow(() => validateDshIdeSnapshot(withCaps({ rewind: true, sessionFavorite: false, sessionMove: false, sessionDelete: true })));
+	// 缺插件就是 false，不省略字段
+	assert.throws(() => validateDshIdeSnapshot(withCaps({ rewind: true, sessionFavorite: false, sessionMove: false })), /sessionDelete must be a boolean/);
+	assert.throws(() => validateDshIdeSnapshot(withCaps({ rewind: 'yes', sessionFavorite: false, sessionMove: false, sessionDelete: false })), /rewind must be a boolean/);
+	assert.throws(() => validateDshIdeSnapshot(withCaps({ rewind: true, sessionFavorite: false, sessionMove: false, sessionDelete: false, extra: true })), /unknown field/);
+});
+
 test('validateDshIdeSnapshot rejects explicit undefined', () => {
 	assert.throws(() => validateDshIdeSnapshot(snapshot({ message: undefined })), /must omit explicit undefined field/);
 });

@@ -171,8 +171,11 @@ test('2-A: the four fields reach history parts through the same extras shape the
 			assert.ok(infos.some(part => part.content.value.includes('计划模式已启用')));
 			assert.ok(infos.some(part => part.content.value.includes('完成手册') && part.content.value.includes('3 轮')));
 			assert.ok(infos.some(part => part.content.value.includes('dsh-doc')));
-			const markdown = response.parts.filter(part => part.kind === 'markdownContent') as { content: { value: string } }[];
-			assert.ok(markdown.some(part => part.content.value.includes('[x] 写测试')));
+			// Todo 用原生任务行承接：标题是完成数，逐项在 progress 里。
+			const tasks = response.parts.filter(part => part.kind === 'progressTaskSerialized') as { content: { value: string }; progress: { content: { value: string } }[] }[];
+			assert.equal(tasks.length, 1, 'todos must render as one native progress task');
+			assert.ok(tasks[0].content.value.includes('待办'));
+			assert.ok(tasks[0].progress.some(part => part.content.value.includes('[x] 写测试')));
 		}
 	} finally {
 		session.dispose();

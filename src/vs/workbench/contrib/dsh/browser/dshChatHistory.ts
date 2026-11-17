@@ -26,7 +26,20 @@ export type DshHistoryPart =
 	| { readonly kind: 'info'; readonly content: { readonly value: string } }
 	| { readonly kind: 'reference'; readonly reference: string; readonly options?: { readonly status?: { readonly description: string; readonly kind: number } } }
 	| { readonly kind: 'command'; readonly command: { readonly id: string; readonly title: string; readonly arguments?: readonly unknown[] } }
+	| DshProgressTaskPart
 	| DshToolInvocationPart;
+
+/**
+ * 原生 `progressTaskSerialized` 的窄形状（`chatService.ts:396-400`）。
+ *
+ * 用于 Todo 清单：原生渲染成可收起的任务行，进度项走 `progress`。
+ * 历史里没有运行态，`progress` 直接给出全部条目；`content` 是任务标题。
+ */
+export interface DshProgressTaskPart {
+	readonly kind: 'progressTaskSerialized';
+	readonly content: { readonly value: string };
+	readonly progress: readonly { readonly kind: 'warning'; readonly content: { readonly value: string } }[];
+}
 
 /**
  * 原生 `toolInvocationSerialized` 的窄形状（`chatService.ts:1216-1236`）。
@@ -300,11 +313,16 @@ function appendExtras(extras: DshHistoryExtras, history: DshHistoryItem[]): void
 		});
 	}
 	if (extras.todos !== undefined && extras.todos.length > 0) {
-		const lines = extras.todos.map(todo => {
-			const mark = todo.status === 'completed' ? '[x]' : todo.status === 'in_progress' ? '[-]' : '[ ]';
-			return `${mark} ${todo.content}`;
+		// Todo 用原生任务行承接：标题给出完成数，逐项进 progress，保持可收起。
+		const done = extras.todos.filter(todo => todo.status === 'completed').length;
+		push({
+			kind: 'progressTaskSerialized',
+			content: { value: `待办 ${done}/${extras.todos.length}` },
+			progress: extras.todos.map(todo => {
+				const mark = todo.status === 'completed' ? '[x]' : todo.status === 'in_progress' ? '[-]' : '[ ]';
+				return { kind: 'warning' as const, content: { value: `${mark} ${todo.content}` } };
+			}),
 		});
-		push({ kind: 'markdownContent', content: { value: lines.join('\n') } });
 	}
 	if (extras.skills !== undefined && extras.skills.length > 0) {
 		push({ kind: 'info', content: { value: `可用技能：${extras.skills.map(skill => skill.name).join('、')}` } });

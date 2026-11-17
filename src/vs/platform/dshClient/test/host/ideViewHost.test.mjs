@@ -112,6 +112,25 @@ test('open reuses the channel id and binds the requested session', () => {
 	assert.equal(again.sessionId, 's-1', 'repeated open keeps the original binding');
 });
 
+test('open returns the dependency capability snapshot with the binding', () => {
+	// 两个插件都没装：四项全 false（fail-closed），且不靠额外 dispatch 调用。
+	const bare = bridgeWith();
+	const bareOpen = bare.bridge.open({ view: 'chat', params: {} });
+	assert.deepEqual(bareOpen.capabilities, { rewind: false, sessionFavorite: false, sessionMove: false, sessionDelete: false });
+
+	// 归档管理器覆盖的三个方法都在：对应三项为 true。
+	const withRegistry = bridgeWith({
+		workspaceRegistry: {
+			setSessionFavorite() { }, favoriteSessions() { }, moveSessionToWorkspace() { }, deleteSession() { }, list() { return []; }, resolveByPath() { return undefined; },
+		},
+	});
+	const caps = withRegistry.bridge.open({ view: 'chat', params: {} }).capabilities;
+	assert.equal(caps.sessionFavorite, true);
+	assert.equal(caps.sessionMove, true);
+	assert.equal(caps.sessionDelete, true);
+	assert.equal(caps.rewind, false);
+});
+
 test('follow calls sessionController.follow once per session and fans the same frames out', async () => {
 	const requests = [];
 	let push = () => undefined;

@@ -13,6 +13,7 @@
 import { localize } from '../../../../nls.js';
 import { registerSingleton, InstantiationType } from '../../../../platform/instantiation/common/extensions.js';
 import { INotificationService } from '../../../../platform/notification/common/notification.js';
+import { IContextKeyService } from '../../../../platform/contextkey/common/contextkey.js';
 import { IDshClientService, DshClientService } from '../../../../platform/dshClient/common/dshClientService.js';
 import { ILanguageFeaturesService } from '../../../../editor/common/services/languageFeatures.js';
 import { IWorkbenchContribution, registerWorkbenchContribution2, WorkbenchPhase } from '../../../common/contributions.js';
@@ -32,6 +33,7 @@ import { registerDshChatSessionContent, registerDshAnswerCommands } from './dshC
 import { IDshIdeSessionsService, DshIdeSessionsService } from './dshIdeSessionsService.js';
 import { registerDshSessionSearchCommands } from './dshSessionSearchCommands.js';
 import { registerDshSessionMenu } from './dshSessionMenu.js';
+import { applyDshCapabilities } from './dshCapabilities.js';
 import { registerDshTeamCommands } from './dshTeamCommands.js';
 import { registerDshIconReplacement } from './dshIconReplacement.js';
 import { IQuickInputService } from '../../../../platform/quickinput/common/quickInput.js';
@@ -57,6 +59,7 @@ class DshClientContribution extends Disposable implements IWorkbenchContribution
 		@IDshIdeSessionsService private readonly _sessions: IDshIdeSessionsService,
 		@IQuickInputService private readonly quickInputService: IQuickInputService,
 		@IInstantiationService private readonly instantiationService: IInstantiationService,
+		@IContextKeyService contextKeyService: IContextKeyService,
 		@ILogService logService: ILogService,
 	) {
 		super();
@@ -97,6 +100,9 @@ class DshClientContribution extends Disposable implements IWorkbenchContribution
 		this._register(consumer.onDidChangeFrame(({ state }) => {
 			// 稳定路径读 typed 视图；`frame` 只作兼容回退（旧 Host 不带 typed 字段时）。
 			this._chat.acceptView(state.view);
+			// 依赖插件能力随快照下发：写进 context key，菜单按它决定入口是否出现。
+			// 缺省 false：旧 Host 不报能力时入口隐藏，不让用户点了才看到失败。
+			applyDshCapabilities(state.view?.capabilities, (key, value) => { key.bindTo(contextKeyService).set(value); });
 		}));
 		this._register(client.onDidSnapshot(snapshot => consumer.accept(snapshot)));
 		this._register(client.onDidWaterfall(notice => this._chat.acceptWaterfall(notice)));

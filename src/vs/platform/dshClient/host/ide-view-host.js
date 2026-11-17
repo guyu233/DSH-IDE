@@ -74,6 +74,37 @@ function optionalService(ctx, name) {
 	return value === undefined || value === null ? undefined : value;
 }
 
+/**
+ * 探测依赖插件的实际装载能力，供 UI 隐藏用不了的功能。
+ *
+ * 只看官方服务/命令是否真的在，不读插件清单、不猜版本：没装或没启用就是 false。
+ * - rewind：`dsh-rewind-plugin` 注册的命令 `rewind-plugin`。
+ * - sessionFavorite / sessionMove：`@michengai/dsh-archive-manager` 覆盖的 workspaceRegistry。
+ * - sessionDelete：同一插件覆盖的 `deleteSession`。
+ */
+function probeDshIdeCapabilities(ctx) {
+	const registry = optionalService(ctx, 'workspaceRegistry');
+	const sessionFavorite = registry !== undefined
+		&& typeof registry.setSessionFavorite === 'function'
+		&& typeof registry.favoriteSessions === 'function';
+	const sessionMove = registry !== undefined && typeof registry.moveSessionToWorkspace === 'function';
+	const sessionDelete = registry !== undefined && typeof registry.deleteSession === 'function';
+	let rewind = false;
+	try {
+		const commands = optionalService(ctx, 'commands');
+		const agents = optionalService(ctx, 'agents');
+		if (commands !== undefined && agents !== undefined && typeof commands.list === 'function') {
+			const agent = typeof agents.get === 'function' ? agents.get(undefined) : undefined;
+			const listed = commands.list(agent);
+			rewind = Array.isArray(listed) && listed.some(item => item !== null && typeof item === 'object' && item.name === 'rewind-plugin');
+		}
+	} catch {
+		// 命令目录读不到就当没装；能力快照本身不能把整个视图打成失败。
+		rewind = false;
+	}
+	return { rewind, sessionFavorite, sessionMove, sessionDelete };
+}
+
 function sectionValue(rows, namespace) {
 	if (!Array.isArray(rows)) {
 		return {};
@@ -204,7 +235,8 @@ export class DshIdeHostBridge {
 			this.sessionId = params.sessionId;
 		}
 		this.channelId = `dsh-ide:${randomUUID()}`;
-		return { channelId: this.channelId, sessionId: this.sessionId };
+		// 能力是视图级信息，随绑定一起返回：不占 follow 帧序列，也不额外发 dispatch。
+		return { channelId: this.channelId, sessionId: this.sessionId, capabilities: probeDshIdeCapabilities(this.ctx) };
 	}
 
 	/**
@@ -298,8 +330,7 @@ export class DshIdeHostBridge {
 							// 单个视图抛错不影响同一条流上的其它视图。
 						}
 					}
-				}
-			} catch (error) {
+				}			} catch (error) {
 				if (abort.signal.aborted) {
 					return;
 				}

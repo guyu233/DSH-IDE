@@ -164,9 +164,11 @@ test('quota notice is a response-level quota error and todos stay visible', () =
 		// 2-B B4：额度提示升级为 response.errorDetails.isQuotaExceeded（带原生配额升级入口）。
 		assert.equal(response.errorDetails?.isQuotaExceeded, true);
 		assert.equal(response.parts.some(part => part.kind === 'warning'), false);
-		const markdown = response.parts.filter(part => part.kind === 'markdownContent') as { content: { value: string } }[];
-		assert.ok(markdown.some(part => part.content.value.includes('[x] 写测试')));
-		assert.ok(markdown.some(part => part.content.value.includes('[-] 跑门禁')));
+		// Todo 走原生任务行，额度错误不影响它继续显示。
+		const tasks = response.parts.filter(part => part.kind === 'progressTaskSerialized') as { progress: { content: { value: string } }[] }[];
+		assert.equal(tasks.length, 1);
+		assert.ok(tasks[0].progress.some(part => part.content.value.includes('[x] 写测试')));
+		assert.ok(tasks[0].progress.some(part => part.content.value.includes('[-] 跑门禁')));
 	}
 });
 

@@ -87,7 +87,7 @@ test('P3 error codes are declared and distinct', () => {
 	const all = [DSH_IDE_FEATURE_UNAVAILABLE, DSH_IDE_INVALID_ARGUMENT, DSH_IDE_ALREADY_RESOLVED, DSH_IDE_SESSION_SWITCHED, DSH_IDE_SNAPSHOT_STALE];
 	assert.equal(new Set(all).size, all.length);
 	assert.equal(DSH_IDE_CHANNEL, 'dshIde');
-	assert.equal(DSH_IDE_WIRE_REVISION, 4, 'typed chat projections bump the snapshot revision');
+	assert.equal(DSH_IDE_WIRE_REVISION, 5, 'capabilities bump the snapshot revision');
 });
 
 // ---------------------------------------------------------------------------
@@ -249,7 +249,7 @@ async function openedChannel(backend = fakeBackend()) {
 	return { view, channel, backend, first };
 }
 
-test('channel dispatches all 36 DTO methods through validateDshIdeInput', async () => {
+test('channel dispatches all 42 DTO methods through validateDshIdeInput', async () => {
 	const { channel, backend } = await openedChannel();
 	for (const method of ALL_METHODS) {
 		const output = await channel.call<{ value: unknown }>('ctx-a', method, VALID[method]);

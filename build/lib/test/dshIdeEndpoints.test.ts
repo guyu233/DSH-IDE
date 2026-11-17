@@ -97,7 +97,7 @@ const UNVERIFIED = FINDINGS.filter(f => !WIRED.includes(f.method)).map(f => f.me
 // 契约口径：method 白名单（20 会话域 + 2 账号域 + 2 归档域 + 团队/预设/附加 + readAttachment）
 // ---------------------------------------------------------------------------
 
-	test('D16 contract still declares exactly 36 methods', () => {
+	test('D16 contract still declares exactly 42 methods', () => {
 	const block = /const DSH_IDE_METHOD_KEYS[\s\S]*?\n\};/.exec(protocol);
 	assert.ok(block !== null, 'DSH_IDE_METHOD_KEYS must exist in the protocol single source');
 	const keys = [...block[0].matchAll(/^\s*([a-zA-Z]+):/gm)].map(m => m[1]);
