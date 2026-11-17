@@ -22,7 +22,7 @@ export const DSH_IDE_API_VERSION = '0.2.2-rc.1';
 /**
  * 线协议修订号（快照连续性校验依据；wireRevision 不变则协议相容）。
  * 4：`DshIdeViewSnapshot` 在保留 `frame` 的同时增加官方聊天页 typed 投影。
- * 5：新增 `capabilities`（依赖插件能力门控：rewind / 会话管理）。
+ * `capabilities` 最终采用独立 method（方案一），不占用修订号——故值停在 4。
  * 这些字段都可缺省；一旦出现就必须命中白名单，否则 fail-closed。
  */
 export const DSH_IDE_WIRE_REVISION = 4;
