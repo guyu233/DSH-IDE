@@ -18,6 +18,16 @@
 > - **打包、profile 覆盖、install-drift、tgz 产物核对等只在"开发完成"节点做一次**；§9.5 里已有的打包记录是历史实测，不是当前每轮必做项。
 > - 真机 GUI 观察仍由用户执行（AGENTS.md §6）；AI 只负责启动开发版 Electron、连通性与代码级定位，不以代码推断界面结论。
 
+### 0.0.1 源码参考约定（2026-11-17 用户明确）
+
+> **不在本机下载或保留 DSH / VS Code 整仓副本。** 本机原先的 `E:/deepseek-harness/` 参考目录不再作为依据。需要核对官方源码时：
+>
+> - DSH：`https://github.com/deepseek-ai/deepseek-harness`（在线最新）；
+> - VS Code：`https://github.com/microsoft/vscode`，或直接读本项目 `src/**`（即 VS Code 工作副本）；
+> - 已安装 DSH 的 `resources/app.asar` 仍可只读参考（与 AGENTS.md §2 资源复用一致）。
+>
+> 本文及四份分析文档里出现的 `E:/deepseek-harness/...:line` 是**历史快照证据**，仅记录当时依据，不代表本机仍有该目录；后续以在线最新源码为准，契约形状以 `src/vs/platform/dshClient/common/dshIdeProtocol.ts` 为真源。
+
 ### 0.1 选定路线（已替换旧版“轻量 slot”方案）
 
 **在现有原生 chat 面板（`dshChatSession.ts` / `dshChatModel.ts`）上改造，只承接 DSH 源码内置的官方聊天内容。**
@@ -881,3 +891,96 @@ DshChatSession.acceptView / acceptConversation → DshChatModel（typed 节点�
 
 > 注：全量门禁已按上表复跑并转 PASS；真机会话树展开在 2-E 用开发版 Electron 连 Host 验收（AI 不代跑）。全量门禁 PASS 不等于打包——按 §0.0 打包推迟到全部开发完成后再做。
 
+
+---
+
+### 9.10 依赖插件能力门控（rewind / 会话管理）：方案一实施计划（待执行）
+
+> 用户决策（2026-11-17）：DSH-IDE 依赖 rewind 与会话管理两个插件；**缺插件时隐藏相关功能**，不报错、不假装可用。传输方式最终选 **方案一：IDE 启动时主动调一次 `capabilities` method + 监听 Host 状态变化时重查**，菜单用 context key 的 `when` 过滤。**不把 capabilities 塞进 follow 快照，不改 wireRevision。**
+>
+> 当前代码状态：仓库已提交一版方案二（`e4839d5a`）——capabilities 随快照下发、wireRevision 5。本节是把代码改回方案一的**书面计划**，本节编写时不动代码；执行时须按 §1.3 契约先行。
+
+#### 9.10.1 两个插件提供什么 / 移除后哪些功能不可用
+
+功能来源：GitHub README 摘要（`SiriLee/dsh-rewind`、`MichengAI/dsh-archive-manager`）+ 本项目 Host 桥 `ide-view-host.js` 的调用点。GitHub 正文抓取不可靠（返回泛化内容），**以本项目 Host 源码为最终依据**，README 只佐证功能定位。
+
+| 插件 | 功能 | 本项目 Host 调用 | 移除后不可用的 DSH-IDE 功能 |
+|---|---|---|---|
+| `dsh-rewind-plugin`（`SiriLee/dsh-rewind`，命令 `rewind-plugin`） | 同窗口就地回退到更早用户消息，可选还原文件 | `commands.list(agent)` 查 `rewind-plugin` → `executeCommandLine('rewind-plugin', ['@<seq>','chat'])`；只承接消息回退，不承接文件恢复 | **消息回退**入口隐藏（当前本就无 UI 按钮） |
+| `@michengai/dsh-archive-manager` | 归档/恢复、收藏、永久删除、工作区移动、诊断 | `workspaceRegistry.setSessionFavorite`/`favoriteSessions`、`moveSessionToWorkspace`、overlay `deleteSession`（`dshIdeProtocol.ts:29-40` 常量） | **收藏 / 移动到工作区 / 删除会话**隐藏 |
+| 同插件不涉及 | — | `setSessionPinned` 走 core `workspaceController`；`renameSession` 走 core `controller().rename`；`archiveSession/unarchiveSession` 走 core | 置顶/重命名/归档/恢复**不隐藏** |
+
+#### 9.10.2 方案一实施计划（按顺序，执行时再改代码）
+
+1. **契约** `dshIdeProtocol.ts`：`DSH_IDE_WIRE_REVISION` 5→4；`DshIdeViewSnapshot` 去掉 `capabilities?` 字段与 `DSH_IDE_VIEW_KEYS` 中的 `capabilities`、`validateDshIdeView` 的校验调用；`DshIdeBackend.open` 去掉 `capabilities?` 返回；**保留** `DshIdeCapabilities` 类型、`capabilities` method（method 计数 42→43）、`validateCapabilities`（改为校验 method 返回值）。
+2. **Host** `ide-view-host.js`：`open()` 不再返回 capabilities；`createMethodHandlers` 增 `capabilities()` → `probeDshIdeCapabilities(ctx, bridge.sessionId)`；`probeDshIdeCapabilities` 的 rewind 探测优先用绑定会话的 agent，取不到再试无参 `commands.list()`；缺插件只返回 false，不抛错。
+3. **electron-main** `ide-view-service.ts`：删 `_capabilities` 字段、open/close 里的赋值、`receive()` 每帧携带 capabilities 的代码；`DshIdeCapabilities` import 删除。快照不再含 capabilities。
+4. **renderer** `dsh.contribution.ts`：`applyDshCapabilities` 不再从 `state.view` 读；改为 `refreshCapabilities()`——`client.call('capabilities')` → `validateCapabilities(result.value)` → `applyDshCapabilities` 写 context key；连接后调一次，`onDidChangeState(connected)` 时重查；为捕捉运行中安装/卸载插件，连接期间低频轮询（建议 30s，`getStatus().connected` 时重查），dispose 时清定时器。调用失败一律写全 false（fail-closed）。
+5. **保留不动**：`dshCapabilities.ts`（4 个 context key + `applyDshCapabilities`）与 `dshSessionMenu.ts` 的 `when` 过滤（收藏/移动/删除分别用对应 capability key）——这两处与传输方式无关，方案一继续复用。
+6. **测试调整**：`dshIdeChannel.test.ts` wireRevision 断言 5→4；`dshIdeProtocol.test.ts` 把 capabilities 测试从"快照字段"改为"method 返回值 `validateCapabilities`"并新增"快照带 capabilities 被拒"；`ideViewHost.test.mjs` 把 `open().capabilities` 改为 `bridge.invoke('capabilities')`；method 计数 42→43（新增 `capabilities`）。
+7. **门禁**：相关 node 测试全 PASS、改动文件 tsc 零错误；按 §0.0 用开发版 Electron 验证菜单隐藏效果，不做打包。
+
+#### 9.10.3 验收
+
+1. 装齐插件：Sessions 右键显示收藏/移动/删除；rewind capability 为 true（本阶段无 UI 按钮）。
+2. 缺插件：对应菜单项不出现；command palette 同名命令也不执行（Action2 `when` 约束）。
+3. 运行中安装插件：下一次状态变化或轮询后菜单项出现；卸载后消失。
+4. 旧 Host（不带 capabilities method）：调用失败 → 全 false → 隐藏，不报错。
+
+---
+
+### 9.11 消除 137 条类型错误 + 并行瘦身计划（待执行）
+
+> 用户要求：一边做一边项目瘦身，用不到的都删掉；在不影响 DSH-IDE 功能前提下把全量 tsc 的 137 条错误清零。原则：**能删就删**（优先删瘦身残留死代码），其次做类型对齐；所有改动都不改变运行时行为。执行期间不碰 §9.10 的契约文件，避免与其冲突。
+
+#### 9.11.1 分类与逐项方案
+
+**第一类：MCP/AgentHost 类型塌缩（~60 条，根因）**
+`agentHostCustomizationService.ts` 的 `IAgentHostMcpServer` 是弱别名（`[key:string]: unknown`），下游 `ReturnType` 派生后字段全变 unknown。方案：按 `getMcpServers()` 实际构造字段补全接口（`start`/`stop`/`state`/`source`/`enablement`/`disabledReason` 等），从协议层 import `McpServerState`/`McpServerStatus`/`McpServerSource`/`CustomizationDisabledReason`/`TextRange`。一次性消除 `mcpListWidget.ts`/`mcpCommands.ts`/`toolsListWidget.ts`/`mcpServerCount.ts` 约 60 条。风险低，纯类型声明。注意新增中文注释配 `// allow-any-unicode-next-line` 过 hygiene。
+
+**第二类：瘦身残留死代码（~35 条 TS6133）**
+| 文件 | 处理 |
+|---|---|
+| `ChatContextKeys` 相关 9 个文件 | 删残留的 `import { ChatContextKeys }`（使用点已删） |
+| `chatSetupContributions.ts`（11 条） | 删 11 个未使用 import |
+| `gettingStartedService.ts`（4 条） | 删 `BUILT_IN_SOURCE`、`sessionInstalledExtensions`、两个媒体路径转换函数（使用点已删） |
+| `terminalService.ts` | 删 `OS`、`terminalEnvironment`、`generateUuid` 等未使用 import/字段 |
+| `chatExecuteActions.ts`/`agentPluginServiceImpl.ts`/`chatWidget.ts` | 逐条删未使用符号 |
+
+**第三类：死代码 + 不可达分支**
+- `editorAccessibilityHelp.ts:154`：`if(true){...} return;` → 展平为直接 `return`（删不可达代码）。
+- `chatWidget.ts`：`_getGenerateInstructionsMessage` 及 `_instructionFilesCheckPromise`/`_instructionFilesExist`/`_checkForAgentInstructionFiles` 无调用点 → 整组删除，连带清 `thenIfNotDisposed`/`IPromptsService`/`GENERATE_AGENT_INSTRUCTIONS_COMMAND_ID` import。
+
+**第四类：改造残留修复（非删除，谨慎）**
+| 文件 | 问题 | 方案 |
+|---|---|---|
+| `sessionTargetPickerActionItem.ts:188` | 类型名笔误 `IChatHarnessSwitchSurveyService` | 改 `IChatHarnessSwitchFeedbackSurveyService` |
+| `agentHostChatInputPicker.ts:263` | `CODEX_APPROVALS_LEARN_MORE_URL` 未定义 | fallback 到 `PERMISSIONS_LEARN_MORE_URL` |
+| `aiCustomizationManagementEditor.ts:3977` | `$('button')` 返回 `HTMLElement` 与字段 `HTMLButtonElement` 不符 | 加 `as HTMLButtonElement`（同文件既有风格） |
+| `web.main.ts:488`/`desktop.main.ts:335` | `WorkspaceTrustEnablementService` 构造参数已删但调用还传 2 个 | 去参数 |
+| `argv.ts` | `agents` 字段无读取点 | 从 `NativeParsedArgs` 删 `agents?: boolean` |
+| `tunnelProxy.ts:203` | Node `createConnection` 类型与回调实现不符 | `as typeof agent.createConnection` 断言（不改运行时） |
+
+**第五类：测试 mock 签名对齐（8 条）**
+- 5 个 `executeCommand` mock → 加 `<R = unknown>(...): Promise<R | undefined>` 并返回 `undefined`（chatForkActions、chatMigrationNotice、onboarding、opener、statusbarItem）。
+- `chatStatusPromo` 的 `getViewWithId`/`openView` → 补 `id` 参数、返回 `T | null`。
+- `chatExpNotification` 的 `getTreatment` → 返回 `Promise<T | undefined>`。
+- `configurationService.test`（4 处）`getTreatmentWithAssignment` → 补 `name` 参数 + 显式返回类型。
+- `chatAccessibilityHelp.test.ts:31` → 删多余 `undefined` 实参。
+- `extHostNotebookStatusCommands.test.ts:37` → `converter` 显式类型 + `this as ExtHostCommands` 打破推断循环。
+
+**第六类：零散上游遗留**：已归入第五类，无其它独立遗留。
+
+#### 9.11.2 执行顺序与契约
+
+1. 先第一类（根因，~60 条）；每批后跑 `npx tsc --project ./src/tsconfig.json --noEmit --skipLibCheck --max-old-space-size=8192` 确认递减。
+2. 第二、三类（死代码清理，低风险）。
+3. 第四类（改造残留，逐个确认，不改运行时）。
+4. 第五类（测试签名）。
+5. 全程遵守"**边做边瘦身**"：发现某符号零引用就删，不留兼容壳；不引入新依赖；不改 §9.10 契约文件；不改 DSH-IDE 功能逻辑。
+
+#### 9.11.3 验证门禁
+
+- 必跑：`npx tsc --project ./src/tsconfig.json --noEmit --skipLibCheck`（目标 0 错误；`--max-old-space-size=8192`）。
+- 建议：对改动文件跑 `build/hygiene.ts`（既有中文注释 hygiene 报错是基线，不新增即可）。
+- 真机验证由用户执行（AGENTS.md §6，AI 不代跑 GUI）；按 §0.0 用开发版 Electron 验证，不做打包。

@@ -34,6 +34,7 @@ import { IDshIdeSessionsService, DshIdeSessionsService } from './dshIdeSessionsS
 import { registerDshSessionSearchCommands } from './dshSessionSearchCommands.js';
 import { registerDshSessionMenu } from './dshSessionMenu.js';
 import { applyDshCapabilities } from './dshCapabilities.js';
+import { validateCapabilities, type DshIdeCapabilities } from '../../../../platform/dshClient/common/dshIdeProtocol.js';
 import { registerDshTeamCommands } from './dshTeamCommands.js';
 import { registerDshIconReplacement } from './dshIconReplacement.js';
 import { IQuickInputService } from '../../../../platform/quickinput/common/quickInput.js';
@@ -100,12 +101,43 @@ class DshClientContribution extends Disposable implements IWorkbenchContribution
 		this._register(consumer.onDidChangeFrame(({ state }) => {
 			// 稳定路径读 typed 视图；`frame` 只作兼容回退（旧 Host 不带 typed 字段时）。
 			this._chat.acceptView(state.view);
-			// 依赖插件能力随快照下发：写进 context key，菜单按它决定入口是否出现。
-			// 缺省 false：旧 Host 不报能力时入口隐藏，不让用户点了才看到失败。
-			applyDshCapabilities(state.view?.capabilities, (key, value) => { key.bindTo(contextKeyService).set(value); });
 		}));
 		this._register(client.onDidSnapshot(snapshot => consumer.accept(snapshot)));
 		this._register(client.onDidWaterfall(notice => this._chat.acceptWaterfall(notice)));
+
+		// 依赖插件能力走独立 method：菜单按 context key 决定入口是否出现。
+		// 旧 Host 没有这个 method、或调用失败时一律写全 false（fail-closed），不报错。
+		const applyCaps = (caps: DshIdeCapabilities | undefined): void => {
+			applyDshCapabilities(caps, (key, value) => { key.bindTo(contextKeyService).set(value); });
+		};
+		const refreshCapabilities = async (): Promise<void> => {
+			const result = await client.call('capabilities', {});
+			if (!result.ok) {
+				applyCaps(undefined);
+				return;
+			}
+			try {
+				validateCapabilities(result.value);
+				applyCaps(result.value);
+			} catch {
+				applyCaps(undefined);
+			}
+		};
+		void refreshCapabilities();
+		// 运行中安装/卸载插件不会发事件：连接期间低频重查，避免入口长期停在旧状态。
+		const capabilityPoll = setInterval(() => {
+			void client.getStatus().then(status => {
+				if (status.connected) {
+					void refreshCapabilities();
+				}
+			});
+		}, 30_000);
+		this._register({ dispose: () => clearInterval(capabilityPoll) });
+		this._register(client.onDidChangeState(state => {
+			if (state.connected) {
+				void refreshCapabilities();
+			}
+		}));
 
 		const sessionId = env[DSH_IDE_SESSION_ENV];
 		const boundSessionId = sessionId === undefined || sessionId === '' ? undefined : sessionId;

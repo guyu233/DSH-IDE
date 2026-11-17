@@ -81,25 +81,37 @@ function optionalService(ctx, name) {
  * - rewind：`dsh-rewind-plugin` 注册的命令 `rewind-plugin`。
  * - sessionFavorite / sessionMove：`@michengai/dsh-archive-manager` 覆盖的 workspaceRegistry。
  * - sessionDelete：同一插件覆盖的 `deleteSession`。
+ * @param {string} [sessionId] 绑定会话；有 live agent 时命令目录按该 agent 查，查不到再用无参目录。
  */
-function probeDshIdeCapabilities(ctx) {
+function probeDshIdeCapabilities(ctx, sessionId) {
 	const registry = optionalService(ctx, 'workspaceRegistry');
 	const sessionFavorite = registry !== undefined
 		&& typeof registry.setSessionFavorite === 'function'
 		&& typeof registry.favoriteSessions === 'function';
 	const sessionMove = registry !== undefined && typeof registry.moveSessionToWorkspace === 'function';
 	const sessionDelete = registry !== undefined && typeof registry.deleteSession === 'function';
+	const hasRewind = listed => Array.isArray(listed)
+		&& listed.some(item => item !== null && typeof item === 'object' && item.name === 'rewind-plugin');
 	let rewind = false;
 	try {
 		const commands = optionalService(ctx, 'commands');
-		const agents = optionalService(ctx, 'agents');
-		if (commands !== undefined && agents !== undefined && typeof commands.list === 'function') {
-			const agent = typeof agents.get === 'function' ? agents.get(undefined) : undefined;
-			const listed = commands.list(agent);
-			rewind = Array.isArray(listed) && listed.some(item => item !== null && typeof item === 'object' && item.name === 'rewind-plugin');
+		if (commands !== undefined && typeof commands.list === 'function') {
+			let listed;
+			const agents = optionalService(ctx, 'agents');
+			const agent = typeof sessionId === 'string' && sessionId !== '' && agents !== undefined && typeof agents.get === 'function'
+				? agents.get(sessionId)
+				: undefined;
+			if (agent !== undefined && agent !== null) {
+				listed = commands.list(agent);
+			}
+			if (!hasRewind(listed)) {
+				// 没有绑定会话（或该 agent 查不到）时退回无参目录；两个来源任一命中即视为已装。
+				listed = commands.list();
+			}
+			rewind = hasRewind(listed);
 		}
 	} catch {
-		// 命令目录读不到就当没装；能力快照本身不能把整个视图打成失败。
+		// 命令目录读不到就当没装；能力探测本身不能把整个视图打成失败。
 		rewind = false;
 	}
 	return { rewind, sessionFavorite, sessionMove, sessionDelete };
@@ -235,8 +247,7 @@ export class DshIdeHostBridge {
 			this.sessionId = params.sessionId;
 		}
 		this.channelId = `dsh-ide:${randomUUID()}`;
-		// 能力是视图级信息，随绑定一起返回：不占 follow 帧序列，也不额外发 dispatch。
-		return { channelId: this.channelId, sessionId: this.sessionId, capabilities: probeDshIdeCapabilities(this.ctx) };
+		return { channelId: this.channelId, sessionId: this.sessionId };
 	}
 
 	/**
@@ -735,6 +746,11 @@ function createMethodHandlers(bridge) {
 				foldedReplies: chat.foldedReplies === 'final' ? 'final' : 'all',
 				developerTools: tools.enabled !== false,
 			};
+		},
+		async capabilities() {
+			// 依赖插件能力：UI 拿它决定收藏/移动/删除/回退入口是否出现。
+			// 缺插件只返回 false，不抛错——这是能力探测，不是一次业务调用。
+			return probeDshIdeCapabilities(bridge.ctx, bridge.sessionId);
 		},
 		async listSessions(args) {
 			const sessionId = bridge.sessionId;

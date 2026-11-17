@@ -15,6 +15,7 @@
 
 import { Emitter, Event } from '../../../../base/common/event.js';
 import { Disposable, DisposableStore } from '../../../../base/common/lifecycle.js';
+import { observableFromEvent, IObservable } from '../../../../base/common/observable.js';
 import { URI } from '../../../../base/common/uri.js';
 import { CancellationToken } from '../../../../base/common/cancellation.js';
 import { CancellationError } from '../../../../base/common/errors.js';
@@ -66,12 +67,42 @@ export class DshChatSessionContent extends Disposable implements IChatSession {
 	}
 
 	/**
+	 * 原生面板的完成态：`false` 表示还在生成。
+	 *
+	 * 不接这个 observable 时，面板无法把响应标成完成、也不会显示可用的停止按钮。
+	 * 真源仍是 `DshChatSession.running()`，这里只是把它转成原生认的 observable。
+	 */
+	private _isCompleteObs: IObservable<boolean> | undefined;
+
+	get isCompleteObs(): IObservable<boolean> {
+		this._isCompleteObs ??= observableFromEvent(
+			this,
+			this._session.onDidChangeRunning,
+			() => !this._session.running(),
+		);
+		return this._isCompleteObs;
+	}
+
+	/**
 	 * 原生面板把输入框内容交给会话：直接走 `DshChatSession.submit`。
 	 *
 	 * 返回 `true` 表示已交给内核；失败时原生面板保留输入并提示。
 	 */
 	async submit(text: string): Promise<boolean> {
 		return this._session.submit(text);
+	}
+
+	/**
+	 * 面板上的停止按钮：走官方 `interrupt`。
+	 *
+	 * 返回 false 表示没有可中断的运行；原生面板据此决定是否继续显示停止态。
+	 */
+	async interruptActiveResponseCallback(): Promise<boolean> {
+		if (!this._session.running()) {
+			return false;
+		}
+		await this._session.cancel();
+		return true;
 	}
 
 	override dispose(): void {

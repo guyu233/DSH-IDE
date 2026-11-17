@@ -25,7 +25,7 @@ export const DSH_IDE_API_VERSION = '0.2.2-rc.1';
  * 5：新增 `capabilities`（依赖插件能力门控：rewind / 会话管理）。
  * 这些字段都可缺省；一旦出现就必须命中白名单，否则 fail-closed。
  */
-export const DSH_IDE_WIRE_REVISION = 5;
+export const DSH_IDE_WIRE_REVISION = 4;
 
 /**
  * `deleteSession` 依赖的社区插件版本（§8.10.8（4）版本绑定）。
@@ -98,8 +98,6 @@ export interface DshIdeViewSnapshot {
 	readonly quotaNotice?: DshIdeQuotaNotice;
 	readonly composer?: DshIdeComposerView;
 	readonly pending?: readonly DshIdePendingItem[];
-	/** 依赖插件能力门控；缺插件时对应功能在 UI 隐藏。缺省一律视为全 false。 */
-	readonly capabilities?: DshIdeCapabilities;
 }
 
 /**
@@ -514,6 +512,8 @@ export interface DshIdeMethodArgs {
 	moveSession: { sessionId: string; workspaceId: string };
 	/** 官方 `session/openWorkspacePath`，打开该会话的工作区目录。 */
 	openSessionPath: { sessionId: string };
+	/** 依赖插件能力探测：Host 读官方服务/命令的实际装载状态后返回四项布尔。 */
+	capabilities: Record<string, never>;
 }
 
 /**
@@ -602,6 +602,7 @@ const DSH_IDE_METHOD_KEYS: Record<DshIdeMethod, readonly string[]> = {
 	listWorkspaces: [],
 	moveSession: ['sessionId', 'workspaceId'],
 	openSessionPath: ['sessionId'],
+	capabilities: [],
 };
 
 // ---------------------------------------------------------------------------
@@ -876,6 +877,8 @@ export function validateDshIdeInput<K extends DshIdeMethod>(command: K, args: un
 			break;
 		case 'openSessionPath':
 			nonEmptyString(record['sessionId'], 'DshIdeInput.openSessionPath.sessionId');
+			break;
+		case 'capabilities':
 			break;
 		case 'accountGetState':
 		case 'accountGetProfile':
@@ -1183,7 +1186,7 @@ export function validateDshIdeSnapshot(value: unknown): DshIdeSnapshot {
 
 const DSH_IDE_VIEW_KEYS = [
 	'frame', 'conversation', 'deliverables', 'attachments', 'plan', 'goal', 'todos', 'skills',
-	'tokenUsageDelta', 'quotaNotice', 'composer', 'pending', 'capabilities',
+	'tokenUsageDelta', 'quotaNotice', 'composer', 'pending',
 ] as const;
 
 /** 跟会话帧校验：`frame` 必填，typed 字段出现时按官方形状 fail-closed。 */
@@ -1229,19 +1232,16 @@ function validateDshIdeView(value: unknown): asserts value is DshIdeViewSnapshot
 	if (view['pending'] !== undefined) {
 		validatePending(view['pending']);
 	}
-	if (view['capabilities'] !== undefined) {
-		validateCapabilities(view['capabilities']);
-	}
 }
 
-/** 能力快照校验：四项必填布尔，exactRecord 拒绝未知字段与显式 undefined。 */
+/** 能力快照校验（`capabilities` method 的返回值）：四项必填布尔，exactRecord 拒绝未知字段与显式 undefined。 */
 export function validateCapabilities(value: unknown): asserts value is DshIdeCapabilities {
 	const caps = exactRecord(value,
 		['rewind', 'sessionFavorite', 'sessionMove', 'sessionDelete'],
-		'DshIdeSnapshot.state.view.capabilities');
+		'DshIdeCapabilities');
 	for (const key of ['rewind', 'sessionFavorite', 'sessionMove', 'sessionDelete'] as const) {
 		if (typeof caps[key] !== 'boolean') {
-			throw new TypeError(`DshIdeSnapshot.state.view.capabilities.${key} must be a boolean`);
+			throw new TypeError(`DshIdeCapabilities.${key} must be a boolean`);
 		}
 	}
 }
@@ -2000,7 +2000,7 @@ export interface DshIdeOpenSpec {
  */
 export interface DshIdeBackend {
 	/** 绑定会话并返回该视图的通道 id（一次打开一个，守恒）。 */
-	open(spec: DshIdeOpenSpec): { readonly channelId: string; readonly sessionId?: string; readonly capabilities?: DshIdeCapabilities };
+	open(spec: DshIdeOpenSpec): { readonly channelId: string; readonly sessionId?: string };
 	/** 订阅会话真源（历史回放 + 实时流）；返回解绑句柄。 */
 	/**
 	 * 订阅会话真源。
