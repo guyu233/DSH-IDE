@@ -20,8 +20,12 @@
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-const repoRoot = process.cwd();
+// 用脚本自身位置推导仓库根，而不是 `process.cwd()`：本文件在
+// build/lib/dsh/verify/ 下，向上四级即仓库根；否则从其它目录直接 `node <本文件>`
+// 会把 cwd 当成仓库根，误报「未找到产物」。
+const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../..');
 const tgz = path.join(repoRoot, 'dist', 'dsh-ide-2.0.0.tgz');
 
 if (!fs.existsSync(tgz)) {

@@ -330,35 +330,52 @@ function contract() {
 		return 'PENDING';
 	}
 
-	// 版本比对：复用契约自身的比较规则（semver 三段 + prerelease），此处用文本方式
-	// 取出同一份逻辑不现实，故按同一语义最小实现：逐段数值比较，prerelease 低于同版正式版。
+	// 版本比对：契约文件 import 了 base/common/process.js（TS 相对导入），node 无法直接
+	// 动态 import，因此这里按契约 `compareVersion` 的同一语义实现一份。
+	// 关键点：prerelease 必须逐段按数字比较，不能把整段当字符串（否则 'rc.10' < 'rc.9'），
+	// 这正是上一版的缺陷；改完后 `dshIdeContract.ts` 的 compareVersion 同步修正为同一规则。
 	const parseVer = v => {
 		const m = /^(\d+)\.(\d+)\.(\d+)(?:-(.+))?$/.exec(v.trim());
 		if (m === null) { return undefined; }
-		return { nums: [Number(m[1]), Number(m[2]), Number(m[3])], pre: m[4] };
+		return { nums: [Number(m[1]), Number(m[2]), Number(m[3])], pre: m[4] ?? '' };
 	};
-	const a = parseVer(installed);
-	const b = parseVer(validated);
-	if (a === undefined || b === undefined) {
+	const comparePre = (x, y) => {
+		if (x === y) { return 0; }
+		if (x === '') { return 1; }
+		if (y === '') { return -1; }
+		const px = x.split('.');
+		const py = y.split('.');
+		for (let i = 0; i < Math.max(px.length, py.length); i++) {
+			const u = px[i];
+			const v = py[i];
+			if (u === undefined) { return -1; }
+			if (v === undefined) { return 1; }
+			const un = /^\d+$/.test(u);
+			const vn = /^\d+$/.test(v);
+			if (un && vn) {
+				const diff = Number(u) - Number(v);
+				if (diff !== 0) { return diff < 0 ? -1 : 1; }
+				continue;
+			}
+			if (un) { return -1; }
+			if (vn) { return 1; }
+			if (u !== v) { return u < v ? -1 : 1; }
+		}
+		return 0;
+	};
+	const pa = parseVer(installed);
+	const pb = parseVer(validated);
+	if (pa === undefined || pb === undefined) {
 		throw new Error(`contract: 无法解析版本（installed=${installed} validated=${validated}）`);
 	}
-	let meets = false;
+	let meets = 0;
 	for (let i = 0; i < 3; i++) {
-		if (a.nums[i] !== b.nums[i]) { meets = a.nums[i] > b.nums[i]; break; }
-		if (i === 2) {
-			// 三段相同：正式版高于预发布；同为预发布时按标签比较，所以 0.2.2-rc.2 ≥ 0.2.2-rc.1。
-			if (a.pre === b.pre) {
-				meets = true;
-			} else if (a.pre === undefined) {
-				meets = true;
-			} else if (b.pre === undefined) {
-				meets = false;
-			} else {
-				meets = a.pre > b.pre;
-			}
-		}
+		if (pa.nums[i] !== pb.nums[i]) { meets = pa.nums[i] < pb.nums[i] ? -1 : 1; break; }
 	}
-	if (!meets) {
+	if (meets === 0) {
+		meets = comparePre(pa.pre, pb.pre);
+	}
+	if (meets < 0) {
 		throw new Error(`contract: 已安装版本 ${installed} 低于经校验版本 ${validated}（upstreamDrift=true）`);
 	}
 

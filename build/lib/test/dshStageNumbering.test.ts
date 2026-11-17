@@ -26,7 +26,7 @@ const roots = [
 	'build/lib/dsh/verify/dshIdeVerify.mjs',
 	'build/lib/test/dshBundleStaging.test.ts',
 	'build/lib/test/dshIdeProtocol.test.ts',
-	'build/lib/test/dshIdeProjection.test.ts',
+	'build/lib/test/dshIdeProjections.test.ts',
 	'build/gulpfile.vscode.ts',
 	'src/vs/platform/dshClient',
 	'src/vs/workbench/contrib/dsh',
@@ -44,10 +44,11 @@ const FORBIDDEN = [
 ];
 
 const files = [];
+const missingRoots = [];
 const walk = p => {
 	const abs = path.join(repoRoot, p);
 	let st;
-	try { st = fs.statSync(abs); } catch { return; }
+	try { st = fs.statSync(abs); } catch { missingRoots.push(p); return; }
 	if (st.isFile()) {
 		if (/\.(ts|js|mjs|css)$/.test(abs)) { files.push(abs); }
 		return;
@@ -64,6 +65,8 @@ const walk = p => {
 for (const r of roots) { walk(r); }
 
 test('D28 old stage numbers are absent from DSH-IDE source comments and strings', () => {
+	// 扫描根的拼写错误会产生「少扫一个文件」的静默假绿：先钉住每个 root 都存在。
+	assert.deepEqual(missingRoots, [], `every scan root must exist: ${missingRoots.join(', ')}`);
 	assert.ok(files.length >= 20, `expected a meaningful source scan, got ${files.length} files`);
 	const hits = [];
 	for (const file of files) {

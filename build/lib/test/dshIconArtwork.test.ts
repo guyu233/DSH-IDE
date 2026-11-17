@@ -13,9 +13,24 @@
 // 运行：node --experimental-strip-types --test --test-force-exit build/lib/test/dshIconArtwork.test.ts
 
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import { DSH_ICON_DATA_URIS } from '../../../out/vs/workbench/contrib/dsh/browser/dshIconDataUris.js';
 import { DSH_CODICON_GLYPH_MAP, dshIconDataUri, resolveDshGlyph } from '../../../out/vs/workbench/contrib/dsh/browser/dshCodiconMap.js';
+
+/**
+ * 生成物指纹：`genDshIconDataUris.mjs` 的 `--check` 逻辑健全，但需要官方 artwork 源
+ * （`DSH_ARTWORK_TS`）才能跑，未接入 CI。这里钉住生成物的字节指纹，任何手改或
+ * 静默重生成都会让本测试变红；真要更新图标时按下面步骤改指纹并说明来源。
+ */
+const EXPECTED_SHA256 = '514e24d8a30b5a21625d168b503c45be0e0f11a10902c118ae817deed4d991a1';
+
+test('dshIconDataUris.ts matches the pinned generation fingerprint', () => {
+	const source = readFileSync(new URL('../../../src/vs/workbench/contrib/dsh/browser/dshIconDataUris.ts', import.meta.url));
+	assert.equal(createHash('sha256').update(source).digest('hex'), EXPECTED_SHA256,
+		'dshIconDataUris.ts drifted; regenerate with build/lib/dsh/genDshIconDataUris.mjs and update the fingerprint with the artwork source noted');
+});
 
 test('the generated icon table covers the official artwork set', () => {
 	assert.equal(Object.keys(DSH_ICON_DATA_URIS).length, 104, 'official ICON_ARTWORK has 104 glyphs');

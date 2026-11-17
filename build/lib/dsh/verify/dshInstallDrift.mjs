@@ -71,7 +71,9 @@ for (const rel of files) {
 	} catch {
 		continue; // 目录或不可读成员，跳过
 	}
-	if (Buffer.isBuffer(artifactBuffer) && artifactBuffer.length > 0) {
+	// 空文件同样要参与比对：`length > 0` 会把「产物是空文件」和「安装侧被截断成 0 字节」
+	// 一起跳过，漂移检测留盲区。
+	if (Buffer.isBuffer(artifactBuffer)) {
 		checked++;
 		if (sha(artifactBuffer) !== sha(fs.readFileSync(installedPath))) { drift.push(`内容不同: ${rel}`); }
 	}
@@ -148,6 +150,12 @@ const syntaxIssues = [];
 
 /** 收集 host/ 下全部 .js，外加 index.js 与 client.js。 */
 function collectJs(dir, out = []) {
+	// 安装包缺 host/ 目录正是漂移要抓的场景：直接 readdirSync 会抛 ENOENT，
+	// 脚本以未捕获异常退出，既不打印 STATUS: FAIL 也不走统一退出码。
+	if (!fs.existsSync(dir)) {
+		syntaxIssues.push(`缺失目录: ${path.relative(installedRoot, dir)}`);
+		return out;
+	}
 	for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
 		const full = path.join(dir, entry.name);
 		if (entry.isDirectory()) { collectJs(full, out); continue; }

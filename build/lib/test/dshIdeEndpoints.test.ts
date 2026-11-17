@@ -90,8 +90,13 @@ const FINDINGS: readonly EndpointFinding[] = [
 
 /** 已完成（代码侧）：deleteSession、setEffort、listCommands、runCommand / setPermissionPreset、loadOlder（第 21 轮）。 */
 const WIRED = ['deleteSession', 'setEffort', 'listCommands', 'runCommand', 'setPermissionPreset', 'loadOlder', 'rewind'];
-/** core 没有、也不靠这两插件补的 method 不在这张表里。 */
-const UNVERIFIED = FINDINGS.filter(f => !WIRED.includes(f.method)).map(f => f.method);
+/**
+ * core 没有、也不靠这两插件补的 method 不在这张表里。
+ *
+ * 显式列空数组而不是 `FINDINGS.filter(not in WIRED)`：后者在 WIRED 覆盖全部 finding 时
+ * 恒为空，`for (const method of UNVERIFIED)` 一次都不执行，守护变成恒真。
+ */
+const UNVERIFIED: readonly string[] = [];
 
 // ---------------------------------------------------------------------------
 // 契约口径：method 白名单（20 会话域 + 2 账号域 + 2 归档域 + 团队/预设/附加 + readAttachment）
@@ -164,6 +169,13 @@ test('D16 findings are complete: 7 methods, each with evidence and a conclusion'
 		assert.ok(f.note.length > 10, `${f.method} must carry a conclusion / D13 prerequisite`);
 	}
 	assert.equal(FINDINGS.filter(f => f.note.startsWith('已完成')).length, 7);
+	// 每条 finding 必须落在 WIRED 或 UNVERIFIED 之一：既不漏判，也不允许两边都不列。
+	for (const finding of FINDINGS) {
+		assert.ok(
+			WIRED.includes(finding.method) || UNVERIFIED.includes(finding.method),
+			`${finding.method} must be classified as WIRED or UNVERIFIED`,
+		);
+	}
 	assert.equal(UNVERIFIED.length, 0);
 });
 

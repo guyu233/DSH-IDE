@@ -334,6 +334,17 @@ test('deleteSession plugin binding names the approved plugin, version and endpoi
 	assert.equal(DSH_IDE_DELETE_SESSION_ENDPOINT, 'workspaceRegistry/deleteSession');
 });
 
+test('契约的 compareVersion 逐段比较 prerelease（rc.10 > rc.9，不能用字符串比）', () => {
+	// 契约文件依赖 base/common/process.js，strip-types 下无法 import，因此按源码结构断言：
+	// 必须存在独立的 comparePrerelease 且用数字正则判定数字段；不得留下整段字符串比较。
+	const contract = readFileSync(new URL('../../../src/vs/platform/dshClient/common/dshIdeContract.ts', import.meta.url), 'utf8');
+	assert.match(contract, /function comparePrerelease\(/, 'contract must extract a comparePrerelease helper');
+	assert.match(contract, /\/\^\\d\+\$\/\.test\(/, 'prerelease segments must be classified with a numeric regex');
+	assert.match(contract, /Number\(x\) - Number\(y\)/, 'numeric segments must compare by value');
+	assert.doesNotMatch(contract, /return ra < rb \? -1 : 1;/, 'must not compare the whole prerelease string');
+	assert.match(contract, /return comparePrerelease\(pa\[3\], pb\[3\]\)/, 'compareVersion must delegate to comparePrerelease');
+});
+
 test('DSH_IDE_API_VERSION pins the validated upstream version', () => {
 	// `dshIdeContract.ts` 依赖 `base/common/process.js`，strip-types 下无法直接加载，
 	// 因此用源码断言核对两者的字面量一致（契约门禁另有版本比对）。

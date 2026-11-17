@@ -84,6 +84,56 @@ export function parseVersion(version: string): [number, number, number, string] 
 	return [safe(parts[0]), safe(parts[1]), safe(parts[2]), pre];
 }
 
+/**
+ * 比较 semver 的 prerelease 段（`rc.2` / `beta.10`）。
+ *
+ * 必须按 semver 规则逐段比较数字：直接把整段当字符串比会让 `rc.10 < rc.9`。
+ * 规则：数字段按数值比、数字段低于非数字段、段数少者更低、都没区别则相等。
+ */
+function comparePrerelease(a: string, b: string): number {
+	if (a === b) {
+		return 0;
+	}
+	// 无 prerelease = 正式版，高于任何 prerelease。
+	if (a === '') {
+		return 1;
+	}
+	if (b === '') {
+		return -1;
+	}
+	const pa = a.split('.');
+	const pb = b.split('.');
+	for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+		const x = pa[i];
+		const y = pb[i];
+		if (x === undefined) {
+			return -1;
+		}
+		if (y === undefined) {
+			return 1;
+		}
+		const xn = /^\d+$/.test(x);
+		const yn = /^\d+$/.test(y);
+		if (xn && yn) {
+			const diff = Number(x) - Number(y);
+			if (diff !== 0) {
+				return diff < 0 ? -1 : 1;
+			}
+			continue;
+		}
+		if (xn) {
+			return -1;
+		}
+		if (yn) {
+			return 1;
+		}
+		if (x !== y) {
+			return x < y ? -1 : 1;
+		}
+	}
+	return 0;
+}
+
 /** 比较 semver：a<b 返回 -1，a==b 返回 0，a>b 返回 1。正式版优先于预发布（1.0.0 > 1.0.0-rc.1）。 */
 export function compareVersion(a: string, b: string): number {
 	const pa = parseVersion(a);
@@ -93,19 +143,7 @@ export function compareVersion(a: string, b: string): number {
 			return pa[i] < pb[i] ? -1 : 1;
 		}
 	}
-	const ra = pa[3];
-	const rb = pb[3];
-	if (ra === rb) {
-		return 0;
-	}
-	// 无预发布 > 有预发布
-	if (ra === '') {
-		return 1;
-	}
-	if (rb === '') {
-		return -1;
-	}
-	return ra < rb ? -1 : 1;
+	return comparePrerelease(pa[3], pb[3]);
 }
 
 /** 已安装的 DSH 版本是否满足经校验版本（>= 即满足）。 */
