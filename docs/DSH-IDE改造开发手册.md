@@ -1013,5 +1013,5 @@ DshChatSession.acceptView / acceptConversation → DshChatModel（typed 节点�
 >
 > **门禁**：tsc 0 error、`test-dsh:all` 384 PASS、`verify:dsh-ide-ci` 五项 PASS、`.eslint-ignore` 死条目 0、`node --check scripts/sync-upstream.mjs` PASS。详见 `docs/DSH-IDE瘦身报告-第3轮.md`。
 >
-> **累计（三轮）**：`ce668543..cd7aeb4b` = 109 个文件、+749 / -5,143 行、19 个提交；tsc 137→0；dependencies 68→66、devDependencies 100→93、scripts 86→80；锁文件 -113 条目（零新增、零版本变更）。
+> **累计（三轮）**：`ce668543..198e44b1` = 111 个文件、+945 / -5,143 行、20 个提交；tsc 137→0；dependencies 68→66、devDependencies 100→93、scripts 86→80；锁文件 -113 条目（零新增、零版本变更）。
 
