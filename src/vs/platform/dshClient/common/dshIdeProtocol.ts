@@ -365,7 +365,11 @@ export interface DshIdeMethodArgs {
 	newSession: { workspace?: string; options?: unknown };
 	/** 从某点 fork 会话。 */
 	fork: { sessionId: string; point?: string };
-	/** 回退到某点。 */
+	/**
+	 * 把模型可见上下文退到某条用户消息。
+	 * core 没有这个 remote；Host 在装了 `dsh-rewind-plugin` 之后调用它的 `rewind-plugin` 命令。
+	 * `to` 是该用户消息的绝对 seq（可带 `@`）。
+	 */
 	rewind: { sessionId: string; to: string };
 	/**
 	 * 向前读取一页历史（官方 `session/page`，只读）。

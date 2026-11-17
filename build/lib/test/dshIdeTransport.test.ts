@@ -346,7 +346,7 @@ test('backend sends every operation to ide/dispatch with the method and payload'
 
 test('backend forwards rewind to the kernel, which refuses it', async () => {
 	const { backend, transport, requests } = backendWithHost(OK);
-	// 回退仍明确拒绝（内核的 rewind: missing(...)），窗口不补一个自己的实现。
+	// 窗口只把 rewind 交给内核；内核再决定调不调 dsh-rewind-plugin。
 	await backend.invoke('rewind', { sessionId: 's-1', to: '0' });
 	assert.deepEqual(requests.map(request => request.url.split('/api/')[1]), ['ide/dispatch']);
 	const payload = requests[0].body as { payload: { args: { method: string } } };

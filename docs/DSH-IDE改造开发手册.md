@@ -162,7 +162,7 @@ DshChatSession.acceptView / acceptConversation → DshChatModel（typed 节点�
 
 **§4.1 会话/消息正文**：核心。接 opening snapshot、assistant stream frame、session entry、projections、cursor/hasMore、assistant revision/event seq。内核桥走官方 `session.follow`，投影成结构化 conversation，renderer 用 VS Code DOM 节点树渲染。
 
-**§4.2 会话列表/元数据/搜索**：会话列表、元数据、新建/切换、搜索、历史分页、`resume`/`fork.point`/`rewind`、`loadOlder.throughSeq`。协议已有 `listSessions`/`searchSessions`/`loadOlder{throughSeq,beforeSeq,maxMessages}`/`resume`/`fork.point`，Host 已按官方 `atSeq` 与 `session/page` 实现；UI 侧会话搜索 quick pick（§8.1）、历史补齐（§8.1）、New Session（§8.2）已接线。`rewind` 官方落点为 null（路线草稿 §7 待确认），Host 保持 `missing()` 禁用态，不臆造；`fork.point` + `resume` 已覆盖主要分叉/切换路径。不另造 `loadThrough`/`forkAt`/`resumeSession`。
+**§4.2 会话列表/元数据/搜索**：会话列表、元数据、新建/切换、搜索、历史分页、`resume`/`fork.point`/`rewind`、`loadOlder.throughSeq`。协议已有 `listSessions`/`searchSessions`/`loadOlder{throughSeq,beforeSeq,maxMessages}`/`resume`/`fork.point`，Host 已按官方 `atSeq` 与 `session/page` 实现；UI 侧会话搜索 quick pick（§8.1）、历史补齐（§8.1）、New Session（§8.2）已接线。`rewind` 不在 core 里。Host 在装了 `dsh-rewind-plugin` 之后调用它的 `rewind-plugin` 命令（`@<seq> chat`）；没装就拒绝。`fork.point` + `resume` 仍是 core 路径。不另造 `loadThrough`/`forkAt`/`resumeSession`。
 
 **§4.3 工具调用与结果**：`tool/call`、`tool/result`、tool delta、callId、工具状态、结果摘要、关联审批的 callId。投影成通用工具节点，用 VS Code tree/details 渲染；todo/skill 结构化结果归约到列表/表格卡。
 
@@ -244,7 +244,7 @@ DshChatSession.acceptView / acceptConversation → DshChatModel（typed 节点�
 
 文件：`src/vs/workbench/contrib/dsh/browser/dshChatSession.ts`、`dshChatModel.ts`。
 
-1. `IDshChatSession`（`:39-74`）接口按契约 36 method 对齐：`submit(text, attachments)`、`answerApproval/answerQuestion`（多选答案）、`listSessions/searchSessions/loadOlder{throughSeq,beforeSeq,maxMessages}`、`resume`/`fork.point`/`rewind`（rewind 落点见路线草稿 §7 待确认，本手册 §2.2）、`deliverables`、`tokenUsageDelta`、`quotaNotice`、`pending`。4 个无官方 remote 的 `missing()` method 只暴露禁用态或明确失败提示，不伪造成功。**注意**：`plan/goal/todos/skills` 虽已在契约与 Host 投影层就绪，但状态层 `DshChatSession` 尚未保存/暴露（真缺陷，见 §9.5 阶段 2-A）。
+1. `IDshChatSession`（`:39-74`）接口按契约 36 method 对齐：`submit(text, attachments)`、`answerApproval/answerQuestion`（多选答案）、`listSessions/searchSessions/loadOlder{throughSeq,beforeSeq,maxMessages}`、`resume`/`fork.point`/`rewind`（rewind 走已装载的 `dsh-rewind-plugin`，不是 core remote）、`deliverables`、`tokenUsageDelta`、`quotaNotice`、`pending`。4 个无官方 remote 的 `missing()` method 只暴露禁用态或明确失败提示，不伪造成功。**注意**：`plan/goal/todos/skills` 虽已在契约与 Host 投影层就绪，但状态层 `DshChatSession` 尚未保存/暴露（真缺陷，见 §9.5 阶段 2-A）。
 2. 移除 renderer 从裸 follow 帧拼节点的逻辑（`dshChatModel.ts:388-403,516-941`），直接消费层 1 的结构化 conversation。
 3. `tokenUsage` 唯一真源在 `DshChatModel`（`:318-320,375-386`），`pending` 在 `DshChatSession.pendingItems`（`:86`），`running` 在 `_running`（`:89`）；扩展时**保持单一真源**。
 4. 风格：tab、单引号、分号、`I` 接口前缀、`_` 私有、`this._register`/`DisposableStore`，错误走 `onUnexpectedError`。
@@ -733,7 +733,8 @@ DshChatSession.acceptView / acceptConversation → DshChatModel（typed 节点�
 
 ### 9.7 能力限制与非缺陷（保持不变）
 
-- `addAttachment`/`removeAttachment`/`openInApp`/`dismissQuotaNotice` 无官方 remote，`rewind` 官方落点为 null：保持 `FEATURE_UNAVAILABLE`/禁用态。
+- `addAttachment`/`removeAttachment`/`openInApp`/`dismissQuotaNotice` 无官方 remote，也没有这两插件的 Host 接口：保持 `FEATURE_UNAVAILABLE`。
+- `rewind` 依赖已装载的 `dsh-rewind-plugin`；`deleteSession` 依赖已装载的 `@michengai/dsh-archive-manager`。插件页上的依赖说明以后再写。
 - 附件上传/移除只能在 prompt/命令提交时内联 admit。
 - DSH 特有纯装饰（鲸鱼动画、TurnNavigator、PixelWhale、onboarding、KaTeX）本阶段不做；VS Code 自身 Mermaid/Markdown 完整保留。
 

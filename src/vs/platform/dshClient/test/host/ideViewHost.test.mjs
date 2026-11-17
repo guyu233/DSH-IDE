@@ -255,6 +255,40 @@ test('session ownership mismatch returns SESSION_SWITCHED', async () => {
 	await assert.rejects(() => bridge.invoke('resume', { sessionId: 's-2' }), error => error.code === SESSION_SWITCHED);
 });
 
+test('rewind calls dsh-rewind-plugin and refuses a missing install', async () => {
+	const calls = [];
+	const agent = { id: 's-1' };
+	const { bridge } = bridgeWith({
+		agents: { get: id => id === 's-1' ? agent : undefined },
+		commands: {
+			list: () => [{ name: 'rewind-plugin', description: 'engine' }],
+			execute: async (who, line, attachments, signal) => {
+				calls.push({ who, line, attachments, hasSignal: signal instanceof AbortSignal });
+				return { commandId: 'c', result: { kind: 'success', text: 'ok' } };
+			},
+		},
+	});
+	bridge.open({ view: 'chat', params: { sessionId: 's-1' } });
+	assert.deepEqual(await bridge.invoke('rewind', { sessionId: 's-1', to: '42' }), { accepted: true });
+	assert.deepEqual(await bridge.invoke('rewind', { sessionId: 's-1', to: '@7' }), { accepted: true });
+	assert.deepEqual(calls.map(call => call.line), ['/rewind-plugin @42 chat', '/rewind-plugin @7 chat']);
+	assert.equal(calls[0].who, agent);
+	assert.equal(calls[0].hasSignal, true);
+	await assert.rejects(
+		() => bridge.invoke('rewind', { sessionId: 's-1', to: 'p0' }),
+		error => error.code === INVALID_ARGUMENT,
+	);
+	const bare = bridgeWith({
+		agents: { get: () => agent },
+		commands: { list: () => [{ name: 'rewind' }], execute: async () => ({ result: { kind: 'success' } }) },
+	});
+	bare.bridge.open({ view: 'chat', params: { sessionId: 's-1' } });
+	await assert.rejects(
+		() => bare.bridge.invoke('rewind', { sessionId: 's-1', to: '1' }),
+		error => error.code === FEATURE_UNAVAILABLE && /dsh-rewind-plugin/.test(error.message),
+	);
+});
+
 test('fork passes a numeric atSeq and rejects a non-numeric point', async () => {
 	const controller = sessionControllerStub();
 	const { bridge } = bridgeWith({ sessionController: controller });
@@ -421,8 +455,6 @@ test('workspace-registry capabilities fail alone, not the whole bridge', async (
 
 test('unverified capabilities and unbound sessions are refused, not faked', async () => {
 	const { bridge } = bridgeWith();
-	// `rewind` 仍是未核对形状的 fail-closed 能力；`runCommand` 已于第 34 轮接线。
-	await assert.rejects(() => bridge.invoke('rewind', { sessionId: 's-1', to: 'p0' }), error => error.code === FEATURE_UNAVAILABLE);
 	await assert.rejects(() => bridge.invoke('submit', { text: 'hi' }), error => error.code === INVALID_ARGUMENT);
 	await assert.rejects(() => bridge.invoke('__bogus', {}), error => error.code === FEATURE_UNAVAILABLE);
 });

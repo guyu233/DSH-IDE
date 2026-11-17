@@ -46,9 +46,9 @@ interface EndpointFinding {
 const FINDINGS: readonly EndpointFinding[] = [
 	{
 		method: 'rewind',
-		landing: null,
-		evidence: 'session-controller/src/index.ts 20 个 @Remote 全量枚举无 rewind；ui-chat/src/client/model/conversation-context.ts:6 仅为 ConversationContextOriginKind 字面量',
-		note: '官方无 rewind remote；它是客户端会话上下文概念（compaction/rewind/rewrite），不是 Host 端点。保持 fail-closed，不得用 fork/prompt 冒充。',
+		landing: 'commands/execute /rewind-plugin @<seq> chat',
+		evidence: '已安装 dsh-rewind-plugin@0.22.1：lib/index.js ENGINE_COMMAND=rewind-plugin，handleRewind 要求 `<target> chat|both`，target 为 @seq',
+		note: '已完成（代码侧）。core 无 rewind remote，不造。Host 只在命令表里有 rewind-plugin 时调用它；没装插件则 FEATURE_UNAVAILABLE。模式固定 chat（消息回退），不把 both 写进契约。',
 	},
 	{
 		method: 'loadOlder',
@@ -89,8 +89,8 @@ const FINDINGS: readonly EndpointFinding[] = [
 ];
 
 /** 已完成（代码侧）：deleteSession、setEffort、listCommands、runCommand / setPermissionPreset、loadOlder（第 21 轮）。 */
-const WIRED = ['deleteSession', 'setEffort', 'listCommands', 'runCommand', 'setPermissionPreset', 'loadOlder'];
-/** 尚不允许接线的 1 个 method：rewind 无独立 remote，保持 fail-closed。 */
+const WIRED = ['deleteSession', 'setEffort', 'listCommands', 'runCommand', 'setPermissionPreset', 'loadOlder', 'rewind'];
+/** core 没有、也不靠这两插件补的 method 不在这张表里。 */
 const UNVERIFIED = FINDINGS.filter(f => !WIRED.includes(f.method)).map(f => f.method);
 
 // ---------------------------------------------------------------------------
@@ -163,9 +163,8 @@ test('D16 findings are complete: 7 methods, each with evidence and a conclusion'
 		assert.ok(f.evidence.length > 20, `${f.method} must carry source evidence`);
 		assert.ok(f.note.length > 10, `${f.method} must carry a conclusion / D13 prerequisite`);
 	}
-	// deleteSession / setEffort / listCommands / runCommand / setPermissionPreset / loadOlder 已完成；仅 rewind 保持 fail-closed。
-	assert.equal(FINDINGS.filter(f => f.note.startsWith('已完成')).length, 6);
-	assert.equal(UNVERIFIED.length, 1);
+	assert.equal(FINDINGS.filter(f => f.note.startsWith('已完成')).length, 7);
+	assert.equal(UNVERIFIED.length, 0);
 });
 
 // ---------------------------------------------------------------------------

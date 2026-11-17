@@ -591,7 +591,26 @@ function createMethodHandlers(bridge) {
 			}
 			return { accepted: true, ...(typeof sessionId === 'string' ? { sessionId } : {}) };
 		},
-		rewind: missing('rewind'),
+		async rewind(args) {
+			// core 没有 rewind remote。装上 dsh-rewind-plugin 后，Host 上的命令名是
+			// `rewind-plugin`（插件自己的 ENGINE_COMMAND）。入参是 `@<seq> chat|both`；
+			// 契约只有消息切点，没有文件恢复，所以模式固定为 chat。
+			bridge.assertOwnership(args.sessionId);
+			const point = rewindPoint(args.to);
+			const sessionId = requireSession();
+			const agents = service(bridge.ctx, 'agents');
+			const agent = typeof agents.get === 'function' ? agents.get(sessionId) : undefined;
+			if (agent === undefined || agent === null) {
+				throw coded(FEATURE_UNAVAILABLE, `no live agent for bound session ${sessionId}`, { capability: 'rewind' });
+			}
+			const commands = service(bridge.ctx, 'commands');
+			const listed = typeof commands.list === 'function' ? commands.list(agent) : undefined;
+			const installed = Array.isArray(listed) && listed.some(item => item !== null && typeof item === 'object' && item.name === 'rewind-plugin');
+			if (!installed) {
+				throw coded(FEATURE_UNAVAILABLE, 'message rewind is unavailable: install and enable dsh-rewind-plugin', { capability: 'rewind' });
+			}
+			return executeCommandLine(buildDshIdeCommandLine('rewind-plugin', [point, 'chat']));
+		},
 		async loadOlder(args) {
 			// 官方 `session/page` 是独立只读端点，返回值就是这一页；
 			// follow 只在开头推一次 snapshot，page() 不会重推，所以必须把页带回去。
@@ -1047,6 +1066,21 @@ function requireGoalView(view) {
 		throw coded(FEATURE_UNAVAILABLE, 'DSH goals service returned an unrecognized GoalView', { capability: 'setGoal' });
 	}
 	return view;
+}
+
+/**
+ * 插件 `rewind-plugin` 的切点。UI 按钮发的是 `@<seq>`（绝对日志序号）。
+ * 纯数字按同一含义补上 `@`；别的形状拒绝，不把裸数字当成「第几条」。
+ */
+function rewindPoint(to) {
+	if (typeof to !== 'string') {
+		throw coded(INVALID_ARGUMENT, 'rewind.to must be a user-message seq');
+	}
+	const seq = to.startsWith('@') ? to.slice(1) : to;
+	if (!/^\d+$/.test(seq)) {
+		throw coded(INVALID_ARGUMENT, 'rewind.to must be a non-negative integer seq');
+	}
+	return `@${seq}`;
 }
 
 /** 官方 `SessionForkRequest.atSeq` 是非负整数。非数字不能变成 NaN 再被 JSON 收成 null。 */
