@@ -279,6 +279,9 @@ function applyDurable(state: DshIdeConversationState, event: Record<string, unkn
 			return;
 		}
 		const call = isRecord(data['call']) ? data['call'] : undefined;
+		// 官方 `rootResult`（`ui-chat/.../conversation-nodes/tool.ts`）：`name: previous?.name ?? ''`，
+		// `call: previous === undefined ? null : { name, argsRaw }`。配对调用不在加载窗口内时
+		// `name` 就是空串、`call` 为 null——这是官方的正常形态，不是坏数据。
 		const callName = call === undefined ? '' : stringOf(call['name']) ?? '';
 		const subCalls = Array.isArray(data['subCalls']) ? data['subCalls'].flatMap(child => decodeToolCallBlock(child)) : [];
 		put(state, `seq:${seq}`, {
@@ -289,7 +292,9 @@ function applyDurable(state: DshIdeConversationState, event: Record<string, unkn
 			callId,
 			name: callName,
 			args: data['args'] ?? null,
-			...(call === undefined ? {} : { call: { name: callName, argsRaw: stringOf(call['argsRaw']) ?? '' } }),
+			...(call === undefined || callName === ''
+				? { call: null }
+				: { call: { name: callName, argsRaw: stringOf(call['argsRaw']) ?? '' } }),
 			...(numberOf(data['callTime']) === undefined ? {} : { callTime: numberOf(data['callTime']) }),
 			content: contentBlocksOf(message['content']),
 			isError: message['isError'] === true,
@@ -738,7 +743,7 @@ function decodeToolCallBlock(value: unknown): DshIdeConversationNode[] {
 			callId,
 			name,
 			args: value['args'] ?? null,
-			...(call === undefined ? {} : { call: { name, argsRaw: stringOf(call['argsRaw']) ?? '' } }),
+			...(call === undefined || name === '' ? { call: null } : { call: { name, argsRaw: stringOf(call['argsRaw']) ?? '' } }),
 			content: contentBlocksOf(value['content']),
 			isError: value['isError'] === true,
 			subCalls,

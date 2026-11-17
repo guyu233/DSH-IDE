@@ -199,6 +199,13 @@ export type DshIdeConversationNode =
 		readonly kind: 'tool-result';
 		readonly callId: string;
 		readonly parentCallId?: string;
+		/**
+		 * Wire 工具名。**允许空串**：官方 `ToolResultNode.name` 的语义是
+		 * "empty when that call left the loaded window"（`ui-conversation/src/client/contract/records.ts:163-176`）——
+		 * 视图从会话中途打开、配对 `tool/call` 不在窗口内时官方本来就给 `''`
+		 * （`ui-chat/src/client/conversation-nodes/tool.ts` 的 `rootResult`：`name: previous?.name ?? ''`）。
+		 * 真机验证时这条被过严的校验器拒成了 `dsh-ide/invalid-argument`（见手册 2-E 记录）。
+		 */
 		readonly name: string;
 		readonly args: unknown;
 		readonly call?: { readonly name: string; readonly argsRaw: string } | null;
@@ -1425,7 +1432,10 @@ function validateConversationNode(value: unknown, label: string, seen: Set<objec
 				readNodeBase(node, label, false);
 				nonEmptyString(node['callId'], `${label}.callId`);
 				optionalString(node['parentCallId'], `${label}.parentCallId`);
-				nonEmptyString(node['name'], `${label}.name`);
+				// 允许空串：官方 `ToolResultNode.name` 明确是「配对调用已离开加载窗口时为空」
+				// （`ui-conversation/src/client/contract/records.ts:169`）。真实会话第一次加载时
+				// `messages[0]` 常常不是 tool/call，官方 `rootResult` 就给 `''`。
+				anyString(node['name'], `${label}.name`);
 				jsonValue(node['args'], `${label}.args`, new Set());
 				validateToolCallRef(node['call'], `${label}.call`);
 				if (node['callTime'] !== undefined && node['callTime'] !== null) {

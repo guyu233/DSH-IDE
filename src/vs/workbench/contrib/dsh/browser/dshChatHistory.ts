@@ -410,7 +410,9 @@ function appendNode(node: DshChatNode, parts: DshHistoryPart[], settledCallIds: 
 			return;
 		case 'tool-result':
 			drawnCallIds.add(node.callId);
-			parts.push(toolInvocationOf(node.callId, node.name, argsTextOf(node.call?.argsRaw, node.args), node));
+			// 官方 `ToolResultNode.name` 允许空串（配对调用不在加载窗口内）；
+			// 此时官方卡片头部显示 callId（`records.ts:167` 的注释：「card head shows callId」）。
+			parts.push(toolInvocationOf(node.callId, node.name === '' ? node.callId : node.name, argsTextOf(node.call?.argsRaw, node.args), node));
 			for (const child of node.subCalls) {
 				appendNode(child, parts, settledCallIds, drawnCallIds);
 			}

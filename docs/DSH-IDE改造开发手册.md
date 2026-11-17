@@ -656,6 +656,33 @@ DshChatSession.acceptView / acceptConversation → DshChatModel（typed 节点�
 | 产物内含本轮改动 | **已核对**：解包 `package/runtime/app/out/vs/workbench/workbench.desktop.main.js`（40,358,667 B），可见 `DSH_CODICON_GLYPH_MAP` / `dshIconDataUris` / `registerDshIconReplacement` / `drawnCallIds` / `extrasOf` / `sameSkills` / `withArchived` / `dshSessionItemState` / `answerApproval` / `planReview` 等符号，确认 2-A/2-B/2-C/2-D 代码已进包 |
 | 运行时加载 | `cordis_inspect_query(Config.listConfigs{name:"dsh-ide"})` 返回 **`status: "absent"`** —— **仍未加载**，须重启 DSH 才生效。**重启会终止当前会话，AI 不自行执行** |
 
+#### 开发板 Electron 首轮验证（2026-11-17，AI 执行启动、不代替 GUI 验收）
+
+按用户要求「先用开发板 electron 验证，连上 DSH 的 host」，用 `.build/electron/DSH IDE.exe`（Electron 43.7.7 / 产品版本 1.143.1）以 `VSCODE_DEV=1` 启动，并注入 Host 三件套环境变量（`DSH_IDE_ENDPOINT` / `DSH_IDE_LAUNCH_URL` / `DSH_IDE_ENDPOINT_FILE`）与会话 id。
+
+**连接性实测（成立）**：
+
+| 检查 | 结果 |
+|---|---|
+| `ide/ping`（官方端点，带 cookie） | `{ok:true, root:"C:\\Users\\guyu\\.dsh\\profiles\\desktop", hostPid:16300}` |
+| IDE 进程到 Host 端口的 TCP 连接 | 3 条 `Established`（52221 / 56526 / 54649 → 127.0.0.1:58815） |
+| 会话列表 | Sessions 面板渲染出当前会话「现在先用开发板electron验证…／E:\DSH-IDE」，数据来自 Host |
+| `ide/dispatch` → `listModels` | 返回真实模型目录（`deepseek-account/deepseek-flash` 等），说明桥接 dispatch 通路正常 |
+| `$events` 流 | 立即返回 `{"type":"ready","clientId":…,"host":{"home":"C:\\Users\\guyu"}}` |
+
+**首轮暴露的两个真缺陷（均已修，含回归用例）**：
+
+1. **帧被拒 `dsh-ide/invalid-argument`**：`DshIdeSnapshot.state.view.conversation.nodes[3].name must be a non-empty string`。
+   - 根因：投影器在官方帧缺 `call.name` 时写空串 `''`（官方 `rootResult` 的 `name: previous?.name ?? ''`，见 `ui-chat/src/client/conversation-nodes/tool.ts`），而**我们自己**的 `validateToolResult` 要求非空 —— 校验器比官方语义更严，把合法帧拒了。
+   - 修复：契约注释写明「`name` 允许空串（配对调用离开加载窗口）」；`validateConversationNode` 的 `tool-result.name` 改用 `anyString`；投影器在有 `call` 头时补 `call: null` 与官方一致；渲染侧空名回退显示 `callId`（官方 `records.ts:167` 的「card head shows callId」）。
+   - 回归：`build/lib/test/dshIdeConversation.test.ts` 新增 2 项（空名合法、有配对时仍带 name/call）。
+2. **`ide/followSession` 静默无帧**：官方 `session/follow` 用同样参数**立即返回 snapshot**（2 turns / 599 steps / projections），而 `ide/followSession` 打开后 20 秒内 **0 帧、也不回错误**；同期 `$events`、`ide/dispatch` 全部正常。
+   - 根因：Host 桥接 `_ensureFollow` 的 `pump()` 在官方流结束（窗口被强杀/传输断开）后**没有摘掉 `_follows` 缓存条目**，后续窗口 `_ensureFollow` 命中死流，监听永远收不到帧。
+   - 修复：`pump()` 的 `finally` 里按同一实例比对后 `this._follows.delete(sessionId)`。
+   - 说明：该修复位于 **Host 半身**（`src/vs/platform/dshClient/host/ide-view-host.js`），只有重启 DSH 才会重新加载，**本轮无法在运行中的 Host 上验证生效**。
+
+**未完成（须用户执行）**：运行中的 DSH Host 是 **2026-11-14 15:58:51** 启动的进程（pid 16300），其内存里的插件代码早于本轮全部改动；`Config.listConfigs{name:"dsh-ide"}` 仍是 `absent`。因此本轮只能验证「连接建立 + 上述两个缺陷的定位与代码修复」，**不能**断言新版 Host 半身与 2-A~2-D 在真机上的最终表现。需用户重启 DSH 后再复验。
+
 ### 9.6 第二阶段实施顺序（已定）
 
 > **2-A（修数据链）与 2-B（翻译层升级）为主线顺序推进；2-D（图标全局替换）与 2-A/2-B 并行启动；2-C（Session 缺口）随主线核对；全部代码完成、门禁全绿后，最后统一做 2-E（真机验收）。**

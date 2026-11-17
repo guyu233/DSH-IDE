@@ -295,6 +295,13 @@ export class DshIdeHostBridge {
 				}
 				const message = error && error.message ? error.message : String(error);
 				console.warn(`[dsh-ide] session follow ended: ${message}`);
+			} finally {
+				// 官方流结束（或被传输层断掉）后必须摘掉缓存条目：否则后续窗口
+				// `_ensureFollow` 会拿到这条已经死掉的流，加监听收不到任何帧，
+				// 表现为「连上了 Host、会话列表也在，但聊天永远空白且不报错」。
+				if (this._follows.get(sessionId) === shared) {
+					this._follows.delete(sessionId);
+				}
 			}
 		};
 		void pump();

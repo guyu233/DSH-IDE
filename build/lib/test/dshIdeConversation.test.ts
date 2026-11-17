@@ -260,3 +260,52 @@ test('assistant/message 带 text content 投影为 assistant 节点且 step 为�
 	}
 	assertNoRaw(view);
 });
+
+test('2-E 真机缺陷回归：配对调用不在窗口内时 tool-result 的 name 为空串仍须通过校验', () => {
+	// 真机现象：开发板连上 Host 后通知「DSH-IDE 帧被拒绝（dsh-ide/invalid-argument :
+	// DshIdeSnapshot.state.view.conversation.nodes[3].name must be a non-empty string）」。
+	// 官方语义：`ToolResultNode.name` 是「配对 tool/call 已离开加载窗口时为空」
+	// （`ui-conversation/src/client/contract/records.ts:169`）；`rootResult` 也给 `name: previous?.name ?? ''`。
+	// 这条用例直接钉住：官方合法形态必须过校验，且 call 降级为 null。
+	const state = createDshIdeConversationState();
+	const frame = {
+		type: 'event',
+		event: {
+			type: 'tool/result',
+			seq: 4,
+			time: 4,
+			data: { message: { source: { callId: 'orphan-1' }, content: [{ type: 'text', text: 'done' }], isError: false } },
+		},
+	};
+	const view = project(state, frame);
+	assert.equal(view.nodes.length, 1);
+	const node = view.nodes[0];
+	assert.equal(node.kind, 'tool-result');
+	if (node.kind === 'tool-result') {
+		assert.equal(node.name, '', 'empty name is the official shape when the call head left the window');
+		assert.equal(node.call, null, 'no call head to backfill when the call left the window');
+	}
+});
+
+test('2-E 真机缺陷回归：有配对调用时 tool-result 仍带 name 与 call 头', () => {
+	const state = createDshIdeConversationState();
+	const frame = {
+		type: 'event',
+		event: {
+			type: 'tool/result',
+			seq: 5,
+			time: 5,
+			data: {
+				call: { name: 'read', argsRaw: '{"path":"a"}' },
+				message: { source: { callId: 'c9' }, content: [{ type: 'text', text: 'ok' }], isError: false },
+			},
+		},
+	};
+	const view = project(state, frame);
+	const node = view.nodes[0];
+	assert.equal(node.kind, 'tool-result');
+	if (node.kind === 'tool-result') {
+		assert.equal(node.name, 'read');
+		assert.deepEqual(node.call, { name: 'read', argsRaw: '{"path":"a"}' });
+	}
+});
