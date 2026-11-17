@@ -62,11 +62,10 @@
 src/vs/base/common/lit-html/**
 src/vs/base/common/signals-core/**
 
-# DSH-IDE plain-JS halves (Host plugin + DSH client module) and the copied ui-chat .tsx leaves.
-# They are shipped as-is (no TS compile step for the plain JS; the .tsx leaves are bundled by
-# build/dsh/chat-render/build-render.mjs), so upstream lint rules (TS-only) do not apply.
+# DSH-IDE plain-JS halves (Host plugin + DSH client module).
+# They are shipped as-is (no TS compile step for the plain JS), so upstream lint rules
+# (TS-only) do not apply.
 src/vs/platform/dshClient/host/**
 src/vs/platform/dshClient/client/**
 src/vs/platform/dshClient/index.js
 src/vs/platform/dshClient/common/env.js
-build/dsh/chat-render/src/**

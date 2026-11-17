@@ -18,7 +18,7 @@ export const DSH_BUILD_INPUT_PATHS = [
 	'LICENSE.txt', 'ThirdPartyNotices.txt',
 	// DSH-IDE 输入：bundle 清单模板与复用凭据在 build/lib/dsh/，图标与 NLS 在 resources/dsh/，
 	// Host/客户端半身在 src/vs/platform/dshClient/（已被上行 src 覆盖）。
-	// 聊天内容由 DshChatModelDriver 直接写进原生 ChatModel，不再有独立渲染 sidecar。
+	// 聊天内容由 `dshChatSessionContent` 的 content provider 提供 history，不再有独立渲染 sidecar。
 	'build/lib/dsh', 'build/dsh',
 	'resources/dsh',
 ] as const;

@@ -6,8 +6,7 @@
 // DSH 团队开关的命令入口。
 //
 // 原生模型选择器承接了模型与 effort，但 DSH 的「团队」开关在原生选择器里没有对应控件；
-// 此前唯一画它的 `dshModelMenu.ts` 从未被实例化。这里用命令 + quick pick 承接，
-// 写回仍走既有 `setTeamEnabled`（`DshComposerSource.setTeam`），不另造接口。
+// 这里用命令 + quick pick 承接，写回仍走既有 `setTeamEnabled`（`DshComposerSource.setTeam`），不另造接口。
 
 import { DisposableStore } from '../../../../base/common/lifecycle.js';
 import { CommandsRegistry } from '../../../../platform/commands/common/commands.js';

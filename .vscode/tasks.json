@@ -24,7 +24,7 @@
 		},
 		{
 			"label": "Install & Watch (All)",
-			"detail": "Install dependencies and watch all of VS Code (core, extensions and copilot).",
+			"detail": "Install dependencies and watch all of VS Code (core and extensions).",
 			"dependsOn": [
 				"Install Dependencies",
 				"Watch"

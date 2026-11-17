@@ -543,7 +543,7 @@ async function verifyDshBuildProvenance(stagingRoot: string): Promise<void> {
  * 把 DSH 的鲸鱼图标写进每个 bundle 输出的 media 目录。
  * globalCompositeBar.ts 与 chatParticipant.contribution.ts 用 FileAccess.asBrowserUri
  * 指向它；它不在 bundle 的 copyResources 精选 glob 内，必须 bundle 后补写。
- * DSH 帧由 DshChatModelDriver 直接写进原生 ChatModel，不再有 sidecar 产物。
+ * 聊天内容由 `dshChatSessionContent` 的 content provider 提供 history，不再有 sidecar 产物。
  */
 const dshWhaleMediaSource = path.join(root, 'src', 'vs', 'workbench', 'contrib', 'dsh', 'browser', 'media', 'dsh-whale.svg');
 const dshWhaleMediaTargetPath = path.join('vs', 'workbench', 'contrib', 'dsh', 'browser', 'media');
@@ -673,8 +673,8 @@ BUILD_TARGETS.forEach(buildTarget => {
 				for (const [from, to] of copyList) {
 					await fs.promises.cp(from, path.join(stagingRoot, to), { recursive: true });
 				}
-				// §5 复用凭据随包保留；聊天内容已由 DshChatModelDriver 直接写进原生
-				// ChatModel，不再有需要随包分发的 sidecar 渲染制品。
+				// §5 复用凭据随包保留；聊天内容已由 `dshChatSessionContent` 的 content provider 提供
+				// history，不再有需要随包分发的 sidecar 渲染制品。
 				for (const [from, to] of [
 					['build/lib/dsh/PROVENANCE.md', 'PROVENANCE.md'],
 					['build/lib/dsh/LICENSE-DSH', 'LICENSE-DSH'],

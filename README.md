@@ -83,11 +83,11 @@ AI 能力全部留在 DSH 一侧；IDE 侧只消费中立 DTO，不持有 DSH �
 ## 仓库结构
 
 ```
-src/vs/workbench/contrib/dsh/     DSH 集成层（Agent、输入框数据源、模型菜单）
+src/vs/workbench/contrib/dsh/     DSH 集成层（Agent、输入框数据源、会话树）
 src/vs/workbench/contrib/chat/    Chat 视图与输入框（VS Code 核心，DSH 定制在此）
 src/vs/platform/dshClient/        与 DSH 通信的唯一通道
 build/lib/dsh/                    打包与验证脚本
-build/dsh/chat-render/            聊天渲染 sidecar 及其来源凭据
+build/dsh/chat-render/            聊天渲染复用件的历史来源凭据（只读，不参与构建）
 ```
 
 ## 构建与开发
