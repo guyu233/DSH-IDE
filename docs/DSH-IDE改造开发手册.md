@@ -1060,3 +1060,17 @@ DshChatSession.acceptView / acceptConversation → DshChatModel（typed 节点�
 
 > **门禁**：tsc 0 error、`build-dsh-tests` PASS、`test-dsh:all` **391** PASS（388 → 391，+3）、`verify:dsh-ide-ci` 五项 PASS、`verify:dsh-artifact` PASS、`npm run compile` PASS（37 s）。`verify:dsh-install-drift` **FAIL（预先存在）**：`host/ide-service.js` / `host/ide-view-host.js` 与 2026-11-17 00:38 的旧产物不一致，本轮未改这两个文件、也未打包（按 §0.0 打包推迟）。详见 `docs/DSH-IDE瘦身与Bug修复报告-第5轮.md`。
 
+#### 9.11.9 第 6 轮：chat-simulation / mock-policy-server 的清理与 Bug 修复（已执行，2026-11-18）
+
+> 上一轮只对 `scripts/chat-simulation/**`（15 文件 / 266 KB）与 `scripts/mock-policy-server/**`（5 文件 / 159 KB）做了模式扫描，本轮全覆盖。另核对第 5 轮文档的定量声明。区间 `2b4f2504..e0b826eb`：**7 个文件，+217 / -62 行**，4 个提交。
+
+> **可删符号（3 个）**：`utils.js` 的 `linearRegressionSlope()`（全仓仅定义+导出项）、`mock-llm-server.ts` 的 `ROOT` 常量（文件内仅定义本身）+ 随之无用的 `path` require、`ScenarioBuilderImpl.burst()`（全仓 `.burst(` 零命中）。
+>
+> **不是死文件（易误判，已核）**：`fixtures/_chatperf_*.ts`（8 个）经 `path.join(FIXTURES_DIR, name)` **字符串动态引用**；`mock-policy-server/public/*` 经 `GUI_ASSETS` 白名单映射；`mock-llm-server.ts` 被 `test/smoke/src/utils.ts:229` 跨目录引用，5 个 smoke 套件依赖。
+
+> **真实 bug（9 处，0 高危）**：7 处 `readBody().then` 无 `.catch`（unhandled rejection 会让 Node 24 终止 mock server，整轮 benchmark 报废）+ `_startServer` 无 catch；WS 回调裸 `JSON.parse`；`loadConfig()` 裸 parse 且失败静默回退默认值；`test-chat-perf-regression.js` 6 处裸 `JSON.parse(fs.readFileSync(...))`（截断的 baseline 会让整轮起不来）；`mock-policy-server` 的 schema 源按 cwd 解析（不在仓库根启动则 `/api/schema` 恒 `ok:false`）；4 处把 `toolNamePattern.source` 反解成不存在的工具名（客户端 unknown tool 后等到超时）；`/vscode-test\/...` 硬编码正斜杠（Windows 下 buildLabel 退化）；`stripJsoncComments` 的正则会砍掉字符串里的 `http://`。
+
+> **文档校正（6 处）**：§9.11.6 的 agentsWindow「整块保留」补注第 5 轮已删；§9.11.8 的「smoke 6 文件」拆写为「smoke 5 + automation 1」；`test-dsh:all` 增量 389→391 改为 388→391；§3.5 的 `package.json:85-94` 改为 `80-91`；报告 5 的「389 +2」与终点提交同步修正。
+
+> **门禁**：tsc 0 error、`test-dsh:all` **391** PASS、`verify:dsh-ide-ci` 五项 PASS、`npm run compile` PASS（31 s）、`node --check` 4 个 JS PASS、TypeScript parse 3 个 .ts 0 diagnostics、`stripJsoncComments` 4/4、`loadConfig` 实跑正常。详见 `docs/DSH-IDE瘦身与Bug修复报告-第6轮.md`。
+
