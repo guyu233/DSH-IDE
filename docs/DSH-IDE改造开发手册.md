@@ -1050,7 +1050,7 @@ DshChatSession.acceptView / acceptConversation → DshChatModel（typed 节点�
 
 #### 9.11.8 第 5 轮：上一轮修复的回归 + sessions 残留 + 脚本缺陷（已执行，2026-11-18）
 
-> 两个子智能体并行扫描：sessions 残留网络（规则实现 / eslint 配置 / stylelint / i18n / smoke / scripts）与构建测试缺陷（含对第 4 轮 11 处修复的逐项复查）。区间 `9919cd20..90e19ae1`：**37 个文件，+226 / -3,910 行**，3 个代码提交 + 文档。
+> 两个子智能体并行扫描：sessions 残留网络（规则实现 / eslint 配置 / stylelint / i18n / smoke / scripts）与构建测试缺陷（含对第 4 轮 11 处修复的逐项复查）。区间 `9919cd20..85ad5953`：**40 个文件，+422 / -3,910 行**，3 个代码提交 + 1 个文档提交。
 
 > **上一轮修复引入的回归（5 处，全部修复）**：① **高危** `bind()` 失败回滚与「相同 id 短路」组合成死锁——A 已绑定 → bind(B) 失败 → 再 bind(A) 直接 return true，但 `model.clear()` 已执行 → 面板永久空白；修法是新增 `_boundDirty` 标志（短路条件加 `&& !this._boundDirty`）。② `consumer.reset()` 挂在 `onDidChangeState({connected:true})`，但 `_connected` 无置 false 路径 → 每窗口最多触发一次，重连不 reset；修法是在 snapshot 监听里按 Host 的 `rebuild` 快照调新增 `markDisconnected()`。③ `throwIfAborted()` 在 `try` 外导致 abort 监听器泄漏。④ `authenticating` 的 catch 无条件清空可能抹掉新 promise。⑤ plan/goal/todos 的「缺席即保留」语义未在契约里固化。
 
