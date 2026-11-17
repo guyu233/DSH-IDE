@@ -41,6 +41,16 @@ export const SESSION_SWITCHED = 'SESSION_SWITCHED';
  */
 export const REQUIRED_SERVICES = Object.freeze(['sessions', 'sessionController']);
 
+/**
+ * 官方 `sessionController` 的读取方法把 `AbortSignal` 当第二参。
+ * 不传时实现里的 `signal.throwIfAborted()` / `signal.aborted` 会抛
+ * `Cannot read properties of undefined (reading 'aborted')`，调用方只看到 gateway/internal。
+ * 真机 `composerState` 已复现。这里给每次调用一个独立信号：取消发生在视图关闭，不靠这条信号。
+ */
+function callerSignal() {
+	return new AbortController().signal;
+}
+
 function coded(code, message, details) {
 	const error = new Error(message);
 	error.code = code;
@@ -538,7 +548,7 @@ function createMethodHandlers(bridge) {
 					{ type: 'text', text: args.text },
 					...attachments.map(attachment => ({ type: 'image', attachment: imagePromptRef(attachment) })),
 				],
-			});
+			}, callerSignal());
 			return { accepted: true };
 		},
 		async interrupt() {
@@ -548,7 +558,7 @@ function createMethodHandlers(bridge) {
 		async resume(args) {
 			bridge.assertOwnership(args.sessionId);
 			if (args.sessionId !== undefined) {
-				await controller().state({ sessionId: args.sessionId });
+				await controller().state({ sessionId: args.sessionId }, callerSignal());
 				bridge.sessionId = args.sessionId;
 			}
 			return { accepted: true };
@@ -587,7 +597,7 @@ function createMethodHandlers(bridge) {
 				...(args.throughSeq === undefined ? {} : { throughSeq: args.throughSeq }),
 				...(args.beforeSeq === undefined ? {} : { beforeSeq: args.beforeSeq }),
 				...(args.maxMessages === undefined ? {} : { maxMessages: args.maxMessages }),
-			});
+			}, callerSignal());
 			if (!page || !Array.isArray(page.records) || typeof page.hasMore !== 'boolean') {
 				throw coded(FEATURE_UNAVAILABLE, 'sessionController.page returned a page without records and hasMore', { capability: 'loadOlder' });
 			}
@@ -626,7 +636,7 @@ function createMethodHandlers(bridge) {
 			if (typeof args.effort !== 'string' || args.effort === '') {
 				throw coded(INVALID_ARGUMENT, 'setEffort.effort must be a non-empty string');
 			}
-			const value = await controller().projections({ sessionId });
+			const value = await controller().projections({ sessionId }, callerSignal());
 			const selection = value && value.values && value.values.modelSelection
 				? value.values.modelSelection.next
 				: undefined;
@@ -654,7 +664,7 @@ function createMethodHandlers(bridge) {
 		async searchSessions(args) {
 			// D59 分批检索：官方 `session/search`，只读。依赖宿主挂载
 			// `@deepseek-ai/dsh-session-query`；未挂载时官方抛 gateway/internal，原样透传。
-			return projectDshIdeSessionSearch(await controller().search({ query: args.query }));
+			return projectDshIdeSessionSearch(await controller().search({ query: args.query }, callerSignal()));
 		},
 		async presentationSettings() {
 			const settings = optionalService(bridge.ctx, 'settings');
@@ -716,7 +726,7 @@ function createMethodHandlers(bridge) {
 			// 输入框一次读齐：模型目录、当前选择、权限目录、预设名单。
 			// 权限 / 预设服务没挂上时对应控件为 null，不把整条读取打成失败。
 			const sessionId = requireSession();
-			const projected = await controller().projections({ sessionId });
+			const projected = await controller().projections({ sessionId }, callerSignal());
 			const values = projected && typeof projected === 'object' ? projected.values : undefined;
 			const catalog = await controller().modelCatalog();
 			return projectDshIdeComposer({
@@ -892,31 +902,34 @@ function createMethodHandlers(bridge) {
 			}
 		},
 		listSkills: async () => {
-			// 官方 `skills.list({ scope })`：scope 是查看者（此处取绑定会话 id），
-			// 返回官方 `SkillSummary[]`。只投影中立字段，不带绝对路径与 resourceBase。
-			const skills = service(bridge.ctx, 'skills');
-			if (typeof skills.list !== 'function') {
-				throw coded(FEATURE_UNAVAILABLE, 'DSH skills service has no list()', { capability: 'listSkills' });
+			// 官方落点是 `sessionSkillCatalog.list({ sessionId }, signal)`（`skills` Remote），
+			// 不是 `ctx.skills.list({ scope })`。scope 是 ScopeKey，把 sessionId 塞进去读不到会话目录。
+			// 返回的 `SkillEntry` 没有 provider：只投影官方字段，userInvocable 恒为 true
+			// （该目录已按 isUserInvocable 过滤）。
+			const sessionId = requireSession();
+			const catalog = service(bridge.ctx, 'sessionSkillCatalog');
+			if (typeof catalog.list !== 'function') {
+				throw coded(FEATURE_UNAVAILABLE, 'DSH sessionSkillCatalog has no list()', { capability: 'listSkills' });
 			}
-			const summaries = await skills.list(typeof bridge.sessionId === 'string' ? { scope: bridge.sessionId } : {});
-			return (Array.isArray(summaries) ? summaries : []).flatMap(skill => {
+			const value = await catalog.list({ sessionId }, callerSignal());
+			const summaries = value && Array.isArray(value.skills) ? value.skills : [];
+			return summaries.flatMap(skill => {
 				if (skill === null || typeof skill !== 'object') {
 					return [];
 				}
 				const name = typeof skill.name === 'string' ? skill.name : '';
 				const description = typeof skill.description === 'string' ? skill.description : '';
-				const provider = typeof skill.provider === 'string' ? skill.provider : '';
-				const invocation = skill.invocation !== null && typeof skill.invocation === 'object' ? skill.invocation : {};
-				if (name === '' || description === '' || provider === '') {
+				if (name === '' || description === '') {
 					return [];
 				}
+				const provider = typeof skill.provider === 'string' && skill.provider !== '' ? skill.provider : undefined;
 				return [{
 					name,
 					description,
 					...(typeof skill.whenToUse === 'string' && skill.whenToUse !== '' ? { whenToUse: skill.whenToUse } : {}),
-					modelInvocable: invocation.modelInvocable === true,
-					userInvocable: invocation.userInvocable === true,
-					provider,
+					modelInvocable: skill.modelInvocable === true,
+					userInvocable: true,
+					...(provider === undefined ? {} : { provider }),
 				}];
 			});
 		},
@@ -1088,7 +1101,7 @@ export function resolveDeleteSessionMethod(ctx) {
 /**
  * 读取会话当前是否仍有活动 turn（D52 前置判据）。
  *
- * 官方信号：`sessionController.state({ sessionId })` 返回 `SessionState.running`
+ * 官方信号：`sessionController.state({ sessionId }, signal)` 返回 `SessionState.running`
  * （`api/session-controller/src/types.ts:608-611`）。返回三态：
  *   - `true`  —— 明确仍在运行；
  *   - `false` —— 明确已停止；
@@ -1105,7 +1118,7 @@ async function sessionRunning(ctx, sessionId) {
 		return undefined;
 	}
 	try {
-		const value = await controller.state({ sessionId });
+		const value = await controller.state({ sessionId }, callerSignal());
 		const running = value && typeof value === 'object' ? value.running : undefined;
 		return typeof running === 'boolean' ? running : undefined;
 	} catch {

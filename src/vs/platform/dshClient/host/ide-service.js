@@ -197,7 +197,7 @@ export class IdeRemoteService extends Service {
       if (!composer || typeof composer.projections !== 'function') {
         return undefined;
       }
-      const projected = await composer.projections({ sessionId });
+      const projected = await composer.projections({ sessionId }, new AbortController().signal);
       const values = projected && typeof projected === 'object' ? projected.values : undefined;
       const catalog = typeof composer.modelCatalog === 'function' ? await composer.modelCatalog() : undefined;
       const permissionPresets = this.ctx.get && this.ctx.get('permissionPresets');

@@ -263,6 +263,7 @@ export class DshChatSession extends Disposable implements IDshChatSession {
 			return false;
 		}
 		await this.refreshComposer();
+		await this.refreshSkills();
 		return true;
 	}
 
@@ -270,6 +271,7 @@ export class DshChatSession extends Disposable implements IDshChatSession {
 	async attach(sessionId: string | undefined): Promise<void> {
 		this.boundSessionId = sessionId;
 		await this.refreshComposer();
+		await this.refreshSkills();
 	}
 
 	/**
@@ -297,7 +299,9 @@ export class DshChatSession extends Disposable implements IDshChatSession {
 		const nextPlan = view.plan;
 		const nextGoal = view.goal;
 		const nextTodos = view.todos ?? [];
-		const nextSkills = view.skills ?? [];
+		// follow 快照没有 skills 字段（技能走 `listSkills`）。缺省表示「这帧没带」，
+		// 不能当成空目录，否则每一次内容帧都会把刚读到的技能清掉。
+		const nextSkills = view.skills !== undefined ? view.skills : this._skills;
 		const extrasChanged = !sameDeliverables(this._deliverables, nextDeliverables)
 			|| !sameAttachments(this._attachments, nextAttachments)
 			|| !sameQuota(this._quotaNotice, nextQuota)
@@ -445,6 +449,27 @@ export class DshChatSession extends Disposable implements IDshChatSession {
 			requestId: eventId,
 			answer: { answers: [{ id: item?.questionId ?? '', selected: [label] }] },
 		});
+	}
+
+	/**
+	 * 重读当前会话的技能目录。follow 帧不带 skills，只能走 `listSkills`。
+	 * 读失败保持上一次的列表（首次为空），不把失败写成空目录。
+	 */
+	private async refreshSkills(): Promise<void> {
+		const generation = this.generation;
+		const sessionId = this.boundSessionId;
+		if (sessionId === undefined) {
+			return;
+		}
+		const result = await this.client.call<readonly DshIdeSkillView[]>('listSkills', {});
+		if (generation !== this.generation || sessionId !== this.boundSessionId || !result.ok || !Array.isArray(result.value)) {
+			return;
+		}
+		if (sameSkills(this._skills, result.value)) {
+			return;
+		}
+		this._skills = result.value;
+		this._onDidChangeExtras.fire();
 	}
 
 	/** 重读输入框目录：模型列表与当前选择（形状由 `projectDshIdeComposer` 决定）。 */

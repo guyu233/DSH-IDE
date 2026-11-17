@@ -683,6 +683,21 @@ DshChatSession.acceptView / acceptConversation → DshChatModel（typed 节点�
 
 **未完成（须用户执行）**：运行中的 DSH Host 是 **2026-11-14 15:58:51** 启动的进程（pid 16300），其内存里的插件代码早于本轮全部改动；`Config.listConfigs{name:"dsh-ide"}` 仍是 `absent`。因此本轮只能验证「连接建立 + 上述两个缺陷的定位与代码修复」，**不能**断言新版 Host 半身与 2-A~2-D 在真机上的最终表现。需用户重启 DSH 后再复验。
 
+#### 第二轮：用官方 `session/follow` 快照核对投影与其余调用（同一 Host）
+
+抓到当前会话的 opening snapshot（348 条 records，`hasMore: true`）。投影后 159 个节点（assistant 48 / tool-call 55 / tool-result 54 / context 2）**整帧通过** `validateDshIdeSnapshot`。`plan` / `goal` 与官方 values 一致。`todos: null` 是「没有待办」，不是丢字段。窗口里的 2 条 `user/message` 是注入上下文，投影成 context，不是用户气泡；更早的用户消息在 `hasMore` 之后，要靠 `loadOlder`。
+
+另外核对并修掉的连接问题：
+
+| 问题 | 证据 | 处理 |
+|---|---|---|
+| `composerState` 在运行中的 Host 上返回 `gateway/internal: Cannot read properties of undefined (reading 'aborted')` | 直接调 `ide/dispatch` | 官方 `projections/prompt/page/state/search` 的第二参是 `AbortSignal`。源码没传。已在 Host 桥与开窗预取补上 |
+| 技能目录到不了界面 | follow 的 `projections.values` 没有 `skills`；`listSkills` 用 `ctx.skills.list({ scope: sessionId })`，而官方目录是 `sessionSkillCatalog.list({ sessionId }, signal)`（`SkillEntry`，无 provider） | 改走官方目录；`provider` 改为可选；内容帧不再把缺省的 skills 当成空目录清掉；`attach`/`bind` 会调用 `listSkills` |
+| 子会话 `session/follow` 返回 `session/agent-busy` | 官方文案：`subagent Sessions require their durable parent address` | 不是缺陷。工作区记账里 DSH-IDE 只挂了当前根会话；5 个子会话 `origin: subagent` 且 `agentAvailable: false`，面板不列它们是对的 |
+| 快照里的 `userQuestions.active` 没有进待决议卡 | 官方 `PendingUserQuestion` 只有 `callId`，回答走 waterfall 的 `eventId` | 不投影。中途接入时，已经发出的问卷要等下一次 waterfall；不能用 callId 冒充 eventId |
+
+这三项里 Host 半身的改动同样要重启 DSH 才进正在跑的进程。
+
 ### 9.6 第二阶段实施顺序（已定）
 
 > **2-A（修数据链）与 2-B（翻译层升级）为主线顺序推进；2-D（图标全局替换）与 2-A/2-B 并行启动；2-C（Session 缺口）随主线核对；全部代码完成、门禁全绿后，最后统一做 2-E（真机验收）。**

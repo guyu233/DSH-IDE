@@ -77,6 +77,24 @@ test('2-A: identical extras do not fire onDidChangeExtras twice', () => {
 	}
 });
 
+test('follow frames without skills keep a catalog loaded by listSkills', async () => {
+	const skills = [{ name: 'dsh-doc', description: 'DSH 文档', modelInvocable: true, userInvocable: true }];
+	const session = new DshChatSession({
+		call: async (method: string) => method === 'listSkills'
+			? { ok: true, value: skills }
+			: { ok: false, error: { code: 'FEATURE_UNAVAILABLE', message: 'test' } },
+		rebindView: async () => ({ ok: true }),
+	} as never);
+	try {
+		await session.attach('session-1');
+		assert.deepEqual(session.skills(), skills);
+		session.acceptView(view({ plan: PLAN }));
+		assert.deepEqual(session.skills(), skills, 'a content frame must not wipe the skill catalog');
+	} finally {
+		session.dispose();
+	}
+});
+
 test('2-A: bind clears plan/goal/todos/skills and notifies', async () => {
 	const session = new DshChatSession(fakeClient());
 	try {

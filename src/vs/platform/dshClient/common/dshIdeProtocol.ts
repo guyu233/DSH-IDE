@@ -287,14 +287,19 @@ export interface DshIdeTodoView {
 	readonly status: 'pending' | 'in_progress' | 'completed';
 }
 
-/** 官方 `SkillSummary` 里一行技能卡要用的字段。不带绝对路径。 */
+/**
+ * 会话技能目录的一行。对齐官方 `SkillEntry`（`session-controller` 的 `skills/list`）：
+ * 该目录只有 name / description / whenToUse / modelInvocable，没有 provider。
+ * `userInvocable` 恒为 true（官方目录已按 `isUserInvocable` 过滤）。
+ * `provider` 只在调用方另外带了来源时出现。
+ */
 export interface DshIdeSkillView {
 	readonly name: string;
 	readonly description: string;
 	readonly whenToUse?: string;
 	readonly modelInvocable: boolean;
 	readonly userInvocable: boolean;
-	readonly provider: string;
+	readonly provider?: string;
 }
 
 /** 官方 `TokenUsage`：单次调用的增量，不是会话累加。 */
@@ -1764,7 +1769,10 @@ function validateSkills(value: unknown): void {
 		if (typeof skill['modelInvocable'] !== 'boolean' || typeof skill['userInvocable'] !== 'boolean') {
 			throw new TypeError(`${label} invocation flags must be booleans`);
 		}
-		nonEmptyString(skill['provider'], `${label}.provider`);
+		// 官方 `SkillEntry` 没有 provider；出现时才要求非空。
+		if (skill['provider'] !== undefined) {
+			nonEmptyString(skill['provider'], `${label}.provider`);
+		}
 	});
 }
 

@@ -1196,38 +1196,36 @@ test('composerState keeps only the fields the input bar renders', async () => {
 test('listSkills projects only the neutral skill card fields', async () => {
 	const calls = [];
 	const { bridge } = bridgeWith({
-		skills: {
-			list: async options => {
-				calls.push(options);
-				return [
-					{
-						name: 'dsh-doc',
-						description: 'DSH 文档',
-						whenToUse: '查 DSH 事实时',
-						invocation: { modelInvocable: true, userInvocable: true },
-						source: 'bundled',
-						provider: 'dsh-agent-preset',
-						path: 'C:/secret/absolute/path.md',
-						resourceBase: { kind: 'directory', path: 'C:/secret' },
-					},
-					{
-						name: 'virtual-only',
-						description: '虚拟技能',
-						invocation: { modelInvocable: false, userInvocable: true },
-						source: 'runtime',
-						provider: 'local',
-					},
-					// 缺必填字段的条目不投影，也不伪造默认值。
-					{ name: '', description: 'bad', invocation: { modelInvocable: true, userInvocable: true }, provider: 'x' },
-					null,
-				];
+		sessionSkillCatalog: {
+			list: async (request, signal) => {
+				calls.push({ request, hasSignal: signal instanceof AbortSignal });
+				return {
+					skills: [
+						{
+							name: 'dsh-doc',
+							description: 'DSH 文档',
+							whenToUse: '查 DSH 事实时',
+							modelInvocable: true,
+							path: 'C:/secret/absolute/path.md',
+						},
+						{
+							name: 'virtual-only',
+							description: '虚拟技能',
+							modelInvocable: false,
+						},
+						// 缺必填字段的条目不投影，也不伪造默认值。
+						{ name: '', description: 'bad', modelInvocable: true },
+						null,
+					],
+				};
 			},
 		},
 	});
 	bridge.open({ view: 'chat', params: { sessionId: 's-1' } });
 	const skills = await bridge.invoke('listSkills', {});
-	// scope 用绑定会话 id，和官方 ui-skill 的用法一致。
-	assert.deepEqual(calls, [{ scope: 's-1' }]);
+	assert.equal(calls.length, 1);
+	assert.deepEqual(calls[0].request, { sessionId: 's-1' });
+	assert.equal(calls[0].hasSignal, true);
 	assert.deepEqual(skills, [
 		{
 			name: 'dsh-doc',
@@ -1235,24 +1233,21 @@ test('listSkills projects only the neutral skill card fields', async () => {
 			whenToUse: '查 DSH 事实时',
 			modelInvocable: true,
 			userInvocable: true,
-			provider: 'dsh-agent-preset',
 		},
 		{
 			name: 'virtual-only',
 			description: '虚拟技能',
 			modelInvocable: false,
 			userInvocable: true,
-			provider: 'local',
 		},
 	]);
-	// 绝对路径与 resourceBase 一律不下发。
 	for (const skill of skills) {
 		assert.equal('path' in skill, false);
-		assert.equal('resourceBase' in skill, false);
+		assert.equal('provider' in skill, false);
 	}
 });
 
-test('listSkills rejects explicitly when the skills service is unavailable', async () => {
+test('listSkills rejects explicitly when the session skill catalog is unavailable', async () => {
 	const { bridge } = bridgeWith();
 	bridge.open({ view: 'chat', params: { sessionId: 's-1' } });
 	await assert.rejects(
