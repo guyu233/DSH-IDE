@@ -929,9 +929,17 @@ DshChatSession.acceptView / acceptConversation → DshChatModel（typed 节点�
 
 ---
 
-### 9.11 消除 137 条类型错误 + 并行瘦身计划（待执行）
+### 9.11 消除 137 条类型错误 + 并行瘦身计划（已执行，2026-11-17）
 
 > 用户要求：一边做一边项目瘦身，用不到的都删掉；在不影响 DSH-IDE 功能前提下把全量 tsc 的 137 条错误清零。原则：**能删就删**（优先删瘦身残留死代码），其次做类型对齐；所有改动都不改变运行时行为。执行期间不碰 §9.10 的契约文件，避免与其冲突。
+>
+> **执行结果**：tsc 137 → **0**；`npm run compile` PASS；`test-dsh:all` 384/384 PASS；`verify:dsh-ide-ci` 五项全 PASS（`DSH_INSTALLED_VERSION=0.2.2-rc.1`）。删除 89 个文件 / 减 4,620 行；依赖 68→66（dependencies）、100→93（devDependencies）；锁文件条目 1,649→1,536（-113，零新增、零版本变更）。详细清单见 `docs/DSH-IDE瘦身报告-第1轮.md`，逐项证据见 `docs/DSH-IDE瘦身问题清单-第1轮.md`。
+>
+> **落地要点与手册原方案的偏差**：
+> 1. `DSH_IDE_CONTRACT_API_VERSION` / `DSH_IDE_CONTRACT_WIRE_REVISION` **未删**——`verify:dsh-ide-protocol-single-source` 显式断言 contract 必须 import protocol 常量，删则门禁 FAIL。
+> 2. `isRecord` / `stringOf` / `numberOf` 的重复实现**保留**——跨 Host-side JS / electron-main / workbench 三层，抽取需改 gulp staging 与 boundary 门禁，收益小于风险。
+> 3. 测试项数 389 → 384：减少的 5 项全部来自随死模块删除的 `dshSessionItemState.test.ts`。
+> 4. `genDshIconDataUris.mjs --check` 与全仓 ESLint、浏览器单测、真机 GUI 均为 PENDING（需官方 source / 既有 header 基线 / 用户执行）。
 
 #### 9.11.1 分类与逐项方案
 
