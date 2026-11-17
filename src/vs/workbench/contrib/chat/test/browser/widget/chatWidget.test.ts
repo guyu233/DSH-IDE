@@ -980,10 +980,9 @@ suite('ChatWidget', () => {
 		});
 	});
 
-	test('switching to an agent-host harness preserves the signed-out welcome and instructions hint', () => {
+	test('switching to an agent-host harness keeps the DSH welcome content', () => {
 		const container = dom.$('.chat-welcome-view-container');
 		const contents: IChatViewWelcomeContent[] = [];
-		let instructionsHintCalls = 0;
 		const widget = Object.assign(Object.create(ChatWidget.prototype), {
 			_location: { location: ChatAgentLocation.Chat },
 			_viewModel: { getItems: () => [] },
@@ -1004,10 +1003,6 @@ suite('ChatWidget', () => {
 					});
 				},
 			},
-			_getGenerateInstructionsMessage: () => {
-				instructionsHintCalls++;
-				return 'Generate Agent Instructions';
-			},
 			updateChatViewVisibility: () => { },
 		}) as {
 			_lockedAgent?: { id: string; prefix: string; agentHostProviderId?: string };
@@ -1023,18 +1018,19 @@ suite('ChatWidget', () => {
 		widget.renderWelcomeViewContentIfNeeded();
 
 		assert.deepStrictEqual({
-			contents: contents.map(content => ({ title: content.title, additionalMessage: content.additionalMessage })),
-			instructionsHintCalls,
+			contents: contents.map(content => ({
+				title: content.title,
+				additionalMessage: typeof content.additionalMessage === 'string' ? content.additionalMessage : content.additionalMessage?.value,
+			})),
 			restored: container.textContent,
 		}, {
 			contents: [
-				{ title: 'Build with Agent', additionalMessage: 'Generate Agent Instructions' },
-				{ title: 'Build with Agent', additionalMessage: 'Generate Agent Instructions' },
-				{ title: 'Delegate to @copilot ', additionalMessage: undefined },
-				{ title: 'Build with Agent', additionalMessage: 'Generate Agent Instructions' },
+				{ title: 'Chat', additionalMessage: '输入消息开始，由 DSH 处理。' },
+				{ title: 'Chat', additionalMessage: '输入消息开始，由 DSH 处理。' },
+				{ title: 'Delegate to @copilot ', additionalMessage: '输入消息开始，由 DSH 处理。' },
+				{ title: 'Chat', additionalMessage: '输入消息开始，由 DSH 处理。' },
 			],
-			instructionsHintCalls: 3,
-			restored: 'Build with Agent',
+			restored: 'Chat',
 		});
 	});
 
