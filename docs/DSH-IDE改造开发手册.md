@@ -709,6 +709,9 @@ DshChatSession.acceptView / acceptConversation → DshChatModel（typed 节点�
 | 归档 | `workspaceController.archiveSession({ sessionId })` 返回集合；`workspaceRegistry.archiveSession(sessionId)` 返回 void | 优先走 controller；没有 controller 时用字符串 id 调 registry，再读 `archivedSessionIds` |
 | 创建目标 | `remoteExportCreate` 只回 `{ ref }`；`create` 回 `GoalView` | 改走 `create`，再用 `projectGoalView` 投影 |
 | 带图提交 | `admitPromptContent` 的已入库图片要带 `encodedBytes` | 提交时带上附件的 `bytes`，限额检查不再变成 NaN |
+| `fork.point` 非数字 | `atSeq` 必须是非负整数；`Number('head')` 是 NaN，JSON 会收成 null | 不是纯数字就 `invalid-argument`，不发给官方 |
+
+正在跑的 Host（cordis `Service.listService`）上，`workspaceController.archiveSession`、`goals.create`、`sessionSkillCatalog.list`、`commands.execute` / `list` 的签名与上面的改法一致。Host 进程里的插件代码仍是 2026-11-14 加载的那份，要重启 DSH 才会换成这份。
 
 ### 9.6 第二阶段实施顺序（已定）
 

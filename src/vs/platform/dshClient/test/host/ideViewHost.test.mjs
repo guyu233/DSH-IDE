@@ -255,6 +255,18 @@ test('session ownership mismatch returns SESSION_SWITCHED', async () => {
 	await assert.rejects(() => bridge.invoke('resume', { sessionId: 's-2' }), error => error.code === SESSION_SWITCHED);
 });
 
+test('fork passes a numeric atSeq and rejects a non-numeric point', async () => {
+	const controller = sessionControllerStub();
+	const { bridge } = bridgeWith({ sessionController: controller });
+	bridge.open({ view: 'chat', params: { sessionId: 's-1' } });
+	await bridge.invoke('fork', { sessionId: 's-1', point: '42' });
+	assert.deepEqual(controller.calls.find(call => call.name === 'fork').request, { sessionId: 's-1', atSeq: 42 });
+	await assert.rejects(
+		() => bridge.invoke('fork', { sessionId: 's-1', point: 'head' }),
+		error => error.code === INVALID_ARGUMENT,
+	);
+});
+
 test('submit and interrupt use the verified sessionController shapes', async () => {
 	const controller = sessionControllerStub();
 	const { bridge } = bridgeWith({ sessionController: controller });

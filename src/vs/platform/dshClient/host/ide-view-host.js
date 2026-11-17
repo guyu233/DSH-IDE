@@ -583,7 +583,7 @@ function createMethodHandlers(bridge) {
 			bridge.assertOwnership(args.sessionId);
 			const created = await controller().fork({
 				sessionId: args.sessionId,
-				...(args.point === undefined || args.point === '' ? {} : { atSeq: Number(args.point) }),
+				...(args.point === undefined || args.point === '' ? {} : { atSeq: forkSeq(args.point) }),
 			});
 			const sessionId = created && (created.sessionId || created.childSessionId);
 			if (typeof sessionId === 'string') {
@@ -1047,6 +1047,14 @@ function requireGoalView(view) {
 		throw coded(FEATURE_UNAVAILABLE, 'DSH goals service returned an unrecognized GoalView', { capability: 'setGoal' });
 	}
 	return view;
+}
+
+/** 官方 `SessionForkRequest.atSeq` 是非负整数。非数字不能变成 NaN 再被 JSON 收成 null。 */
+function forkSeq(point) {
+	if (typeof point !== 'string' || !/^\d+$/.test(point)) {
+		throw coded(INVALID_ARGUMENT, 'fork.point must be a non-negative integer seq');
+	}
+	return Number(point);
 }
 
 function splitModel(model) {
