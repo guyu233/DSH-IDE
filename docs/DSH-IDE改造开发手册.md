@@ -1034,3 +1034,17 @@ DshChatSession.acceptView / acceptConversation → DshChatModel（typed 节点�
 >
 > **保留**：`test/smoke/src/areas/agentsWindow/**`（5 文件 108 KB）整块保留——它测的 Dev Container / packaged AgentHost 已随 `src/vs/sessions/**` 与 `src/vs/platform/agentHost/**` 消失，但删除属测试裁剪，不在「行为不变」的清理范围。
 
+#### 9.11.7 第 4 轮细小 Bug 修复（已执行，2026-11-17）
+
+> 用户要求「每轮检查是否仍有细小 bug，整理出一个没有逻辑问题的可执行方案并处理」。子智能体按 8 类模式（未定义标识符 / 空值 / 异步 / 泄漏 / 逻辑 / 字符串正则路径 / 类型断言 / 状态不一致）扫描 DSH 全部生产代码，命中并复核 **11 处真实 bug**，清单见 `docs/DSH-IDE细小Bug清单-第4轮.md`、修复报告见 `docs/DSH-IDE细小Bug修复报告-第4轮.md`。修复提交 `594dd4a4`（功能改动，与清理提交分开）：**10 文件，+193 / -39 行**。
+>
+> **高危 1 处**：`DshChatSession._running` 只在 `submit()` 置 true、失败置 false，**正常回合结束无复位** → `running()` 永远 true，面板永远「生成中」、停止按钮常驻。修法：新增幂等 `setRunning()` + `acceptSessionStatus()`，由 `dsh.contribution.ts` 消费 `session-status` 帧（Host 侧 `api-session/status` 转发）驱动复位；`submit()` 与 `bind()` 统一走 `setRunning()`。
+>
+> **中危 5 处**：bind 失败不回滚导致同一会话永不重绑；`acceptView` 把缺席的 plan/goal/todos 当清空（投影只在 snapshot 帧下发）；`DshIdeConsumer.reset()` 全仓零调用导致一次坏帧永久熔断；`authenticating` 缓存 rejected Promise 导致首次鉴权失败永久失效；`void this.refresh()` 无 catch 造成 unhandled rejection。
+>
+> **低危 5 处**：`mapTreeItem` 的 `changed` 恒真（无变化也重建树）；模型目录只比 identifier（改名/推理档不刷新）；行内补全 Disposable 未注册；`throwIfAborted()` 与 abort 监听之间的竞态窗口；`applyQuotaNotice` 顺序导致配额错误挂到交付物行。
+>
+> **测试**：新增 4 项（`dshChatSessionExtras` 3 项 + `dshSessionTree` 1 项），`test-dsh:all` 384 → **388** 全 PASS。
+>
+> **门禁**：tsc 0 error、`build-dsh-tests` PASS、`test-dsh:all` 388 PASS、`verify:dsh-ide-ci` 五项 PASS、`npm run compile` PASS（0 errors，36 s）。
+
