@@ -144,9 +144,9 @@ DshChatSession.acceptView / acceptConversation → DshChatModel（typed 节点�
 - `DSH_IDE_WIRE_REVISION = 4`（`dshIdeProtocol.ts`）。保留 `frame` 并增加 typed 投影后，由 3 升到 4。
 - `DshIdeMethodArgs` 共 **43 个 method**（2026-11-17 新增 6 个会话操作：`renameSession` / `setSessionFavorite` / `setSessionPinned` / `listWorkspaces` / `moveSession` / `openSessionPath`）。仍 `missing()` 的是 4 个（`addAttachment`、`removeAttachment`、`openInApp`、`dismissQuotaNotice`，均无官方 remote）；`setGoal` / `listSkills` 已分别接官方 `goals` / `skills` 服务（见 §8.1）。
 - 旧稿点名要新增的 `searchSessions` / `resumeSession` / `forkAt` / `loadThrough` **不另增**：`searchSessions` 与 `resume` 已在白名单；`fork.point` 已映射官方 `atSeq`；`loadOlder.throughSeq` 已是官方切点。
-- `validateDshIdeSnapshot`（`:755-778`）、`assertSnapshotContinuity`（`:797-816`，version 严格 +1）、`validateDshIdeInvokeOutput` 只允许 `{value}`（`:592-596`）。
-- `DshIdeWaterfallNotice`（`:671-706`）、`DshIdeSessionNotice`（`:667-669`）形状固定；扩展 listen 事件面必须先改契约并同步测试（`:209-221`）。
-- consumer 当前只处理 snapshot，测试钉死不处理 waterfall（`dshIdeEndpoints.test.ts:301-312`）。
+- `validateDshIdeSnapshot`（`:1157`）、`assertSnapshotContinuity`（`:1963`，version 严格 +1）、`validateDshIdeInvokeOutput` 只允许 `{value}`（`:933`）。
+- `DshIdeWaterfallNotice`（`:1058`）、`DshIdeSessionNotice`（`:1054`）形状固定；扩展 listen 事件面必须先改契约并同步测试（`:924-931`）。
+- consumer 当前只处理 snapshot，测试钉死不处理 waterfall（`build/lib/test/dshIdeEndpoints.test.ts:328-331`）。
 
 ---
 
@@ -186,7 +186,7 @@ DshChatSession.acceptView / acceptConversation → DshChatModel（typed 节点�
 
 **§4.4 Deliverables**：`deliverables/presented`、`workspace/changes`、`changes.summary`、`changes.diff/open`、`present.open/host`。投影成文件卡/变更卡/交付物卡，`openFile` 接 VS Code 编辑器/文件服务。
 
-**§4.5 Attachments**：上传附件、消息图片、文件引用、prompt 与 receipt 绑定、历史附件读取。`submit` 带附件 ref，`readAttachment` 读取，图片用 DOM `<img>`/themed icon。协议已有 `DshIdeImageAttachmentRef`（`:109-122`），不重新发明。不接 DSH 拖动上传组件与 native clipboard/file IPC。
+**§4.5 Attachments**：上传附件、消息图片、文件引用、prompt 与 receipt 绑定、历史附件读取。`submit` 带附件 ref，`readAttachment` 读取，图片用 DOM `<img>`/themed icon。协议已有 `DshIdeImageAttachmentRef`（`:136-145`），不重新发明。不接 DSH 拖动上传组件与 native clipboard/file IPC。
 
 **§4.6 审批/问卷**：审批视图保留 `toolName/callId/reason/displayReason`；问卷保留 `id/question/detail/header/options[].label/description/multiSelect/intent`。`agent` 对象与 `AbortSignal` 不进线协议（`agentId` 在通知信封、`signal` 留在 Host 等待句柄）。回答走 `answerApproval/answerQuestion`，多选答案是 `DshIdeQuestionAnswer.answers[].selected` 多项；UI 为确认/拒绝卡、问卷卡。
 
@@ -263,8 +263,8 @@ DshChatSession.acceptView / acceptConversation → DshChatModel（typed 节点�
 文件：`src/vs/workbench/contrib/dsh/browser/dshChatSession.ts`、`dshChatModel.ts`。
 
 1. `IDshChatSession`（`:39-74`）接口按契约 43 method 对齐：`submit(text, attachments)`、`answerApproval/answerQuestion`（多选答案）、`listSessions/searchSessions/loadOlder{throughSeq,beforeSeq,maxMessages}`、`resume`/`fork.point`/`rewind`（rewind 走已装载的 `dsh-rewind-plugin`，不是 core remote）、`deliverables`、`tokenUsageDelta`、`quotaNotice`、`pending`。4 个无官方 remote 的 `missing()` method 只暴露禁用态或明确失败提示，不伪造成功。**注意**：`plan/goal/todos/skills` 虽已在契约与 Host 投影层就绪，但状态层 `DshChatSession` 尚未保存/暴露（真缺陷，见 §9.5 阶段 2-A）。
-2. 移除 renderer 从裸 follow 帧拼节点的逻辑（`dshChatModel.ts:388-403,516-941`），直接消费层 1 的结构化 conversation。
-3. `tokenUsage` 唯一真源在 `DshChatModel`（`:318-320,375-386`），`pending` 在 `DshChatSession.pendingItems`（`:86`），`running` 在 `_running`（`:89`）；扩展时**保持单一真源**。
+2. 移除 renderer 从裸 follow 帧拼节点的逻辑（`dshChatModel.ts` 的 `acceptConversation`，`:394` 起），直接消费层 1 的结构化 conversation。
+3. `tokenUsage` 唯一真源在 `DshChatModel`（`:364`），`pending` 在 `DshChatSession.pendingItems`（`:89`），`running` 在 `_running`（`:92`）；扩展时**保持单一真源**。
 4. 风格：tab、单引号、分号、`I` 接口前缀、`_` 私有、`this._register`/`DisposableStore`，错误走 `onUnexpectedError`。
 
 **本层完成标志**：chat 状态层不再依赖裸帧拼装，所有官方内容都有单一真源。
@@ -636,7 +636,7 @@ DshChatSession.acceptView / acceptConversation → DshChatModel（typed 节点�
 
 1. **归档 / 恢复**：`DshAgentSessionsController` 实现原生可选接口 `setChatSessionItemArchived(resource, archived)`；写回走既有 `archiveSession` / `unarchiveSession`（Host 侧官方 `workspaceRegistry`），成功后就地更新行 `archived` 并 fire `onDidChangeChatSessionItems`，失败保留原状并 `warn`（不假装成功）。
 2. **已读状态**：实现 `setChatSessionItemRead(resource, isRead)`。DSH 没有已读持久化端点，这里只改本地行状态，**不写回 Host**（注释已写明，避免被误当作持久化）。
-3. **纯函数抽取**：新增 `dshSessionItemState.ts`（`withArchived` / `withRead` / `timingForRunning`），把「找不到行 / 值没变 / 保持行身份」的语义从控制器里拆出来，可用零 DI 单测覆盖；新增 `build/lib/test/dshSessionItemState.test.ts`（5 项）。
+3. **纯函数抽取**：新增 `dshSessionItemState.ts`（`withArchived` / `withRead` / `timingForRunning`），把「找不到行 / 值没变 / 保持行身份」的语义从控制器里拆出来，可用零 DI 单测覆盖；新增 `build/lib/test/dshSessionItemState.test.ts`（5 项）。（两者均已在第 1 轮瘦身删除，等价逻辑现内联在 `dshAgentSessionsController.ts` 与 `dshSessionTree.ts`。）
 4. **unread 徽标**：原生 `IChatSessionItem` 只有 `badge`（字符串）与 `isRead`（布尔），没有独立的「未读」徽标控件；已按 §9.5「无 API 则记录不做」处理，不造第二套状态。
 
 **验收（实测）**：`test-dsh:all` PASS（含新增 5 项）；`verify:dsh-ide-ci` 五步全 PASS。
@@ -654,7 +654,7 @@ DshChatSession.acceptView / acceptConversation → DshChatModel（typed 节点�
 
 **落地结果（本轮已完成）**：
 
-1. **资源生成脚本**：新增 `build/lib/dsh/genDshIconDataUris.mjs`（带 `--check` 漂移模式）。实测官方 `ICON_ARTWORK` 为 **104** 个 glyph（不是草稿写的 109），生成 `dshIconDataUris.ts`（约 76 KB）；每个 glyph 按 regular stroke=1 求值，兼容三种声明（`strokeWidth => \`…\``、`() => '…'`、`strokeWidth === ICON_MEDIUM_STROKE` 三元的 medium/regular 两支）。data URI 全量 URL-encode（含单引号转 `%27`），保证可直接放进 CSS `url()`。
+1. **资源生成脚本**：新增 `build/lib/dsh/genDshIconDataUris.mjs`（带 `--check` 漂移模式）。实测官方 `ICON_ARTWORK` 为 **104** 个 glyph（不是草稿写的 109），生成 `dshIconDataUris.ts`（约 94 KB）；每个 glyph 按 regular stroke=1 求值，兼容三种声明（`strokeWidth => \`…\``、`() => '…'`、`strokeWidth === ICON_MEDIUM_STROKE` 三元的 medium/regular 两支）。data URI 全量 URL-encode（含单引号转 `%27`），保证可直接放进 CSS `url()`。
 2. **映射表**：`dshCodiconMap.ts` 手写 60+ 条语义对应（search/plus/close/copy/branch/check/chevron/…），并在 `resolveDshGlyph` 里过滤掉不存在的 glyph（防 `mask: url(undefined)`）；未映射的 codicon 返回 `undefined`，保持 codicon 原样。
 3. **替换缝**：新增 `platform/theme/common/iconReplacement.ts`（单槽位注册 + 注销，重复注册直接抛错）；`iconsStyleSheet.getCSS()` 在「默认 codicon 未被产品图标主题改写」时查询替换函数，命中输出 `content:''; background-color:currentColor; width/height:1em; mask: url('data:…') center / contain no-repeat`，未命中保留原 font 规则。platform 层不 import workbench；挂载点在 `dsh.contribution.ts` → `dshIconReplacement.ts`。
 4. **单测**：新增 `build/lib/test/dshIconArtwork.test.ts`（4 项：glyph 数量、data URI 形状、映射目标存在、未映射返回 undefined）；新增 `build/lib/test/dshIconReplacement.test.ts`（3 项：注册可见、重复注册抛错、过期句柄不误清后来的注册）；新增 `build/lib/test/dshIconsStyleSheet.test.ts`（4 项：命中替换仍输出 `--vscode-icon-*-content/font-family` 根变量、未命中保留 font 规则、无注册时全量 font 规则、产品主题改写优先于替换）。
@@ -787,9 +787,14 @@ DshChatSession.acceptView / acceptConversation → DshChatModel（typed 节点�
 
 **结论**：不新增 `listSubagentChildren` 端点、不做右键子菜单。**用已有 `parentSessionId`/`origin` 在 renderer 拼 `IChatSessionItem.children`，交给 VS Code 原生树渲染。**
 
-#### 9.9.2 当前代码实际状态（工作树，非文档声称）
+#### 9.9.2 当前代码实际状态（改造前快照，2026-11-17 初；行号为当时值）
 
-| 位置（当前行号） | 当前行为 | 树所需改动 |
+> **说明**：下表记录的是 §9.9 改造**动手前**的代码状态，用于对照「改了什么」。§9.9 完成后：
+> `refresh()` 现为 `:190` 起（内部走 `buildSessionTree` + `flattenTree`，不再 `next.push`）；
+> `toSessionItem()` 在 `:321`；`sameItem()` 已删除，改为 `dshSessionTree.ts:167` 的 `sameTreeItem`；
+> `applyRunning()` 在 `:293`；归档/已读为 `setChatSessionItemArchived:245` / `setChatSessionItemRead:258` / `applyArchived:272`。
+
+| 位置（改造前快照） | 当时行为 | 树所需改动 |
 |---|---|---|
 | `dshAgentSessionsController.ts:190-242` `refresh()` | `:220-227` 逐条 `toSessionItem()` 后 `next.push(item)`，全扁平 | 改为先建树，push 根节点 |
 | `dshAgentSessionsController.ts:323-343` `toSessionItem()` | `:335-342` 只返回 `resource/label/description/status/timing/iconPath`，**无 `children`、不读 `parentSessionId/origin`** | 保持单条映射，供树构造调用；补稳定 resource/timing、label 单行 |
@@ -884,10 +889,10 @@ DshChatSession.acceptView / acceptConversation → DshChatModel（typed 节点�
 | 项 | 结果 |
 |---|---|
 | `dshSessionTree.test.ts`（9 项） | PASS |
-| 会话相关四文件联跑（`dshSessionItemState` + `dshSessionTree` + `dshChatSessionContent` + `dshChatHistoryNative`） | PASS（37 项） |
+| 会话相关四文件联跑（`dshSessionItemState` + `dshSessionTree` + `dshChatSessionContent` + `dshChatHistoryNative`） | PASS（37 项，当时记录；`dshSessionItemState` 已在第 1 轮删除） |
 | mocha `test-dsh` 核心命令 | PASS（7 项） |
 | 改动文件 tsc 检查 | PASS：`dshSessionTree.ts` 零错误；`dshAgentSessionsController.ts` 的 `pane` 可能为 null 已改为 `?? undefined` 收窄，改动文件零错误 |
-| 全量 `tsc --noEmit` / `verify:dsh-ide-ci` | **PASS**（2026-11-17 15:26 复跑）：`test-dsh:all` mocha 7 项 + node 386 项全通过；`verify:dsh-ide-ci` 在 `DSH_INSTALLED_VERSION=0.2.2-rc.3` 下五步全 PASS；全量 tsc 余 137 个既有 VS Code 报错，本次改动文件零命中 |
+| 全量 `tsc --noEmit` / `verify:dsh-ide-ci` | **PASS**（2026-11-17 15:26 复跑，当时记录）：`test-dsh:all` mocha 7 项 + node 386 项全通过；`verify:dsh-ide-ci` 在 `DSH_INSTALLED_VERSION=0.2.2-rc.3` 下五步全 PASS；全量 tsc 余 137 个既有 VS Code 报错，本次改动文件零命中。（**现行口径见 §9.11**：node 384 项、全量 tsc 0 报错、`DSH_INSTALLED_VERSION=0.2.2-rc.1`；本行保留为当时的验收记录。） |
 
 > 注：全量门禁已按上表复跑并转 PASS；真机会话树展开在 2-E 用开发版 Electron 连 Host 验收（AI 不代跑）。全量门禁 PASS 不等于打包——按 §0.0 打包推迟到全部开发完成后再做。
 
