@@ -6,7 +6,9 @@
  * 输出到 `.build/upstream-diff/<新版本>-dsh-ide-diff.md`（不入库），用于升级时比对复用面差异的落地凭据。只读，不改任何源码。
  *
  * 复用面 = 本项目真正依赖 DSH 上游的两部分：
- *   1) 渲染复用件：`packages/client/ui-chat` 的 20 个源文件 + 8 个 CSS 模块 + 1 个 APNG；
+ *   1) 历史渲染复用件：`packages/client/ui-chat` 的 20 个源文件 + 8 个 CSS 模块 + 1 个 APNG。
+ *      这批复制件与 sidecar 构建链已删除（仅保留 `build/dsh/chat-render/` 的来源凭据），
+ *      本脚本仍按上游 tag 比对，用于追溯「当初复用的是哪些文件」；它们不再进入构建。
  *   2) 传输/契约：connection / gateway / session-controller / llm / client-modules / typert 的关键契约文件。
  *
  * 用法（在仓库根执行）：
@@ -152,10 +154,10 @@ function main() {
 	lines.push(`| target | \`${target}\` @ \`${targetCommit}\` |`)
 	lines.push(`| 生成时间 | ${now} |`)
 	lines.push(`| 状态 | ${same ? '**版本相同（无需同步）**' : '有差异，需处理下表'} |`)
-	lines.push(`| 渲染件变化 | ${changedUi.length}/20 源 + ${changedCss.length}/8 CSS + ${changedAsset.length}/1 资产 |`)
+	lines.push(`| 历史渲染件变化 | ${changedUi.length}/20 源 + ${changedCss.length}/8 CSS + ${changedAsset.length}/1 资产（本地复制件已删除，仅作历史对照） |`)
 	lines.push(`| 传输/契约变化 | ${changedContract.length}/${CONTRACT_FILES.length} |`)
 	lines.push('')
-	lines.push('## 1. 渲染复用件（packages/client/ui-chat，20 源 / 8 CSS / 1 资产）')
+	lines.push('## 1. 历史渲染复用件（packages/client/ui-chat，20 源 / 8 CSS / 1 资产；本地复制件与 sidecar 已删除，仅作历史对照）')
 	lines.push('')
 	lines.push('| 文件 | 状态 |')
 	lines.push('| --- | --- |')
@@ -175,9 +177,9 @@ function main() {
 		lines.push('- base 与 target 相同，无需动作。')
 	} else {
 		if (changedUi.length === 0 && changedCss.length === 0 && changedAsset.length === 0) {
-			lines.push('- DSH 渲染样式：无变化，无需改 `src/vs/workbench/contrib/chat/browser/widget/media/chat.css` 的 DSH 皮肤段。')
+			lines.push('- DSH 历史渲染件：无变化，无需动作（本地复制件已删除，仅作历史对照）。')
 		} else {
-			lines.push('- **DSH 渲染样式有变化**：聊天内容由 `DshChatModelDriver` 直接写进原生 ChatModel，观感在 `chat.css` 的 `.dsh-session` 段维护；逐项对照上游 CSS 数值更新该段，不新增 sidecar。')
+			lines.push('- **DSH 历史渲染件有变化**：这些上游文件曾用于旧渲染 sidecar，本地复制件已删除；如需重做渲染复用，以此为差异清单，当前不进入构建。')
 			for (const [p, s] of changedUi) lines.push(`  - ${s} \`${rel(p)}\``)
 			for (const [p, s] of changedCss) lines.push(`  - ${s} \`${rel(p)}\``)
 			for (const [p, s] of changedAsset) lines.push(`  - ${s} \`${rel(p)}\``)
