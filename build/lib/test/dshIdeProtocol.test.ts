@@ -21,6 +21,7 @@ import {
 	dshAccountClientMetadata,
 	exactRecord,
 	jsonValue,
+	validateCapabilities,
 	validateDshIdeInput,
 	validateDshIdeInvokeOutput,
 	validateDshIdeLoadOlderResult,
@@ -70,6 +71,7 @@ const VALID_ARGS: Record<DshIdeMethod, unknown> = {
 	listSkills: {},
 	openInApp: { target: 'file:///workspace/readme.md' },
 	dismissQuotaNotice: { seq: 1 },
+	capabilities: {},
 	renameSession: { sessionId: 's1', title: '新标题' },
 	setSessionFavorite: { sessionId: 's1' },
 	setSessionPinned: { sessionId: 's1' },
@@ -80,8 +82,8 @@ const VALID_ARGS: Record<DshIdeMethod, unknown> = {
 
 const ALL_METHODS = Object.keys(VALID_ARGS) as DshIdeMethod[];
 
-test('method whitelist has all 42 methods', () => {
-	assert.equal(ALL_METHODS.length, 42);
+test('method whitelist has all 43 methods', () => {
+	assert.equal(ALL_METHODS.length, 43);
 	assert.equal(new Set(ALL_METHODS).size, ALL_METHODS.length);
 });
 
@@ -237,17 +239,19 @@ test('validateDshIdeSnapshot rejects unknown fields', () => {
 	assert.throws(() => validateDshIdeSnapshot(snapshot({ state: { state: 'ready', __extra: 1 } })), /unknown field/);
 });
 
-test('capabilities 快照四项必填布尔，缺项或非布尔一律拒绝', () => {
-	const withCaps = (capabilities: unknown) => snapshot({
-		version: 1,
-		state: { state: 'ready', view: { frame: { type: 'snapshot' }, capabilities } },
-	});
-	assert.doesNotThrow(() => validateDshIdeSnapshot(withCaps({ rewind: true, sessionFavorite: false, sessionMove: false, sessionDelete: true })));
+test('capabilities method 返回值四项必填布尔，缺项或非布尔一律拒绝', () => {
+	assert.doesNotThrow(() => validateCapabilities({ rewind: true, sessionFavorite: false, sessionMove: false, sessionDelete: true }));
 	// 缺插件就是 false，不省略字段
-	assert.throws(() => validateDshIdeSnapshot(withCaps({ rewind: true, sessionFavorite: false, sessionMove: false })), /sessionDelete must be a boolean/);
-	assert.throws(() => validateDshIdeSnapshot(withCaps({ rewind: 'yes', sessionFavorite: false, sessionMove: false, sessionDelete: false })), /rewind must be a boolean/);
-	assert.throws(() => validateDshIdeSnapshot(withCaps({ rewind: true, sessionFavorite: false, sessionMove: false, sessionDelete: false, extra: true })), /unknown field/);
+	assert.throws(() => validateCapabilities({ rewind: true, sessionFavorite: false, sessionMove: false }), /sessionDelete must be a boolean/);
+	assert.throws(() => validateCapabilities({ rewind: 'yes', sessionFavorite: false, sessionMove: false, sessionDelete: false }), /rewind must be a boolean/);
+	assert.throws(() => validateCapabilities({ rewind: true, sessionFavorite: false, sessionMove: false, sessionDelete: false, extra: true }), /unknown field/);
 });
+
+test('快照 view 不再接受 capabilities（方案一：能力走独立 method）', () => {
+	const view = { frame: { type: 'snapshot' }, capabilities: { rewind: true, sessionFavorite: false, sessionMove: false, sessionDelete: false } };
+	assert.throws(() => validateDshIdeSnapshot(snapshot({ version: 1, state: { state: 'ready', view } })), /unknown field/);
+});
+
 
 test('validateDshIdeSnapshot rejects explicit undefined', () => {
 	assert.throws(() => validateDshIdeSnapshot(snapshot({ message: undefined })), /must omit explicit undefined field/);
