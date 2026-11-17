@@ -486,6 +486,18 @@ export interface DshIdeMethodArgs {
 	openInApp: { target: string };
 	/** 关掉一条额度通知。官方 dismiss 是网页客户端本地状态，Host 在有 remote 之前 fail-closed。 */
 	dismissQuotaNotice: { seq: number };
+	/** 官方 `session/rename`。 */
+	renameSession: { sessionId: string; title: string };
+	/** 归档管理器 `setSessionFavorite`。只传会话，Host 按当前收藏状态切换。 */
+	setSessionFavorite: { sessionId: string };
+	/** 官方 `workspace/pinSession` 与 `unpinSession`。只传会话，Host 按当前置顶状态切换。 */
+	setSessionPinned: { sessionId: string };
+	/** 官方工作区名单，供「移动到工作区」。 */
+	listWorkspaces: Record<string, never>;
+	/** 归档管理器 `workspaceRegistry.moveSessionToWorkspace`。 */
+	moveSession: { sessionId: string; workspaceId: string };
+	/** 官方 `session/openWorkspacePath`，打开该会话的工作区目录。 */
+	openSessionPath: { sessionId: string };
 }
 
 /**
@@ -568,6 +580,12 @@ const DSH_IDE_METHOD_KEYS: Record<DshIdeMethod, readonly string[]> = {
 	listSkills: [],
 	openInApp: ['target'],
 	dismissQuotaNotice: ['seq'],
+	renameSession: ['sessionId', 'title'],
+	setSessionFavorite: ['sessionId'],
+	setSessionPinned: ['sessionId'],
+	listWorkspaces: [],
+	moveSession: ['sessionId', 'workspaceId'],
+	openSessionPath: ['sessionId'],
 };
 
 // ---------------------------------------------------------------------------
@@ -635,6 +653,14 @@ function nonNegativeInteger(value: unknown, label: string): number {
 		throw new TypeError(`${label} must be a non-negative integer`);
 	}
 	return value as number;
+}
+
+/** 官方 `llm/retry.delayMs` 是有限非负实数（含小数），不是整数。 */
+function nonNegativeFinite(value: unknown, label: string): number {
+	if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) {
+		throw new TypeError(`${label} must be a non-negative finite number`);
+	}
+	return value;
 }
 
 function nonEmptyString(value: unknown, label: string): string {
@@ -819,6 +845,21 @@ export function validateDshIdeInput<K extends DshIdeMethod>(command: K, args: un
 			break;
 		case 'dismissQuotaNotice':
 			nonNegativeInteger(record['seq'], 'DshIdeInput.dismissQuotaNotice.seq');
+			break;
+		case 'renameSession':
+			nonEmptyString(record['sessionId'], 'DshIdeInput.renameSession.sessionId');
+			nonEmptyString(record['title'], 'DshIdeInput.renameSession.title');
+			break;
+		case 'setSessionFavorite':
+		case 'setSessionPinned':
+			nonEmptyString(record['sessionId'], `DshIdeInput.${command}.sessionId`);
+			break;
+		case 'moveSession':
+			nonEmptyString(record['sessionId'], 'DshIdeInput.moveSession.sessionId');
+			nonEmptyString(record['workspaceId'], 'DshIdeInput.moveSession.workspaceId');
+			break;
+		case 'openSessionPath':
+			nonEmptyString(record['sessionId'], 'DshIdeInput.openSessionPath.sessionId');
 			break;
 		case 'accountGetState':
 		case 'accountGetProfile':
@@ -1502,10 +1543,13 @@ function validateConversationNode(value: unknown, label: string, seen: Set<objec
 			case 'model-retry': {
 				const node = exactRecord(value, ['kind', 'seq', 'time', 'messageId', 'turn', 'retry', 'maxRetries', 'delayMs', 'mode', 'retryState', 'failure'], label);
 				readNodeBase(node, label, false);
-				for (const key of ['retry', 'maxRetries', 'delayMs'] as const) {
+				for (const key of ['retry', 'maxRetries'] as const) {
 					if (node[key] !== undefined) {
 						nonNegativeInteger(node[key], `${label}.${key}`);
 					}
+				}
+				if (node['delayMs'] !== undefined) {
+					nonNegativeFinite(node['delayMs'], `${label}.delayMs`);
 				}
 				if (node['mode'] !== undefined && node['mode'] !== 'normal' && node['mode'] !== 'always') {
 					throw new TypeError(`${label}.mode must be normal or always`);

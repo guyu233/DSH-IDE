@@ -357,6 +357,8 @@ export class AgentSessionsControl extends Disposable implements IAgentSessionsCo
 				identityProvider: new AgentSessionsIdentityProvider(),
 				horizontalScrolling: false,
 				multipleSelectionSupport: true,
+				// 会话行单击即打开，不跟随 workbench.list.openMode 的双击设置。
+				openOnSingleClick: true,
 				findWidgetEnabled: true,
 				defaultFindMode: TreeFindMode.Filter,
 				keyboardNavigationLabelProvider: new AgentSessionsKeyboardNavigationLabelProvider(),
@@ -793,7 +795,14 @@ export class AgentSessionsControl extends Disposable implements IAgentSessionsCo
 		};
 
 		this.contextMenuService.showContextMenu({
-			getActions: () => Separator.join(...menu.getActions({ arg: marshalledContext, shouldForwardArgs: true }).map(([, actions]) => actions)),
+			getActions: () => {
+				const groups = menu.getActions({ arg: marshalledContext, shouldForwardArgs: true }).map(([, actions]) => actions);
+				// DSH 会话用自己的菜单（收藏 / 置顶 / 重命名 / 分叉 / 归档 / 删除），不混入 VS Code 的 Open as Editor。
+				const visible = session.providerType === 'dsh' || session.resource.scheme === 'dsh'
+					? groups.map(actions => actions.filter(action => action.id.startsWith('dsh.session.')))
+					: groups;
+				return Separator.join(...visible);
+			},
 			getAnchor: () => anchor,
 			getActionsContext: () => marshalledContext,
 		});

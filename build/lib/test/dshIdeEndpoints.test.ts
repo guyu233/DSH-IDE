@@ -101,7 +101,7 @@ const UNVERIFIED = FINDINGS.filter(f => !WIRED.includes(f.method)).map(f => f.me
 	const block = /const DSH_IDE_METHOD_KEYS[\s\S]*?\n\};/.exec(protocol);
 	assert.ok(block !== null, 'DSH_IDE_METHOD_KEYS must exist in the protocol single source');
 	const keys = [...block[0].matchAll(/^\s*([a-zA-Z]+):/gm)].map(m => m[1]);
-	assert.equal(keys.length, 36, `expected 36 methods, got ${keys.length}`);
+	assert.equal(keys.length, 42, `expected 42 methods, got ${keys.length}`);
 	for (const f of FINDINGS) {
 		assert.ok(keys.includes(f.method), `D16 finding must reference a real whitelist method: ${f.method}`);
 	}
@@ -209,7 +209,7 @@ test('D17 deleteSession calls the approved physical-delete endpoint, never a clo
 test('D59 archive endpoints are official remotes and now wired without third-party approval', () => {
 	const block = /const DSH_IDE_METHOD_KEYS[\s\S]*?\n\};/.exec(protocol);
 	assert.ok(block !== null);
-	assert.equal([...block[0].matchAll(/^\s*([a-zA-Z]+):/gm)].length, 36, 'contract must declare 36 methods after the chat-baseline expansion');
+	assert.equal([...block[0].matchAll(/^\s*([a-zA-Z]+):/gm)].length, 42, 'contract must declare 42 methods after the chat-baseline expansion');
 	for (const endpoint of ['archiveSession', 'unarchiveSession']) {
 		assert.ok(protocol.includes(endpoint + ':'), endpoint + ' must be a contract method');
 		// 窗口只经 ide/dispatch 转发；真正调官方 remote 的是内核桥接。

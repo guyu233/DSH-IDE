@@ -70,12 +70,18 @@ const VALID_ARGS: Record<DshIdeMethod, unknown> = {
 	listSkills: {},
 	openInApp: { target: 'file:///workspace/readme.md' },
 	dismissQuotaNotice: { seq: 1 },
+	renameSession: { sessionId: 's1', title: '新标题' },
+	setSessionFavorite: { sessionId: 's1' },
+	setSessionPinned: { sessionId: 's1' },
+	listWorkspaces: {},
+	moveSession: { sessionId: 's1', workspaceId: 'w1' },
+	openSessionPath: { sessionId: 's1' },
 };
 
 const ALL_METHODS = Object.keys(VALID_ARGS) as DshIdeMethod[];
 
-test('method whitelist has all 36 methods', () => {
-	assert.equal(ALL_METHODS.length, 36);
+test('method whitelist has all 42 methods', () => {
+	assert.equal(ALL_METHODS.length, 42);
 	assert.equal(new Set(ALL_METHODS).size, ALL_METHODS.length);
 });
 

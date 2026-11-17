@@ -156,7 +156,7 @@ import { DSH_IDE_COOKIE_ENV, DSH_IDE_ENDPOINT_ENV, DSH_IDE_LAUNCH_URL_ENV, DSH_I
 import { readFile as readFileText } from 'node:fs/promises';
 import { DshIdeTransport, authenticateHost } from '../../platform/dshClient/transport/dshIdeTransport.js';
 import { DshIdeLaunchListener } from '../../platform/dshClient/transport/dshIdeLaunchListener.js';
-import { createDshIdeBackendFromEnv } from '../../platform/dshClient/electron-main/dshIdeBackendFactory.js';
+import { createDshIdeBackendFromEnv, defaultDshIdeEndpointFile } from '../../platform/dshClient/electron-main/dshIdeBackendFactory.js';
 import { DshIdeViewService } from '../../platform/dshClient/electron-main/ide-view-service.js';
 import { DSH_IDE_CHANNEL } from '../../platform/dshClient/common/dshIdeProtocol.js';
 import { logNodeCompileCacheStatus, markNodeCompileCacheReady, waitForNodeCompileCacheReady } from '../../base/node/nodeCompileCache.js';
@@ -1526,7 +1526,7 @@ export class CodeApplication extends Disposable {
 		// 延迟解析器：拿到之前接单器一直重试，拿到之后自动接单（不阻塞启动、不假装成功）。
 		{
 			const endpointOrigin = process.env[DSH_IDE_ENDPOINT_ENV];
-			const endpointFile = process.env[DSH_IDE_ENDPOINT_FILE_ENV];
+			const endpointFile = process.env[DSH_IDE_ENDPOINT_FILE_ENV] || defaultDshIdeEndpointFile();
 			// 只要知道「去哪里找端点」就启动接单器。不能只看启动时的 DSH_IDE_ENDPOINT：
 			// IDE 可能在 DSH 重启之后仍然存活，那时旧端点已失效，但端点文件里有新的。
 			const hasEntry = (typeof endpointOrigin === 'string' && endpointOrigin !== '')
@@ -2012,6 +2012,7 @@ function createLazyLaunchCaller(origin: string, endpointFile?: string): { call(n
 	// 当前实际连着的 origin。DSH 每次重启都可能换端口（pid 必变），
 	// 所以它不能是闭包里那个启动时的常量。
 	let currentOrigin = origin;
+	let currentLaunchUrl = process.env[DSH_IDE_LAUNCH_URL_ENV];
 
 	/**
 	 * 重新读一次 Host 端点文件，拿到新的 origin + launchUrl。
@@ -2040,9 +2041,11 @@ function createLazyLaunchCaller(origin: string, endpointFile?: string): { call(n
 				return false;
 			}
 			// 启动时没有 origin（空串）也算「变」：那是首次解析，不是无变化。
-			if (currentOrigin !== '' && nextOrigin === currentOrigin) {
+			// 同端口换 token 时 origin 不变，但 launchUrl 变了，旧 cookie 不能再用。
+			if (currentOrigin !== '' && nextOrigin === currentOrigin && (nextLaunchUrl === undefined || nextLaunchUrl === currentLaunchUrl)) {
 				return false;
 			}
+			currentLaunchUrl = nextLaunchUrl;
 			// 端口变了：丢掉旧传输与旧 cookie，按新 launchUrl 重新换一次。
 			currentOrigin = nextOrigin;
 			transport?.dispose();

@@ -13,6 +13,8 @@
 // 本文件在 `electron-main/` 下，因此必须保持零 `@deepseek-ai/*`（boundary 门禁）；
 // 官方包的等价线协议由 `transport/dshIdeTransport.ts` 手写实现，这里只做装配。
 
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
 import { env } from '../../../base/common/process.js';
 import { DSH_IDE_COOKIE_ENV, DSH_IDE_ENDPOINT_ENV, DSH_IDE_ENDPOINT_FILE_ENV, DSH_IDE_LAUNCH_URL_ENV } from '../common/env.js';
 import { DshIdeTransport, DshIdeTransportBackend, authenticateHost } from '../transport/dshIdeTransport.js';
@@ -22,8 +24,30 @@ import { UnavailableDshIdeBackend, type DshIdeBackend } from './ide-view-service
  * 按环境装配后端。HTTP 端点在首帧之前不能异步等待，因此这里只做同步装配：
  * 有 cookie 直接用；只有 launch URL 时按「先换 cookie」的记录在首次 `follow` 前完成交换。
  */
+/**
+ * Host 没把路径写进环境变量时，仍按插件载荷的固定位置找端点文件。
+ * 拉起 IDE 时工作目录是 `runtime/app`，文件在它的上一级。
+ */
+export function defaultDshIdeEndpointFile(): string | undefined {
+	const cwd = process.cwd();
+	const candidates = [
+		join(cwd, '..', 'host-endpoint.json'),
+		join(cwd, 'runtime', 'host-endpoint.json'),
+	];
+	for (const file of candidates) {
+		try {
+			if (existsSync(file)) {
+				return file;
+			}
+		} catch {
+			// 探测失败就试下一个，不让发现过程本身把后端打成不可用。
+		}
+	}
+	return undefined;
+}
+
 export function createDshIdeBackendFromEnv(processEnv: Record<string, string | undefined> = env as Record<string, string | undefined>): DshIdeBackend {
-	const endpointFile = processEnv[DSH_IDE_ENDPOINT_FILE_ENV];
+	const endpointFile = processEnv[DSH_IDE_ENDPOINT_FILE_ENV] || defaultDshIdeEndpointFile();
 	const origin = processEnv[DSH_IDE_ENDPOINT_ENV];
 	// 知道端点文件就足够建立后端：即使启动时没有 DSH_IDE_ENDPOINT（IDE 可能比 DSH 活得久），
 	// 也能在第一次调用时按文件里的新端点解析。两者都没有才是真的不可用。
@@ -76,13 +100,19 @@ class LazyDshIdeTransportBackend implements DshIdeBackend {
 			}
 			const endpoint = parsed as { origin?: unknown; launchUrl?: unknown };
 			const nextOrigin = typeof endpoint.origin === 'string' ? endpoint.origin : undefined;
+			const nextLaunchUrl = typeof endpoint.launchUrl === 'string' ? endpoint.launchUrl : undefined;
 			// 启动时 origin 为空也算变化：那是首次解析。
-			if (nextOrigin === undefined || nextOrigin === ''
-				|| (this.origin !== '' && nextOrigin === this.origin)) {
+			// 端口没变但 launchUrl 变了（同端口换了 token）同样要重连，旧 cookie 已经作废。
+			if (nextOrigin === undefined || nextOrigin === '') {
+				return false;
+			}
+			const sameOrigin = this.origin !== '' && nextOrigin === this.origin;
+			const sameLaunch = nextLaunchUrl === undefined || nextLaunchUrl === this.launchUrl;
+			if (sameOrigin && sameLaunch) {
 				return false;
 			}
 			this.origin = nextOrigin;
-			this.launchUrl = typeof endpoint.launchUrl === 'string' ? endpoint.launchUrl : undefined;
+			this.launchUrl = nextLaunchUrl ?? this.launchUrl;
 			// 旧 cookie 属于旧端口，必须作废。
 			this.cookie = undefined;
 			this.close();

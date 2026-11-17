@@ -309,3 +309,22 @@ test('2-E 真机缺陷回归：有配对调用时 tool-result 仍带 name 与 ca
 		assert.deepEqual(node.call, { name: 'read', argsRaw: '{"path":"a"}' });
 	}
 });
+
+test('llm/retry 的 delayMs 可以是小数，整帧仍能通过校验', () => {
+	const state = createDshIdeConversationState();
+	const frame = {
+		type: 'event',
+		event: {
+			type: 'llm/retry',
+			seq: 8,
+			time: 8,
+			data: { retry: 1, maxRetries: 5, delayMs: 459.98018830311815, mode: 'normal' },
+		},
+	};
+	const view = project(state, frame);
+	const node = view.nodes[0];
+	assert.equal(node.kind, 'model-retry');
+	if (node.kind === 'model-retry') {
+		assert.equal(node.delayMs, 459.98018830311815);
+	}
+});

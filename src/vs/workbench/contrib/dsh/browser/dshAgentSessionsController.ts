@@ -20,11 +20,13 @@ import type { IDshIdeSessionSummary } from '../../../../platform/dshClient/commo
 import { IWorkbenchContribution, registerWorkbenchContribution2, WorkbenchPhase } from '../../../common/contributions.js';
 import { IChatSessionTiming } from '../../chat/common/chatService/chatService.js';
 import { ChatSessionStatus, IChatSessionItem, IChatSessionItemController, IChatSessionItemsDelta, IChatSessionProviderOptionGroup, IChatSessionsService } from '../../chat/common/chatSessionsService.js';
+import { ChatViewId, ChatViewPaneTarget, IChatWidgetService } from '../../chat/browser/chat.js';
 import { sessionOpenerRegistry } from '../../chat/browser/agentSessions/agentSessionsOpener.js';
-import { dshChatSessionFor } from './dshChatSession.js';
+import { ChatViewPane } from '../../chat/browser/widgetHosts/viewPane/chatViewPane.js';
+import { IViewsService } from '../../../services/views/common/viewsService.js';
 import { getDshComposerSource } from './dshComposerRegistry.js';
 import { toPermissionItems } from './dshComposerProjection.js';
-import { withArchived, withRead } from './dshSessionItemState.js';
+import { buildSessionTree, flattenTree, mapTreeItem, sameTreeItem } from './dshSessionTree.js';
 
 export const DSH_CHAT_SESSION_TYPE = 'dsh';
 
@@ -113,12 +115,20 @@ export class DshAgentSessionsController extends Disposable implements IChatSessi
 			this.applyRunning(notice.sessionId, notice.running);
 		}));
 		this._register(sessionOpenerRegistry.registerParticipant({
-			handleOpenSession: async (_accessor, session) => {
-				const sessionId = dshSessionIdFromResource(session.resource);
-				if (sessionId === undefined) {
+			handleOpenSession: async (accessor, session) => {
+				if (dshSessionIdFromResource(session.resource) === undefined) {
 					return false;
 				}
-				await dshChatSessionFor(this.client).bind(sessionId);
+				// 直接在该 Chat 视图里加载会话：`openSession` 会在 `canResolveChatSession` 未就绪时
+				// 降级成编辑器标签，落点就不是 Sessions 旁边的 Chat 了。
+				const views = accessor.get(IViewsService);
+				const pane = await views.openView<ChatViewPane>(ChatViewId, true) ?? views.getViewWithId<ChatViewPane>(ChatViewId) ?? undefined;
+				if (pane !== undefined) {
+					await pane.loadSession(session.resource);
+					pane.focus();
+				} else {
+					await accessor.get(IChatWidgetService).openSession(session.resource, ChatViewPaneTarget, { pinned: true });
+				}
 				return true;
 			},
 		}));
@@ -205,27 +215,22 @@ export class DshAgentSessionsController extends Disposable implements IChatSessi
 			summaries.push(...result.value);
 		}
 
-		const next: IChatSessionItem[] = [];
-		const seen = new Set<string>();
-		for (const summary of summaries) {
-			const item = toSessionItem(summary, this.liveRunning);
-			if (item === undefined || seen.has(item.resource.toString())) {
-				continue;
-			}
-			seen.add(item.resource.toString());
-			next.push(item);
-		}
+		// 子智能体会话按原生 children 树承接：只有 origin==='subagent' 且父在列表里才挂子项。
+		const roots = buildSessionTree(summaries, summary => toSessionItem(summary, this.liveRunning));
+		const allItems = flattenTree(roots);
+		const seen = new Set(allItems.map(item => item.resource.toString()));
 
-		const previous = new Set(this._items.map(item => item.resource.toString()));
-		const removed = this._items
+		const oldAll = flattenTree(this._items);
+		const previous = new Set(oldAll.map(item => item.resource.toString()));
+		const removed = oldAll
 			.filter(item => !seen.has(item.resource.toString()))
 			.map(item => item.resource);
-		const addedOrUpdated = next.filter(item => {
-			const key = item.resource.toString();
-			const before = this._items.find(existing => existing.resource.toString() === key);
-			return before === undefined || !sameItem(before, item);
+		const beforeByKey = new Map(oldAll.map(item => [item.resource.toString(), item]));
+		const addedOrUpdated = allItems.filter(item => {
+			const before = beforeByKey.get(item.resource.toString());
+			return before === undefined || !sameTreeItem(before, item);
 		});
-		this._items = next;
+		this._items = roots;
 		if (addedOrUpdated.length > 0 || removed.length > 0 || previous.size !== seen.size) {
 			this._onDidChangeChatSessionItems.fire({ addedOrUpdated, removed });
 		}
@@ -252,11 +257,11 @@ export class DshAgentSessionsController extends Disposable implements IChatSessi
 	 */
 	setChatSessionItemRead(resource: URI, isRead: boolean): void {
 		const key = resource.toString();
-		const next = withRead(this._items, key, isRead);
+		const next = mapTreeItem(this._items, key, item => item.isRead === isRead ? undefined : { ...item, isRead });
 		if (next === this._items) {
 			return;
 		}
-		const updated = next.find(item => item.resource.toString() === key);
+		const updated = flattenTree(next).find(item => item.resource.toString() === key);
 		this._items = next;
 		if (updated !== undefined) {
 			this._onDidChangeChatSessionItems.fire({ addedOrUpdated: [updated] });
@@ -273,11 +278,11 @@ export class DshAgentSessionsController extends Disposable implements IChatSessi
 			return;
 		}
 		const key = dshSessionResource(sessionId).toString();
-		const next = withArchived(this._items, key, archived);
+		const next = mapTreeItem(this._items, key, item => item.archived === archived ? undefined : { ...item, archived });
 		if (next === this._items) {
 			return;
 		}
-		const updated = next.find(item => item.resource.toString() === key);
+		const updated = flattenTree(next).find(item => item.resource.toString() === key);
 		this._items = next;
 		if (updated !== undefined) {
 			this._onDidChangeChatSessionItems.fire({ addedOrUpdated: [updated] });
@@ -288,7 +293,7 @@ export class DshAgentSessionsController extends Disposable implements IChatSessi
 	private applyRunning(sessionId: string, running: boolean): void {
 		this.liveRunning.set(sessionId, running);
 		const key = dshSessionResource(sessionId).toString();
-		const current = this._items.find(item => item.resource.toString() === key);
+		const current = flattenTree(this._items).find(item => item.resource.toString() === key);
 		if (current === undefined) {
 			return;
 		}
@@ -296,17 +301,20 @@ export class DshAgentSessionsController extends Disposable implements IChatSessi
 		if (current.status === status) {
 			return;
 		}
-		const updated: IChatSessionItem = {
-			...current,
+		const next = mapTreeItem(this._items, key, item => ({
+			...item,
 			status,
 			timing: {
-				created: current.timing.created,
-				lastRequestStarted: running ? current.timing.lastRequestStarted ?? current.timing.created : current.timing.lastRequestStarted,
-				lastRequestEnded: running ? undefined : current.timing.lastRequestEnded ?? current.timing.created,
+				created: item.timing.created,
+				lastRequestStarted: running ? item.timing.lastRequestStarted ?? item.timing.created : item.timing.lastRequestStarted,
+				lastRequestEnded: running ? undefined : item.timing.lastRequestEnded ?? item.timing.created,
 			},
-		};
-		this._items = this._items.map(item => item.resource.toString() === key ? updated : item);
-		this._onDidChangeChatSessionItems.fire({ addedOrUpdated: [updated] });
+		}));
+		const updated = flattenTree(next).find(item => item.resource.toString() === key);
+		this._items = next;
+		if (updated !== undefined) {
+			this._onDidChangeChatSessionItems.fire({ addedOrUpdated: [updated] });
+		}
 	}
 }
 
@@ -330,15 +338,6 @@ function toSessionItem(summary: IDshIdeSessionSummary, liveRunning: ReadonlyMap<
 		timing,
 		iconPath: Codicon.comment,
 	};
-}
-
-function sameItem(left: IChatSessionItem, right: IChatSessionItem): boolean {
-	return left.label === right.label
-		&& left.description === right.description
-		&& left.status === right.status
-		&& left.timing.created === right.timing.created
-		&& left.timing.lastRequestStarted === right.timing.lastRequestStarted
-		&& left.timing.lastRequestEnded === right.timing.lastRequestEnded;
 }
 
 registerWorkbenchContribution2(DshAgentSessionsController.ID, DshAgentSessionsController, WorkbenchPhase.AfterRestored);

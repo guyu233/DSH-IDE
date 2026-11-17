@@ -918,6 +918,74 @@ function createMethodHandlers(bridge) {
 					throw coded(INVALID_ARGUMENT, `unknown setGoal action ${JSON.stringify(args.action)}`);
 			}
 		},
+		async renameSession(args) {
+			bridge.assertOwnership(args.sessionId);
+			await controller().rename({ sessionId: args.sessionId, title: args.title });
+			return { accepted: true };
+		},
+		async setSessionFavorite(args) {
+			bridge.assertOwnership(args.sessionId);
+			const registry = service(bridge.ctx, 'workspaceRegistry');
+			if (typeof registry.setSessionFavorite !== 'function' || typeof registry.favoriteSessions !== 'function') {
+				throw coded(FEATURE_UNAVAILABLE, 'session favorite is unavailable: install and enable @michengai/dsh-archive-manager', { capability: 'setSessionFavorite' });
+			}
+			const current = await registry.favoriteSessions();
+			const ids = current && Array.isArray(current.favoriteSessionIds) ? current.favoriteSessionIds : [];
+			await registry.setSessionFavorite({ sessionId: args.sessionId, favorite: !ids.includes(args.sessionId) });
+			return { accepted: true };
+		},
+		async setSessionPinned(args) {
+			bridge.assertOwnership(args.sessionId);
+			const workspaces = service(bridge.ctx, 'workspaceController');
+			const registry = optionalService(bridge.ctx, 'workspaceRegistry');
+			const pinned = registry && Array.isArray(registry.pinnedSessionIds) ? registry.pinnedSessionIds.includes(args.sessionId) : false;
+			const method = pinned ? 'unpinSession' : 'pinSession';
+			if (typeof workspaces[method] !== 'function') {
+				throw coded(FEATURE_UNAVAILABLE, `DSH workspaceController has no ${method}()`, { capability: 'setSessionPinned' });
+			}
+			await workspaces[method]({ sessionId: args.sessionId });
+			return { accepted: true };
+		},
+		async listWorkspaces() {
+			const registry = optionalService(bridge.ctx, 'workspaceRegistry');
+			const items = registry && typeof registry.list === 'function' ? registry.list() : [];
+			return (Array.isArray(items) ? items : []).flatMap(workspace => {
+				if (workspace === null || typeof workspace !== 'object') {
+					return [];
+				}
+				const id = typeof workspace.id === 'string' ? workspace.id : typeof workspace.workspaceId === 'string' ? workspace.workspaceId : '';
+				if (id === '') {
+					return [];
+				}
+				const path = typeof workspace.path === 'string' ? workspace.path : '';
+				const title = typeof workspace.title === 'string' && workspace.title !== '' ? workspace.title : (path || id);
+				return [{ id, title, ...(path === '' ? {} : { path }) }];
+			});
+		},
+		async moveSession(args) {
+			bridge.assertOwnership(args.sessionId);
+			const registry = service(bridge.ctx, 'workspaceRegistry');
+			if (typeof registry.moveSessionToWorkspace !== 'function') {
+				throw coded(FEATURE_UNAVAILABLE, 'moving a session is unavailable: install and enable @michengai/dsh-archive-manager', { capability: 'moveSession' });
+			}
+			await registry.moveSessionToWorkspace({ sessionId: args.sessionId, targetWorkspaceId: args.workspaceId });
+			return { accepted: true };
+		},
+		async openSessionPath(args) {
+			bridge.assertOwnership(args.sessionId);
+			const listed = await controller().list({}, callerSignal());
+			const items = listed && Array.isArray(listed.items) ? listed.items : [];
+			const item = items.find(entry => entry && entry.sessionId === args.sessionId);
+			const cwd = item && (typeof item.cwd === 'string' ? item.cwd : undefined);
+			if (cwd === undefined || cwd === '') {
+				throw coded(FEATURE_UNAVAILABLE, 'session has no workspace path to open', { capability: 'openSessionPath' });
+			}
+			if (typeof controller().openWorkspacePath !== 'function') {
+				throw coded(FEATURE_UNAVAILABLE, 'DSH sessionController has no openWorkspacePath()', { capability: 'openSessionPath' });
+			}
+			await controller().openWorkspacePath({ path: cwd }, callerSignal());
+			return { accepted: true };
+		},
 		listSkills: async () => {
 			// 官方落点是 `sessionSkillCatalog.list({ sessionId }, signal)`（`skills` Remote），
 			// 不是 `ctx.skills.list({ scope })`。scope 是 ScopeKey，把 sessionId 塞进去读不到会话目录。

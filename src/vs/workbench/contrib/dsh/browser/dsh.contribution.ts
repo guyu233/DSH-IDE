@@ -31,6 +31,7 @@ import { Disposable } from '../../../../base/common/lifecycle.js';
 import { registerDshChatSessionContent, registerDshAnswerCommands } from './dshChatSessionContent.js';
 import { IDshIdeSessionsService, DshIdeSessionsService } from './dshIdeSessionsService.js';
 import { registerDshSessionSearchCommands } from './dshSessionSearchCommands.js';
+import { registerDshSessionMenu } from './dshSessionMenu.js';
 import { registerDshTeamCommands } from './dshTeamCommands.js';
 import { registerDshIconReplacement } from './dshIconReplacement.js';
 import { IQuickInputService } from '../../../../platform/quickinput/common/quickInput.js';
@@ -66,6 +67,7 @@ class DshClientContribution extends Disposable implements IWorkbenchContribution
 		this._register(registerDshChatSessionContent(client, chatSessionsService));
 		// 原生 history 里的审批 / 问卷按钮调这两个命令，真正走 answerApproval/answerQuestion。
 		this._register(registerDshAnswerCommands(client));
+		registerDshSessionMenu();
 		// 会话搜索：服务层早就实现，这里补上 quick pick 入口。
 		this._register(registerDshSessionSearchCommands(client, this._sessions, this.quickInputService, this.instantiationService, this.notifications));
 		// DSH 团队开关：原生模型选择器没有对应控件，用命令承接。

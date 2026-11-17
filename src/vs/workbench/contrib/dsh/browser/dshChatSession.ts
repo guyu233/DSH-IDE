@@ -262,6 +262,12 @@ export class DshChatSession extends Disposable implements IDshChatSession {
 		if (!rebound.ok) {
 			return false;
 		}
+		// `rebind` 返回的快照就是这次绑定的首屏内容：不喂给 model，面板会一直是空的，
+		// 只能等后续流帧；已结束的会话根本不会再推帧。
+		const view = rebound.value?.state?.state === 'ready' ? rebound.value.state.view : undefined;
+		if (view !== undefined) {
+			this.acceptView(view);
+		}
 		await this.refreshComposer();
 		await this.refreshSkills();
 		return true;

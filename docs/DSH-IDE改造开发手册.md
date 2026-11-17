@@ -1,10 +1,10 @@
-# DSH-IDE 改造开发手册（第一阶段已落地；第二阶段 2-A/2-B/2-C/2-D 已落地，2-E 真机验收待用户执行）
+# DSH-IDE 改造开发手册（第一/第二阶段代码完成；2-E 真机验收与子智能体会话树待定）
 
-> 编写日期：2026-11-16。依据：`docs/DSH-IDE承接DSH桌面端聊天页面的路线草稿.md`（22:23 更新版）、`docs/DSH-core内容进入桌面前端的全部入口.md`、`docs/DSH-IDE内容接收与ChatSession面板架构分析.md`、`docs/DSH聊天页面全量构成与插件显示机制.md`，以及只读核对的 DSH 源码 `E:/deepseek-harness`、DSH-IDE 源码 `E:/DSH-IDE/src/`。
+> 编写日期：2026-11-16；进度更新：2026-11-17。依据：`docs/DSH-IDE承接DSH桌面端聊天页面的路线草稿.md`（2026-11-17 14:11 进度版）、`docs/DSH-core内容进入桌面前端的全部入口.md`、`docs/DSH-IDE内容接收与ChatSession面板架构分析.md`、`docs/DSH聊天页面全量构成与插件显示机制.md`，以及只读核对的 DSH 源码 `E:/deepseek-harness`、DSH-IDE 源码 `E:/DSH-IDE/src/`。
 >
 > 本文是静态源码证据推导的实施方案，不是真机观测结论；所有 `file:line` 以快照为准，动手前复核。真机 GUI 验证由用户执行，AI 不代跑。
 >
-> **阅读顺序**：§0–§7 是目标、基线与冻结边界；§8 是已完成内容的压缩摘要；§9 是第二阶段状态与计划（2-A~2-D 已落地，2-E 真机验收待用户执行）。
+> **阅读顺序**：§0–§7 是目标、基线与冻结边界；§8 是已完成内容的压缩摘要；§9.1–§9.8 是第二阶段状态（2-A~2-D 代码完成并打包，2-E 真机验收待用户执行）；**§9.9 是子智能体会话树（2026-11-17 已按确认决策实现，全量门禁 PASS）**。
 
 ---
 
@@ -500,14 +500,21 @@ DshChatSession.acceptView / acceptConversation → DshChatModel（typed 节点�
 > 说明：Host 级 `include:tool-subagent` 行在 profile 清单里是 inactive，但当前会话的 `ptc` preset 在 preset 作用域内挂了 `tool-subagent`（`provider: spawn`、`modelSelection: true`、`modelDiscovery: true`），所以本会话的 `subagent` / `subagent_fork` / `list_subagent_models` 工具可用——这也是子智能体能被实际派工的原因。这一点按源码核对记录，不臆造 Host 级启用。
 
 ---
-## 9. 当前状态：第一阶段完成；第二阶段 2-A/2-B/2-C/2-D 已落地，2-E 真机验收待用户执行
+## 9. 当前状态：第一/第二阶段代码完成并打包；2-E 真机验收与新重点「子智能体会话树」待定
 
-### 9.1 阶段划分（本次更新）
+### 9.1 阶段划分与当前进度（按 2026-11-17 草稿迭代）
 
-草稿在 2026-11-16 22:23 更新后，目标已从"把内容接进来"推进到"**用 VS Code 原生模具正确渲染 + 图标全局替换**"。手册据此把工作分为两阶段：
+草稿在 2026-11-17 14:11 重写为进度版：已完成部分压缩为摘要，未完成部分给出方案。当前状态：
 
-- **第一阶段（已完成并冻结）**：§3 的四层改造——数据通路、契约、Host 投影、状态层、逐类 UI 接线。见 §8 逐轮记录。
-- **第二阶段（进行中）**：把第一阶段"降级翻译"的 UI 升级为真正的 VS Code 原生 content kind；补齐 Session 面板缺口；图标全局替换为 DSH SVG。见 §9.3–§9.6。**2-A/2-B/2-C/2-D 已落地（§9.5），只剩 2-E 真机验收。**
+| 阶段 | 状态 | 说明 |
+|---|---|---|
+| 路线决策 | 完成 | 原生 chat 面板 + 翻译层，不引入 slot / Webview（§0） |
+| 第一阶段（层 1–4） | 完成并冻结 | 数据通路、契约、Host 投影、状态层、逐类 UI 接线（§8） |
+| 第二阶段 2-A~2-D | **代码完成** | 门禁全绿、产物已打包并装入 profile（§9.2–§9.5） |
+| 第二阶段 2-E | **待用户执行** | 重启 DSH（当前 `Config.listConfigs{name:"dsh-ide"}` 为 `absent`）+ 真机 GUI 验收（§4 草稿 / §9.5 2-E） |
+| **子智能体会话树** | **代码完成（全量门禁 PASS）** | 用户确认三项决策后实现：纯 renderer 改动、原生 `IChatSessionItem.children`；新增 `dshSessionTree.ts` 与 9 项单测（§9.9）。全量门禁已复跑 PASS，真机验证并入 2-E |
+
+> 重启前运行中的 DSH Host（pid 16300，2026-11-14 启动）内存里的插件代码早于本轮改动；开发板 electron 已完成连接性与两轮源码核对（§9.5 2-E），但**新版 Host 半身与 2-A~2-D 的真机最终表现须重启后复验**。
 
 ### 9.2 第一阶段真实状态（基线，不再改）
 
@@ -730,6 +737,7 @@ DshChatSession.acceptView / acceptConversation → DshChatModel（typed 节点�
 | 主线 C | 2-C Session 缺口核对 | 随主线，无硬依赖 |
 | 并行 D | 2-D 图标全局替换（资源生成→映射→getCSS→覆盖点→主题验证） | **与 A/B 并行**，独立工作流、独立门禁，不阻塞主线 |
 | 收尾 E | 2-E 真机验收（用户执行） | **全部完成后**统一做 |
+| 新重点（待定） | 子智能体会话树（§9.9） | 证据已闭合；用户确认 3 个问题（§9.9.5）后按形态 A+ 实现，并入门禁 |
 
 ### 9.7 能力限制与非缺陷（保持不变）
 
@@ -743,4 +751,120 @@ DshChatSession.acceptView / acceptConversation → DshChatModel（typed 节点�
 1. **真机 GUI 验证时机**：**全部代码完成、门禁全绿后统一验证**，不在中途分批做。由用户执行（AI 不代跑）。
 2. **图标替换排期**：**与 2-A/2-B 并行**启动，独立工作流、独立门禁（2-D）。
 3. **临时文件**：`.dsh-preview/`、`.session_dump.txt` 已删除清理（经用户确认终止占用目录的两个临时预览进程 `serve.cjs` / `serve-chat-view.cjs` 后删除）。二者未被 git 跟踪，不进版本库。
+
+---
+
+### 9.9 子智能体会话树（2026-11-17 已按确认决策实现）
+
+> 状态：用户确认三项决策（仅树展开 / rebind 到主 chat / 完整递归+防环）后，已按 §9.9.5 实现并通过门禁。契约字段与 Host 投影本就具备 `parentSessionId`/`origin`，本次是**纯 renderer 改动**，不改契约、不加 Host 端点、不改菜单。落地结果见 §9.9.8。
+
+#### 9.9.1 需求与结论
+
+需求：Session 面板中，父会话可展开其子智能体会话，子会话还能继续展开下一层（递归），用 VS Code 原生会话树承接 DSH 的子智能体会话关系。
+
+**结论**：不新增 `listSubagentChildren` 端点、不做右键子菜单。**用已有 `parentSessionId`/`origin` 在 renderer 拼 `IChatSessionItem.children`，交给 VS Code 原生树渲染。**
+
+#### 9.9.2 当前代码实际状态（工作树，非文档声称）
+
+| 位置（当前行号） | 当前行为 | 树所需改动 |
+|---|---|---|
+| `dshAgentSessionsController.ts:190-242` `refresh()` | `:220-227` 逐条 `toSessionItem()` 后 `next.push(item)`，全扁平 | 改为先建树，push 根节点 |
+| `dshAgentSessionsController.ts:323-343` `toSessionItem()` | `:335-342` 只返回 `resource/label/description/status/timing/iconPath`，**无 `children`、不读 `parentSessionId/origin`** | 保持单条映射，供树构造调用；补稳定 resource/timing、label 单行 |
+| `dshAgentSessionsController.ts:345-352` `sameItem()` | 只比 `label/description/status/timing.*` | 递归比较 `children`，否则子项状态变化不刷新 |
+| `dshAgentSessionsController.ts:298-320` `applyRunning()` | `:301` 只按 resource 找顶层，`:309-318` 只替换顶层 | 递归更新 `children` |
+| `dshAgentSessionsController.ts:250-256`/`:263-274` 归档/已读 | 走 `applyArchived`(`277-295`) / `withRead`，均 `items.map` 单层 | 递归更新 `children` |
+| `dshSessionItemState.ts:14,24-34,42-52,55-64` | `DshSessionItemLike`/`withArchived`/`withRead`/`timingForRunning`，全部单层 | 扩展为递归或新增递归包装 |
+| `dshAgentSessionsController.ts:117-134` `sessionOpenerRegistry` | 对任意 `dsh:///<sessionId>` 调 `bind(sessionId)` | **不用改**；子项 resource 用同格式即可 |
+| `dshSessionMenu.ts:86-235` | 9 个命令（收藏/置顶/重命名/fork/复制 ID/打开路径/移动/归档/删除），不涉及父子 | **不用改**，也不要把它当子智能体入口 |
+| `buildSessionTree`/`children`/`parentSessionId`/`origin==='subagent'` | `dsh/browser/` 全 0 命中 | 全部待建 |
+| `build/lib/test/dshSessionTree*.test.*` | 不存在 | 新建单测 |
+
+#### 9.9.3 关键 API 事实与 gotcha（源码核对，草稿未写）
+
+**VS Code 原生规则（必须遵守）：**
+
+1. provider 接口只有 `children?: readonly IChatSessionItem[]`（`chatSessionsService.ts:260-273`），**没有 `parentSession` 字段**；`parentSession` 是内部类型（`agentSessionsModel.ts:90-94,230-232`），由 `toInternalSession` 从嵌套关系自动注入（`:762-803`）——**不要在 item 上手写 parentSession**。
+2. 子项仍是普通 `IChatSessionItem`，需要 stable `resource` + `label` + `timing`；children **可仅嵌入**，无需逐个 `registerChatSessionItemController`（model 只 set 顶层 provider items，children 递归内联，`:743-807`）。
+3. child 定位按 `resource` 相等（`agentSessionsModel.ts:607-619`），树 id 用 `resource.toString()`、child 带 `chat-` 前缀（`agentSessionsViewer.ts:1749-1752`）——resource 必须稳定且唯一。
+4. `hasChildren` 依据 `children?.length`（`agentSessionsViewer.ts:1295,1351-1353`）；`has-chat-children` class 由 `visibleChildrenCount > 0` 决定（`:364-365`），缩进 guide 只在 `aria-expanded="true"` 出现（`agentsessionsviewer.css:389-397`）。
+5. **展开是用户驱动**：tree `expandOnlyOnTwistieClick: true`、缩进设为 0（`agentSessionsControl.ts:366-372`），**没有公开 `expandSession`**（`:847-857,868-879,970-1008` 只展开 section）。不做"默认展开所有子会话"，交给用户点 twistie。
+6. parent 的 `label.split('\n')[0]` 会进 child 的 `parentSession.label`（`agentSessionsModel.ts:781`）——label 保持单行。
+
+**DSH 侧参照规则（不直接复用其输出）：**
+
+7. `flattenLineage()`（`lineage.ts:54-95`）输出的是**新对象 `SessionListEntry`**（剥离 `agentAvailable`、新增 `depth`，`:21-44,81-85`），不是 `IChatSessionItem`；仓库里也**没有**反向 `buildTree/unflatten` 可搬——只参照规则，不搬输出。
+8. 规则：仅 `origin === 'subagent' && parentSessionId && byId.has(parentSessionId)` 才挂为子项（普通 fork 即便有 parent 也不挂，`:63-69`）；父不在列表→降级 root 不丢（`:69`）；`visited` 防环（`:74-79`）；不可达环成员补 root（`:92-94`）。
+9. **保持 DSH 输入顺序**，不按 `updatedAt` 重排（`lineage.ts:48-50`）。
+
+#### 9.9.4 证据链与判定（详细见草稿 §5.2/§5.3）
+
+| 待确认点 | 结论 | 证据 |
+|---|---|---|
+| `listSessions` 是否返回子会话 | 是（不过滤 subagent） | `list.ts:145-178,180-193` |
+| summary 是否带父子字段 | 是（`parentSessionId`/`origin`） | `list.ts:372-382`，`dshIdeProtocol.ts:68-80` |
+| Host 桥是否保留 | 是 | `ide-view-host.js:708-745`，`dshIdeSessionList.js:48-62` |
+| renderer 是否使用 | **否**（唯一缺口） | `dshAgentSessionsController.ts:335-342` |
+| VS Code 是否有原生 children 树 | 有 | `chatSessionsService.ts:260-267`，`agentSessionsModel.ts:762-803` |
+| 是否需新 `listSubagentChildren` 端点 | 不需要（仅冷/外部子会话不返回时再评估） | 草稿 §5.3 |
+| 是否需右键子菜单 | 不建议主用；children 树是正解 | `agentSessionsActions.ts:71-78,812-817` |
+| 点击打开是否要改 | 不用，现有 opener 通用 | `dshAgentSessionsController.ts:117-134` |
+| 深度是否受限 | 来自配置 `maxDepth:2`，不是 list 缺失 | `tool-subagent.spec.ts:606-610,442-456,74-79` |
+
+#### 9.9.5 代码级实施计划（确认后按序执行）
+
+| 步骤 | 文件 | 具体动作 |
+|---|---|---|
+| 1 | 新增 `dshSessionTree.ts`（或并入 `dshSessionItemState.ts`） | 纯函数 `buildSessionTree(summaries, toItem)`：按 §9.9.3 规则 7–9 建树。`byId=Map(sessionId→summary)`；仅 subagent 且 parent 存在才挂子；`visited` 防环；孤儿/环降级 root；**保持输入顺序**；输出 `readonly IChatSessionItem[]`（root 带嵌套 `children`），**不写 `parentSession`、不写 `depth` 到 item**（depth 仅测试可选返回） |
+| 2 | `dshAgentSessionsController.ts:190-242` `refresh()` | `:220-227` 的逐条 `next.push` 改为用 `buildSessionTree(summaries, toSessionItem)` 的结果作为 `next` |
+| 3 | `dshAgentSessionsController.ts:323-343` `toSessionItem()` | 只做单条映射：resource=`dshSessionResource(sessionId)`、timing 来自 `timingForRunning`、label 单行；稳定 resource 供 child 定位 |
+| 4 | `dshAgentSessionsController.ts:345-352` `sameItem()` | 递归：先比顶层字段，再比两侧 `children` 长度与逐项 `sameItem` |
+| 5 | `dshAgentSessionsController.ts:298-320` + `dshSessionItemState.ts` | `applyRunning` / `withArchived` / `withRead` 递归处理 `children`（给 item 接口加 `children?`，`map` 后对 `children` 再递归） |
+| 6 | 契约 / Host / 菜单 / opener | **不动**：不加端点、不改 `dshIdeProtocol.ts`、不改 `dshSessionMenu.ts`、不改 `sessionOpenerRegistry` |
+| 7 | 新测试 `build/lib/test/dshSessionTree.test.ts` | 见 §9.9.6 |
+
+#### 9.9.6 测试与门禁
+
+`dshSessionTree.test.ts` 必测用例：
+
+1. `origin==='subagent'` 且 parent 存在 → 挂为父项 `children`。
+2. 普通 fork（有 `parentSessionId` 但非 subagent）→ 仍为 root。
+3. parent 不在列表的孤儿 subagent → 降级 root 不丢。
+4. 环状父子 → `visited` 防死循环，剩余项补 root。
+5. 三层递归（父→子→孙）→ children 嵌套正确、resource 唯一。
+6. 输入顺序保持，不按 `updatedAt` 重排。
+7. `sameItem` 子项状态变化 → 返回 true（触发刷新）。
+8. `applyRunning`/`withArchived`/`withRead` 递归更新子项。
+
+门禁：`test-dsh:all` 全 PASS、`verify:dsh-ide-ci` 五步全 PASS、改动文件 tsc 零错误（全量 tsc 既有 FAIL 如实记录）；真机会话树展开在 2-E 重启后一并验收（AI 不代跑）。
+
+#### 9.9.7 用户决策（2026-11-17 已确认，按此实现）
+
+1. **形态**：**仅"会话树展开"**——原生、递归自然。不做右键子智能体子菜单（`dshSessionMenu.ts` 已是独立右键菜单且不含子项，保持不动）。
+2. **点击子会话**：**rebind 到主 chat**——现有 opener `dsh:///<id> → bind` 通用，无需新增路径、不新开 editor/side。
+3. **深度**：**完整递归 + 防环**——不截断到 `maxDepth`；list 已返回所有层级，人为截断反而丢信息；`maxDepth` 只控制派生，不限制展示。
+
+按 §9.9.5 执行，完成结果如下。
+
+#### 9.9.8 落地结果与门禁（2026-11-17）
+
+**改动文件：**
+
+| 文件 | 改动 |
+|---|---|
+| 新增 `src/vs/workbench/contrib/dsh/browser/dshSessionTree.ts` | 纯函数层：`buildSessionTree(summaries, toItem)` 建树（subagent 才挂子、孤儿降级 root、`visited` 防环、保持输入顺序、不写 `parentSession`/`depth`）；`flattenTree` / `mapTreeItem`（递归状态更新）/ `sameTreeItem`（递归比较）/ `sessionTimingForRunning` |
+| `dshAgentSessionsController.ts` | `refresh()` 改用 `buildSessionTree` + `flattenTree` 做树与 delta；`setChatSessionItemRead` / `applyArchived` / `applyRunning` 改用 `mapTreeItem` 递归更新子项；`applyRunning` 查找改 `flattenTree`；删除旧的单层 `sameItem`，改用 `sameTreeItem` |
+| 新增 `build/lib/test/dshSessionTree.test.ts` | 9 项：subagent 挂子、普通 fork 为 root、孤儿降级 root、环防死循环不丢、三层递归、输入顺序、重复 id 去重、递归状态更新、递归比较 |
+| `package.json` | `test-dsh:all` 登记 `dshSessionTree.test.ts` |
+
+**门禁实测（如实记录）：**
+
+| 项 | 结果 |
+|---|---|
+| `dshSessionTree.test.ts`（9 项） | PASS |
+| 会话相关四文件联跑（`dshSessionItemState` + `dshSessionTree` + `dshChatSessionContent` + `dshChatHistoryNative`） | PASS（37 项） |
+| mocha `test-dsh` 核心命令 | PASS（7 项） |
+| 改动文件 tsc 检查 | PASS：`dshSessionTree.ts` 零错误；`dshAgentSessionsController.ts` 的 `pane` 可能为 null 已改为 `?? undefined` 收窄，改动文件零错误 |
+| 全量 `tsc --noEmit` / `verify:dsh-ide-ci` | **PASS**（2026-11-17 15:26 复跑）：`test-dsh:all` mocha 7 项 + node 386 项全通过；`verify:dsh-ide-ci` 在 `DSH_INSTALLED_VERSION=0.2.2-rc.3` 下五步全 PASS；全量 tsc 余 137 个既有 VS Code 报错，本次改动文件零命中 |
+
+> 注：全量门禁已按上表复跑并转 PASS；真机会话树展开在 2-E 重启 DSH 后一并验收（AI 不代跑）。
 

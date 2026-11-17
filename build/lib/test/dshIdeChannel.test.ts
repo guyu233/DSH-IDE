@@ -49,6 +49,7 @@ const ALL_METHODS: DshIdeMethod[] = [
 	'archiveSession', 'unarchiveSession', 'searchSessions',
 	'composerState', 'presentationSettings', 'setTeamEnabled', 'setAgentPreset',
 	'addAttachment', 'removeAttachment', 'setGoal', 'listSkills', 'openInApp', 'dismissQuotaNotice',
+	'renameSession', 'setSessionFavorite', 'setSessionPinned', 'listWorkspaces', 'moveSession', 'openSessionPath',
 ];
 
 interface FakeBackend extends DshIdeBackend {
@@ -233,6 +234,12 @@ const VALID: Record<DshIdeMethod, unknown> = {
 	listSkills: {},
 	openInApp: { target: 'readme.md' },
 	dismissQuotaNotice: { seq: 1 },
+	renameSession: { sessionId: 's-1', title: '新标题' },
+	setSessionFavorite: { sessionId: 's-1' },
+	setSessionPinned: { sessionId: 's-1' },
+	listWorkspaces: {},
+	moveSession: { sessionId: 's-1', workspaceId: 'w-1' },
+	openSessionPath: { sessionId: 's-1' },
 };
 
 async function openedChannel(backend = fakeBackend()) {
