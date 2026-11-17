@@ -34,7 +34,6 @@ import { setup as setupChatSandboxTests } from './areas/chat/chatSandbox.test';
 import { setup as setupChatSessionsTests } from './areas/chat/chatSessions.test';
 import { setup as setupChatModelConfigTests } from './areas/chat/chatModelConfig.test';
 import { setup as setupAccessibilityTests } from './areas/accessibility/accessibility.test';
-import { setup as setupAgentsWindowTests } from './areas/agentsWindow/agentsWindow.test';
 import { setup as setupBrowserViewTests } from './areas/browserView/browserView.test';
 import { setup as setupPolicyTests } from './areas/policy/policy.test';
 
@@ -467,7 +466,6 @@ const smokeTestSuite = describe(`VSCode Smoke Tests (${opts.web ? 'Web' : 'Elect
 	if (!opts.web && !opts.remote) { setupChatSandboxTests(logger); }
 	if (!opts.web && !opts.remote) { setupChatSessionsTests(logger); }
 	if (!opts.web && !opts.remote) { setupChatModelConfigTests(logger); }
-	if (!opts.web && !opts.remote) { setupAgentsWindowTests(logger, quality); }
 	if (!opts.web && !opts.remote) { setupBrowserViewTests(logger); }
 	// Native policy fixtures modify OS state outside the test profile; opt in only on disposable runners so you don't break your own machine.
 	if (!opts.web && !opts.remote && process.env.VSCODE_SMOKE_TEST_POLICY === '1') { setupPolicyTests(logger); }

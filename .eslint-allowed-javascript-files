@@ -8,11 +8,6 @@
 #
 # Lines starting with `#` are comments. Blank lines are ignored.
 
-build/next/devTunnelsWebEntry.js
-build/next/devTunnelsShims/buffer.js
-build/next/devTunnelsShims/empty.cjs
-build/next/devTunnelsShims/process.js
-build/next/devTunnelsShims/vscodeJsonrpc.cjs
 eslint.config.js
 extensions/cpp/build/update-grammars.js
 extensions/css-language-features/server/test/index.js
