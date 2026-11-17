@@ -260,7 +260,8 @@ export function getConfigPickerItemHover(property: string, item: IConfigPickerIt
 
 function getPermissionsLearnMoreUrl(property: string): string | undefined {
 	if (property === CodexSessionConfigKey.PermissionsPreset) {
-		return CODEX_APPROVALS_LEARN_MORE_URL;
+		// 本仓没有单独的 Codex 审批说明链接：回退到通用权限说明，避免引用不存在的常量。
+		return PERMISSIONS_LEARN_MORE_URL;
 	}
 	if (property === ClaudeSessionConfigKey.PermissionMode || property === SessionConfigKey.AutoApprove) {
 		return PERMISSIONS_LEARN_MORE_URL;
