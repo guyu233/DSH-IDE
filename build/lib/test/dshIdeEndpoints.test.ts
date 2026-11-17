@@ -132,11 +132,13 @@ test('chat-baseline methods without a verified remote stay missing(...)', () => 
 });
 
 test('setGoal and listSkills are wired to their official services', () => {
-	// goals：packages/goal/goal/src/index.ts 的 @Remote create/edit/pause/resume/complete/clear
+	// goals.create 返回 GoalView；remoteExportCreate 只回 { ref }，界面不能用那条。
 	assert.match(host, /async setGoal\(args\)/);
-	assert.match(host, /goals\.remoteExportCreate/);
-	// skills：packages/skill/skill/src/index.ts:473 list(options)
-	assert.match(host, /skills\.list\(/);
+	assert.match(host, /goals\.create\(agent, request\)/);
+	assert.doesNotMatch(host, /goals\.remoteExportCreate/);
+	// skills：session-controller 的 sessionSkillCatalog.list({ sessionId }, signal)
+	assert.match(host, /sessionSkillCatalog/);
+	assert.match(host, /catalog\.list\(\{ sessionId \}, callerSignal\(\)\)/);
 });
 
 test('D16 Host bridge keeps the unverified methods as missing(...)', () => {

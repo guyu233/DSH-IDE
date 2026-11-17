@@ -259,12 +259,16 @@ test('submit and interrupt use the verified sessionController shapes', async () 
 	const controller = sessionControllerStub();
 	const { bridge } = bridgeWith({ sessionController: controller });
 	bridge.open({ view: 'chat', params: { sessionId: 's-1' } });
-	await bridge.invoke('submit', { text: 'hi' });
+	const image = { attachmentId: 'img-1', mediaType: 'image/png', bytes: 3, width: 1, height: 1 };
+	await bridge.invoke('submit', { text: 'hi', attachments: [image] });
 	await bridge.invoke('interrupt', {});
 	const prompt = controller.calls.find(call => call.name === 'prompt');
 	assert.equal(prompt.request.sessionId, 's-1');
 	assert.equal(prompt.request.mode, 'queue');
-	assert.deepEqual(prompt.request.content, [{ type: 'text', text: 'hi' }]);
+	assert.deepEqual(prompt.request.content, [
+		{ type: 'text', text: 'hi' },
+		{ type: 'image', attachment: image, encodedBytes: 3 },
+	]);
 	assert.equal(controller.calls.find(call => call.name === 'cancel').request.sessionId, 's-1');
 });
 
@@ -1015,21 +1019,35 @@ test('D52 deleteSession proceeds only when the session is provably stopped', asy
 // 契约按列表类投影为 string[]（不是 { accepted: true }）。
 // ---------------------------------------------------------------------------
 
-test('archiveSession calls the official registry and returns the projected archive set', async () => {
+test('archiveSession calls workspaceController and returns the projected archive set', async () => {
 	const calls = [];
 	const { bridge } = bridgeWith({
-		workspaceRegistry: {
-			list: () => [{ id: 'w-1', sessionIds: ['s-1', 's-2'] }],
-			archiveSession: async request => { calls.push(request); return { archivedSessionIds: ['s-1', 's-2'] }; },
-			unarchiveSession: async request => { calls.push(request); return { archivedSessionIds: ['s-2'] }; },
+		workspaceController: {
+			archiveSession: async request => { calls.push(['archive', request]); return { archivedSessionIds: ['s-1', 's-2'] }; },
+			unarchiveSession: async request => { calls.push(['unarchive', request]); return { archivedSessionIds: ['s-2'] }; },
 		},
 	});
 	bridge.open({ view: 'chat', params: { sessionId: 's-1' } });
 	assert.deepEqual(await bridge.invoke('archiveSession', { sessionId: 's-1' }), ['s-1', 's-2']);
-	// 不传 stopActivity：是否强停运行中会话由调用方显式决定，缺省保留官方拒绝语义。
-	assert.deepEqual(calls[0], { sessionId: 's-1' });
+	assert.deepEqual(calls[0], ['archive', { sessionId: 's-1' }]);
 	assert.deepEqual(await bridge.invoke('unarchiveSession', { sessionId: 's-1' }), ['s-2']);
-	assert.deepEqual(calls[1], { sessionId: 's-1' });
+	assert.deepEqual(calls[1], ['unarchive', { sessionId: 's-1' }]);
+});
+
+test('archiveSession falls back to workspaceRegistry with a session id string', async () => {
+	const calls = [];
+	const registry = {
+		list: () => [{ id: 'w-1', sessionIds: ['s-1'] }],
+		archivedSessionIds: ['s-1'],
+		archiveSession: async sessionId => { calls.push(sessionId); },
+		unarchiveSession: async sessionId => { calls.push(sessionId); registry.archivedSessionIds = []; },
+	};
+	const { bridge } = bridgeWith({ workspaceRegistry: registry });
+	bridge.open({ view: 'chat', params: { sessionId: 's-1' } });
+	assert.deepEqual(await bridge.invoke('archiveSession', { sessionId: 's-1' }), ['s-1']);
+	assert.deepEqual(calls, ['s-1']);
+	assert.deepEqual(await bridge.invoke('unarchiveSession', { sessionId: 's-1' }), []);
+	assert.deepEqual(calls, ['s-1', 's-1']);
 });
 
 test('archiveSession refuses when the registry lacks the official method', async () => {
@@ -1279,7 +1297,7 @@ test('setGoal routes each action to the official goals service', async () => {
 		roundsStarted: 1, createdAt: 10, updatedAt: 20, activation: 'armed',
 	};
 	const goals = {
-		remoteExportCreate: (who, request) => { calls.push(['create', who, request]); return { ref: { id: 'g-1', revision: 1 } }; },
+		create: (who, request) => { calls.push(['create', who, request]); return view; },
 		edit: (who, ref, request) => { calls.push(['edit', who, ref, request]); return view; },
 		pause: (who, ref) => { calls.push(['pause', who, ref]); return { ...view, phase: 'paused' }; },
 		resume: (who, ref) => { calls.push(['resume', who, ref]); return view; },
@@ -1292,7 +1310,10 @@ test('setGoal routes each action to the official goals service', async () => {
 	});
 	bridge.open({ view: 'chat', params: { sessionId: 's-1' } });
 
-	await bridge.invoke('setGoal', { action: 'create', objective: '完成手册', maxGoalRounds: 8 });
+	const created = await bridge.invoke('setGoal', { action: 'create', objective: '完成手册', maxGoalRounds: 8 });
+	assert.equal(created.goal.id, 'g-1');
+	assert.equal(created.goal.objective, '完成手册');
+	assert.equal(created.activation, 'armed');
 	await bridge.invoke('setGoal', { action: 'edit', id: 'g-1', revision: 1, objective: '新目标' });
 	await bridge.invoke('setGoal', { action: 'pause', id: 'g-1', revision: 2 });
 	await bridge.invoke('setGoal', { action: 'resume', id: 'g-1', revision: 3 });
@@ -1300,7 +1321,7 @@ test('setGoal routes each action to the official goals service', async () => {
 	await bridge.invoke('setGoal', { action: 'clear', id: 'g-1', revision: 5 });
 
 	assert.deepEqual(calls.map(call => call[0]), ['create', 'edit', 'pause', 'resume', 'complete', 'clear']);
-	// create 走官方远程导出，入参形状对齐 CreateGoalRequest。
+	// create 走进程内 goals.create，入参形状对齐 CreateGoalRequest，返回值是投影后的 GoalView。
 	assert.deepEqual(calls[0][2], { objective: '完成手册', maxGoalRounds: 8 });
 	// 其余动作都带 CAS 引用。
 	assert.deepEqual(calls[2][2], { id: 'g-1', revision: 2 });

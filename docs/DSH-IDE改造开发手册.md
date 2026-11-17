@@ -698,6 +698,18 @@ DshChatSession.acceptView / acceptConversation → DshChatModel（typed 节点�
 
 这三项里 Host 半身的改动同样要重启 DSH 才进正在跑的进程。
 
+#### 第三轮：对照官方源码核对全部 Host 入口
+
+逐个对照 `E:/deepseek-harness` 里的服务签名。`sessionController` 的 list / search / create / selectModel / modelCatalog / prompt / cancel / fork / page / state / follow / projections，以及 `commands.execute` / `commands.list`、`agentTeams.setEnabled`、`agentPresets.select` / `list`、`permissionPresets.catalog`、`attachments.readImage`、`deepseekAccount.getState` / `getProfile`、`goals.edit|pause|resume|complete|clear`、`llm.stream`、`agentDefaultModel.currentSelection`、waterfall 事件名，签名与现有调用一致。
+
+又修掉三处对不上的调用：
+
+| 问题 | 官方签名 | 处理 |
+|---|---|---|
+| 归档 | `workspaceController.archiveSession({ sessionId })` 返回集合；`workspaceRegistry.archiveSession(sessionId)` 返回 void | 优先走 controller；没有 controller 时用字符串 id 调 registry，再读 `archivedSessionIds` |
+| 创建目标 | `remoteExportCreate` 只回 `{ ref }`；`create` 回 `GoalView` | 改走 `create`，再用 `projectGoalView` 投影 |
+| 带图提交 | `admitPromptContent` 的已入库图片要带 `encodedBytes` | 提交时带上附件的 `bytes`，限额检查不再变成 NaN |
+
 ### 9.6 第二阶段实施顺序（已定）
 
 > **2-A（修数据链）与 2-B（翻译层升级）为主线顺序推进；2-D（图标全局替换）与 2-A/2-B 并行启动；2-C（Session 缺口）随主线核对；全部代码完成、门禁全绿后，最后统一做 2-E（真机验收）。**

@@ -546,7 +546,13 @@ function createMethodHandlers(bridge) {
 				mode: 'queue',
 				content: [
 					{ type: 'text', text: args.text },
-					...attachments.map(attachment => ({ type: 'image', attachment: imagePromptRef(attachment) })),
+					// 进程内 admit 认的是已入库图片：`{ type:'image', attachment, encodedBytes }`。
+					// 缺 encodedBytes 时官方限额把字节数加成 NaN，限额检查会失效。
+					...attachments.map(attachment => ({
+						type: 'image',
+						attachment: imagePromptRef(attachment),
+						encodedBytes: attachment.bytes,
+					})),
 				],
 			}, callerSignal());
 			return { accepted: true };
@@ -838,23 +844,13 @@ function createMethodHandlers(bridge) {
 			return account().getProfile(args.client);
 		},
 		async archiveSession(args) {
-			// §8.10.11：官方 workspace-controller 的公开 remote，不需第三方插件批准。
-			// 不传 stopActivity：是否强停运行中的会话由调用方显式决定，缺省时保留官方的
-			// `workspace/session-active` 拒绝并原样透传，DSH-IDE 不自行决定强停。
-			bridge.assertOwnership(args.sessionId);
-			const registry = service(bridge.ctx, 'workspaceRegistry');
-			if (typeof registry.archiveSession !== 'function') {
-				throw coded(FEATURE_UNAVAILABLE, 'DSH workspaceRegistry has no archiveSession()', { capability: 'archiveSession' });
-			}
-			return projectDshIdeArchiveSet(await registry.archiveSession({ sessionId: args.sessionId }));
+			// 官方 remote 是 `workspaceController.archiveSession({ sessionId })`，返回完整归档集合。
+			// `workspaceRegistry.archiveSession` 是另一套签名：第一参是 sessionId 字符串，返回 void。
+			// 不传 stopActivity：是否强停运行中的会话由调用方显式决定，缺省保留官方拒绝。
+			return changeArchive(bridge, 'archiveSession', args.sessionId);
 		},
 		async unarchiveSession(args) {
-			bridge.assertOwnership(args.sessionId);
-			const registry = service(bridge.ctx, 'workspaceRegistry');
-			if (typeof registry.unarchiveSession !== 'function') {
-				throw coded(FEATURE_UNAVAILABLE, 'DSH workspaceRegistry has no unarchiveSession()', { capability: 'unarchiveSession' });
-			}
-			return projectDshIdeArchiveSet(await registry.unarchiveSession({ sessionId: args.sessionId }));
+			return changeArchive(bridge, 'unarchiveSession', args.sessionId);
 		},
 		addAttachment: missing('addAttachment'),
 		removeAttachment: missing('removeAttachment'),
@@ -870,14 +866,16 @@ function createMethodHandlers(bridge) {
 			const goals = service(bridge.ctx, 'goals');
 			switch (args.action) {
 				case 'create': {
+					// `remoteExportCreate` 是线协议，只回 `{ ref }`。界面要的是 GoalView，
+					// 所以走进程内 `create`，再投影成契约形状。
 					const request = {
 						...(typeof args.objective === 'string' ? { objective: args.objective } : {}),
 						...(typeof args.maxGoalRounds === 'number' ? { maxGoalRounds: args.maxGoalRounds } : {}),
 					};
-					if (typeof goals.remoteExportCreate === 'function') {
-						return goals.remoteExportCreate(agent, request);
+					if (typeof goals.create !== 'function') {
+						throw coded(FEATURE_UNAVAILABLE, 'DSH goals service has no create()', { capability: 'setGoal' });
 					}
-					return goals.create(agent, request);
+					return requireGoalView(projectGoalView(goals.create(agent, request)));
 				}
 				case 'edit': {
 					const ref = { id: args.id, revision: args.revision };
@@ -972,6 +970,32 @@ function createMethodHandlers(bridge) {
 			return { accepted: true };
 		},
 	};
+}
+
+/**
+ * 归档 / 取消归档。
+ *
+ * 优先 `workspaceController`：入参是 `{ sessionId }`，返回 `{ archivedSessionIds }`。
+ * 没有这层 remote 时退到 `workspaceRegistry`，第一参必须是 sessionId 字符串，
+ * 返回值是 void，集合从 `archivedSessionIds` 读。
+ *
+ * @param {'archiveSession' | 'unarchiveSession'} method
+ * @param {string} sessionId
+ */
+function changeArchive(bridge, method, sessionId) {
+	bridge.assertOwnership(sessionId);
+	const controller = optionalService(bridge.ctx, 'workspaceController');
+	if (controller !== undefined && typeof controller[method] === 'function') {
+		return Promise.resolve(controller[method]({ sessionId })).then(projectDshIdeArchiveSet);
+	}
+	const registry = service(bridge.ctx, 'workspaceRegistry');
+	if (typeof registry[method] !== 'function') {
+		throw coded(FEATURE_UNAVAILABLE, `DSH workspaceRegistry has no ${method}()`, { capability: method });
+	}
+	return Promise.resolve(registry[method](sessionId)).then(() => {
+		const ids = Array.isArray(registry.archivedSessionIds) ? registry.archivedSessionIds : [];
+		return projectDshIdeArchiveSet({ archivedSessionIds: ids });
+	});
 }
 
 /** 提交给官方 prompt 的图片引用：只留 ImageAttachmentRef 字段，不带 x- 扩展。 */
