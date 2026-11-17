@@ -510,32 +510,6 @@
 			"detail": "node_modules/tsec/bin/tsec -p src/tsconfig.json --noEmit"
 		},
 		{
-			"label": "Launch Monaco Editor Vite",
-			"type": "shell",
-			"command": "npm run dev",
-			"options": {
-				"cwd": "./build/vite/"
-			},
-			"isBackground": true,
-			"problemMatcher": {
-				"owner": "vite",
-				"fileLocation": "absolute",
-				"pattern": {
-					"regexp": "^(.+?):(\\d+):(\\d+):\\s+(error|warning)\\s+(.*)$",
-					"file": 1,
-					"line": 2,
-					"column": 3,
-					"severity": 4,
-					"message": 5
-				},
-				"background": {
-					"activeOnStart": true,
-					"beginsPattern": ".*VITE.*",
-					"endsPattern": "(Local|Network):.*"
-				}
-			}
-		},
-		{
 			"label": "Launch MCP Server",
 			"type": "shell",
 			"command": "cd test/mcp && npm run compile && npm run start-http",
@@ -640,28 +614,6 @@
 				"background": {
 					"beginsPattern": "Starting compilation\\.\\.\\.",
 					"endsPattern": "Finished compilation with"
-				}
-			}
-		},
-		{
-			"label": "Component Explorer Server",
-			"type": "shell",
-			"command": "npx component-explorer serve -p ./test/componentFixtures/component-explorer.json -vv --kill-if-running",
-			"isBackground": true,
-			"inAgents": true,
-			"problemMatcher": {
-				"owner": "component-explorer",
-				"fileLocation": "absolute",
-				"pattern": {
-					"regexp": "^\\s*at\\s+(.+?):(\\d+):(\\d+)\\s*$",
-					"file": 1,
-					"line": 2,
-					"column": 3
-				},
-				"background": {
-					"activeOnStart": false,
-					"beginsPattern": ".*Setting up sessions.*",
-					"endsPattern": "  current: (?<componentExplorerUrl>.*) \\(current\\)"
 				}
 			}
 		},

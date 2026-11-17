@@ -34,9 +34,7 @@ product.overrides.json
 .chat-simulation-data
 vscode-telemetry-docs/
 test-output.json
-test/componentFixtures/.screenshots/*
 dist
-.playwright-cli
 .playwright-mcp
 .claude/
 .agents/agents/*.local.md
