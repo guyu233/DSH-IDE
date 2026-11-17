@@ -112,7 +112,14 @@ export class DshClientService extends Disposable implements IDshStreamClient {
 		// 快照流只在视图打开后由宿主推送；先注册监听，避免漏帧。
 		// 这里**不做**结构/连续性校验：那是 DshIdeConsumer.accept() 的唯一职责。
 		this._register(this.channel.listen<DshIdeSnapshot>('snapshot')(snapshot => {
-			this.markConnected();
+			// Host 的 `rebuild` 快照是「传输断开、正在重连」的唯一信号：
+			// 不在这里把连接态翻回 false，`onDidChangeState({connected:true})` 每窗口只会触发一次，
+			// 重连后「清熔断」等依赖它的逻辑就永远不会再跑。
+			if (snapshot.state.state === 'rebuild') {
+				this.markDisconnected();
+			} else {
+				this.markConnected();
+			}
 			this._onDidSnapshot.fire(snapshot);
 		}));
 		// 事件名与通道常量 DSH_IDE_WATERFALL_EVENT 同值。common 不引用 electron-main。
@@ -163,6 +170,15 @@ export class DshClientService extends Disposable implements IDshStreamClient {
 		}
 		this._connected = true;
 		this._onDidChangeState.fire({ connected: true });
+	}
+
+	/** 置为断开并广播；由 Host 的 `rebuild` 快照驱动，重连成功后再次 `markConnected()`。 */
+	private markDisconnected(): void {
+		if (!this._connected) {
+			return;
+		}
+		this._connected = false;
+		this._onDidChangeState.fire({ connected: false });
 	}
 
 	async closeView(): Promise<void> {

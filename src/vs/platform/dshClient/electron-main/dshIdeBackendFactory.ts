@@ -235,7 +235,7 @@ class LazyDshIdeTransportBackend implements DshIdeBackend {
 		if (this.authenticating !== undefined) {
 			return this.authenticating;
 		}
-		this.authenticating = (async () => {
+		const attempt = (async () => {
 			const cookie = this.cookie ?? await this.exchangeCookie();
 			const transport = new DshIdeTransport({ origin: this.origin, cookie });
 			const backend = new DshIdeTransportBackend(transport);
@@ -246,10 +246,14 @@ class LazyDshIdeTransportBackend implements DshIdeBackend {
 			return backend;
 		})().catch(error => {
 			// 失败不得缓存：否则首次 cookie 交换的瞬时失败会把 rejected promise 永久复用到后续所有调用。
-			this.authenticating = undefined;
+			// 但只清掉「自己这一次」——期间若已被 close()/新一次 ensureImpl() 换成新 promise，不能抹掉它。
+			if (this.authenticating === attempt) {
+				this.authenticating = undefined;
+			}
 			throw error;
 		});
-		return this.authenticating;
+		this.authenticating = attempt;
+		return attempt;
 	}
 
 	private async exchangeCookie(): Promise<string> {

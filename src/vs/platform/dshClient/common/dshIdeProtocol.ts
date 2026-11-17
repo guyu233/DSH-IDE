@@ -90,6 +90,13 @@ export interface DshIdeViewSnapshot {
 	readonly conversation?: DshIdeConversationView;
 	readonly deliverables?: readonly DshIdeDeliverableView[];
 	readonly attachments?: readonly DshIdeImageAttachmentRef[];
+	/**
+	 * 计划 / 目标 / Todo 投影的**共同语义**：
+	 *
+	 * 字段缺席 = 本帧没带，保留上一次的值（投影只在 `snapshot` 帧下发，内容帧不带）；
+	 * 关闭/取消用显式空值形态表达（`plan: { active: false, pending: false }`、`todos: []`），
+	 * 不靠省略字段。
+	 */
 	readonly plan?: DshIdePlanView;
 	readonly goal?: DshIdeGoalView;
 	readonly todos?: readonly DshIdeTodoView[];

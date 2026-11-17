@@ -93,6 +93,13 @@ export class DshChatSession extends Disposable implements IDshChatSession {
 	private _current: { provider: string; model: string } | undefined;
 	private _running = false;
 	private boundSessionId: string | undefined;
+	/**
+	 * 绑定已「脏」：上一次 bind 已经把模型清空但 rebind 失败。
+	 *
+	 * 没有这个标志时，失败回滚 `boundSessionId = previous` 会让下一次 `bind(previous)`
+	 * 命中开头的「相同 id 直接 return true」短路，模型永远停在空状态。
+	 */
+	private _boundDirty = false;
 	/** typed 视图里的交付物 / 附件 / 额度提示（单一真源，面板只读）。 */
 	private _deliverables: readonly DshIdeDeliverableView[] = [];
 	private _attachments: readonly DshIdeImageAttachmentRef[] = [];
@@ -225,7 +232,7 @@ export class DshChatSession extends Disposable implements IDshChatSession {
 	 *          不能假装绑定成功继续打开视图。
 	 */
 	async bind(sessionId: string | undefined): Promise<boolean> {
-		if (sessionId === this.boundSessionId) {
+		if (sessionId === this.boundSessionId && !this._boundDirty) {
 			return true;
 		}
 		this.generation++;
@@ -250,10 +257,13 @@ export class DshChatSession extends Disposable implements IDshChatSession {
 		const rebound = await this.client.rebindView(sessionId);
 		if (!rebound.ok) {
 			// 失败必须回滚绑定：否则下一次 `bind(同一 id)` 会因「相等」直接返回 true，
-			// 永远不再重绑，面板停在空状态。清空的状态不需要恢复——旧会话已被 generation 作废。
+			// 永远不再重绑，面板停在空状态。但模型已经被 clear()，只回滚 id 不够——
+			// 同时置脏，让下一次同 id 的 bind 仍会真正重跑 rebind。
 			this.boundSessionId = previous;
+			this._boundDirty = true;
 			return false;
 		}
+		this._boundDirty = false;
 		// `rebind` 返回的快照就是这次绑定的首屏内容：不喂给 model，面板会一直是空的，
 		// 只能等后续流帧；已结束的会话根本不会再推帧。
 		const view = rebound.value?.state?.state === 'ready' ? rebound.value.state.view : undefined;

@@ -161,9 +161,11 @@ export class DshIdeTransport {
 		if (signal.aborted) {
 			cancel();
 		}
-		signal.throwIfAborted();
 		this._pendingCalls.add(controller);
 		try {
+			// 放进 try 内：已在 try 外的 `throwIfAborted()` 会跳过 finally，
+			// 把 cancel/onAbort 监听器永久留在调用方的 signal 上。
+			signal.throwIfAborted();
 			return await Promise.race([this._callRemote(namespace, method, args, controller.signal), cancellation]);
 		} finally {
 			this._pendingCalls.delete(controller);

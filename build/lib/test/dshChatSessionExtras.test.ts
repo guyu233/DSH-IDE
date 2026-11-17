@@ -222,6 +222,30 @@ test('2-A: rebind 失败后同一 id 仍可重试（绑定回滚）', async () =
 	}
 });
 
+test('2-A: A 已绑定 → bind(B) 失败 → 再 bind(A) 必须真正重绑（面板不能永久空白）', async () => {
+	let rebindCalls: string[] = [];
+	let failB = true;
+	const session = new DshChatSession({
+		call: async () => ({ ok: false, error: { code: 'FEATURE_UNAVAILABLE', message: 'test' } }),
+		rebindView: async (sessionId: string) => {
+			rebindCalls.push(sessionId);
+			if (sessionId === 'B' && failB) {
+				return { ok: false, error: { code: 'dsh-ide/not-ready', message: 'B fails' } };
+			}
+			return { ok: true, value: { state: { state: 'ready', view: { frame: { type: 'noop' }, conversation: { nodes: [], hasMore: false } } } } };
+		},
+	} as never);
+	try {
+		assert.equal(await session.bind('A'), true);
+		rebindCalls = [];
+		assert.equal(await session.bind('B'), false, 'B must fail');
+		assert.equal(await session.bind('A'), true, 'binding back to A must succeed');
+		assert.deepEqual(rebindCalls, ['B', 'A'], 'A must be rebound, not short-circuited');
+	} finally {
+		session.dispose();
+	}
+});
+
 test('2-A: 会话状态通知按 sessionId 过滤，且结束后能复位 running', async () => {
 	const session = new DshChatSession(fakeClient());
 	const fired: boolean[] = [];
