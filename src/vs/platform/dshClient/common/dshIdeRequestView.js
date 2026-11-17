@@ -5,7 +5,7 @@
 
 // 批准 / 问卷请求的中立投影（Host `describeRequest` 与 IDE `projectDshIdeWaterfallNotice` 共用）。
 //
-// 依据（E:/deepseek-harness）：
+// 依据（https://github.com/deepseek-ai/deepseek-harness）：
 //   - `packages/interaction/user-approval/src/types.ts` `ApprovalRequestEvent`
 //   - `packages/interaction/user-questions/src/types.ts` `AskUserQuestionItem` / `AskUserQuestionIntent`
 // 只保留可 JSON 化的官方字段。`agent` 对象与 `AbortSignal` 不进线协议（agentId 在通知信封上，

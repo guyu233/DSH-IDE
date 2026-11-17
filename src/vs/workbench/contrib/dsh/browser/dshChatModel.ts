@@ -5,7 +5,7 @@
 
 // DSH 会话帧 → 聊天记录。**不翻译、不转换、不投影**：形状就是 DSH 自己的。
 //
-// 依据（E:/deepseek-harness/packages/client/ui-conversation/src/client/contract/records.ts）：
+// 依据（https://github.com/deepseek-ai/deepseek-harness/blob/main/packages/client/ui-conversation/src/client/contract/records.ts）：
 //   - 用户消息 = `UserMessageNode`：{ kind:'user', seq, time, content: readonly ContentBlock[] }
 //   - 助手消息 = `AssistantMessageNode`：{ kind:'assistant', seq, time, turn, step,
 //     blocks: readonly AssistantBlock[], usage?, providerMetadata?, requestConfig? }
@@ -280,9 +280,6 @@ export type DshChatNode =
 	| DshInheritedHistoryNode
 	| DshSubagentCatalogNode
 	| DshSubagentNoticeNode;
-
-/** 渲染层只需要 `AssistantBlock` 的窄形状（与 DSH 定义同构）。 */
-export type AssistantBlockLike = DshAssistantBlock;
 
 export interface DshChatChange {
 	readonly node: DshChatNode;

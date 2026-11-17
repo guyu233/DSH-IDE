@@ -6,12 +6,12 @@
 // 子智能体会话树的纯函数层：把扁平的 session summary 列表拼成
 // `IChatSessionItem.children` 树，交给 VS Code 原生会话树渲染。
 //
-// 规则参照官方 `flattenLineage()`（E:/deepseek-harness/packages/api/session-controller/
+// 规则参照官方 `flattenLineage()`（https://github.com/deepseek-ai/deepseek-harness/blob/main/packages/api/session-controller/
 // src/client/sessions/lineage.ts:54-96）：只有 origin==='subagent' 且 parentSessionId
 // 在列表里才挂为子项；普通 fork 即便带 parent 也不挂；孤儿降级 root；visited 防环，
 // 不可达的环成员补为 root；保持输入顺序，不按 updatedAt 重排。
 //
-// 独立成零 UI / DI 依赖的模块，便于单测直接跑（与 dshSessionItemState.ts 同一模式）。
+// 独立成零 UI / DI 依赖的模块，便于单测直接跑。
 // 不写 `parentSession`（那是 VS Code 内部字段，由嵌套关系注入），不写 `depth`。
 
 import type { IChatSessionTiming } from '../../chat/common/chatService/chatService.js';
@@ -31,15 +31,6 @@ export interface DshSessionTreeNode {
 	readonly archived?: boolean;
 	readonly isRead?: boolean;
 	readonly children?: readonly DshSessionTreeNode[];
-}
-
-/** 行运行态计时（与 `dshSessionItemState.timingForRunning` 同语义，本地复用以免循环依赖）。 */
-export function sessionTimingForRunning(created: number, running: boolean): IChatSessionTiming {
-	return {
-		created,
-		lastRequestStarted: running ? created : undefined,
-		lastRequestEnded: running ? undefined : created,
-	};
 }
 
 /**

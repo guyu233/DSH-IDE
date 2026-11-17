@@ -11,7 +11,7 @@
 // 第 31 轮补充：commands scoped-remote 的 wire 形状已从源码核对清楚，
 // 但接线仍归 D13；本测试新增断言钉住该形状结论与「仍 fail-closed」状态。
 //
-// 依据（只读核对 E:/deepseek-harness-0.2.2-rc.1/，本地静态源码，无真机观测）：
+// 依据（只读核对 https://github.com/deepseek-ai/deepseek-harness 的 0.2.2-rc.1 源码，无真机观测）：
 //   §8.10.9「D16 官方落点核对结论」。第 26 轮据此把唯一已核对完整 wire 形状的
 //   setEffort 接线（session/projections → session/selectModel），故本表把
 //   deleteSession + setEffort 标为已接线；第 32 轮据第 31 轮核实的 commands

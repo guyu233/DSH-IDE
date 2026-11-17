@@ -9,7 +9,7 @@
 // 传输端口：`transport` 由 P5 真机接线提供。未注入时本文件不伪造任何事件或决议：
 // `follow` 只登记监听，answerer 一律 `next()` 委托给 DSH 自己的 answerer。
 //
-// 已核对的服务与方法（E:/deepseek-harness-0.2.2-rc.1）：
+// 已核对的服务与方法（https://github.com/deepseek-ai/deepseek-harness，0.2.2-rc.1）：
 //   sessions: get(id) / list()
 //   sessionController: list / create / selectModel / modelCatalog / prompt / cancel / fork / state
 //   approval/request 结果值：'allowed-once' | 'rejected' | 'cancelled' | 'unavailable'
@@ -1325,7 +1325,7 @@ async function sessionExists(ctx, sessionId) {
 /**
  * 由 Host 自己推导 IDE 可用的官方端点与 launch URL（不新增私有端点）。
  *
- * 依据（E:/deepseek-harness-0.2.2-rc.1）：
+ * 依据（https://github.com/deepseek-ai/deepseek-harness，0.2.2-rc.1）：
  *   - `webServer` 暴露 `port` / `host` / `protocol`（packages/host/webserver/src/index.ts:406-420）；
  *   - `connection.authenticatedUrl(baseUrl)` 把进程内 launch token 拼到干净 URL 上
  *     （packages/client/connection/src/rpc-host.ts:198）。

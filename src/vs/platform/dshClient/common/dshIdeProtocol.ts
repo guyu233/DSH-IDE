@@ -3,7 +3,7 @@
  *  Licensed under the MIT License.
  *--------------------------------------------------------------------------------------------*/
 
-// DSH-IDE 连接层协议真源（P1 冻结，P3 升级到 wireRevision 2）。
+// DSH-IDE 连接层协议真源（P1 冻结，当前 wireRevision 4）。
 //
 // 模式直接从 dsh-TUI 的 `tui-profile/protocols/tui-channel.js` + `src/adapter/channel/{provider,consumer}.ts`
 // 平移：校验原语（exactRecord / jsonValue）、双向校验器（输入/快照）、Consumer 连续性 fail-closed。
@@ -931,7 +931,7 @@ export function validateDshIdeInput<K extends DshIdeMethod>(command: K, args: un
  * `DshIdeChannel.listen()` 对其它名字返回 `Event.None`。
  * `waterfall` 承载官方 `$events` 的审批 / 问卷请求与取消，帧形状是
  * `DshIdeWaterfallNotice`，由独立消费者 `validateDshIdeWaterfallNotice` 校验，
- * **不**进入 `DshIdeSnapshot`（wireRevision 保持 2）。
+ * **不**进入 `DshIdeSnapshot`（wireRevision 保持 4）。
  * 若将来要再增加官方事件名，须**先改本契约**（新增事件名常量 + 帧形状 + 独立消费者）
  * 并按第 2 章 §9 走完手续；在此之前不得在实现里私自增加事件名，
  * 也不得改用自建出站通道（§8.10.2 的「允许增加」以「先改契约」为前提）。

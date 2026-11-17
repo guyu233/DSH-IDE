@@ -252,7 +252,6 @@ test('快照 view 不再接受 capabilities（方案一：能力走独立 method
 	assert.throws(() => validateDshIdeSnapshot(snapshot({ version: 1, state: { state: 'ready', view } })), /unknown field/);
 });
 
-
 test('validateDshIdeSnapshot rejects explicit undefined', () => {
 	assert.throws(() => validateDshIdeSnapshot(snapshot({ message: undefined })), /must omit explicit undefined field/);
 });

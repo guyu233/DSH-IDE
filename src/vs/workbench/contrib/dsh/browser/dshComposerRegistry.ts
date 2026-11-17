@@ -33,26 +33,13 @@ const PLACEHOLDER: IDshComposerSource = {
 };
 
 let current: IDshComposerSource | undefined = PLACEHOLDER;
-const listeners = new Set<(source: IDshComposerSource | undefined) => void>();
 
 /** DSH 贡献点在构造时登记数据源；窗口关闭时传 undefined 注销。 */
 export function setDshComposerSource(source: IDshComposerSource | undefined): void {
-	if (current === source) {
-		return;
-	}
 	current = source;
-	for (const listener of listeners) {
-		listener(source);
-	}
 }
 
 /** 输入框读取当前数据源；DSH 未就绪时返回 undefined，选择器退回 VS Code 自带数据。 */
 export function getDshComposerSource(): IDshComposerSource | undefined {
 	return current;
-}
-
-/** 订阅数据源换人（输入框在挂载后才知道 DSH 是否就绪）。 */
-export function onDidChangeDshComposerSource(listener: (source: IDshComposerSource | undefined) => void): { dispose(): void } {
-	listeners.add(listener);
-	return { dispose: () => listeners.delete(listener) };
 }

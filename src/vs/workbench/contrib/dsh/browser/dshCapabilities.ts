@@ -5,7 +5,7 @@
 
 // 依赖插件能力的 context key：会话菜单用它决定入口是否出现。
 //
-// 值的唯一来源是 Host 下发的 `capabilities` 快照（官方服务/命令的实际装载状态）。
+// 值的唯一来源是 Host 独立 `capabilities` method 的返回值（官方服务/命令的实际装载状态）。
 // 缺省按 false 处理：拿不到能力时隐藏入口，而不是让用户点了才报错。
 
 import { RawContextKey } from '../../../../platform/contextkey/common/contextkey.js';
