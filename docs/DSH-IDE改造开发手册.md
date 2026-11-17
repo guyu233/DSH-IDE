@@ -1022,7 +1022,7 @@ DshChatSession.acceptView / acceptConversation → DshChatModel（typed 节点�
 
 #### 9.11.6 第 4 轮：已删目录的断链与残留（已执行，2026-11-17）
 
-> 第 4 轮由 3 个子智能体并行扫描（配置残留 / 重复实现 / 手册一致性），重点查「`src/vs/platform/agentHost/**`、`extensions/copilot/**`、`src/vs/sessions/**` 已删但仍有引用」的地方。区间 `d75b1fc1..7a0e6f1e`：**22 个文件，+108 / -1,289 行**，5 个提交。
+> 第 4 轮由 3 个子智能体并行扫描（配置残留 / 重复实现 / 手册一致性），重点查「`src/vs/platform/agentHost/**`、`extensions/copilot/**`、`src/vs/sessions/**` 已删但仍有引用」的地方。区间 `d75b1fc1..628256cc`：**23 个文件，+284 / -1,289 行**，6 个提交。
 >
 > **真实断链（7 处，11 行）**：`scripts/test-integration.sh:200` / `.bat:130` 无条件 import 已删的 `agentHostTestProfile.ts`（`set -e` 中断整个默认集成测试）；`scripts/code-agent-host.js/.sh` spawn 不存在的 `out/.../agentHostServerMain.js`；`scripts/test-agent-host-e2e.sh/.bat` exec 不存在的 `test/integration/agentHost/runner.ts`；`scripts/code-sessions-web.js/.sh` import 不存在的 `src/vs/sessions/sessions.web.main.internal`。
 >
