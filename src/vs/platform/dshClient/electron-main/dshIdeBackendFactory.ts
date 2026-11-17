@@ -244,7 +244,11 @@ class LazyDshIdeTransportBackend implements DshIdeBackend {
 			}
 			this.impl = backend;
 			return backend;
-		})();
+		})().catch(error => {
+			// 失败不得缓存：否则首次 cookie 交换的瞬时失败会把 rejected promise 永久复用到后续所有调用。
+			this.authenticating = undefined;
+			throw error;
+		});
 		return this.authenticating;
 	}
 

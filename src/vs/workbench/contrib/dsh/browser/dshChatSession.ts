@@ -72,6 +72,8 @@ export interface IDshChatSession {
 	cancel(): Promise<void>;
 	answerApproval(eventId: string, decision: 'approve' | 'reject'): Promise<void>;
 	answerQuestion(eventId: string, label: string): Promise<void>;
+	/** Host 侧会话状态通知（`api-session/status`）：回合结束的唯一复位来源。 */
+	acceptSessionStatus(sessionId: string, running: boolean): void;
 }
 
 export class DshChatSession extends Disposable implements IDshChatSession {
@@ -227,6 +229,7 @@ export class DshChatSession extends Disposable implements IDshChatSession {
 			return true;
 		}
 		this.generation++;
+		const previous = this.boundSessionId;
 		this.boundSessionId = sessionId;
 		this.model.clear();
 		this.pendingItems.clear();
@@ -240,13 +243,15 @@ export class DshChatSession extends Disposable implements IDshChatSession {
 		this._onDidChangePending.fire([]);
 		// extras 也被清空：必须通知，否则复用同一个共享会话的 content 会一直显示旧交付物。
 		this._onDidChangeExtras.fire();
-		this._running = false;
-		this._onDidChangeRunning.fire(false);
+		this.setRunning(false);
 		if (sessionId === undefined) {
 			return true;
 		}
 		const rebound = await this.client.rebindView(sessionId);
 		if (!rebound.ok) {
+			// 失败必须回滚绑定：否则下一次 `bind(同一 id)` 会因「相等」直接返回 true，
+			// 永远不再重绑，面板停在空状态。清空的状态不需要恢复——旧会话已被 generation 作废。
+			this.boundSessionId = previous;
 			return false;
 		}
 		// `rebind` 返回的快照就是这次绑定的首屏内容：不喂给 model，面板会一直是空的，
@@ -289,9 +294,9 @@ export class DshChatSession extends Disposable implements IDshChatSession {
 		const nextDeliverables = view.deliverables ?? [];
 		const nextAttachments = view.attachments ?? [];
 		const nextQuota = view.quotaNotice;
-		const nextPlan = view.plan;
-		const nextGoal = view.goal;
-		const nextTodos = view.todos ?? [];
+		const nextPlan = view.plan !== undefined ? view.plan : this._plan;
+		const nextGoal = view.goal !== undefined ? view.goal : this._goal;
+		const nextTodos = view.todos !== undefined ? view.todos : this._todos;
 		// follow 快照没有 skills 字段（技能走 `listSkills`）。缺省表示「这帧没带」，
 		// 不能当成空目录，否则每一次内容帧都会把刚读到的技能清掉。
 		const nextSkills = view.skills !== undefined ? view.skills : this._skills;
@@ -312,6 +317,28 @@ export class DshChatSession extends Disposable implements IDshChatSession {
 		if (extrasChanged) {
 			this._onDidChangeExtras.fire();
 		}
+	}
+
+	/**
+	 * 收一条 Host 侧的会话状态通知（`api-session/status`）。
+	 *
+	 * 这是 `_running` 唯一的正常复位来源：`submit()` 只负责乐观置 true，
+	 * 回合结束时官方不会推内容帧，只有这条状态帧会带 `running: false`。
+	 * 会话 id 不匹配（后台会话变化）直接忽略。
+	 */
+	acceptSessionStatus(sessionId: string, running: boolean): void {
+		if (sessionId !== this.boundSessionId) {
+			return;
+		}
+		this.setRunning(running);
+	}
+
+	private setRunning(running: boolean): void {
+		if (this._running === running) {
+			return;
+		}
+		this._running = running;
+		this._onDidChangeRunning.fire(running);
 	}
 
 	/** 批准 / 问卷帧：登记成本地面的卡片，不再走通知。 */
@@ -404,12 +431,10 @@ export class DshChatSession extends Disposable implements IDshChatSession {
 
 	/** 发送一句话。成功后交给内核，不做乐观插入。 */
 	async submit(text: string): Promise<boolean> {
-		this._running = true;
-		this._onDidChangeRunning.fire(true);
+		this.setRunning(true);
 		const result = await this.client.call('submit', { text });
 		if (!result.ok) {
-			this._running = false;
-			this._onDidChangeRunning.fire(false);
+			this.setRunning(false);
 			return false;
 		}
 		return true;

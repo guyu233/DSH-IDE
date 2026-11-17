@@ -140,27 +140,30 @@ export function mapTreeItem<T extends DshSessionTreeNode>(
 	resourceKey: string,
 	update: (item: T) => T | undefined,
 ): readonly T[] {
-	let changed = false;
-	const map = (list: readonly T[]): readonly T[] => list.map(item => {
-		let next = item;
-		if (item.resource.toString() === resourceKey) {
-			const updated = update(item);
-			if (updated !== undefined && updated !== item) {
-				next = updated;
-				changed = true;
+	const map = (list: readonly T[]): readonly T[] => {
+		let changed = false;
+		const next = list.map(item => {
+			let mapped = item;
+			if (item.resource.toString() === resourceKey) {
+				const updated = update(item);
+				if (updated !== undefined && updated !== item) {
+					mapped = updated;
+					changed = true;
+				}
 			}
-		}
-		if (item.children !== undefined) {
-			const nextChildren = map(item.children as readonly T[]);
-			if (nextChildren !== item.children) {
-				next = { ...next, children: nextChildren } as T;
-				changed = true;
+			if (item.children !== undefined) {
+				const nextChildren = map(item.children as readonly T[]);
+				// 内层 `map` 在无变化时返回原数组，因此这里的引用判等才成立。
+				if (nextChildren !== item.children) {
+					mapped = { ...mapped, children: nextChildren } as T;
+					changed = true;
+				}
 			}
-		}
-		return next;
-	});
-	const next = map(items);
-	return changed ? next : items;
+			return mapped;
+		});
+		return changed ? next : list;
+	};
+	return map(items);
 }
 
 /** 递归比较两个 item（含 children 顺序与内容）。 */

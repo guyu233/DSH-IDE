@@ -133,6 +133,22 @@ test('mapTreeItem updates a nested child and keeps siblings stable', () => {
 	assert.equal(parent.children![0].archived, undefined, 'original tree is not mutated');
 });
 
+test('mapTreeItem returns the original array when nothing changed (含子项的树)', () => {
+	const tree = buildSessionTree(
+		[
+			summary('parent'),
+			summary('child', { origin: 'subagent', parentSessionId: 'parent' }),
+		],
+		toItem,
+	);
+	// 命中但 update 返回原对象：不应产生新数组，否则调用方的 next === this._items 判等永远失效。
+	const same = mapTreeItem(tree, URI.from({ scheme: 'dsh', path: '/child' }).toString(), item => item);
+	assert.equal(same, tree, 'a no-op update must not rebuild the tree');
+	// 完全不命中：同样应返回原数组。
+	const untouched = mapTreeItem(tree, URI.from({ scheme: 'dsh', path: '/missing' }).toString(), item => ({ ...item }));
+	assert.equal(untouched, tree, 'a miss must not rebuild the tree');
+});
+
 test('sameTreeItem detects child status changes', () => {
 	const make = (status: ChatSessionStatus) => buildSessionTree(
 		[summary('parent'), summary('child', { origin: 'subagent', parentSessionId: 'parent' })],

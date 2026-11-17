@@ -86,8 +86,7 @@ class DshClientContribution extends Disposable implements IWorkbenchContribution
 		if (preset === undefined) {
 			void composer.refresh();
 		}
-		registerDshInlineCompletions(languageFeatures, client);
-
+		this._register(registerDshInlineCompletions(languageFeatures, client));
 		const consumer = this._register(new DshIdeConsumer());
 		this._register(consumer.onDidFail((error: { readonly code: string }) => {
 			this.notifications.warn(localize(
@@ -104,6 +103,13 @@ class DshClientContribution extends Disposable implements IWorkbenchContribution
 		}));
 		this._register(client.onDidSnapshot(snapshot => consumer.accept(snapshot)));
 		this._register(client.onDidWaterfall(notice => this._chat.acceptWaterfall(notice)));
+		// 回合结束只由 `api-session/status` 通知（`session-status`）：内容帧不带 running，
+		// 不消费它的话 `running()` 会永远停在 true，面板永远显示「生成中」。
+		this._register(client.onDidSessionNotice(notice => {
+			if (notice.kind === 'status') {
+				this._chat.acceptSessionStatus(notice.sessionId, notice.running);
+			}
+		}));
 
 		// 依赖插件能力走独立 method：菜单按 context key 决定入口是否出现。
 		// 旧 Host 没有这个 method、或调用失败时一律写全 false（fail-closed），不报错。
@@ -135,6 +141,9 @@ class DshClientContribution extends Disposable implements IWorkbenchContribution
 		this._register({ dispose: () => clearInterval(capabilityPoll) });
 		this._register(client.onDidChangeState(state => {
 			if (state.connected) {
+				// 重连后必须清掉熔断与旧版本基线：否则一次 stale 帧会让 consumer 永久拒帧，
+				// 只能靠重载窗口恢复。
+				consumer.reset();
 				void refreshCapabilities();
 			}
 		}));

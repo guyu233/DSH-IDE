@@ -26,6 +26,26 @@ import type {
 } from '../../chat/common/languageModels.js';
 import { DSH_MODEL_VENDOR, toLanguageModel } from './dshComposerProjection.js';
 
+/**
+ * 判定两版模型表项是否「显示上等价」。
+ *
+ * 只比 `identifier` 会漏掉改名与推理档变化：选择器会一直显示旧名称、旧档位。
+ * 这里比较元数据里所有会影响显示的字段（含配置 schema 的 JSON 形态）。
+ */
+function sameLanguageModel(left: ILanguageModelChatMetadataAndIdentifier, right: ILanguageModelChatMetadataAndIdentifier | undefined): boolean {
+	if (right === undefined) {
+		return false;
+	}
+	return left.identifier === right.identifier
+		&& left.metadata.name === right.metadata.name
+		&& left.metadata.family === right.metadata.family
+		&& left.metadata.version === right.metadata.version
+		&& left.metadata.maxInputTokens === right.metadata.maxInputTokens
+		&& left.metadata.maxOutputTokens === right.metadata.maxOutputTokens
+		&& left.metadata.modelGroup?.id === right.metadata.modelGroup?.id
+		&& JSON.stringify(left.metadata.configurationSchema) === JSON.stringify(right.metadata.configurationSchema);
+}
+
 interface ComposerModel {
 	readonly id: string;
 	readonly name: string;
@@ -102,7 +122,7 @@ export class DshLanguageModelProvider extends Disposable implements ILanguageMod
 				this.vendorHost?.ensureVendor(vendor);
 			}
 		}
-		if (next.length === this.models.length && next.every((model, index) => model.identifier === this.models[index].identifier)) {
+		if (next.length === this.models.length && next.every((model, index) => sameLanguageModel(model, this.models[index]))) {
 			return;
 		}
 		this.models = next;

@@ -232,10 +232,12 @@ export function toHistory(
 		appendNode(node, parts, settledCallIds, drawnCallIds);
 	}
 	flush();
+	// 配额提示是「本回合」的 response 级状态：必须在追加交付物 / extras / pending 之前落到
+	// 对话的末尾 response 上，否则会挂到 appendDeliverables 新开的那条（不带 prompt 的）行上。
+	applyQuotaNotice(extras.quotaNotice, history);
 	appendDeliverables(extras.deliverables ?? [], history);
 	appendExtras(extras, history);
 	appendPending(pendingItems, history);
-	applyQuotaNotice(extras.quotaNotice, history);
 	return history;
 }
 

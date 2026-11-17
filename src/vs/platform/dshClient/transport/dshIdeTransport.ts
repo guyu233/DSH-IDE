@@ -149,14 +149,19 @@ export class DshIdeTransport {
 		if (signal === undefined) {
 			return this._callRemote(namespace, method, args);
 		}
-		signal.throwIfAborted();
 		const controller = new AbortController();
 		const cancel = () => controller.abort(signal.reason);
 		let rejectCancellation: (reason: unknown) => void = () => undefined;
 		const cancellation = new Promise<never>((_resolve, reject) => { rejectCancellation = reject; });
 		const onAbort = () => rejectCancellation(controller.signal.reason);
 		controller.signal.addEventListener('abort', onAbort, { once: true });
+		// 先挂监听再检查已取消：反过来会在「检查」与「挂监听」之间漏掉一次 abort，
+		// 调用再也不会被取消。挂完后复查可覆盖「检查前就已取消」的情况。
 		signal.addEventListener('abort', cancel, { once: true });
+		if (signal.aborted) {
+			cancel();
+		}
+		signal.throwIfAborted();
 		this._pendingCalls.add(controller);
 		try {
 			return await Promise.race([this._callRemote(namespace, method, args, controller.signal), cancellation]);

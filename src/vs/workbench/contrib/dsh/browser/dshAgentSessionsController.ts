@@ -9,6 +9,7 @@
 import { RunOnceScheduler } from '../../../../base/common/async.js';
 import { CancellationToken } from '../../../../base/common/cancellation.js';
 import { Codicon } from '../../../../base/common/codicons.js';
+import { onUnexpectedError } from '../../../../base/common/errors.js';
 import { Emitter } from '../../../../base/common/event.js';
 import { Disposable } from '../../../../base/common/lifecycle.js';
 import { URI } from '../../../../base/common/uri.js';
@@ -63,7 +64,7 @@ export class DshAgentSessionsController extends Disposable implements IChatSessi
 
 	/** 多名单一同增减时合成一次 listSessions，平时不轮询。 */
 	private readonly _listRefresh = this._register(new RunOnceScheduler(() => {
-		void this.refresh(CancellationToken.None);
+		this.refreshNow();
 	}, 50));
 	/** api-session/status 比名单里的 running 新。后台子任务不会把父会话标成还在跑。 */
 	private readonly liveRunning = new Map<string, boolean>();
@@ -94,19 +95,19 @@ export class DshAgentSessionsController extends Disposable implements IChatSessi
 			}
 		}));
 		this._register(this.workspace.onDidChangeWorkspaceFolders(() => {
-			void this.refresh(CancellationToken.None);
+			this.refreshNow();
 		}));
 		// 登记控制器时窗口通道还没 open，第一次 listSessions 会失败。连上之后再取一次。
 		this._register(this.client.onDidChangeState(state => {
 			if (state.connected) {
-				void this.refresh(CancellationToken.None);
+				this.refreshNow();
 			}
 		}));
 		void this.client.getStatus().then(status => {
 			if (status.connected) {
-				void this.refresh(CancellationToken.None);
+				this.refreshNow();
 			}
-		});
+		}, onUnexpectedError);
 		this._register(this.client.onDidSessionNotice(notice => {
 			if (notice.kind === 'list') {
 				this._listRefresh.schedule();
@@ -185,6 +186,15 @@ export class DshAgentSessionsController extends Disposable implements IChatSessi
 			return source.selectPreset(value);
 		}
 		return Promise.resolve();
+	}
+
+	/**
+	 * 后台刷新入口：`refresh()` 在 listSessions 失败时会 throw（原生 `IChatSessionItemController`
+	 * 需要感知失败），但所有「连接状态变化 / 工作区变化 / 定时合并」的触发点都是 fire-and-forget，
+	 * 必须自己收口，否则会变成 unhandled rejection。失败只记日志，不弹通知。
+	 */
+	private refreshNow(): void {
+		void this.refresh(CancellationToken.None).catch(onUnexpectedError);
 	}
 
 	async refresh(token: CancellationToken): Promise<void> {

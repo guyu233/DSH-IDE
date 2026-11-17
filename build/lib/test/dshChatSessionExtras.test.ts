@@ -181,3 +181,63 @@ test('2-A: the four fields reach history parts through the same extras shape the
 		session.dispose();
 	}
 });
+
+
+test('2-A: 内容帧不带 plan/goal/todos 时保留上一次的值（不被清空）', () => {
+	const session = new DshChatSession(fakeClient());
+	let fired = 0;
+	session.onDidChangeExtras(() => fired++);
+	try {
+		session.acceptView(view({ plan: PLAN, goal: GOAL, todos: TODOS }));
+		assert.equal(fired, 1);
+		// 后续内容帧只带 conversation：projections 是空对象，三者必须原样保留。
+		session.acceptView(view({}));
+		assert.deepEqual(session.plan(), PLAN, 'a content frame must not wipe the plan');
+		assert.equal(session.goal()?.goal.objective, '完成手册', 'a content frame must not wipe the goal');
+		assert.deepEqual(session.todos(), TODOS, 'a content frame must not wipe the todos');
+		assert.equal(fired, 1, 'nothing changed, so no rebuild');
+	} finally {
+		session.dispose();
+	}
+});
+
+test('2-A: rebind 失败后同一 id 仍可重试（绑定回滚）', async () => {
+	let attempts = 0;
+	const session = new DshChatSession({
+		call: async () => ({ ok: false, error: { code: 'FEATURE_UNAVAILABLE', message: 'test' } }),
+		rebindView: async () => {
+			attempts += 1;
+			return attempts === 1
+				? { ok: false, error: { code: 'dsh-ide/not-ready', message: 'first attempt fails' } }
+				: { ok: true };
+		},
+	} as never);
+	try {
+		assert.equal(await session.bind('session-1'), false, 'first bind must report failure');
+		assert.equal(attempts, 1);
+		assert.equal(await session.bind('session-1'), true, 'the same id must be retried instead of short-circuiting');
+		assert.equal(attempts, 2);
+	} finally {
+		session.dispose();
+	}
+});
+
+test('2-A: 会话状态通知按 sessionId 过滤，且结束后能复位 running', async () => {
+	const session = new DshChatSession(fakeClient());
+	const fired: boolean[] = [];
+	session.onDidChangeRunning(value => fired.push(value));
+	try {
+		assert.equal(await session.bind('session-1'), true);
+		session.acceptSessionStatus('other-session', true);
+		assert.equal(session.running(), false, 'a background session must not affect this one');
+		assert.deepEqual(fired, [], 'a foreign status must not fire');
+		session.acceptSessionStatus('session-1', true);
+		assert.equal(session.running(), true);
+		session.acceptSessionStatus('session-1', false);
+		assert.equal(session.running(), false, 'the status frame is the only normal reset source');
+		session.acceptSessionStatus('session-1', false);
+		assert.deepEqual(fired, [true, false], 'repeat values must not fire');
+	} finally {
+		session.dispose();
+	}
+});
