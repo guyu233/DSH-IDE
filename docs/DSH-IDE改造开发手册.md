@@ -10,6 +10,14 @@
 
 ## 0. 最终决策与目标基线
 
+### 0.0 开发/验证流程（2026-11-17 用户明确，优先于本文所有打包记录）
+
+> **现阶段不做打包。** 开发中的功能与界面验证一律用**开发版 Electron**（`.build/electron/DSH IDE.exe`，`VSCODE_DEV=1`，注入 Host 三件套环境变量）启动后实测；等全部开发完成后，才进入打包环节（`gulp dsh-ide-pack` / `verify:dsh-artifact` / `verify:dsh-install-drift`）。
+>
+> - 每个功能批次完成后：跑相关单测 + 用开发版 Electron 连 DSH Host 验证功能/界面，发现问题就地修。
+> - **打包、profile 覆盖、install-drift、tgz 产物核对等只在"开发完成"节点做一次**；§9.5 里已有的打包记录是历史实测，不是当前每轮必做项。
+> - 真机 GUI 观察仍由用户执行（AGENTS.md §6）；AI 只负责启动开发版 Electron、连通性与代码级定位，不以代码推断界面结论。
+
 ### 0.1 选定路线（已替换旧版“轻量 slot”方案）
 
 **在现有原生 chat 面板（`dshChatSession.ts` / `dshChatModel.ts`）上改造，只承接 DSH 源码内置的官方聊天内容。**
@@ -281,8 +289,9 @@ DshChatSession.acceptView / acceptConversation → DshChatModel（typed 节点�
 ### 3.5 门禁同步
 
 - 测试入口：`package.json:85-94` 的 `build-dsh-tests`、`test-dsh`、`test-dsh:all`、`verify:dsh-ide-*`、`verify:dsh-ide-ci`；`dshIdeEndpoints.test.ts` 在 `test-dsh:all` 显式列表内。
-- 每次提交前跑：`tsc --noEmit`（`node --max-old-space-size=8192 node_modules/typescript/bin/tsc --noEmit -p src/tsconfig.json`）+ `npm run test-dsh:all` + 相关 verify 门禁。
-- 提交信息写清「做了什么 / 门禁实测结果 / 未完成项」；PENDING 不计入通过；真机验证由用户执行。
+- **开发期每批**（按 §0.0）：相关单测 + 增量类型检查（改动文件零错误）+ 开发版 Electron 连 Host 验证功能/界面。**不做打包。**
+- **开发完成后一次性**：全量 `tsc --noEmit` + `npm run test-dsh:all` + `verify:dsh-ide-ci` + 打包（§0.0）。
+- 提交信息写清「做了什么 / 门禁实测结果 / 未完成项」；PENDING 不计入通过；真机 GUI 由用户执行。
 
 ---
 
@@ -500,7 +509,7 @@ DshChatSession.acceptView / acceptConversation → DshChatModel（typed 节点�
 > 说明：Host 级 `include:tool-subagent` 行在 profile 清单里是 inactive，但当前会话的 `ptc` preset 在 preset 作用域内挂了 `tool-subagent`（`provider: spawn`、`modelSelection: true`、`modelDiscovery: true`），所以本会话的 `subagent` / `subagent_fork` / `list_subagent_models` 工具可用——这也是子智能体能被实际派工的原因。这一点按源码核对记录，不臆造 Host 级启用。
 
 ---
-## 9. 当前状态：第一/第二阶段代码完成并打包；2-E 真机验收与新重点「子智能体会话树」待定
+## 9. 当前状态：第一/第二阶段代码完成；开发版 Electron 验证中；打包推迟到开发完成后
 
 ### 9.1 阶段划分与当前进度（按 2026-11-17 草稿迭代）
 
@@ -510,8 +519,8 @@ DshChatSession.acceptView / acceptConversation → DshChatModel（typed 节点�
 |---|---|---|
 | 路线决策 | 完成 | 原生 chat 面板 + 翻译层，不引入 slot / Webview（§0） |
 | 第一阶段（层 1–4） | 完成并冻结 | 数据通路、契约、Host 投影、状态层、逐类 UI 接线（§8） |
-| 第二阶段 2-A~2-D | **代码完成** | 门禁全绿、产物已打包并装入 profile（§9.2–§9.5） |
-| 第二阶段 2-E | **待用户执行** | 重启 DSH（当前 `Config.listConfigs{name:"dsh-ide"}` 为 `absent`）+ 真机 GUI 验收（§4 草稿 / §9.5 2-E） |
+| 第二阶段 2-A~2-D | **代码完成** | 门禁全绿；历史曾打包并装入 profile，但按 §0.0 现流程打包推迟到开发完成后（§9.2–§9.5） |
+| 第二阶段 2-E | **开发版 Electron 验证** | 用 `.build/electron/DSH IDE.exe` 连 Host 验证功能/界面（§9.5 2-E）；不做打包 |
 | **子智能体会话树** | **代码完成（全量门禁 PASS）** | 用户确认三项决策后实现：纯 renderer 改动、原生 `IChatSessionItem.children`；新增 `dshSessionTree.ts` 与 9 项单测（§9.9）。全量门禁已复跑 PASS，真机验证并入 2-E |
 
 > 重启前运行中的 DSH Host（pid 16300，2026-11-14 启动）内存里的插件代码早于本轮改动；开发板 electron 已完成连接性与两轮源码核对（§9.5 2-E），但**新版 Host 半身与 2-A~2-D 的真机最终表现须重启后复验**。
@@ -645,13 +654,17 @@ DshChatSession.acceptView / acceptConversation → DshChatModel（typed 节点�
 
 **门禁（实测）**：`test-dsh:all` PASS（370 项 node --test 全过 + mocha 7 项全过）；`verify:dsh-ide-ci` 五步全 PASS；生成脚本 `--check` PASS（无漂移）。
 
-#### 阶段 2-E：真机验收与收尾
+#### 阶段 2-E：开发版 Electron 功能/界面验收（现状流程，不做打包）
 
-1. 用户按 `AGENTS.md §6` 做 GUI 验证：消息显示、审批/问卷按钮、工具展开、交付物打开、图标主题表现。AI 不代跑。
-2. 清理临时文件 `.dsh-preview/`、`.session_dump.txt`（用户决定）。
-3. 更新 §9.2 状态表与 §8 逐轮记录，把第二阶段各轮落地情况写入 §8（保持摘要可追溯；详细逐轮历史可查 git log）。
+按 §0.0：**现阶段每批开发完成后用开发版 Electron 启动验证功能与界面；打包推迟到全部开发完成后。**
 
-**产物与安装（本轮已完成到「等待重启」）**：
+1. 启动：`.build/electron/DSH IDE.exe` + `VSCODE_DEV=1` + Host 三件套环境变量（`DSH_IDE_ENDPOINT` / `DSH_IDE_LAUNCH_URL` / `DSH_IDE_ENDPOINT_FILE`）。
+2. 检查：`ide/ping` 连通、Sessions 面板来自 Host、`ide/dispatch` 可用、`$events` 就绪。
+3. 用户按 `AGENTS.md §6` 做 GUI 验证：消息显示、审批/问卷按钮、工具展开、交付物打开、图标主题表现、会话树展开。AI 不代跑。
+4. 发现问题就地修，再重复 1–3；**本阶段不执行打包、profile 覆盖、install-drift**。
+5. 临时文件 `.dsh-preview/`、`.session_dump.txt` 已清理（§9.8）。
+
+**产物与安装（历史实测记录，非当前流程；按 §0.0 打包推迟到开发完成后再做）**：
 
 | 项 | 实测值 |
 |---|---|
@@ -722,9 +735,9 @@ DshChatSession.acceptView / acceptConversation → DshChatModel（typed 节点�
 
 ### 9.6 第二阶段实施顺序（已定）
 
-> **2-A（修数据链）与 2-B（翻译层升级）为主线顺序推进；2-D（图标全局替换）与 2-A/2-B 并行启动；2-C（Session 缺口）随主线核对；全部代码完成、门禁全绿后，最后统一做 2-E（真机验收）。**
+> **2-A（修数据链）与 2-B（翻译层升级）为主线顺序推进；2-D（图标全局替换）与 2-A/2-B 并行启动；2-C（Session 缺口）随主线核对；每批完成后按 §0.0 用开发版 Electron 连 Host 验证（GUI 观察由用户执行）。**
 >
-> 真机验证不在中途分批做：等 2-A/2-B/2-C/2-D 全部完成、`verify:dsh-ide-ci` 全绿后一次性由用户执行（AGENTS.md §6）。
+> 打包、profile 覆盖、install-drift 按 §0.0 推迟到全部开发完成后一次性执行。
 >
 > 全程不改协议/通道/Host/状态层（§5 冻结边界），不改原生渲染工厂，不做注册表，不恢复 driver。
 
@@ -736,8 +749,8 @@ DshChatSession.acceptView / acceptConversation → DshChatModel（typed 节点�
 | 主线 B | 2-B 翻译层升级（B1→B5 分批 TDD） | 依赖 A；逐批跑门禁 |
 | 主线 C | 2-C Session 缺口核对 | 随主线，无硬依赖 |
 | 并行 D | 2-D 图标全局替换（资源生成→映射→getCSS→覆盖点→主题验证） | **与 A/B 并行**，独立工作流、独立门禁，不阻塞主线 |
-| 收尾 E | 2-E 真机验收（用户执行） | **全部完成后**统一做 |
-| 新重点（待定） | 子智能体会话树（§9.9） | 证据已闭合；用户确认 3 个问题（§9.9.5）后按形态 A+ 实现，并入门禁 |
+| 收尾 E | 2-E 开发版 Electron 验证（按 §0.0 每批做，GUI 观察由用户执行） | 每批完成后 |
+| 新重点（已完成） | 子智能体会话树（§9.9） | 已按形态 A+ 实现并入门禁 |
 
 ### 9.7 能力限制与非缺陷（保持不变）
 
@@ -748,7 +761,7 @@ DshChatSession.acceptView / acceptConversation → DshChatModel（typed 节点�
 
 ### 9.8 用户决策（已定）与执行边界
 
-1. **真机 GUI 验证时机**：**全部代码完成、门禁全绿后统一验证**，不在中途分批做。由用户执行（AI 不代跑）。
+1. **开发期验证时机**：按 §0.0，每批完成后用开发版 Electron 连 Host 验证功能与界面；GUI 观察由用户执行（AI 不代跑）。打包推迟到全部开发完成后。
 2. **图标替换排期**：**与 2-A/2-B 并行**启动，独立工作流、独立门禁（2-D）。
 3. **临时文件**：`.dsh-preview/`、`.session_dump.txt` 已删除清理（经用户确认终止占用目录的两个临时预览进程 `serve.cjs` / `serve-chat-view.cjs` 后删除）。二者未被 git 跟踪，不进版本库。
 
@@ -866,5 +879,5 @@ DshChatSession.acceptView / acceptConversation → DshChatModel（typed 节点�
 | 改动文件 tsc 检查 | PASS：`dshSessionTree.ts` 零错误；`dshAgentSessionsController.ts` 的 `pane` 可能为 null 已改为 `?? undefined` 收窄，改动文件零错误 |
 | 全量 `tsc --noEmit` / `verify:dsh-ide-ci` | **PASS**（2026-11-17 15:26 复跑）：`test-dsh:all` mocha 7 项 + node 386 项全通过；`verify:dsh-ide-ci` 在 `DSH_INSTALLED_VERSION=0.2.2-rc.3` 下五步全 PASS；全量 tsc 余 137 个既有 VS Code 报错，本次改动文件零命中 |
 
-> 注：全量门禁已按上表复跑并转 PASS；真机会话树展开在 2-E 重启 DSH 后一并验收（AI 不代跑）。
+> 注：全量门禁已按上表复跑并转 PASS；真机会话树展开在 2-E 用开发版 Electron 连 Host 验收（AI 不代跑）。全量门禁 PASS 不等于打包——按 §0.0 打包推迟到全部开发完成后再做。
 

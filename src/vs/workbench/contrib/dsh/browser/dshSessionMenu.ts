@@ -44,7 +44,8 @@ async function fail(notifications: INotificationService, error: { message?: stri
 
 function registerSessionAction(options: {
 	readonly id: string;
-	readonly title: string;
+	/** 已由调用方 `localize2` 解析好的标题（NLS 的 key 必须是字面量，不能在此处动态拼）。 */
+	readonly title: ReturnType<typeof localize2>;
 	readonly order: number;
 	readonly group: string;
 	readonly icon?: typeof Codicon.star;
@@ -55,7 +56,7 @@ function registerSessionAction(options: {
 		constructor() {
 			super({
 				id: options.id,
-				title: localize2(options.id, options.title),
+				title: options.title,
 				icon: options.icon,
 				...(options.keybinding === undefined ? {} : {
 					keybinding: {
@@ -86,7 +87,7 @@ function registerSessionAction(options: {
 export function registerDshSessionMenu(): void {
 	registerSessionAction({
 		id: 'dsh.session.favorite',
-		title: localize('dsh.session.favorite', "收藏"),
+		title: localize2('dsh.session.favorite', "收藏"),
 		order: 1,
 		group: '1_dsh',
 		icon: Codicon.star,
@@ -99,7 +100,7 @@ export function registerDshSessionMenu(): void {
 	});
 	registerSessionAction({
 		id: 'dsh.session.pin',
-		title: localize('dsh.session.pin', "置顶会话"),
+		title: localize2('dsh.session.pin', "置顶会话"),
 		order: 2,
 		group: '1_dsh',
 		run: async (accessor, sessionId) => {
@@ -111,7 +112,7 @@ export function registerDshSessionMenu(): void {
 	});
 	registerSessionAction({
 		id: 'dsh.session.rename',
-		title: localize('dsh.session.rename', "重命名"),
+		title: localize2('dsh.session.rename', "重命名"),
 		order: 1,
 		group: '2_dsh',
 		keybinding: KeyMod.CtrlCmd | KeyMod.Alt | KeyCode.KeyG,
@@ -131,7 +132,7 @@ export function registerDshSessionMenu(): void {
 	});
 	registerSessionAction({
 		id: 'dsh.session.fork',
-		title: localize('dsh.session.fork', "分叉会话"),
+		title: localize2('dsh.session.fork', "分叉会话"),
 		order: 2,
 		group: '2_dsh',
 		keybinding: KeyMod.CtrlCmd | KeyMod.Alt | KeyCode.KeyF,
@@ -149,7 +150,7 @@ export function registerDshSessionMenu(): void {
 	});
 	registerSessionAction({
 		id: 'dsh.session.copyId',
-		title: localize('dsh.session.copyId', "复制 Session ID"),
+		title: localize2('dsh.session.copyId', "复制 Session ID"),
 		order: 3,
 		group: '2_dsh',
 		run: async (accessor, sessionId) => {
@@ -158,7 +159,7 @@ export function registerDshSessionMenu(): void {
 	});
 	registerSessionAction({
 		id: 'dsh.session.openPath',
-		title: localize('dsh.session.openPath', "在应用中打开"),
+		title: localize2('dsh.session.openPath', "在应用中打开"),
 		order: 1,
 		group: '3_dsh',
 		run: async (accessor, sessionId) => {
@@ -170,7 +171,7 @@ export function registerDshSessionMenu(): void {
 	});
 	registerSessionAction({
 		id: 'dsh.session.move',
-		title: localize('dsh.session.move', "移动到工作区"),
+		title: localize2('dsh.session.move', "移动到工作区"),
 		order: 2,
 		group: '3_dsh',
 		run: async (accessor, sessionId) => {
@@ -202,7 +203,7 @@ export function registerDshSessionMenu(): void {
 	});
 	registerSessionAction({
 		id: 'dsh.session.archive',
-		title: localize('dsh.session.archive', "归档会话"),
+		title: localize2('dsh.session.archive', "归档会话"),
 		order: 1,
 		group: '4_dsh',
 		keybinding: KeyMod.CtrlCmd | KeyMod.Shift | KeyCode.KeyA,
@@ -215,7 +216,7 @@ export function registerDshSessionMenu(): void {
 	});
 	registerSessionAction({
 		id: 'dsh.session.delete',
-		title: localize('dsh.session.delete', "删除会话"),
+		title: localize2('dsh.session.delete', "删除会话"),
 		order: 1,
 		group: '5_dsh',
 		run: async (accessor, sessionId) => {
