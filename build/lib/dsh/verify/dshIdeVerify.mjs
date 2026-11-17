@@ -191,7 +191,6 @@ function boundary() {
 		'workbench/contrib/dsh/browser/dshIdeConsumer.ts',
 		'workbench/contrib/dsh/browser/dshChatModel.ts',
 		'workbench/contrib/dsh/browser/dshChatSession.ts',
-		'workbench/contrib/dsh/browser/dshChatModelDriver.ts',
 	];
 	for (const file of uiProjectionFiles) {
 		const text = read(file);

@@ -655,7 +655,7 @@ BUILD_TARGETS.forEach(buildTarget => {
 					[path.join(dshResources, 'locale'), 'locale'],
 					[path.join(dshClientOut, 'index.js'), 'index.js'],
 					[path.join(dshClientOut, 'client', 'client.js'), 'client.js'],
-					// host/ 现仅 ide-service.js（终端已回归原生 node-pty，不再有独立 runner），整目录 stage 即可。
+					// host/ 整目录 stage（electron-home / ide-launch-queue / ide-service / ide-view-host 都在其中）。
 					[path.join(dshClientOut, 'host'), 'host'],
 					// common/ 只 stage Host 直接依赖的环境常量、认证脱敏与中立会话投影；IDE 主进程模块留在 app 内。
 					// 因此按文件 stage，避免把传输层误打进 bundle。
@@ -667,7 +667,6 @@ BUILD_TARGETS.forEach(buildTarget => {
 					[path.join(dshClientOut, 'common', 'dshIdeArchiveSet.js'), path.join('common', 'dshIdeArchiveSet.js')],
 					[path.join(dshClientOut, 'common', 'dshIdeSessionSearch.js'), path.join('common', 'dshIdeSessionSearch.js')],
 					[path.join(dshClientOut, 'common', 'dshIdeComposer.js'), path.join('common', 'dshIdeComposer.js')],
-[path.join(dshClientOut, 'common', 'dshIdeLocationIndex.js'), path.join('common', 'dshIdeLocationIndex.js')],
 					[path.join(dshClientOut, 'common', 'dshIdeWaterfallNotice.js'), path.join('common', 'dshIdeWaterfallNotice.js')],
 					[path.join(dshClientOut, 'common', 'dshIdeRequestView.js'), path.join('common', 'dshIdeRequestView.js')],
 				];
