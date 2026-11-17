@@ -9,17 +9,20 @@
 // 为什么必须内联 data URI：CSS 里的 `url(...)` 指向文档/资源文件时在打包后会失效
 // （手册 §9.5 阶段 2-D 第 3 条）；内联后无外部依赖，且 `mask` 会随 `currentColor` 变色。
 //
-// 资源来源（只读，不手绘）：`E:/deepseek-harness/packages/client/ui-primitives/src/icons/artwork.ts`
+// 资源来源（只读，不手绘）：https://github.com/deepseek-ai/deepseek-harness 的
+// `packages/client/ui-primitives/src/icons/artwork.ts`
 // 的 `ICON_ARTWORK`，regular stroke = 1（`ICON_REGULAR_STROKE`）。
 //
 // 用法：node build/lib/dsh/genDshIconDataUris.mjs [--check]
 //   --check  只比对输出是否与已生成文件一致（不写文件），供门禁使用。
+// 源文件不随仓库分发：运行前用 DSH_ARTWORK_TS 指向官方仓库的
+// `packages/client/ui-primitives/src/icons/artwork.ts`（只读，不在本机保留整仓副本）。
 
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 
 const repoRoot = path.resolve(import.meta.dirname, '../../..');
-const sourcePath = 'E:/deepseek-harness/packages/client/ui-primitives/src/icons/artwork.ts';
+const sourcePath = process.env['DSH_ARTWORK_TS'] ?? '';
 const outputPath = path.join(repoRoot, 'src/vs/workbench/contrib/dsh/browser/dshIconDataUris.ts');
 const strokeWidth = 1;
 
@@ -88,8 +91,8 @@ function toDataUri(svg) {
 }
 
 function generate() {
-	if (!fs.existsSync(sourcePath)) {
-		throw new Error(`official artwork source not found: ${sourcePath}`);
+	if (sourcePath === '' || !fs.existsSync(sourcePath)) {
+		throw new Error(`official artwork source not found: ${sourcePath || '<empty>'}; set DSH_ARTWORK_TS to the official packages/client/ui-primitives/src/icons/artwork.ts`);
 	}
 	const entries = readArtwork();
 	if (entries.length < 100) {

@@ -8,7 +8,7 @@
 
 | 项 | 值 |
 | --- | --- |
-| 权威源仓库（只读，绝不写） | `E:\deepseek-harness`（官方 `deepseek-ai/deepseek-harness` 检出） |
+| 权威源仓库（只读，绝不写） | `https://github.com/deepseek-ai/deepseek-harness`（官方仓库；不下载整仓副本） |
 | `sourceCommit` | `39163dd30f703a79079e2d2446545cff3c453738`（`git describe`：`dsh-v0.2.2-rc.3-608-g39163dd30f`） |
 | 源包 | `packages/client/ui-primitives/`（`@deepseek-ai/dsh-client-ui-primitives`，版本 `0.2.2-rc.3`） |
 | 源文件 | `src/icons/artwork.ts`（sha256 `0f24b3f813f79d726fd1784d5d9bbf0b4fc64fa801711df728a6d34363d5b964`，78,594 B） |
@@ -27,7 +27,7 @@
 生成物：`src/vs/workbench/contrib/dsh/browser/dshIconDataUris.ts`
 （sha256 `514e24d8a30b5a21625d168b503c45be0e0f11a10902c118ae817deed4d991a1`，76,313 B）。
 
-**可重复验证**：`node build/lib/dsh/genDshIconDataUris.mjs --check`
+**可重复验证**：`DSH_ARTWORK_TS=<官方 artwork.ts 路径> node build/lib/dsh/genDshIconDataUris.mjs --check`
 （已登记进 `test-dsh:all` 的 `dshIconArtwork.test.ts` 覆盖生成物形状）。
 
 ## 3. 边界
