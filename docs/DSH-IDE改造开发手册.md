@@ -992,3 +992,14 @@ DshChatSession.acceptView / acceptConversation → DshChatModel（typed 节点�
 - 必跑：`npx tsc --project ./src/tsconfig.json --noEmit --skipLibCheck`（目标 0 错误；`--max-old-space-size=8192`）。
 - 建议：对改动文件跑 `build/hygiene.ts`（既有中文注释 hygiene 报错是基线，不新增即可）。
 - 真机验证由用户执行（AGENTS.md §6，AI 不代跑 GUI）；按 §0.0 用开发版 Electron 验证，不做打包。
+
+#### 9.11.4 第 2 轮复检与断链修复（已执行，2026-11-17）
+
+> 第 1 轮结束后复检发现 3 个**已失效的脚本/配置**与 4 处死代码，按同样流程先出清单（`docs/DSH-IDE瘦身问题清单-第2轮.md`）再执行。区间 `36521cd0..2d7a1b02`：**20 个文件，+42 / -496 行**。
+>
+> **删除**：`build/lib/dsh/verify/dshRealSampleP95.mjs`（import 的 `ide-view-projector.ts` / `translator.ts` 已被删，boundary 门禁反向要求不得存在，实跑 `ERR_MODULE_NOT_FOUND`）、`build/dsh-ide-build-prereqs.mjs`（扁平化后把 `types-stash` 写到 `E:\`）、npm script `verify:dsh-real-p95`；`dshComposerProjection.ts` 的 `toChatMode`/`observeModes`/`modesOf`（41 行）、`dshChatSession.ts` 的 `noteRunning`/`pendingItemsView`+`_pendingView`/`boundId`（22 行）、`dshIdeProtocol.ts` 的 `DshIdeImageAttachmentValue`、重复的 `DSH_MODEL_VENDOR`；`.vscode` 的 3 个悬空任务与 5 个指向已删扩展目录的启动项。
+>
+> **修正**：`sync-upstream.mjs` 的 PROVENANCE 路径与版本正则（原恒返回 undefined → 报告恒为 SAME）；`dshArtifactContents.mjs` 的 `EXPECTED_COMMON` 7 → 10；手册 method 计数 42/36 → 43（6 处）；README 两处过期描述；4 处 `DshChatModelDriver` 注释改为 `dshChatSessionContent` content provider。
+>
+> **门禁**：tsc 0 error、`test-dsh:all` 384 PASS、`verify:dsh-ide-ci` 五项 PASS、`verify:dsh-artifact` PASS、`.vscode` 两份 JSONC 解析与依赖引用全部可解析。详见 `docs/DSH-IDE瘦身报告-第2轮.md`。
+
