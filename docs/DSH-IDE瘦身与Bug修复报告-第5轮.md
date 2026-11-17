@@ -1,7 +1,7 @@
 # DSH-IDE 瘦身与 Bug 修复报告（第 5 轮）
 
 > 编制时间：2026-11-18 00:35（Asia/Shanghai）
-> 起点：`9919cd20`（第 4 轮结束）　终点：`90e19ae1`
+> 起点：`9919cd20`（第 4 轮结束）　终点：`85ad5953`（第 5 轮文档提交；统计口径含文档）
 > 全区间：**40 个文件，+422 / -3,910 行**（含本文档与手册提交）
 > 4 个提交：`3a3c7336`（回归修复）→ `8903ba72`（清理）→ `90e19ae1`（脚本/测试缺陷）→ 文档
 
@@ -11,7 +11,7 @@
 |---|---|
 | `tsc --noEmit` | **PASS**（0 error） |
 | `npm run build-dsh-tests` | **PASS** |
-| `npm run test-dsh:all` | **PASS**（**391**，较第 4 轮 389 **+2**） |
+| `npm run test-dsh:all` | **PASS**（**391**，较第 4 轮 388 **+3**） |
 | `verify:dsh-ide-ci`（五项） | **PASS**（`DSH_INSTALLED_VERSION=0.2.2-rc.1`） |
 | `verify:dsh-artifact` | **PASS**（142,011,142 B；`package/common/` 11 模块） |
 | `npm run compile` | **PASS**（0 errors，37 s） |

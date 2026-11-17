@@ -298,7 +298,7 @@ DshChatSession.acceptView / acceptConversation → DshChatModel（typed 节点�
 
 ### 3.5 门禁同步
 
-- 测试入口：`package.json:85-94` 的 `build-dsh-tests`、`test-dsh`、`test-dsh:all`、`verify:dsh-ide-*`、`verify:dsh-ide-ci`；`dshIdeEndpoints.test.ts` 在 `test-dsh:all` 显式列表内。
+- 测试入口：`package.json:80-91` 的 `build-dsh-tests`、`test-dsh`、`test-dsh:all`、`verify:dsh-ide-*`、`verify:dsh-ide-ci`；`dshIdeEndpoints.test.ts` 在 `test-dsh:all` 显式列表内。
 - **开发期每批**（按 §0.0）：相关单测 + 增量类型检查（改动文件零错误）+ 开发版 Electron 连 Host 验证功能/界面。**不做打包。**
 - **开发完成后一次性**：全量 `tsc --noEmit` + `npm run test-dsh:all` + `verify:dsh-ide-ci` + 打包（§0.0）。
 - 提交信息写清「做了什么 / 门禁实测结果 / 未完成项」；PENDING 不计入通过；真机 GUI 由用户执行。
@@ -1032,7 +1032,7 @@ DshChatSession.acceptView / acceptConversation → DshChatModel（typed 节点�
 >
 > **门禁**：tsc 0 error、`test-dsh:all` 384 PASS、`verify:dsh-ide-ci` 五项 PASS、`verify:dsh-artifact` PASS、`npm run compile` PASS（0 errors，49 s）、三份 `.vscode` JSONC 解析 PASS、`bash -n` / `node --check` 全部 PASS、`.eslint-allowed-*-files` 0 missing、`build/lib/test/i18n.test.ts` 3/3 PASS。详见 `docs/DSH-IDE瘦身报告-第4轮.md`。
 >
-> **保留**：`test/smoke/src/areas/agentsWindow/**`（5 文件 108 KB）整块保留——它测的 Dev Container / packaged AgentHost 已随 `src/vs/sessions/**` 与 `src/vs/platform/agentHost/**` 消失，但删除属测试裁剪，不在「行为不变」的清理范围。
+> **保留**：`test/smoke/src/areas/agentsWindow/**`（5 文件 108 KB）整块保留——它测的 Dev Container / packaged AgentHost 已随 `src/vs/sessions/**` 与 `src/vs/platform/agentHost/**` 消失，但删除属测试裁剪，不在「行为不变」的清理范围。（**第 5 轮已删除**，见 §9.11.8。）
 
 #### 9.11.7 第 4 轮细小 Bug 修复（已执行，2026-11-17）
 
@@ -1054,9 +1054,9 @@ DshChatSession.acceptView / acceptConversation → DshChatModel（typed 节点�
 
 > **上一轮修复引入的回归（5 处，全部修复）**：① **高危** `bind()` 失败回滚与「相同 id 短路」组合成死锁——A 已绑定 → bind(B) 失败 → 再 bind(A) 直接 return true，但 `model.clear()` 已执行 → 面板永久空白；修法是新增 `_boundDirty` 标志（短路条件加 `&& !this._boundDirty`）。② `consumer.reset()` 挂在 `onDidChangeState({connected:true})`，但 `_connected` 无置 false 路径 → 每窗口最多触发一次，重连不 reset；修法是在 snapshot 监听里按 Host 的 `rebuild` 快照调新增 `markDisconnected()`。③ `throwIfAborted()` 在 `try` 外导致 abort 监听器泄漏。④ `authenticating` 的 catch 无条件清空可能抹掉新 promise。⑤ plan/goal/todos 的「缺席即保留」语义未在契约里固化。
 
-> **清理**：删 12 个纯 `src/vs/sessions/**` 的 eslint 配置块（236 行，规则只做 minimatch 不 stat 磁盘）、`stylelint.ts` 的死正则、`i18n.ts` 的 sessions 分支（与测试成对删）、`tsec.exemptions.json` 2 条、`test/smoke/src/areas/agentsWindow/**` 6 文件 164 KB（被测源码与 out 产物全不存在）、`build/next/devTunnelsWeb*` 7 文件 + npm script（outDir 写死已删 feature）。**保留** `eslint.config.js:1863` 的 `'vs/sessions/~'`（在活 target 的允许清单里，删=收窄语义）。
+> **清理**：删 12 个纯 `src/vs/sessions/**` 的 eslint 配置块（236 行，规则只做 minimatch 不 stat 磁盘）、`stylelint.ts` 的死正则、`i18n.ts` 的 sessions 分支（与测试成对删）、`tsec.exemptions.json` 2 条、`test/smoke/src/areas/agentsWindow/**` 5 文件 108 KB + `test/automation/src/agentsWindow.ts` 1 文件 56 KB（合计 6 文件 164 KB；被测源码与 out 产物全不存在）、`build/next/devTunnelsWeb*` 7 文件 + npm script（outDir 写死已删 feature）。**保留** `eslint.config.js:1863` 的 `'vs/sessions/~'`（在活 target 的允许清单里，删=收窄语义）。
 
 > **脚本/测试缺陷（6 处）**：`dshIdeEndpoints.test.ts` 的 `UNVERIFIED` 恒为空数组导致守护恒真（改为显式空数组 + 覆盖断言）；`dshStageNumbering.test.ts` 扫描根拼错且 `catch { return }` 吞错（改正 + `missingRoots` 断言）；`compareVersion` 与 `dshIdeVerify.mjs` 把 prerelease 整段字符串比（`rc.10 < rc.9`，改为逐段数字比较）；`dshInstallDrift.mjs` 跳过空文件、缺 `host/` 时抛 ENOENT；`dshArtifactContents.mjs` 依赖 `process.cwd()`；`genDshIconDataUris --check` 未接线（改用生成物 sha256 指纹测试）。
 
-> **门禁**：tsc 0 error、`build-dsh-tests` PASS、`test-dsh:all` **391** PASS（389 → 391）、`verify:dsh-ide-ci` 五项 PASS、`verify:dsh-artifact` PASS、`npm run compile` PASS（37 s）。`verify:dsh-install-drift` **FAIL（预先存在）**：`host/ide-service.js` / `host/ide-view-host.js` 与 2026-11-17 00:38 的旧产物不一致，本轮未改这两个文件、也未打包（按 §0.0 打包推迟）。详见 `docs/DSH-IDE瘦身与Bug修复报告-第5轮.md`。
+> **门禁**：tsc 0 error、`build-dsh-tests` PASS、`test-dsh:all` **391** PASS（388 → 391，+3）、`verify:dsh-ide-ci` 五项 PASS、`verify:dsh-artifact` PASS、`npm run compile` PASS（37 s）。`verify:dsh-install-drift` **FAIL（预先存在）**：`host/ide-service.js` / `host/ide-view-host.js` 与 2026-11-17 00:38 的旧产物不一致，本轮未改这两个文件、也未打包（按 §0.0 打包推迟）。详见 `docs/DSH-IDE瘦身与Bug修复报告-第5轮.md`。
 
