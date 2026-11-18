@@ -64,18 +64,22 @@
 | BUG-014 | 已修（隔离证据） | 关闭世代拦截废弃调用：close() 递增世代，握手完成、端点重发现重试与跟随建立三处恢复点都比对世代，不符以 dsh-ide/cancelled 丢弃。1 条隔离用例转绿。真机快速开关窗 PENDING。 |
 | BUG-020 | 已修（隔离证据） | 重试分类边界：端点未变时业务失败原样抛出、不重放；已关闭窗口的调用以 cancelled 丢弃而非重试。1 条隔离用例锁定边界。完整分类矩阵与消费型轮询 PENDING。 |
 | SEC-004 | 仍存在 | 端点信任与 ACL 证据 PENDING。 |
-| BUG-018 | 已修（隔离证据） | 开窗结果三态：egistered-ide 才 opened: true，刚拉起只 opened: false, queued: true；spawn 等 spawn/rror 事件判定并检查 pid，异步 rror 不再漏掉。2 条隔离用例转绿；队列与 electronHome 19/19 保持。真机首点开窗 PENDING。 |
+| BUG-018 | 已修（隔离证据） | 开窗结果三态：
+egistered-ide 才 opened: true，刚拉起只 opened: false, queued: true；spawn 等 spawn/rror 事件判定并检查 pid，异步 rror 不再漏掉。2 条隔离用例转绿；队列与 electronHome 19/19 保持。真机首点开窗 PENDING。 |
 | BUG-021 | 已修（隔离证据） | 归档写回按序号采纳（archiveEpoch + isCurrentRefresh，旧回包整体丢弃）；收藏/置顶排队任务在执行时重新核对目标行可见。2 条隔离用例转绿。真机多行并发 PENDING。 |
-| BUG-023 | 已修（隔离证据） | 会话列表可见状态收敛为单一来源：onDidChangeBodyVisibility 不再单独驱动 control，而是重算「pane 可见 且 列表实际显示」；efreshSessionsControlVisibility 在更新容器与 context 后同步 control。pane 可见但列表隐藏时 control 不再作为可见订阅方工作，重新展示可恢复。1 条隔离用例锁定。真机 pane 切换 PENDING。 |
+| BUG-023 | 已修（隔离证据） | 会话列表可见状态收敛为单一来源：onDidChangeBodyVisibility 不再单独驱动 control，而是重算「pane 可见 且 列表实际显示」；
+efreshSessionsControlVisibility 在更新容器与 context 后同步 control。pane 可见但列表隐藏时 control 不再作为可见订阅方工作，重新展示可恢复。1 条隔离用例锁定。真机 pane 切换 PENDING。 |
 | CLN-003 | 存疑保留（已核引用） | 旧列表服务仍有 3 个文件引用（dsh.contribution / dshIdeSessionsService / dshSessionSearchCommands），搜索命令实际承接，**不能整删**。按审计要求先录引用矩阵，不删。 |
-| SEC-005 | 已修（锁文件证据） | 四处 markdown-it 统一升到 14.3.3（>=14.3.3 <15），只改 version/esolved/integrity 三行，未整体重写锁文件；实体包同步。1 条隔离用例转绿。真机 Markdown 渲染与发布物 PENDING。 |
+| SEC-005 | 已修（锁文件证据） | 四处 markdown-it 统一升到 14.3.3（>=14.3.3 <15），只改 version/
+esolved/integrity 三行，未整体重写锁文件；实体包同步。1 条隔离用例转绿。真机 Markdown 渲染与发布物 PENDING。 |
 | SEC-006 | 存疑保留 | 按原审计逐公告核可达性，不能单凭锁宣告生产漏洞 / B09。 |
 | DOC-003、DOC-005、DOC-007 | 仍存在 | 发布、版本、cwd 验收 PENDING / B10。 |
 | DOC-002、DOC-004、DOC-006、SEC-001 | 仍存在 | 平台支持、上游来源、历史凭据说明、行内补全声明 PENDING / B11。 |
 | BUG-019 | 已修（隔离证据） | 远端图片尺寸探测有界且必结算：2 MB 字节上限 + 5 s 时限，超限/超时明确返回「读不到」并销毁响应；解析失败只在流结束时才是最终结论，此时结算为 undefined，不再吞错悬空。本地桩实测四种情形（正常图 / 非图片 / 超大 / 不结束）均结算。真机 Emmet 命令 PENDING。 |
 | BUG-024 | 已修（隔离证据） | 模拟器工具名模式不匹配改为显式失败：四条协议路径（Responses API + 三处）都不再静默回退成请求里的第一个工具，避免把「执行了另一个工具」统计成原场景性能数据。1 条隔离用例锁定四条路径。真机性能基线与模拟运行 PENDING。 |
 | OPT-001 | 仍存在 | 需实测 P95 与内存斜率后才能决定是否优化；无实测不优化。 |
-| OPT-002 | 已修（实测证据） | watch 与一次性 transpile 参数语义统一：watch(outDir, excludeTests) 接收 --out 与 --exclude-tests，不再固定 OUT_DIR；监听器改用绝对 glob 与绝对 cwd/ase，非仓库 cwd 启动不再偏移；去掉底层 watcher 不支持的 eadDelay。实测从 C:\ 启动 	ranspile --watch --out out-watch-probe：目录被创建、out/ 未被写入。1 条隔离用例锁定。 |
+| OPT-002 | 已修（实测证据） | watch 与一次性 transpile 参数语义统一：watch(outDir, excludeTests) 接收 --out 与 --exclude-tests，不再固定 OUT_DIR；监听器改用绝对 glob 与绝对 cwd/ase，非仓库 cwd 启动不再偏移；去掉底层 watcher 不支持的 
+eadDelay。实测从 C:\ 启动 	ranspile --watch --out out-watch-probe：目录被创建、out/ 未被写入。1 条隔离用例锁定。 |
 | CLN-004 | 存疑保留（已核引用） | sessionIdOf 实测 18 处引用（非零引用）；裸帧入口 ccept() 仍被测试调用；零字节文件多为 fixture，不按大小删。按审计要求**不删**。 |
 | CLN-005 | 存疑保留（已核引用） | dsh.hostBaseUrl 全仓仅配置注册与 NLS 两处命中，实际端点由 env/文件决定。但「无人配置」未被证明，**不删 schema**。 |
 
@@ -166,8 +170,7 @@ DEC-012、DEC-013 仍为草案。既然配对不能视作默认事实，原子�
 | 隔离红测（B06 后） | Node 9 + 原生 2 条目标断言失败。 | Node 20 条 **20 全绿**；原生 10 条全绿。P1 隔离红测清零。 |
 | Host 半身用例（B06） | 85 项 | PASS（含 ideViewHost 85 项，随 node 子集一并 218/218 通过）。 |
 | 常规 DSH 矩阵（B06） | PASS 417 | 直接运行 218/218 通过；五步门禁前四步 PASS，	est-dsh:all 因 pretest-dsh 触发重建被 esbuild 临时目录锁阻断（见风险）。 |
-| 构建链（B06/B07） | PASS | **已恢复（B07）**：
-pm run compile 源码 0 errors 且产物完整，但 esbuild 收尾删除系统临时目录报 Access is denied，导致 npm 钩子重建时 out 被清空。已核实为环境性文件锁（同目录 node 删除可成功），非代码缺陷。B07 进一步定位：残留物是 1.37 MB 的**普通文件**（内容为 TypeScript 补全 JSON），esbuild 按目录删除故恒失败；每次运行都新生成一个，共 30 个。另 `node_modules/typescript/lib/tsc.js` 整仓编译因内存耗尽崩溃（exit 134）。触发条件：本机重装依赖后出现；仓库源码与锁文件均未改变。**恢复方式（已落地并提交）**：新增 `build/next/emit-fallback.ts` 与脚本 `npm run build-dsh-tests:fallback`，用 TypeScript 自带 `transpileModule` 转译 `src/**` 的 `.ts` 并原样拷贝非 TS 资源，不依赖 esbuild 服务、不清空 `out/`。实测 `emitted=7171 copied=1419 failed=0`。恢复后实测：源码 `tsc --noEmit` PASS；五步门禁前四步 PASS；node 矩阵 421/422 PASS，唯一失败为 `D23 node-pty binding`（原生模块未编译，B00 基线同源，需 MSVC 工具链）。`test-dsh:all` 仍 NOT-PASS，因为 `pretest-dsh` 钩子固定走 esbuild 路径——**未改动该钩子**（避免悄悄替换官方构建路径），本环境验证改用 `npm run build-dsh-tests:fallback` + 直接运行测试文件。 |
+| 构建链（B06/B07/B13） | PASS（含精确根因） | **已恢复（B07）并定位根因（B13）**：`npm run compile` 源码 0 errors 且产物完整，但 esbuild 收尾删除系统临时目录报 `Access is denied`，导致 `pretest-dsh` 重建时 `out/` 被清空。**B13 决定性实验**：清空全部残留后单跑官方 `build-dsh-tests`，仍新生成 1 个残留并失败；用**单个** 1,377,561 B 源文件（`src/vs/workbench/api/test/browser/extHostDocumentData.test.perf-data.ts`）单独调用 `esbuild.transform` 即可复现，`ok=false leaked=1`，**与并发无关**；1 MB 输入同样失败，故**与体积无关**。残留内容是该源文件本身（MS 版权头），非「补全 JSON」。esbuild 的 `lib/main.js` 只有 `writeFile`（`:1844`/`:1868` 用 `randomFileName()`），**没有任何 `rmSync`**——删除由 Go 二进制内部完成并在本机失败；而同一文件用 `fs.unlinkSync` 可由我们删除。结论：本机环境下 esbuild 自身临时文件清理失败，属环境/二进制层问题，非本仓库代码缺陷。**恢复方式（已提交）**：`build/next/emit-fallback.ts` + `npm run build-dsh-tests:fallback`，用 TypeScript `transpileModule` 转译 `src/**` 并拷贝非 TS 资源，不依赖 esbuild 服务、不清空 `out/`；实测 `emitted=7171 copied=1419 failed=0`。恢复后：源码 `tsc --noEmit` PASS；五步门禁前四步 PASS；node 矩阵 421/422（唯一失败 `D23 node-pty binding`，需 MSVC 工具链）。`test-dsh:all` 仍 NOT-PASS——**未改 `pretest-dsh` 钩子**（避免悄悄替换官方构建路径）。 |
 | 分流单测（B03） | 4 项 | PASS 6/6（新增不可用不分流、入库引用转发、未入库拒绝）。 |
 | Host 半身用例 | 85 项 | PASS 85/85（改从转译产物加载共享契约，含新增身份确认与可见行语义）。 |
 | 常规 DSH 矩阵 | PASS 417 | PASS 417/417，五步全 PASS；契约、边界、投影与单一真源门禁同批更新到 revision 5 与工厂装配。 |
