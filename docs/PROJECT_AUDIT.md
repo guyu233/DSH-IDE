@@ -66,12 +66,15 @@
 | SEC-004 | 仍存在 | 端点信任与 ACL 证据 PENDING。 |
 | BUG-018 | 已修（隔离证据） | 开窗结果三态：egistered-ide 才 opened: true，刚拉起只 opened: false, queued: true；spawn 等 spawn/rror 事件判定并检查 pid，异步 rror 不再漏掉。2 条隔离用例转绿；队列与 electronHome 19/19 保持。真机首点开窗 PENDING。 |
 | BUG-021 | 已修（隔离证据） | 归档写回按序号采纳（archiveEpoch + isCurrentRefresh，旧回包整体丢弃）；收藏/置顶排队任务在执行时重新核对目标行可见。2 条隔离用例转绿。真机多行并发 PENDING。 |
-| BUG-023、CLN-003 | 仍存在 / 存疑保留 | 归档、可见性与实际消费路径 PENDING。 |
-| SEC-005 | 已修（锁文件证据） | 四处 markdown-it 统一升到 14.3.3（>=14.3.3 <15），只改 ersion/esolved/integrity 三行，未整体重写锁文件；实体包同步。1 条隔离用例转绿。真机 Markdown 渲染与发布物 PENDING。 |
+| BUG-023 | 仍存在 | 归档与可见性余项 PENDING。 |
+| CLN-003 | 存疑保留（已核引用） | 旧列表服务仍有 3 个文件引用（dsh.contribution / dshIdeSessionsService / dshSessionSearchCommands），搜索命令实际承接，**不能整删**。按审计要求先录引用矩阵，不删。 |
+| SEC-005 | 已修（锁文件证据） | 四处 markdown-it 统一升到 14.3.3（>=14.3.3 <15），只改 version/esolved/integrity 三行，未整体重写锁文件；实体包同步。1 条隔离用例转绿。真机 Markdown 渲染与发布物 PENDING。 |
 | SEC-006 | 存疑保留 | 按原审计逐公告核可达性，不能单凭锁宣告生产漏洞 / B09。 |
 | DOC-003、DOC-005、DOC-007 | 仍存在 | 发布、版本、cwd 验收 PENDING / B10。 |
 | DOC-002、DOC-004、DOC-006、SEC-001 | 仍存在 | 平台支持、上游来源、历史凭据说明、行内补全声明 PENDING / B11。 |
-| BUG-019、BUG-024、OPT-001、OPT-002、CLN-004、CLN-005 | 仍存在 / 存疑保留 | 依赖前序结论；维持现状，需独立复核 / B12。 |
+| BUG-019、BUG-024、OPT-001、OPT-002 | 仍存在 | 依赖前序结论；维持现状，需独立复核。 |
+| CLN-004 | 存疑保留（已核引用） | sessionIdOf 实测 18 处引用（非零引用）；裸帧入口 ccept() 仍被测试调用；零字节文件多为 fixture，不按大小删。按审计要求**不删**。 |
+| CLN-005 | 存疑保留（已核引用） | dsh.hostBaseUrl 全仓仅配置注册与 NLS 两处命中，实际端点由 env/文件决定。但「无人配置」未被证明，**不删 schema**。 |
 
 历史关闭项 BUG-001–007、SEC-002、CLN-001 不重开。其原有验收范围不覆盖本表的跨模块问题。CLN-002 没有可删除零引用项的新增证据。
 
@@ -111,6 +114,7 @@
 | B09 | BUG-022：D10，投影位置语义与 revision 锚点。 | **已落地（隔离证据）**；surfaceOp.replace 与外层 revision 同批。逐事件 golden PENDING。 |
 | B10 | BUG-018：D11，开窗结果三态与 spawn 判定。 | **已落地（隔离证据）**；结果语义与异步 error 处理同批。真机首点 PENDING。 |
 | B11 | BUG-020、BUG-021：D12，重试分类与并发写回。 | **已落地（隔离证据）**；分类边界、序号采纳与执行时复核同批。真机并发 PENDING。 |
+| B12 | 发布验收、资源与清理。 | **部分落地**：verify:dsh-ide-release-gate 四项全 PASS（protocol-single-source / boundary / projection-golden / contract）；七处许可与来源凭据齐全；扩展与 Markdown/Mermaid 完整保留；打包任务唯一（dsh-ide-pack 与 -min 同一套 staging）；CLN-003/004/005 经引用核验确认**维持现状不删**。发布物审查与真机验收 **PENDING**。 |
 
 隔离红测使用 `.red.ts`，仅由显式命令运行；旧用例、默认测试入口、门禁规则不变。对应测试修复后须随实现进入常规矩阵，其余红测保留原口径。B00/B01 各分配 6 个只读关注面，B01 使用 `glm-5.3-flash`；身份调用方分片未完整回交，由主控复查。并行结果只采纳可以回查源码、日志或公开声明的事实。
 
