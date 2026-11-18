@@ -67,6 +67,7 @@ function loadBuilt<T>(path: string): Promise<T> {
 const [
 	{ createDshIdeBackendFromEnv }, { DshIdeChannel }, { DshIdeViewService }, { DshChatModel },
 	{ DshChatSession }, { DshComposerSource }, { DSH_IDE_MERGE_WINDOW_MS, DshIdeConsumer },
+	{ createDshIdeConversationState, projectDshIdeConversation },
 ] = await Promise.all([
 	loadBuilt<{ createDshIdeBackendFromEnv(env: Record<string, string>): DshIdeBackend }>('platform/dshClient/electron-main/dshIdeBackendFactory'),
 	loadBuilt<{ DshIdeChannel: new (view: unknown) => TestChannel }>('platform/dshClient/electron-main/dshIdeChannel'),
@@ -75,6 +76,7 @@ const [
 	loadBuilt<{ DshChatSession: new (client: TestClient) => TestChatSession }>('workbench/contrib/dsh/browser/dshChatSession'),
 	loadBuilt<{ DshComposerSource: new (client: TestClient, log: { trace(): void; warn(): void }) => TestComposer }>('workbench/contrib/dsh/browser/dshComposerSource'),
 	loadBuilt<{ DSH_IDE_MERGE_WINDOW_MS: number; DshIdeConsumer: new () => TestConsumer }>('workbench/contrib/dsh/browser/dshIdeConsumer'),
+	loadBuilt<{ createDshIdeConversationState(): unknown; projectDshIdeConversation(state: unknown, frame: unknown): { nodes: readonly DshIdeConversationNode[] } | undefined }>('platform/dshClient/common/dshIdeConversation'),
 ]);
 const source = (file: string) => readFileSync(new URL(file, root), 'utf8');
 const content = (text: string) => [{ type: 'text' as const, text }];
@@ -522,6 +524,66 @@ test('BUG-015: a rejected write-back does not pretend the selection succeeded', 
 	} finally {
 		session.dispose();
 	}
+});
+
+test('BUG-022: a replace surfaceOp removes the nodes it supersedes', () => {
+	const state = createDshIdeConversationState();
+	// 先落两条普通消息（append 语义）。
+	const first = projectDshIdeConversation(state, { type: 'event', event: {
+		type: 'user/message', seq: 1, time: 1, surfaceOp: { op: 'append' },
+		data: { source: { kind: 'user' }, content: [{ type: 'text', text: 'first' }] },
+	} });
+	assert.deepEqual(first?.nodes.map(node => node.seq), [1]);
+	const second = projectDshIdeConversation(state, { type: 'event', event: {
+		type: 'user/message', seq: 2, time: 2, surfaceOp: { op: 'append' },
+		data: { source: { kind: 'user' }, content: [{ type: 'text', text: 'second' }] },
+	} });
+	assert.deepEqual(second?.nodes.map(node => node.seq), [1, 2]);
+	// 新事件以 replace 覆盖 [1,2]：旧的两条必须消失，只留新的一条。
+	const replaced = projectDshIdeConversation(state, { type: 'event', event: {
+		type: 'user/message', seq: 3, time: 3, surfaceOp: { op: 'replace', startSeq: 1, endSeq: 2 },
+		data: { source: { kind: 'user' }, content: [{ type: 'text', text: 'compacted' }] },
+	} });
+	assert.deepEqual(replaced?.nodes.map(node => node.seq), [3], 'the superseded nodes must be gone');
+});
+
+test('BUG-022: a replace that does not cover a node leaves it in place', () => {
+	const state = createDshIdeConversationState();
+	for (const seq of [1, 2, 3]) {
+		projectDshIdeConversation(state, { type: 'event', event: {
+			type: 'user/message', seq, time: seq, surfaceOp: { op: 'append' },
+			data: { source: { kind: 'user' }, content: [{ type: 'text', text: `m${seq}` }] },
+		} });
+	}
+	// 只覆盖 [2,2]：1 与 3 必须留下。
+	const view = projectDshIdeConversation(state, { type: 'event', event: {
+		type: 'user/message', seq: 4, time: 4, surfaceOp: { op: 'replace', startSeq: 2, endSeq: 2 },
+		data: { source: { kind: 'user' }, content: [{ type: 'text', text: 'replaced' }] },
+	} });
+	assert.deepEqual(view?.nodes.map(node => node.seq), [1, 3, 4]);
+});
+
+test('BUG-022: the stream baseline reads revision from the outer assistantStream', () => {
+	const state = createDshIdeConversationState();
+	// 官方形状：revision 在外层，activeAttempt 只是镜像。
+	const view = projectDshIdeConversation(state, { type: 'snapshot', records: [], hasMore: false, assistantStream: {
+		revision: 7,
+		activeAttempt: { attemptId: 'a-1', turn: 1, step: 1, stream: [{ type: 'text-delta', text: 'live' }] },
+	} });
+	const stream = view?.nodes.find(node => node.kind === 'assistant');
+	assert.ok(stream !== undefined, 'the in-flight attempt must be projected');
+	// 内层没有 revision 时也必须拿到外层的 7：否则基线记成 0，
+	// 后续 revision 8 虽仍会通过，但 revision 1..7 的 chunk 会被误判为「不新」。
+	// 官方分发形状是 `{ type:'assistant-stream', frame: <AssistantStreamFrame> }`。
+	const afterChunk = projectDshIdeConversation(state, {
+		type: 'assistant-stream',
+		frame: { type: 'chunk', attemptId: 'a-1', revision: 8, chunk: { type: 'text-delta', text: ' more' } },
+	});
+	assert.ok(afterChunk !== undefined, 'a newer chunk must be accepted after the baseline');
+	assert.ok(
+		afterChunk.nodes.some(node => node.kind === 'assistant' && JSON.stringify(node).includes('more')),
+		'the newer chunk content must reach the projected node',
+	);
 });
 
 test('SEC-003: Host dispatch shares the packaged protocol validator', () => {

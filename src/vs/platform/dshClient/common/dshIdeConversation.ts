@@ -149,6 +149,10 @@ function applySnapshot(state: DshIdeConversationState, frame: Record<string, unk
 	// 流式基线：恢复进行中的 attempt。
 	const baseline = isRecord(frame['assistantStream']) ? frame['assistantStream'] : undefined;
 	const active = baseline !== undefined && isRecord(baseline['activeAttempt']) ? baseline['activeAttempt'] : undefined;
+	// revision 的权威位置在 `assistantStream` **外层**（官方 `AssistantStreamFrame`：
+	// 单调、替换时重置为 1）。`activeAttempt` 里的是同一份数据的镜像，
+	// 读内层会在嵌套形状变化时静默退化成 0，使后续 chunk 全被判为「不新」而丢弃。
+	const baselineRevision = baseline !== undefined ? numberOf(baseline['revision']) : undefined;
 	if (active !== undefined) {
 		const attemptId = stringOf(active['attemptId']);
 		const stream = Array.isArray(active['stream']) ? active['stream'] : [];
@@ -162,7 +166,7 @@ function applySnapshot(state: DshIdeConversationState, frame: Record<string, unk
 			const attempt: DshIdeStreamAttempt = {
 				turn: numberOf(active['turn']) ?? 0,
 				step: numberOf(active['step']) ?? 0,
-				revision: numberOf(active['revision']) ?? 0,
+				revision: baselineRevision ?? numberOf(active['revision']) ?? 0,
 				blocks,
 				id: `stream:${attemptId}`,
 			};
@@ -175,12 +179,45 @@ function applySnapshot(state: DshIdeConversationState, frame: Record<string, unk
 
 type DshAssistantBlock = DshIdeAssistantBlock;
 
+/**
+ * 消费官方 `surfaceOp`。
+ *
+ * 官方 `replace` 用 `{ op:'replace', startSeq, endSeq }`（**闭区间**、按当前 surface 顺序）
+ * 表示「这一段被新事件取代」。投影器原来只按 seq 追加，忽略这个字段，
+ * 于是被替换掉的旧节点会一直留在画面上——表现为重复内容或过期内容不消失。
+ * @param state 投影状态
+ * @param event 带 `surfaceOp` 的 durable 事件
+ * @param seq 本事件自己的 seq（替换后的新节点不得被自己删掉）
+ */
+function applySurfaceOp(state: DshIdeConversationState, event: Record<string, unknown>, seq: number): void {
+	const op = isRecord(event['surfaceOp']) ? event['surfaceOp'] : undefined;
+	if (op === undefined || stringOf(op['op']) !== 'replace') {
+		return;
+	}
+	const start = numberOf(op['startSeq']);
+	const end = numberOf(op['endSeq']);
+	if (start === undefined || end === undefined || start > end) {
+		return;
+	}
+	for (const [id, node] of [...state.nodes]) {
+		if (id.startsWith('stream:')) {
+			continue;
+		}
+		// 只删落在被替换区间内的旧节点；本事件自己的 seq 不在其中（它比区间更新）。
+		if (node.seq >= start && node.seq <= end && node.seq !== seq) {
+			state.nodes.delete(id);
+		}
+	}
+}
+
 /** 一条 durable 事件 → 零到多个节点，原地写入 state。 */
 function applyDurable(state: DshIdeConversationState, event: Record<string, unknown>): void {
 	const seq = numberOf(event['seq']);
 	if (seq === undefined) {
 		return;
 	}
+	// 先应用替换语义，再写入本事件：顺序反过来会把自己刚写的节点删掉。
+	applySurfaceOp(state, event, seq);
 	const type = stringOf(event['type']);
 	const data = isRecord(event['data']) ? event['data'] : {};
 	const time = numberOf(event['time']) ?? 0;
