@@ -655,6 +655,27 @@ test('BUG-024: a scenario tool pattern mismatch fails instead of running another
 	);
 });
 
+test('BUG-023: the sessions control follows the list visibility, not just the pane', () => {
+	// 只读结构核验：可见状态必须只有一个来源（pane 可见 且 列表实际显示）。
+	const pane = source('src/vs/workbench/contrib/chat/browser/widgetHosts/viewPane/chatViewPane.ts');
+	assert.doesNotMatch(
+		pane,
+		/onDidChangeBodyVisibility\(visible => sessionsControl\.setVisible\(visible\)\)/,
+		'the pane must not drive the control on its own',
+	);
+	assert.match(
+		pane,
+		/onDidChangeBodyVisibility\(\(\) => this\.refreshSessionsControlVisibility\(\)\)/,
+		'a pane visibility change must re-evaluate the combined state',
+	);
+	// control 的最终状态必须同时考虑容器可见与 body 可见。
+	assert.match(
+		pane,
+		/this\.sessionsControl\?\.setVisible\(newSessionsContainerVisible && this\.isBodyVisible\(\)\)/,
+		'the control must follow the list result combined with the body',
+	);
+});
+
 test('SEC-003: Host dispatch shares the packaged protocol validator', () => {
 	// 只审查装配和单一校验器的接线；不发送非法 DTO，不调用真实 Host。
 	const host = source('src/vs/platform/dshClient/host/ide-view-host.js');

@@ -929,7 +929,9 @@ export class ChatViewPane extends ViewPane implements IViewWelcomeDelegate {
 				return openEvent;
 			},
 		}));
-		this._register(this.onDidChangeBodyVisibility(visible => sessionsControl.setVisible(visible)));
+		// 可见状态只有一个来源：pane 可见 **且** 会话列表实际显示。
+		// 只按 pane 判断会让「pane 可见但列表隐藏」时 control 仍作为可见订阅方工作。
+		this._register(this.onDidChangeBodyVisibility(() => this.refreshSessionsControlVisibility()));
 
 		sessionsToolbar.context = sessionsControl;
 
@@ -1016,6 +1018,10 @@ export class ChatViewPane extends ViewPane implements IViewWelcomeDelegate {
 		setVisibility(newSessionsContainerVisible, this.sessionsContainer);
 		this.sessionsViewerVisible = newSessionsContainerVisible;
 		this.sessionsViewerVisibilityContext.set(newSessionsContainerVisible);
+		// 列表的实际显隐由「pane 可见」与「容器可见」共同决定，control 必须跟着这个结果走。
+		// 只更新容器与 context 会让 control 继续按 pane 的可见性工作：列表已经隐藏，
+		// 它却仍把自己当成可见订阅方，继续刷新与响应事件。
+		this.sessionsControl?.setVisible(newSessionsContainerVisible && this.isBodyVisible());
 
 		return {
 			changed: sessionsContainerVisible !== newSessionsContainerVisible,

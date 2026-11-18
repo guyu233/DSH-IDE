@@ -66,7 +66,7 @@
 | SEC-004 | 仍存在 | 端点信任与 ACL 证据 PENDING。 |
 | BUG-018 | 已修（隔离证据） | 开窗结果三态：egistered-ide 才 opened: true，刚拉起只 opened: false, queued: true；spawn 等 spawn/rror 事件判定并检查 pid，异步 rror 不再漏掉。2 条隔离用例转绿；队列与 electronHome 19/19 保持。真机首点开窗 PENDING。 |
 | BUG-021 | 已修（隔离证据） | 归档写回按序号采纳（archiveEpoch + isCurrentRefresh，旧回包整体丢弃）；收藏/置顶排队任务在执行时重新核对目标行可见。2 条隔离用例转绿。真机多行并发 PENDING。 |
-| BUG-023 | 仍存在 | 归档与可见性余项 PENDING。 |
+| BUG-023 | 已修（隔离证据） | 会话列表可见状态收敛为单一来源：onDidChangeBodyVisibility 不再单独驱动 control，而是重算「pane 可见 且 列表实际显示」；efreshSessionsControlVisibility 在更新容器与 context 后同步 control。pane 可见但列表隐藏时 control 不再作为可见订阅方工作，重新展示可恢复。1 条隔离用例锁定。真机 pane 切换 PENDING。 |
 | CLN-003 | 存疑保留（已核引用） | 旧列表服务仍有 3 个文件引用（dsh.contribution / dshIdeSessionsService / dshSessionSearchCommands），搜索命令实际承接，**不能整删**。按审计要求先录引用矩阵，不删。 |
 | SEC-005 | 已修（锁文件证据） | 四处 markdown-it 统一升到 14.3.3（>=14.3.3 <15），只改 version/esolved/integrity 三行，未整体重写锁文件；实体包同步。1 条隔离用例转绿。真机 Markdown 渲染与发布物 PENDING。 |
 | SEC-006 | 存疑保留 | 按原审计逐公告核可达性，不能单凭锁宣告生产漏洞 / B09。 |
