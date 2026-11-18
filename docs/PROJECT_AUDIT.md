@@ -2,11 +2,11 @@
 
 唯一生效的审计结论在本文。其它文档只保留链接。
 
-当前基线：`8915453f`。访问日期 2026-11-18。
+当前基线：`cbf54c1b`。访问日期 2026-11-18。
 
 ## 当前总摘要
 
-健康度：`npm run compile` 0 error（1.33 min）；`verify:dsh-ide-ci` 五项 PASS（`DSH_INSTALLED_VERSION=0.2.2-rc.3`）；node 测试 416、mocha 7、fail 0。覆盖率没有命令。全仓 ESLint 未作为通过项。真机界面未验。`verify:dsh-install-drift` 仍对 2026-11-17 的旧 Host 产物失败，开发期不打包。
+健康度：`npm run compile` 0 error（4.5 min）；`verify:dsh-ide-ci` 五项 PASS（`DSH_INSTALLED_VERSION=0.2.2-rc.3`）；node 测试 417、mocha 7、fail 0。覆盖率没有命令。全仓 ESLint 未作为通过项。真机界面未验。`verify:dsh-install-drift` 仍对 2026-11-17 的旧 Host 产物失败，开发期不打包。
 
 最危险的 3 件事：
 
@@ -24,6 +24,7 @@
 
 | ID | 主题 | 结论 | 依据 | 范围 | 状态 | 回滚 |
 |---|---|---|---|---|---|---|
+| DEC-011 | 发送请求 | `submit` 必填 `sessionId`。Host 只在仍绑定该会话时写入。已经换绑则拒绝。方法数仍是 43。与 DEC-010 同一条规则，不另留「空参数写当前会话」 | `dshIdeProtocol.ts` `submit`；`ide-view-host.js` `assertOwnership` | 聊天发送 | 生效 | `git revert cbf54c1b` |
 | DEC-010 | 停止请求 | `interrupt` 必填 `sessionId`。Host 只在仍绑定该会话时 `cancel`。已经换绑则拒绝，不停新会话。方法数仍是 43。取代上一轮「不加 sessionId」的暂缓 | `dshIdeProtocol.ts` `interrupt`；`ide-view-host.js` `assertOwnership` | 聊天停止 | 生效 | `git revert 8915453f` |
 | DEC-009 | 收藏/置顶切换 | 同一会话的收藏、置顶各自排队。下一次读取发生在上一次写入返回之后。契约仍只传 sessionId，由 Host 按当前状态切换 | `ide-view-host.js` `enqueueToggle`。检索 `favoriteSessions()` 与 `pinnedSessionIds`，各 1 处读取 | Host 会话操作 | 生效 | `git revert 051dd6dd` |
 | DEC-008 | 开窗回包绑定 | `attach` 只在 `generation` 仍为 0、且没有绑定、也没有正在进行的 `bind` 时登记开窗会话。用户已经换过会话就返回 | `dshChatSession.ts` `attach`。`generation` 只在 `bind` 和 `dispose` 时增加 | 聊天会话 | 生效 | `git revert 51596740` |
@@ -35,12 +36,13 @@
 | DEC-004 | 删除后不立刻拉名单 | 只从当前树摘行，子会话升到原位 | `deleteChatSessionItem` | 会话列表 | 生效 | `git revert 1d3f4cf2` |
 | DEC-005 | 不做的原生部件 | 不做 planReview、changesSummary、multiDiffData、confirmation、questionCarousel、working、附件 chip | 原生回传或 history 类型接不住 | 聊天历史 | 生效 | 不单开这些部件 |
 
-冲突检测：DEC-010 取代上一轮「interrupt 不加字段」的暂缓。方法数仍是 43，没有「空参数就停当前会话」的第二条路径。它不取消 `rebind`（DEC-003）。DEC-009 不改删除路径（DEC-004）。
+冲突检测：DEC-011 沿用 DEC-010，不取消 `rebind`（DEC-003），不改删除路径（DEC-004）。方法数仍是 43。`setModel`、`setEffort`、`setGoal`、`runCommand` 等仍用 `requireSession()`，本轮不改，避免半套迁移。
 
 ## 问题总表
 
 | ID | 状态 | 位置 | 类型 | 证据 | 处理 |
 |---|---|---|---|---|---|
+| BUG-007 | 已闭环 | `dshIdeProtocol.ts` `submit`；`ide-view-host.js` `submit` | 竞态 | 发送不带会话，Host 用当时绑定的会话调用 `prompt`。换绑后到达的请求会把文字写进新会话 | 必填 `sessionId`。换绑后 `assertOwnership` 拒绝。测试 `submit sends the session that was bound when the text was sent` |
 | BUG-006 | 已闭环 | `dshIdeProtocol.ts` `interrupt`；`ide-view-host.js` `interrupt` | 竞态 | 停止请求不带会话，Host 用当时绑定的会话调用 `cancel`。换绑后到达的请求会停掉新会话 | 必填 `sessionId`。换绑后 `assertOwnership` 拒绝。测试 `submit and interrupt use the verified sessionController shapes` 与 `cancel sends the session that was bound when stop was clicked` |
 | BUG-005 | 已闭环 | `ide-view-host.js` `setSessionFavorite` / `setSessionPinned` | 竞态 | 两次调用会同时读到同一份收藏或置顶状态，然后都写成同一种结果。测试 `two favorite toggles for one session apply in order` | 按会话串行。第一次写成收藏，第二次取消收藏 |
 | BUG-004 | 已闭环 | `dshChatSession.ts` `attach` | 竞态 | `openView` 的回包无条件写 `boundSessionId`。用户已 `bind` 别的会话时，绑定被改回开窗会话。检索 `.attach(`，DSH 渲染层只有贡献点这一处调用 | 已有绑定或 `generation !== 0` 时直接返回。测试 `attach does not replace a session the user already bound` |
@@ -64,7 +66,7 @@
 | scripts | 86 | 79 |
 | 锁文件条目 | 1649 | 1536 |
 | tsc 错误 | 137 | 0 |
-| node 测试 | 384 | 416 |
+| node 测试 | 384 | 417 |
 | mocha | 7 | 7 |
 
 ## 存疑保留
@@ -77,6 +79,7 @@
 
 ## 假设与待验证
 
+- 【事实】发送带上点击时的 `sessionId`。视图已换到别的会话时，Host 拒绝且不再调用 `prompt`。
 - 【事实】停止请求带上点击时的 `sessionId`。视图已换到别的会话时，Host 拒绝且不再调用 `cancel`。
 - 【事实】同一会话两次收藏切换按顺序写成收藏、再取消。测试断言了写入序列。
 - 【事实】用户先 `bind` 再 `attach` 时，第二次 `bind` 同一 id 不会再 `rebind`。测试断言了 `rebind` 只发生一次。
@@ -89,8 +92,8 @@
 
 | 门禁 | 改前 | 改后 |
 |---|---|---|
-| `npm run compile` | 上一轮 0 error | 0 error，1.33 min |
-| `verify:dsh-ide-ci` | 五项 PASS，node 415 | 五项 PASS，node 416，mocha 7，fail 0 |
+| `npm run compile` | 上一轮 0 error | 0 error，4.5 min |
+| `verify:dsh-ide-ci` | 五项 PASS，node 416 | 五项 PASS，node 417，mocha 7，fail 0 |
 | 覆盖率 | 无命令 | 未跑 |
 | 全仓 ESLint | PENDING | PENDING |
 | 真机 GUI | PENDING | PENDING |
@@ -102,6 +105,7 @@
 
 | 风险 | 回滚 |
 |---|---|
+| 旧的不带 `sessionId` 的 `submit` 会被拒绝。IDE 与 Host 必须一起更新 | `git revert cbf54c1b` |
 | 旧的空 `interrupt` 调用会被拒绝。IDE 与 Host 必须一起更新 | `git revert 8915453f` |
 | 前一次收藏写入若一直不返回，同会话的下一次切换会等着 | `git revert 051dd6dd` |
 | 若开窗回包早于任何点击，行为与原来一样，仍登记该会话 | `git revert 51596740` |
@@ -124,9 +128,9 @@
 
 ## 状态对照
 
-已闭环：BUG-006、BUG-005、BUG-004、BUG-003、SEC-002、BUG-001、BUG-002、CLN-001、DEC-010。
+已闭环：BUG-007、BUG-006、BUG-005、BUG-004、BUG-003、SEC-002、BUG-001、BUG-002、CLN-001、DEC-011。
 
-仍存在：SEC-001、OPT-001、CLN-002、安装漂移、真机未验、收藏/置顶无星标、删除后旧名单可能把行画回来。
+仍存在：SEC-001、OPT-001、CLN-002、安装漂移、真机未验、收藏/置顶无星标、删除后旧名单可能把行画回来。`requireSession()` 仍有 11 处（`setModel`、`setEffort`、`setGoal`、`setTeamEnabled`、`setAgentPreset`、`runCommand`、`rewind`、`composerState`、`listCommands`、`listSkills`，以及 `loadOlder` 缺省回退）。方案与 DEC-011 相同：调用方带上点击时的 sessionId，Host 只在仍绑定时执行。一次改完，不留空参数回退。
 
 新引入：无。
 
@@ -134,6 +138,7 @@
 
 | 日期 | ID | 状态 | 提交 |
 |---|---|---|---|
+| 2026-11-18 | BUG-007、DEC-011 | 已闭环 | `cbf54c1b` |
 | 2026-11-18 | BUG-006、DEC-010 | 已闭环。取代「interrupt 不加字段」 | `8915453f` |
 | 2026-11-18 | BUG-005、DEC-009 | 已闭环 | `051dd6dd` |
 | 2026-11-18 | BUG-004、DEC-008 | 已闭环 | `51596740` |
