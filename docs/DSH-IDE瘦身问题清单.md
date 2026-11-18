@@ -16,6 +16,7 @@
 | `dshLanguageModelProvider.ts` | 逻辑错误 | 每次刷新都再次登记 vendor | 记住已登记项，dispose 时撤掉 |
 | `ide-view-host.js` 重命名 / 移动 / 新建 / 收藏 / 置顶 | 状态不一致 | 这些调用不一定发出 `api-session/added\|removed`，面板不更新 | 成功后 fanout `session-list`。失败不发。删除不发 |
 | `dshChatHistory.ts` steering / 子智能体通知 | 内容丢失 | 还没有用户消息时 `pending` 为空，末尾 flush 直接返回 | 先开一条空 prompt 的回复再写入 |
+| `dshSessionMenu.ts` 删除 / `deleteChatSessionItem` | 状态不一致 | 删除成功后名单不立刻重拉，行会留着；立刻重拉又会把旧名单里的行画回来 | 成功后只从当前树拿掉这一行，子会话升到原位置。不调用 listSessions |
 
 ## 不改
 
@@ -33,4 +34,4 @@
 
 ## 仍开放
 
-收藏和置顶没有单独的行字段，刷新名单也不会多出一个星标。删除成功后的行要等 Host 真正从名单里去掉才会消失。`build/next` 的 watch 在非仓库根启动时可能监听空目录，改动需要长驻验证。`verify:dsh-install-drift` 仍对旧产物失败，要等开发完成后打包再验。
+收藏和置顶没有单独的行字段，刷新名单也不会多出一个星标。删除后如果下一次 `listSessions` 仍带回这个 id，行会再出现，这表示 Host 名单还没丢掉它。`build/next` 的 watch 在非仓库根启动时可能监听空目录，改动需要长驻验证。`verify:dsh-install-drift` 仍对旧产物失败，要等开发完成后打包再验。
