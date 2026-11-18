@@ -152,8 +152,8 @@ DEC-012、DEC-013 仍为草案。既然配对不能视作默认事实，原子�
 | 隔离红测（B06 后） | Node 9 + 原生 2 条目标断言失败。 | Node 20 条 **20 全绿**；原生 10 条全绿。P1 隔离红测清零。 |
 | Host 半身用例（B06） | 85 项 | PASS（含 ideViewHost 85 项，随 node 子集一并 218/218 通过）。 |
 | 常规 DSH 矩阵（B06） | PASS 417 | 直接运行 218/218 通过；五步门禁前四步 PASS，	est-dsh:all 因 pretest-dsh 触发重建被 esbuild 临时目录锁阻断（见风险）。 |
-| 构建链（B06） | PASS | **PENDING**：
-pm run compile 源码 0 errors 且产物完整，但 esbuild 收尾删除系统临时目录报 Access is denied，导致 npm 钩子重建时 out 被清空。已核实为环境性文件锁（同目录 node 删除可成功），非代码缺陷。 |
+| 构建链（B06） | PASS | **FAIL（环境阻塞，B07 复核）**：
+pm run compile 源码 0 errors 且产物完整，但 esbuild 收尾删除系统临时目录报 Access is denied，导致 npm 钩子重建时 out 被清空。已核实为环境性文件锁（同目录 node 删除可成功），非代码缺陷。B07 进一步定位：残留物是 1.37 MB 的**普通文件**（内容为 TypeScript 补全 JSON），esbuild 按目录删除故恒失败；每次运行都新生成一个，共 30 个。另 `node_modules/typescript/lib/tsc.js` 整仓编译因内存耗尽崩溃（exit 134）。触发条件：本机重装依赖后出现；仓库源码与锁文件均未改变。恢复后需重跑 `npm run compile`、`npm run build-dsh-tests`、`npm run verify:dsh-ide-ci` 三项，才能继续 B07。 |
 | 分流单测（B03） | 4 项 | PASS 6/6（新增不可用不分流、入库引用转发、未入库拒绝）。 |
 | Host 半身用例 | 85 项 | PASS 85/85（改从转译产物加载共享契约，含新增身份确认与可见行语义）。 |
 | 常规 DSH 矩阵 | PASS 417 | PASS 417/417，五步全 PASS；契约、边界、投影与单一真源门禁同批更新到 revision 5 与工厂装配。 |
