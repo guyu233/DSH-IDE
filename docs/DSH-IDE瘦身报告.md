@@ -1194,12 +1194,58 @@ STATUS: FAIL  [install-drift]
 
 见问题清单第 11 轮。本轮没有跑覆盖率工具。
 
-## 累计（截至第 11 轮）
+## 第 12 轮
+
+> 起点 `4fa3a82d`，功能提交 `245a025b`（10 文件，+185 / -28）。没有删除。
+
+### 1. 门禁总览
+
+| 门禁 | 结果 |
+|---|---|
+| `npm run compile`（含 `src/tsconfig.json`） | **PASS**（0 errors，1.55 min） |
+| `npm run test-dsh:all` | **PASS**（mocha 7 + node **404** / fail 0；401 + 3） |
+| `verify:dsh-ide-ci`（`DSH_INSTALLED_VERSION=0.2.2-rc.3`） | **PASS**（五项：protocol-single-source、boundary、projection-golden、contract、test-dsh:all） |
+| 改动文件 ESLint | **PENDING**。直接跑 eslint 报的是既有 `header/header`（DSH 头与规则期望的上游头不一致），不是本轮逻辑。未 `--fix`，避免改写版权头 |
+| 全仓 ESLint | **PENDING** |
+| 真机 GUI | **PENDING** |
+| `verify:dsh-install-drift` | **FAIL（预先存在）**，本轮未打包 |
+| 覆盖率 | 未跑。没有既有覆盖率命令 |
+
+### 2. 删除清单
+
+**无。** 六路扫描没有拿出「全仓符号名零命中（含字符串与动态引用）」的死代码。
+
+### 3. 修复
+
+已开着的 IDE 再收到带 `sessionId` 的开窗请求时，接单器不再丢掉会话 id；已有窗口聚焦后用 `vscode:openChatSession` 打开 `dsh:/<id>`，由内容提供者绑定。归档与恢复都走会话控制器，已归档行能恢复，刷新不再丢掉归档标志。写模型/权限之后的目录刷新不再采用写前的回包。当前权限是 custom 时选择器能显示它，其它状态下仍不能切到 custom。模型目录重复刷新不再重复登记 vendor。
+
+### 4. 依赖前后对比
+
+无变化。dependencies 66、devDependencies 93、scripts 79。`test-dsh:all` 只多挂了 `dshComposerRefresh.test.ts`，没有新依赖。
+
+### 5. 存疑保留
+
+见问题清单第 12 轮 B 表。另外：已有窗口打开会话依赖 URI 与 `dshSessionResource` 同形，本轮没有抽成同一个函数（主进程不能引用 workbench 控制器）。两处都是 `URI.from({ scheme: 'dsh', path: '/' + encodeURIComponent(sessionId) })`。
+
+### 6. 风险与回滚
+
+| 风险 | 等级 | 回滚 |
+|---|---|---|
+| 已有窗口被聚焦时会再打开聊天会话。URI 若和控制器不一致，绑定失败并在日志里出现 openChatSession failed | 中 | `git revert 245a025b` |
+| 归档菜单改走控制器。控制器未注册时点击无效果，不再弹出通道错误 | 低 | 同上 |
+| dispose 语言模型登记时会撤掉本轮加上的 vendor，包括 `dsh` | 低。只在该登记句柄释放时发生 | 同上 |
+| 从 custom 再点一次 custom 会向 Host 写一次 custom，可能被拒绝 | 低 | 同上 |
+
+### 7. 假设
+
+见问题清单第 12 轮。本轮没有跑覆盖率工具。
+
+## 累计（截至第 12 轮）
 
 | 项 | 值 |
 |---|---|
 | tsc 错误 | 137 → **0** |
-| test-dsh:all | 384 → **401**（全 PASS；第 9 轮 +4，第 10 轮 +2，第 11 轮 +4。减少的 5 项来自更早删掉的死模块） |
+| test-dsh:all | 384 → **404**（全 PASS；第 9 轮 +4，第 10 轮 +2，第 11 轮 +4，第 12 轮 +3。减少的 5 项来自更早删掉的死模块。计数是 node --test；mocha 仍为 7） |
 | dependencies | 68 → **66** |
 | devDependencies | 100 → **93** |
 | scripts | 86 → **79** |

@@ -845,3 +845,38 @@
 2. 时间戳变小或相等不标未读，避免时钟回拨把已读会话打成未读。
 3. Windows 上 `URI.file` 会把盘符收成小写。测试按不区分大小写比较。
 
+---
+
+## 第 12 轮：已开窗口丢会话、归档菜单、目录回滚、custom 权限
+
+> 起点 `4fa3a82d`。可用模型：`workbuddylocal/glm-5.3-flash`（low/high/max）、`workbuddylocal/hy4flash`（high）。workflow `round12-dsh-scan` 六路只读扫描。本轮按推荐方案改，不另开问题等确认。
+
+### A. 本轮修复
+
+| # | 位置 | 类型 | 判定依据 | 风险 | 推荐 |
+|---|---|---|---|---|---|
+| A1 | `dshIdeLaunchListener.ts` dispatch；`app.ts` 已有窗口分支 | 逻辑错误 | Host `launch` 把 `sessionId` 放进队列，接单器只抄 `workspace`。已有窗口只 `focus()`，`userEnv` 不会再生效 | 高。IDE 已开时再点会话，窗口停在旧会话 | 接单器转发非空 `sessionId`。已有窗口聚焦后走现成 `vscode:openChatSession`，资源形状与 `dshSessionResource` 相同，由 content provider `bind` |
+| A2 | `dshSessionMenu.ts` `dsh.session.archive`；`agentSessionsControl.ts:800-803` | 状态不一致 | DSH 右键只留 `dsh.session.*`，原生 unarchive 被滤掉。自定义归档直接 `call`，不写控制器 `archivedIds`，刷新后标志丢失，且没有恢复项 | 中 | 归档/恢复都走 `IChatSessionsService.setChatSessionItemArchived`。已归档只显示恢复 |
+| A3 | `dshComposerSource.ts` `write` / `refresh` | 竞态 | 写成功后的 `refresh` 复用写前的 `composerState`。快照刷新与 `setModel` 重叠时，旧回包把选择盖回去 | 中 | 写成功先作废在途代次，再发一次新的读取 |
+| A4 | `dshComposerProjection.ts` `toPermissionItems` | 状态不一致 | `custom` 被滤出选项，但 `current === 'custom'` 仍要显示。选择器找不到 checked 项 | 中 | 仅当当前已是 custom 时把它插回列表。其它权限下仍然不提供「切到 custom」 |
+| A5 | `dshLanguageModelProvider.ts` `ensureVendor` | 逻辑错误 | 每次目录刷新都 `delta` 已登记的 vendor，服务侧打 `already registered` 并忽略。dispose 也不撤登记 | 低 | 闭包里记住已登记项，重复刷新不再 delta；dispose 时撤掉本轮加上的 descriptor |
+
+### B. 排除
+
+| # | 项 | 为什么不做 |
+|---|---|---|
+| B1 | `search()` 把结果读空 | 误报。`client.call` 的 `value` 已是 `{items, hasMore}` |
+| B2 | 会话树纯环丢光节点 | 误报。补根循环会留下一个 root。现有测试要求不丢 |
+| B3 | 快照投影丢掉 goal.activation | 撤回。官方快照 schema 没有该字段；实时视图的 activation 走另一条投影 |
+| B4 | `spawn` 残留 `DSH_IDE_COMPOSER` | 子进程 env 是拷贝，不写回 Host 的 `process.env` |
+| B5 | `rebind` 时取消旧会话的 waterfall | 会把仍在跑的会话的批准/问卷取消掉。切走不应结算 |
+| B6 | `todosOf` 遇坏项整表缺席 | 有意 fail-closed。缺席表示保留，不把坏帧当成清空 |
+| B7 | `deleteSession` 作废在途 refresh | 有意：删除成功后以 Host 重查为准。失败保留旧列表是既有降级 |
+| B8 | 菜单 `registerAction2` 的 dispose | 贡献点每个窗口只注册一次。二次注册才会撞命令 id |
+
+### C. 假设
+
+1. `vscode:openChatSession` 收到与 `dshSessionResource` 相同的 URI 后，会进 `provideChatSessionContent` 并 `bind`。这是点击会话行的同一条路。
+2. custom 项不加 `locked`。`locked` 会藏起其它权限，用户就无法从 custom 切走。
+3. 没有跑覆盖率工具。测试项数增加只说明多了断言。
+

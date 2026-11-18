@@ -1118,3 +1118,11 @@ DshChatSession.acceptView / acceptConversation → DshChatModel（typed 节点�
 
 > **门禁**：tsc 0 error、`test-dsh:all` **401** PASS、`npm run compile` PASS（0 errors，44 s）。`verify:dsh-ide-ci` 对本改动 **PENDING**（改动前的上一提交已 PASS）。详见 `docs/DSH-IDE瘦身报告.md`（第 11 轮）。
 
+#### 9.11.15 第 12 轮：已开窗口丢会话、归档菜单、目录回滚、custom 权限（已执行，2026-11-18）
+
+> 没有删除。可用子智能体模型为 `workbuddylocal/glm-5.3-flash` 与 `hy4flash`。
+
+> **修复**：① 开窗接单器转发 `sessionId`；IDE 已打开时不再只聚焦，而是用 `vscode:openChatSession` 绑定这次点击的会话。② 归档/恢复都走会话控制器。DSH 右键滤掉了原生 unarchive，自定义归档原先不写 `archivedIds`。③ 写回后的 `composerState` 不再复用写前的在途回包。④ 当前权限已是 `custom` 时选择器能显示它。⑤ 模型 vendor 不重复登记。
+
+> **门禁**：`npm run compile` 0 error（1.55 min）、`test-dsh:all` **404** PASS（401 + 3）、`verify:dsh-ide-ci` 五项 PASS（`DSH_INSTALLED_VERSION=0.2.2-rc.3`）。详见 `docs/DSH-IDE瘦身报告.md`（第 12 轮）与 `docs/DSH-IDE瘦身问题清单.md`（第 12 轮）。
+
