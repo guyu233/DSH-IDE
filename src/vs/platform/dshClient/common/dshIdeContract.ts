@@ -76,12 +76,23 @@ export const VSCODE_PATCH_POINTS = Object.freeze([
 	},
 ] as readonly VSCodePatchPoint[]);
 
-/** 解析 semver（支持 `1.2.3` 与 `1.2.3-rc.1`）。返回 [major, minor, patch, prerelease]。 */
-export function parseVersion(version: string): [number, number, number, string] {
-	const [core, pre = ''] = version.split('-');
-	const parts = core.split('.').map(n => parseInt(n, 10));
-	const safe = (n: number | undefined): number => (n !== undefined && Number.isFinite(n) ? n : 0);
-	return [safe(parts[0]), safe(parts[1]), safe(parts[2]), pre];
+/**
+ * 严格解析 semver（SemVer 2.0.0）。
+ *
+ * 为什么不用 `parseInt`：`parseInt('abc')` 是 NaN、`parseInt('1x')` 是 1，
+ * 于是 `abc` 会被当成 `0.0.0`、`1x.2.3` 会被当成 `1.2.3`——无效版本被静默接受，
+ * 「版本不符」被误判成「版本相符」。这里要求形状严格合法，非法即返回 `undefined`，
+ * 由调用方明确拒绝，而不是补零猜一个值。
+ *
+ * build metadata（`+sha`）按 SemVer §10 不参与比较，因此解析时丢弃、但**允许出现**。
+ * @returns `[major, minor, patch, prerelease]`；形状非法时返回 `undefined`
+ */
+export function parseVersion(version: string): [number, number, number, string] | undefined {
+	const match = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+[0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*)?$/.exec(version.trim());
+	if (match === null) {
+		return undefined;
+	}
+	return [Number(match[1]), Number(match[2]), Number(match[3]), match[4] ?? ''];
 }
 
 /**
@@ -134,10 +145,17 @@ function comparePrerelease(a: string, b: string): number {
 	return 0;
 }
 
-/** 比较 semver：a<b 返回 -1，a==b 返回 0，a>b 返回 1。正式版优先于预发布（1.0.0 > 1.0.0-rc.1）。 */
-export function compareVersion(a: string, b: string): number {
+/**
+ * 比较 semver：a<b 返回 -1，a==b 返回 0，a>b 返回 1。
+ * 正式版优先于预发布（1.0.0 > 1.0.0-rc.1）。
+ * 任一侧形状非法时返回 `undefined`：非法版本不可比较，不能当成相等或更低。
+ */
+export function compareVersion(a: string, b: string): number | undefined {
 	const pa = parseVersion(a);
 	const pb = parseVersion(b);
+	if (pa === undefined || pb === undefined) {
+		return undefined;
+	}
 	for (let i = 0; i < 3; i++) {
 		if (pa[i] !== pb[i]) {
 			return pa[i] < pb[i] ? -1 : 1;
@@ -146,9 +164,14 @@ export function compareVersion(a: string, b: string): number {
 	return comparePrerelease(pa[3], pb[3]);
 }
 
-/** 已安装的 DSH 版本是否满足经校验版本（>= 即满足）。 */
+/**
+ * 已安装的 DSH 版本是否满足经校验版本（>= 即满足）。
+ *
+ * 版本字符串非法时返回 `false`：无法证明满足，就不算满足。
+ */
 export function installedMeetsVersion(installed: string): boolean {
-	return compareVersion(installed, UPSTREAM_VALIDATED_VERSION) >= 0;
+	const order = compareVersion(installed, UPSTREAM_VALIDATED_VERSION);
+	return order !== undefined && order >= 0;
 }
 
 export interface UpstreamDrift {

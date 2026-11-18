@@ -346,8 +346,11 @@ function contract() {
 	// 动态 import，因此这里按契约 `compareVersion` 的同一语义实现一份。
 	// 关键点：prerelease 必须逐段按数字比较，不能把整段当字符串（否则 'rc.10' < 'rc.9'），
 	// 这正是上一版的缺陷；改完后 `dshIdeContract.ts` 的 compareVersion 同步修正为同一规则。
+	// 与 `dshIdeContract.ts` 的 `parseVersion` 保持**同一套严格规则**（SemVer 2.0.0）：
+	// 主版本段不允许前导零，prerelease 段形状受限，build metadata（`+sha`）允许出现
+	// 但不参与比较（§10）。两边口径不一致时，门禁会把运行时接受的版本判成非法，反之亦然。
 	const parseVer = v => {
-		const m = /^(\d+)\.(\d+)\.(\d+)(?:-(.+))?$/.exec(v.trim());
+		const m = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+[0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*)?$/.exec(v.trim());
 		if (m === null) { return undefined; }
 		return { nums: [Number(m[1]), Number(m[2]), Number(m[3])], pre: m[4] ?? '' };
 	};

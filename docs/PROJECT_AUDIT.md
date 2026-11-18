@@ -73,7 +73,8 @@ efreshSessionsControlVisibility 在更新容器与 context 后同步 control。p
 | SEC-005 | 已修（锁文件证据） | 四处 markdown-it 统一升到 14.3.3（>=14.3.3 <15），只改 version/
 esolved/integrity 三行，未整体重写锁文件；实体包同步。1 条隔离用例转绿。真机 Markdown 渲染与发布物 PENDING。 |
 | SEC-006 | 存疑保留 | 按原审计逐公告核可达性，不能单凭锁宣告生产漏洞 / B09。 |
-| DOC-003、DOC-005 | 仍存在 | 门禁覆盖声明与版本比对口径需统一；DOC-005 需按 SemVer 严格化并补预发布/build metadata 用例。 |
+| DOC-003 | 仍存在 | CI 聚合不含 compile/lint/SCA/GUI，且缺 STATUS 仍可 PASS；安装漂移无 profile 也输出 PASS；产物门禁只查符号痕迹。需按审计要求统一改为缺证据即 PENDING，并校验发布包 provenance/digest。 |
+| DOC-005 | 已修（实测证据） | 版本比对口径统一为 SemVer 2.0.0 严格规则：运行时 `parseVersion` 不再用 `parseInt` 补零（`abc`→`0.0.0`、`1x`→`1` 的静默接受已消除），非法即返回 `undefined`；`compareVersion` 非法返回 `undefined`，`installedMeetsVersion` 对非法版本返回 `false`（无法证明满足即不算满足）；build metadata 按 §10 允许出现但不参与比较。门禁脚本改用同一套正则。实测 10 个用例（含预发布、build metadata、前导零、非法、空串）两套规则**全部 MATCH**；`rc.10 > rc.9` 成立。1 条隔离用例锁定。 |
 | DOC-007 | 已修（实测证据） | 三个门禁脚本统一用脚本自身位置推导仓库根（向上四级），不再用 `process.cwd()`。实测从 `C:\` 直接调用 `dshIdeCi.mjs` 与 `dshInstallDrift.mjs` 均正确定位仓库（前者前三步 PASS、`contract` 因未设 `DSH_INSTALLED_VERSION` 按设计 PENDING）。1 条隔离用例锁定三处口径。 |
 | DOC-002、DOC-004、DOC-006、SEC-001 | 仍存在 | 平台支持、上游来源、历史凭据说明、行内补全声明 PENDING / B11。 |
 | BUG-019 | 已修（隔离证据） | 远端图片尺寸探测有界且必结算：2 MB 字节上限 + 5 s 时限，超限/超时明确返回「读不到」并销毁响应；解析失败只在流结束时才是最终结论，此时结算为 undefined，不再吞错悬空。本地桩实测四种情形（正常图 / 非图片 / 超大 / 不结束）均结算。真机 Emmet 命令 PENDING。 |

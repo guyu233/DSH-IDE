@@ -701,6 +701,31 @@ test('DOC-007: every verifier derives the repo root from its own location', () =
 	}
 });
 
+test('DOC-005: runtime and gate share one strict semver rule', async () => {
+	const { parseVersion, compareVersion, installedMeetsVersion } = await import(new URL('out/vs/platform/dshClient/common/dshIdeContract.js', root).href) as {
+		parseVersion(v: string): [number, number, number, string] | undefined;
+		compareVersion(a: string, b: string): number | undefined;
+		installedMeetsVersion(v: string): boolean;
+	};
+	// 合法：主版本、预发布、build metadata（§10 不参与比较但允许出现）。
+	assert.deepEqual(parseVersion('0.2.2-rc.3'), [0, 2, 2, 'rc.3']);
+	assert.deepEqual(parseVersion('0.2.2+build.7'), [0, 2, 2, '']);
+	assert.deepEqual(parseVersion('0.2.2-rc.3+sha.abc'), [0, 2, 2, 'rc.3']);
+	// 非法：不再补零猜值，一律 undefined。
+	for (const bad of ['01.2.3', 'abc', '1.2', '1.2.3.4', '']) {
+		assert.equal(parseVersion(bad), undefined, `${bad} must be rejected`);
+	}
+	// 预发布逐段按数值比较：rc.10 > rc.9。
+	assert.equal(compareVersion('0.2.2-rc.10', '0.2.2-rc.9'), 1);
+	// 非法版本不可比较，也不能被当成「满足」。
+	assert.equal(compareVersion('abc', '0.2.2'), undefined);
+	assert.equal(installedMeetsVersion('abc'), false);
+	// 门禁脚本必须用同一套正则，否则两边口径会再次分叉。
+	const gate = source('build/lib/dsh/verify/dshIdeVerify.mjs');
+	assert.match(gate, /\(0\|\[1-9\]\\d\*\)\\\./, 'the gate must reject leading zeros like the runtime does');
+	assert.match(gate, /\\\+\[0-9a-zA-Z-\]\+/, 'the gate must accept build metadata like the runtime does');
+});
+
 test('SEC-003: Host dispatch shares the packaged protocol validator', () => {
 	// 只审查装配和单一校验器的接线；不发送非法 DTO，不调用真实 Host。
 	const host = source('src/vs/platform/dshClient/host/ide-view-host.js');
