@@ -808,6 +808,20 @@ test('DOC-004: sync-upstream never writes to the reference repo', () => {
 	assert.match(script, /api\.github\.com\/repos\/deepseek-ai\/deepseek-harness/, 'comparison must use the read-only API');
 });
 
+test('SEC-001: inline completion is registered as unavailable, not wired through a side channel', () => {
+	const protocol = source('src/vs/platform/dshClient/common/dshIdeProtocol.ts');
+	const contribution = source('src/vs/workbench/contrib/dsh/browser/dsh.contribution.ts');
+	const readme = source('README.md');
+	// 事实核验：`ide/inlineComplete` 确实不在唯一通道白名单里。
+	assert.doesNotMatch(protocol, /'inlineComplete'/, 'the method must not be in the contract whitelist yet');
+	// 因此不得注册 provider：注册也拿不到结果。
+	assert.doesNotMatch(contribution, /this\._register\(registerDshInlineCompletions\(/, 'the provider must not be registered while unreachable');
+	// 也不得为它另开旁路通道（唯一通道不变量）。
+	assert.match(contribution, /行内补全\*\*不注册\*\*/, 'the reason must be recorded in place');
+	// 公开声明必须与之一致。
+	assert.match(readme, /行内补全 \| \*\*暂不可用\*\*/, 'the README must state it is unavailable');
+});
+
 test('SEC-003: Host dispatch shares the packaged protocol validator', () => {
 	// 只审查装配和单一校验器的接线；不发送非法 DTO，不调用真实 Host。
 	const host = source('src/vs/platform/dshClient/host/ide-view-host.js');

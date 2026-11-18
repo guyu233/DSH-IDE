@@ -15,7 +15,6 @@ import { registerSingleton, InstantiationType } from '../../../../platform/insta
 import { INotificationService } from '../../../../platform/notification/common/notification.js';
 import { IContextKeyService } from '../../../../platform/contextkey/common/contextkey.js';
 import { IDshClientService, DshClientService } from '../../../../platform/dshClient/common/dshClientService.js';
-import { ILanguageFeaturesService } from '../../../../editor/common/services/languageFeatures.js';
 import { IWorkbenchContribution, registerWorkbenchContribution2, WorkbenchPhase } from '../../../common/contributions.js';
 import { DSH_IDE_SESSION_ENV, DSH_IDE_COMPOSER_ENV } from '../../../../platform/dshClient/common/env.js';
 import { env } from '../../../../base/common/process.js';
@@ -54,7 +53,6 @@ class DshClientContribution extends Disposable implements IWorkbenchContribution
 	constructor(
 		@IDshClientService client: IDshClientService,
 		@INotificationService private readonly notifications: INotificationService,
-		@ILanguageFeaturesService languageFeatures: ILanguageFeaturesService,
 		@ILanguageModelsService languageModels: ILanguageModelsService,
 		@IChatSessionsService chatSessionsService: IChatSessionsService,
 		@IDshIdeSessionsService private readonly _sessions: IDshIdeSessionsService,
@@ -86,7 +84,10 @@ class DshClientContribution extends Disposable implements IWorkbenchContribution
 		if (preset === undefined) {
 			void composer.refresh();
 		}
-		this._register(registerDshInlineCompletions(languageFeatures, client));
+		// 行内补全**不注册**：`ide/inlineComplete` 不在唯一通道白名单里，注册后永远拿不到结果。
+		// 恢复条件见 `inlineCompletion.ts` 的说明；在此之前不假装可用，也不另开旁路。
+		// 因此本贡献点也不再注入 `ILanguageFeaturesService`——留着只为传一个不用的参数是噪音。
+		void registerDshInlineCompletions;
 		const consumer = this._register(new DshIdeConsumer());
 		this._register(consumer.onDidFail((error: { readonly code: string }) => {
 			this.notifications.warn(localize(

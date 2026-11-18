@@ -56,6 +56,21 @@ export class DshInlineCompletionsProvider implements InlineCompletionsProvider<I
 	}
 }
 
+/**
+ * 行内补全当前**不可用**，这里显式登记原因而不是假装接上。
+ *
+ * 事实：provider 调用的是 `ide/inlineComplete`，而 `ide/inlineComplete` 不在唯一通道的
+ * 方法白名单（`DSH_IDE_VIEW_BOUND_METHODS`）里。Host 侧登记了同名 @Remote 能力，
+ * 但 renderer 侧调用会被契约校验拒绝——**注册了不等于可达**。
+ * 与其让用户看到一个永远不出结果的补全，不如不注册，并把原因说清楚。
+ *
+ * 恢复条件（三项同时满足才允许接线）：① 该 method 进入唯一契约白名单并通过
+ * `validateDshIdeInput`；② 明确启用条件与文本最小化策略（不默认上传整个缓冲区）；
+ * ③ 取消语义与测试就位。**不得**为此另开旁路通道。
+ */
+export const DSH_INLINE_COMPLETION_UNAVAILABLE_REASON =
+	'DSH 行内补全暂不可用：`ide/inlineComplete` 尚未纳入唯一通道方法白名单。';
+
 export function registerDshInlineCompletions(languageFeaturesService: ILanguageFeaturesService, client: IDshClientService, selector: LanguageSelector = DSH_INLINE_COMMON_LANGUAGES): Disposable {
 	const provider = new DshInlineCompletionsProvider(client);
 	const reg = languageFeaturesService.inlineCompletionsProvider.register(selector, provider);
