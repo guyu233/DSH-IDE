@@ -938,7 +938,7 @@ DshChatSession.acceptView / acceptConversation → DshChatModel（typed 节点�
 
 > 用户要求：一边做一边项目瘦身，用不到的都删掉；在不影响 DSH-IDE 功能前提下把全量 tsc 的 137 条错误清零。原则：**能删就删**（优先删瘦身残留死代码），其次做类型对齐；所有改动都不改变运行时行为。执行期间不碰 §9.10 的契约文件，避免与其冲突。
 >
-> **执行结果**：tsc 137 → **0**；`npm run compile` PASS；`test-dsh:all` 384/384 PASS；`verify:dsh-ide-ci` 五项全 PASS（`DSH_INSTALLED_VERSION=0.2.2-rc.1`）。变更 92 个文件（26 删除 / 64 修改 / 2 新增），+456 / -4,621 行；依赖 68→66（dependencies）、100→93（devDependencies）；锁文件条目 1,649→1,536（-113，零新增、零版本变更）。详细清单见 `docs/DSH-IDE瘦身报告-第1轮.md`，逐项证据见 `docs/DSH-IDE瘦身问题清单-第1轮.md`。
+> **执行结果**：tsc 137 → **0**；`npm run compile` PASS；`test-dsh:all` 384/384 PASS；`verify:dsh-ide-ci` 五项全 PASS（`DSH_INSTALLED_VERSION=0.2.2-rc.1`）。变更 92 个文件（26 删除 / 64 修改 / 2 新增），+456 / -4,621 行；依赖 68→66（dependencies）、100→93（devDependencies）；锁文件条目 1,649→1,536（-113，零新增、零版本变更）。详细清单见 `docs/DSH-IDE瘦身报告.md`（第 1 轮），逐项证据见 `docs/DSH-IDE瘦身问题清单.md`（第 1 轮）。
 >
 > **落地要点与手册原方案的偏差**：
 > 1. `DSH_IDE_CONTRACT_API_VERSION` / `DSH_IDE_CONTRACT_WIRE_REVISION` **未删**——`verify:dsh-ide-protocol-single-source` 显式断言 contract 必须 import protocol 常量，删则门禁 FAIL。
@@ -1000,13 +1000,13 @@ DshChatSession.acceptView / acceptConversation → DshChatModel（typed 节点�
 
 #### 9.11.4 第 2 轮复检与断链修复（已执行，2026-11-17）
 
-> 第 1 轮结束后复检发现 3 个**已失效的脚本/配置**与 4 处死代码，按同样流程先出清单（`docs/DSH-IDE瘦身问题清单-第2轮.md`）再执行。区间 `36521cd0..2d7a1b02`：**20 个文件，+42 / -496 行**。
+> 第 1 轮结束后复检发现 3 个**已失效的脚本/配置**与 4 处死代码，按同样流程先出清单（见 `docs/DSH-IDE瘦身问题清单.md` 第 2 轮）再执行。区间 `36521cd0..2d7a1b02`：**20 个文件，+42 / -496 行**。
 >
 > **删除**：`build/lib/dsh/verify/dshRealSampleP95.mjs`（import 的 `ide-view-projector.ts` / `translator.ts` 已被删，boundary 门禁反向要求不得存在，实跑 `ERR_MODULE_NOT_FOUND`）、`build/dsh-ide-build-prereqs.mjs`（扁平化后把 `types-stash` 写到 `E:\`）、npm script `verify:dsh-real-p95`；`dshComposerProjection.ts` 的 `toChatMode`/`observeModes`/`modesOf`（41 行）、`dshChatSession.ts` 的 `noteRunning`/`pendingItemsView`+`_pendingView`/`boundId`（22 行）、`dshIdeProtocol.ts` 的 `DshIdeImageAttachmentValue`、重复的 `DSH_MODEL_VENDOR`；`.vscode` 的 3 个悬空任务与 5 个指向已删扩展目录的启动项。
 >
 > **修正**：`sync-upstream.mjs` 的 PROVENANCE 路径与版本正则（原恒返回 undefined → 报告恒为 SAME）；`dshArtifactContents.mjs` 的 `EXPECTED_COMMON` 7 → 10；手册 method 计数 42/36 → 43（6 处）；README 两处过期描述；4 处 `DshChatModelDriver` 注释改为 `dshChatSessionContent` content provider。
 >
-> **门禁**：tsc 0 error、`test-dsh:all` 384 PASS、`verify:dsh-ide-ci` 五项 PASS、`verify:dsh-artifact` PASS、`.vscode` 两份 JSONC 解析与依赖引用全部可解析。详见 `docs/DSH-IDE瘦身报告-第2轮.md`。
+> **门禁**：tsc 0 error、`test-dsh:all` 384 PASS、`verify:dsh-ide-ci` 五项 PASS、`verify:dsh-artifact` PASS、`.vscode` 两份 JSONC 解析与依赖引用全部可解析。详见 `docs/DSH-IDE瘦身报告.md`（第 2 轮）。
 
 #### 9.11.5 第 3 轮复检（已执行，2026-11-17）
 
@@ -1016,7 +1016,7 @@ DshChatSession.acceptView / acceptConversation → DshChatModel（typed 节点�
 >
 > **修正**：`scripts/sync-upstream.mjs` 的「渲染复用件」段改为「历史渲染复用件」，注明本地复制件与 sidecar 已删除、仅作历史对照。
 >
-> **门禁**：tsc 0 error、`test-dsh:all` 384 PASS、`verify:dsh-ide-ci` 五项 PASS、`.eslint-ignore` 死条目 0、`node --check scripts/sync-upstream.mjs` PASS。详见 `docs/DSH-IDE瘦身报告-第3轮.md`。
+> **门禁**：tsc 0 error、`test-dsh:all` 384 PASS、`verify:dsh-ide-ci` 五项 PASS、`.eslint-ignore` 死条目 0、`node --check scripts/sync-upstream.mjs` PASS。详见 `docs/DSH-IDE瘦身报告.md`（第 3 轮）。
 >
 > **累计（三轮）**：约 111 个文件变更、净减约 4,200 行（+945 / -5,143）、20 余个提交；tsc 137→0；dependencies 68→66、devDependencies 100→93、scripts 86→80；锁文件 -113 条目（零新增、零版本变更）。
 
@@ -1030,13 +1030,13 @@ DshChatSession.acceptView / acceptConversation → DshChatModel（typed 节点�
 >
 > **修正**：`sync-agent-host-protocol.ts` 的 `DEST_DIR` 改到 `chatContracts`（61 个 generated 文件的真实位置）；`dshIdeProtocol.ts:25` 的 wireRevision 注释去掉撤销的 5 号方案残留；手册 13 处行号/定量声明（§2 校验器 6 处、§4.5 附件 1 处、§2 状态层 3 处、§9.7 图标大小 1 处、§9.9.2 表头与 5 个真实行号）。
 >
-> **门禁**：tsc 0 error、`test-dsh:all` 384 PASS、`verify:dsh-ide-ci` 五项 PASS、`verify:dsh-artifact` PASS、`npm run compile` PASS（0 errors，49 s）、三份 `.vscode` JSONC 解析 PASS、`bash -n` / `node --check` 全部 PASS、`.eslint-allowed-*-files` 0 missing、`build/lib/test/i18n.test.ts` 3/3 PASS。详见 `docs/DSH-IDE瘦身报告-第4轮.md`。
+> **门禁**：tsc 0 error、`test-dsh:all` 384 PASS、`verify:dsh-ide-ci` 五项 PASS、`verify:dsh-artifact` PASS、`npm run compile` PASS（0 errors，49 s）、三份 `.vscode` JSONC 解析 PASS、`bash -n` / `node --check` 全部 PASS、`.eslint-allowed-*-files` 0 missing、`build/lib/test/i18n.test.ts` 3/3 PASS。详见 `docs/DSH-IDE瘦身报告.md`（第 4 轮）。
 >
 > **保留**：`test/smoke/src/areas/agentsWindow/**`（5 文件 108 KB）整块保留——它测的 Dev Container / packaged AgentHost 已随 `src/vs/sessions/**` 与 `src/vs/platform/agentHost/**` 消失，但删除属测试裁剪，不在「行为不变」的清理范围。（**第 5 轮已删除**，见 §9.11.8。）
 
 #### 9.11.7 第 4 轮细小 Bug 修复（已执行，2026-11-17）
 
-> 用户要求「每轮检查是否仍有细小 bug，整理出一个没有逻辑问题的可执行方案并处理」。子智能体按 8 类模式（未定义标识符 / 空值 / 异步 / 泄漏 / 逻辑 / 字符串正则路径 / 类型断言 / 状态不一致）扫描 DSH 全部生产代码，命中并复核 **11 处真实 bug**，清单见 `docs/DSH-IDE细小Bug清单-第4轮.md`、修复报告见 `docs/DSH-IDE细小Bug修复报告-第4轮.md`。修复提交 `594dd4a4`（功能改动，与清理提交分开）：**10 文件，+193 / -39 行**。
+> 用户要求「每轮检查是否仍有细小 bug，整理出一个没有逻辑问题的可执行方案并处理」。子智能体按 8 类模式（未定义标识符 / 空值 / 异步 / 泄漏 / 逻辑 / 字符串正则路径 / 类型断言 / 状态不一致）扫描 DSH 全部生产代码，命中并复核 **11 处真实 bug**，清单见 `docs/DSH-IDE瘦身问题清单.md`（第 4 轮补充：细小 Bug 清单）、修复报告见 `docs/DSH-IDE瘦身报告.md`（第 4 轮补充：细小 Bug 修复）。修复提交 `594dd4a4`（功能改动，与清理提交分开）：**10 文件，+193 / -39 行**。
 >
 > **高危 1 处**：`DshChatSession._running` 只在 `submit()` 置 true、失败置 false，**正常回合结束无复位** → `running()` 永远 true，面板永远「生成中」、停止按钮常驻。修法：新增幂等 `setRunning()` + `acceptSessionStatus()`，由 `dsh.contribution.ts` 消费 `session-status` 帧（Host 侧 `api-session/status` 转发）驱动复位；`submit()` 与 `bind()` 统一走 `setRunning()`。
 >
@@ -1058,7 +1058,7 @@ DshChatSession.acceptView / acceptConversation → DshChatModel（typed 节点�
 
 > **脚本/测试缺陷（6 处）**：`dshIdeEndpoints.test.ts` 的 `UNVERIFIED` 恒为空数组导致守护恒真（改为显式空数组 + 覆盖断言）；`dshStageNumbering.test.ts` 扫描根拼错且 `catch { return }` 吞错（改正 + `missingRoots` 断言）；`compareVersion` 与 `dshIdeVerify.mjs` 把 prerelease 整段字符串比（`rc.10 < rc.9`，改为逐段数字比较）；`dshInstallDrift.mjs` 跳过空文件、缺 `host/` 时抛 ENOENT；`dshArtifactContents.mjs` 依赖 `process.cwd()`；`genDshIconDataUris --check` 未接线（改用生成物 sha256 指纹测试）。
 
-> **门禁**：tsc 0 error、`build-dsh-tests` PASS、`test-dsh:all` **391** PASS（388 → 391，+3）、`verify:dsh-ide-ci` 五项 PASS、`verify:dsh-artifact` PASS、`npm run compile` PASS（37 s）。`verify:dsh-install-drift` **FAIL（预先存在）**：`host/ide-service.js` / `host/ide-view-host.js` 与 2026-11-17 00:38 的旧产物不一致，本轮未改这两个文件、也未打包（按 §0.0 打包推迟）。详见 `docs/DSH-IDE瘦身与Bug修复报告-第5轮.md`。
+> **门禁**：tsc 0 error、`build-dsh-tests` PASS、`test-dsh:all` **391** PASS（388 → 391，+3）、`verify:dsh-ide-ci` 五项 PASS、`verify:dsh-artifact` PASS、`npm run compile` PASS（37 s）。`verify:dsh-install-drift` **FAIL（预先存在）**：`host/ide-service.js` / `host/ide-view-host.js` 与 2026-11-17 00:38 的旧产物不一致，本轮未改这两个文件、也未打包（按 §0.0 打包推迟）。详见 `docs/DSH-IDE瘦身报告.md`（第 5 轮）。
 
 #### 9.11.9 第 6 轮：chat-simulation / mock-policy-server 的清理与 Bug 修复（已执行，2026-11-18）
 
@@ -1072,7 +1072,7 @@ DshChatSession.acceptView / acceptConversation → DshChatModel（typed 节点�
 
 > **文档校正（6 处）**：§9.11.6 的 agentsWindow「整块保留」补注第 5 轮已删；§9.11.8 的「smoke 6 文件」拆写为「smoke 5 + automation 1」；`test-dsh:all` 增量 389→391 改为 388→391；§3.5 的 `package.json:85-94` 改为 `80-91`；报告 5 的「389 +2」与终点提交同步修正。
 
-> **门禁**：tsc 0 error、`test-dsh:all` **391** PASS、`verify:dsh-ide-ci` 五项 PASS、`npm run compile` PASS（31 s）、`node --check` 4 个 JS PASS、TypeScript parse 3 个 .ts 0 diagnostics、`stripJsoncComments` 4/4、`loadConfig` 实跑正常。详见 `docs/DSH-IDE瘦身与Bug修复报告-第6轮.md`。
+> **门禁**：tsc 0 error、`test-dsh:all` **391** PASS、`verify:dsh-ide-ci` 五项 PASS、`npm run compile` PASS（31 s）、`node --check` 4 个 JS PASS、TypeScript parse 3 个 .ts 0 diagnostics、`stripJsoncComments` 4/4、`loadConfig` 实跑正常。详见 `docs/DSH-IDE瘦身报告.md`（第 6 轮）。
 
 #### 9.11.10 第 7 轮：build/lib + test/smoke + build/next 的清理与 Bug 修复（已执行，2026-11-18）
 
@@ -1084,5 +1084,5 @@ DshChatSession.acceptView / acceptConversation → DshChatModel（typed 节点�
 
 > **存疑保留**：`build/next/index.ts:759` 的 watch glob cwd 错位（改需长驻验证）、`copilotCli.test.ts` 死测试（唯一用例 skip、命令已删，删除牵连 main.ts 注册属测试裁剪）、11 处上游有意 skip 的假守护（启用属功能变更 + 需真机，按 AGENTS §6/§7 不做）。
 
-> **门禁**：主 tsc 0 error；`test/smoke/tsconfig.json` 39 个错误与改动前基线完全一致（0 新增）；TypeScript parse 13 个改动 .ts 0 diagnostics；`test-dsh:all` 391 PASS；`verify:dsh-ide-ci` 五项 PASS；`npm run compile` PASS（54 s）。详见 `docs/DSH-IDE瘦身与Bug修复报告-第7轮.md`。
+> **门禁**：主 tsc 0 error；`test/smoke/tsconfig.json` 39 个错误与改动前基线完全一致（0 新增）；TypeScript parse 13 个改动 .ts 0 diagnostics；`test-dsh:all` 391 PASS；`verify:dsh-ide-ci` 五项 PASS；`npm run compile` PASS（54 s）。详见 `docs/DSH-IDE瘦身报告.md`（第 7 轮）。
 
