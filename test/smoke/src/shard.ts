@@ -21,15 +21,9 @@ export interface Shard {
 const suiteDurations = new Map<string, number>([
 	['Data Loss (insiders -> insiders)', 210],
 	['Terminal', 150],
-	['Agents Window (Dev Container AgentHost)', process.platform === 'linux' ? 115 : 5], // skips itself without Docker
-	['Agents Window (WSL Dev Container AgentHost)', 175], // includes the ~80s WSL setup step
 	['Chat Sessions', 85],
-	['Agents Window (SSH Dev Container AgentHost)', 75],
-	['Agents Window (Codex)', 65],
 	['Integrated Browser', 65],
-	['Agents Window (local AgentHost)', 60],
 	['Extension Host Restart', 55],
-	['Agents Window (local AgentHost, SDK sandbox)', 55],
 	[`Chat Sandbox (${process.platform})`, 50],
 	['Chat Model Configuration', 40],
 	['Task', 35],
@@ -37,9 +31,8 @@ const suiteDurations = new Map<string, number>([
 ]);
 const defaultSuiteDuration = 20;
 
-// Coupled to the PR workflows: pr-win32-test.yml only provisions WSL in the first
-// shard, and pr-darwin-test.yml runs the PAC proxy suites after the last shard.
-const firstShardSuite = 'Agents Window (WSL Dev Container AgentHost)';
+// pr-darwin-test.yml used to run the PAC proxy suites after the last shard;
+// those suites no longer exist, but the extra budget is kept for other long tasks.
 const lastShardExtraDuration = process.platform === 'darwin' ? 270 : 0;
 
 /**
@@ -73,15 +66,9 @@ export function selectShardSuites(suites: readonly Suite[], shard: Shard): Suite
 	const durations = suites.map(estimateDuration);
 	const shardDurations = new Array<number>(shard.total).fill(0);
 	shardDurations[shard.total - 1] += lastShardExtraDuration;
-	const assignments: (number | undefined)[] = suites.map(suite => suite.title === firstShardSuite ? 0 : undefined);
-	assignments.forEach((target, suiteIndex) => {
-		if (target !== undefined) {
-			shardDurations[target] += durations[suiteIndex];
-		}
-	});
+	const assignments: (number | undefined)[] = suites.map(() => undefined);
 
 	const order = suites.map((_, index) => index)
-		.filter(index => assignments[index] === undefined)
 		.sort((a, b) => durations[b] - durations[a] || a - b);
 	for (const suiteIndex of order) {
 		const target = shardDurations.indexOf(Math.min(...shardDurations));

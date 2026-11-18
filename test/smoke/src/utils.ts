@@ -5,7 +5,6 @@
 
 import * as sqlite3 from '@vscode/sqlite3';
 import * as fs from 'fs';
-import { Suite, Context } from 'mocha';
 import { dirname, join } from 'path';
 import { Application, ApplicationOptions, IModelConfigSection, Logger } from '../../automation';
 
@@ -78,18 +77,6 @@ export const MOCK_CONFIG_MODEL_DEFAULT_SECTIONS: readonly IModelConfigSection[] 
 		],
 	},
 ];
-
-export function describeRepeat(n: number, description: string, callback: (this: Suite) => void): void {
-	for (let i = 0; i < n; i++) {
-		describe(`${description} (iteration ${i})`, callback);
-	}
-}
-
-export function itRepeat(n: number, description: string, callback: (this: Context) => any): void {
-	for (let i = 0; i < n; i++) {
-		it(`${description} (iteration ${i})`, callback);
-	}
-}
 
 export function installAllHandlers(logger: Logger, optionsTransform?: (opts: ApplicationOptions) => ApplicationOptions, beforeStart?: (app: Application) => Promise<void> | void) {
 	installDiagnosticsHandler(logger);
@@ -342,27 +329,6 @@ export function timeout(i: number) {
 			resolve();
 		}, i);
 	});
-}
-
-export async function retryWithRestart(app: Application, testFn: () => Promise<unknown>, retries = 3, timeoutMs = 20000): Promise<unknown> {
-	let lastError: Error | undefined = undefined;
-	for (let i = 0; i < retries; i++) {
-		const result = await Promise.race([
-			testFn().then(() => true, error => {
-				lastError = error;
-				return false;
-			}),
-			timeout(timeoutMs).then(() => false)
-		]);
-
-		if (result) {
-			return;
-		}
-
-		await app.restart();
-	}
-
-	throw lastError ?? new Error('retryWithRestart failed with an unknown error');
 }
 
 export interface ITask<T> {
