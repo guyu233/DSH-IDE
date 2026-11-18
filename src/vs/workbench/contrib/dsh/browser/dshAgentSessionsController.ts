@@ -70,6 +70,13 @@ export class DshAgentSessionsController extends Disposable implements IChatSessi
 	private readonly liveRunning = new Map<string, boolean>();
 	/** 最近一次归档/恢复回包里的完整集合。listSessions 摘要没有 archived 字段。 */
 	private readonly archivedIds = new Set<string>();
+	/**
+	 * 归档写回的序号。
+	 *
+	 * 回包是**完整集合**，所以只能整体采纳；两次写回乱序返回时，较旧的那次会把
+	 * 较新的结果覆盖掉，界面就会显示成「刚归档的又回来了」。只采纳序号最新的那一次。
+	 */
+	private archiveEpoch = 0;
 	/** 后发起的 refresh 作废先发起的回包。 */
 	private refreshEpoch = 0;
 
@@ -322,11 +329,17 @@ export class DshAgentSessionsController extends Disposable implements IChatSessi
 
 	/** 归档 / 恢复：成功后就地把行状态改掉，失败保留原状并如实提示。 */
 	private async applyArchived(sessionId: string, archived: boolean): Promise<void> {
+		const epoch = ++this.archiveEpoch;
 		const result = archived
 			? await this.client.call('archiveSession', { sessionId })
 			: await this.client.call('unarchiveSession', { sessionId });
 		if (!result.ok) {
+			// 失败只提示，不改状态；序号已经前进，较旧的成功回包也不会再覆盖更新的意图。
 			this._notifications.warn(localize('dsh.sessions.archiveFailed', "DSH 会话归档失败：{0}", result.error.message));
+			return;
+		}
+		if (!isCurrentRefresh(epoch, this.archiveEpoch)) {
+			// 期间有更新的归档请求：这次回包描述的是旧意图，整体丢弃。
 			return;
 		}
 		// 回包是完整归档集合。不能只改这一行：下一次 listSessions 没有 archived 字段，刷新会把标志清掉。

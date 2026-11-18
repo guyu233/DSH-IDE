@@ -1299,6 +1299,9 @@ function createMethodHandlers(bridge) {
 				throw coded(FEATURE_UNAVAILABLE, 'session favorite is unavailable: install and enable @michengai/dsh-archive-manager', { capability: 'setSessionFavorite' });
 			}
 			return bridge.enqueueToggle(`favorite:${args.sessionId}`, async () => {
+				// 排队期间视图可能已经换绑：执行前必须重新核对这一行仍然可见，
+				// 否则会把一次旧窗口的意图作用到别处。
+				await assertVisibleRowForBridge(bridge, args.sessionId);
 				const current = await registry.favoriteSessions();
 				const ids = current && Array.isArray(current.favoriteSessionIds) ? current.favoriteSessionIds : [];
 				await registry.setSessionFavorite({ sessionId: args.sessionId, favorite: !ids.includes(args.sessionId) });
@@ -1310,6 +1313,8 @@ function createMethodHandlers(bridge) {
 			await assertVisibleRowForBridge(bridge, args.sessionId);
 			const workspaces = service(bridge.ctx, 'workspaceController');
 			return bridge.enqueueToggle(`pin:${args.sessionId}`, async () => {
+				// 同 setSessionFavorite：排队期间换绑后不能再按旧意图执行。
+				await assertVisibleRowForBridge(bridge, args.sessionId);
 				const registry = optionalService(bridge.ctx, 'workspaceRegistry');
 				const pinned = registry && Array.isArray(registry.pinnedSessionIds) ? registry.pinnedSessionIds.includes(args.sessionId) : false;
 				const method = pinned ? 'unpinSession' : 'pinSession';

@@ -602,6 +602,30 @@ test('BUG-018: the spawn result waits for the asynchronous error event', () => {
 	assert.match(service, /child\.pid === undefined/, 'a child without a pid did not start');
 });
 
+test('BUG-020: a business rejection is never replayed as if it were a transport failure', () => {
+	// 只核对分类边界：端点没变时不得重放，否则一次业务拒绝会被当成瞬时故障重发。
+	const factory = source('src/vs/platform/dshClient/electron-main/dshIdeBackendFactory.ts');
+	assert.match(factory, /if \(!\(await this\.refreshEndpoint\(\)\)\) \{\s*\n\s*throw error;/, 'a non-endpoint failure must be rethrown unchanged');
+	assert.match(factory, /this\.assertLive\(epoch\)/, 'a closed view must cancel the call instead of retrying it');
+});
+
+test('BUG-021: an archive reply older than a newer request is discarded', () => {
+	// 回包是完整集合，只能整体采纳；乱序时必须只采纳序号最新的那一次。
+	const controller = source('src/vs/workbench/contrib/dsh/browser/dshAgentSessionsController.ts');
+	assert.match(controller, /const epoch = \+\+this\.archiveEpoch;/, 'each archive request must take an epoch');
+	assert.match(controller, /if \(!isCurrentRefresh\(epoch, this\.archiveEpoch\)\)/, 'a stale reply must be dropped before it replaces the set');
+});
+
+test('BUG-021: a queued toggle re-checks ownership before it runs', () => {
+	const host = source('src/vs/platform/dshClient/host/ide-view-host.js');
+	// 入队前的检查不够：排队期间视图可能换绑，执行时必须重新核对这一行仍然可见。
+	const favorite = host.slice(host.indexOf('async setSessionFavorite'));
+	const pin = host.slice(host.indexOf('async setSessionPinned'));
+	const recheck = /enqueueToggle\(`[^`]+`, async \(\) => \{\s*\n\s*\/\/[^\n]*\n\s*await assertVisibleRowForBridge\(bridge, args\.sessionId\);/;
+	assert.match(favorite, recheck, 'setSessionFavorite must re-check ownership inside the queued task');
+	assert.match(pin, recheck, 'setSessionPinned must re-check ownership inside the queued task');
+});
+
 test('SEC-003: Host dispatch shares the packaged protocol validator', () => {
 	// 只审查装配和单一校验器的接线；不发送非法 DTO，不调用真实 Host。
 	const host = source('src/vs/platform/dshClient/host/ide-view-host.js');
