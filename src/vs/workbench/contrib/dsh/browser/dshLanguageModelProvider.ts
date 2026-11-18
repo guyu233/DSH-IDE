@@ -25,6 +25,7 @@ import type {
 	ILanguageModelsService,
 } from '../../chat/common/languageModels.js';
 import { DSH_MODEL_VENDOR, toLanguageModel } from './dshComposerProjection.js';
+import { dshChatSessionFor } from './dshChatSession.js';
 
 /**
  * 判定两版模型表项是否「显示上等价」。
@@ -106,7 +107,12 @@ export class DshLanguageModelProvider extends Disposable implements ILanguageMod
 	}
 
 	private async load(): Promise<void> {
-		const result = await this.client.call<ComposerState>('composerState', {});
+		// 目录随会话投影下发（`composerState`），所以必须带发起会话；未绑定时不猜。
+		const sessionId = dshChatSessionFor(this.client).activeSessionId;
+		if (sessionId === undefined) {
+			return;
+		}
+		const result = await this.client.call<ComposerState>('composerState', { sessionId });
 		if (!result.ok) {
 			// 会话还没绑定或视图还没开：保持空列表，不发假模型，也不弹错误。
 			this.logService.trace('[dsh] composerState 暂不可用，模型列表保持上一次', result.error.code);

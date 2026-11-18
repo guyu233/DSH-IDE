@@ -23,12 +23,61 @@ import { projectDshIdeSessionSearch } from '../common/dshIdeSessionSearch.js';
 import { projectDshIdeComposer } from '../common/dshIdeComposer.js';
 import { projectApprovalRequest, projectQuestionRequest } from '../common/dshIdeRequestView.js';
 import { safeErrorText } from '../common/dshIdeAuthRedaction.js';
+// 共享契约真源：Host 与 IDE 用同一份字段白名单与方法校验，不再各自复制一套规则。
+import {
+	DSH_IDE_INCOMPATIBLE_WIRE,
+	DSH_IDE_VIEW_BOUND_FRAME,
+	DSH_IDE_VIEW_BOUND_METHODS,
+	DSH_IDE_WIRE_REVISION,
+	requireDshIdeWireRevision,
+	sameDshIdeViewBinding,
+	validateDshIdeInput,
+	validateDshIdeViewBinding,
+} from '../common/dshIdeProtocol.js';
 
 /** 与 common/dshIdeProtocol.ts 同值的错误码（Host 半身为纯 JS，不跨层 import TS）。 */
 export const FEATURE_UNAVAILABLE = 'dsh-ide/feature-unavailable';
 export const INVALID_ARGUMENT = 'dsh-ide/invalid-argument';
 export const ALREADY_RESOLVED = 'ALREADY_RESOLVED';
 export const SESSION_SWITCHED = 'SESSION_SWITCHED';
+export const INCOMPATIBLE_WIRE = DSH_IDE_INCOMPATIBLE_WIRE;
+
+/**
+ * 校验对端声明的线协议修订号。
+ *
+ * 为什么不靠包版本号：同一个包里的两半仍可能被开发启动或旧安装拆开使用。协议修订号是
+ * 两半共同声明、且由共享校验器核对的事实；不一致就拒绝，不按旧形状继续调用。
+ * @param {unknown} value
+ */
+function requirePeerWireRevision(value) {
+	requireDshIdeWireRevision(value);
+}
+
+/**
+ * 从本次调用的运行时上下文读出可信主体。
+ *
+ * 为什么不用请求里的字段：调用方可以在 DTO 里写任何值。官方 Gateway 在调用上下文上提供
+ * `this.ctx.invocation.peer`，其 `principal` 由 Host 在建立连接时固定，线协议字段无法设置。
+ * @param {object} ctx
+ * @returns {boolean} 是否为本地所有者（owner）主体
+ */
+function isTrustedOwnerCaller(ctx) {
+	const invocation = ctx && typeof ctx === 'object' ? ctx.invocation : undefined;
+	const peer = invocation && typeof invocation === 'object' ? invocation.peer : undefined;
+	const principal = peer && typeof peer === 'object' ? peer.principal : undefined;
+	return principal !== null && typeof principal === 'object' && principal.kind === 'owner';
+}
+
+/**
+ * 调用方取消信号：官方把 carrier 取消注入到最后一个参数。
+ * 没有调用上下文（本地直接调用）时给一个独立信号，保持既有行为。
+ * @param {object} ctx
+ */
+function callerAbortSignal(ctx) {
+	const invocation = ctx && typeof ctx === 'object' ? ctx.invocation : undefined;
+	const signal = invocation && typeof invocation === 'object' ? invocation.signal : undefined;
+	return signal !== undefined && typeof signal.aborted === 'boolean' ? signal : callerSignal();
+}
 
 /**
  * 本桥接的**核心**依赖：缺任一即无法跟随会话，桥接拒绝建立。
@@ -236,6 +285,8 @@ export class DshIdeHostBridge {
 		this._statusListeners = new Set();
 		/** 同一会话的收藏/置顶切换必须串行，否则两次读取会看到同一状态。 */
 		this._toggles = new Map();
+		/** 最近一次采纳的绑定代次；只允许前进。 */
+		this._generation = 0;
 		this._armWaterfalls();
 		this._armSessionStatus();
 	}
@@ -273,16 +324,58 @@ export class DshIdeHostBridge {
 		return { channelId: this.channelId, sessionId: this.sessionId };
 	}
 
+	/** 本桥当前的绑定形状：视图 id 即通道 id，代次由 IDE 主进程推进后随调用上行。 */
+	bindingOf(generation) {
+		return { viewId: this.channelId, generation, sessionId: this.sessionId ?? null };
+	}
+
+	/**
+	 * 按调用方声明的绑定推进本桥的绑定。
+	 *
+	 * 为什么以调用方为准：同一 Host 服务多个窗口，每个窗口各自持有自己的视图与代次。
+	 * 绑定是「这次调用代表哪个视图的哪一代」的事实，必须随调用上行，不能由 Host 猜。
+	 * 代次只允许前进：迟到或重放的旧代调用不得把绑定退回去。
+	 * @param {{ viewId: string, generation: number, sessionId: string | null }} binding
+	 */
+	adoptBinding(binding) {
+		if (this.channelId === undefined) {
+			this.channelId = binding.viewId;
+		}
+		if (this.channelId !== binding.viewId) {
+			throw coded(SESSION_SWITCHED, `DSH-IDE view ${binding.viewId} is not served by this bridge (serving ${this.channelId})`);
+		}
+		if (binding.generation < this._generation) {
+			throw coded(SESSION_SWITCHED, `DSH-IDE view generation ${binding.generation} is older than ${this._generation}`);
+		}
+		this._generation = binding.generation;
+		this.sessionId = binding.sessionId === null ? undefined : binding.sessionId;
+		return binding;
+	}
+
 	/**
 	 * 跟随一个会话。同一个会话只调用一次 `sessionController.follow`，
 	 * 多个视图收同一份帧。没有会话地址时不听。
 	 */
-	follow(sessionId, onEvent) {
+	follow(binding, onEvent) {
+		if (binding !== undefined && typeof binding === 'object') {
+			this.adoptBinding(validateDshIdeViewBinding(binding));
+		} else if (typeof binding === 'string' || binding === undefined) {
+			// 兼容进程内直调：第一参是会话 id 时按当前视图绑定处理。
+			if (typeof binding === 'string' && binding !== '') {
+				this.sessionId = binding;
+			}
+			return this._followBound(onEvent);
+		}
+		const sessionId = this.sessionId;
 		if (typeof sessionId !== 'string' || sessionId === '') {
 			this._statusListeners.add(onEvent);
 			return { dispose: () => { this._statusListeners.delete(onEvent); } };
 		}
-		this.sessionId = sessionId;
+		return this._attachFollow(sessionId, onEvent);
+	}
+
+	/** 已确定会话 id 时挂上共享跟随。 */
+	_attachFollow(sessionId, onEvent) {
 		const shared = this._ensureFollow(sessionId);
 		shared.listeners.add(onEvent);
 		shared.ref += 1;
@@ -301,11 +394,22 @@ export class DshIdeHostBridge {
 	}
 
 	/** 给官方流式 remote 用：帧原样送出，不改写成行。 */
-	async *followSession(sessionId, signal) {
+	/** 进程内直调：没有远程绑定形状时按当前会话跟随。 */
+	_followBound(onEvent) {
+		const sessionId = this.sessionId;
+		if (typeof sessionId !== 'string' || sessionId === '') {
+			this._statusListeners.add(onEvent);
+			return { dispose: () => { this._statusListeners.delete(onEvent); } };
+		}
+		return this._attachFollow(sessionId, onEvent);
+	}
+
+	async *followSession(binding, signal) {
+		const adopted = validateDshIdeViewBinding(binding);
 		const queue = [];
 		let wake = () => undefined;
 		let closed = false;
-		const handle = this.follow(typeof sessionId === 'string' ? sessionId : '', frame => {
+		const handle = this.follow(adopted, frame => {
 			queue.push(frame);
 			const notify = wake;
 			wake = () => undefined;
@@ -319,6 +423,9 @@ export class DshIdeHostBridge {
 			wake = () => undefined;
 			notify();
 		};
+		// 身份先于内容：先确认这次流属于哪个视图的哪一代，再送会话帧。
+		// 顺序反过来的话，窗口会把「还没确认归属」的帧当成自己的内容。
+		yield { type: DSH_IDE_VIEW_BOUND_FRAME, binding: adopted };
 		if (signal && typeof signal.addEventListener === 'function') {
 			if (signal.aborted) {
 				stop();
@@ -494,20 +601,62 @@ export class DshIdeHostBridge {
 		}
 	}
 
-	async invoke(method, args) {
+	/**
+	 * 执行一次 DTO method。
+	 *
+	 * `binding` 是这次调用的发起视图与代次：采纳它之后，本桥的会话归属校验才有确定目标。
+	 * 入参已由共享校验器核对过字段白名单。
+	 * @param {string} method
+	 * @param {unknown} args
+	 * @param {{ viewId: string, generation: number, sessionId: string | null }} binding
+	 */
+	async invoke(method, args, binding) {
 		const handler = this.methods[method];
 		if (handler === undefined) {
 			throw coded(FEATURE_UNAVAILABLE, `DshIdeHostBridge: method ${JSON.stringify(method)} is not defined`);
 		}
+		// 进程内本地调用（Host 单测、插件内部直调）没有远程视图身份，沿用本桥当前绑定；
+		// 远程入口 `ide/dispatch` 总是带上已校验的绑定，因此远程路径不存在「省略身份」的形态。
+		if (binding !== undefined) {
+			this.adoptBinding(validateDshIdeViewBinding(binding));
+		}
 		return handler(args || {});
 	}
 
-	/** 会话归属校验（第 2 章 E6）。 */
+	/**
+	 * 会话归属校验。
+	 *
+	 * 缺 `sessionId` 一律拒绝：没有「默认当前会话」的回退，否则换绑之后到达的旧调用会写进
+	 * 新会话。显式行操作不经过这里，改由 `assertVisibleRow` 按可见对象校验。
+	 * @param {unknown} requested
+	 */
 	assertOwnership(requested) {
-		if (requested === undefined || this.sessionId === undefined || requested === this.sessionId) {
-			return;
+		if (typeof requested !== 'string' || requested === '') {
+			throw coded(INVALID_ARGUMENT, 'sessionId must be a non-empty string');
 		}
-		throw coded(SESSION_SWITCHED, `DSH-IDE session switched: bound ${this.sessionId}, requested ${requested}`);
+		if (this.sessionId === undefined) {
+			throw coded(INVALID_ARGUMENT, 'DSH-IDE view has no bound session');
+		}
+		if (requested !== this.sessionId) {
+			throw coded(SESSION_SWITCHED, `DSH-IDE session switched: bound ${this.sessionId}, requested ${requested}`);
+		}
+	}
+
+	/**
+	 * 显式可见行校验：用户点了某一行的菜单，就不要求那一行是当前绑定的会话。
+	 *
+	 * 仍必须确认这一行对该主体可见——不能凭一个任意 id 直接操作存储。
+	 * @param {unknown} sessionId
+	 * @param {readonly { sessionId?: unknown }[]} visibleRows
+	 */
+	assertVisibleRow(sessionId, visibleRows) {
+		if (typeof sessionId !== 'string' || sessionId === '') {
+			throw coded(INVALID_ARGUMENT, 'sessionId must be a non-empty string');
+		}
+		if (!Array.isArray(visibleRows) || !visibleRows.some(row => row !== null && typeof row === 'object' && row.sessionId === sessionId)) {
+			throw coded(SESSION_SWITCHED, `DSH-IDE row ${sessionId} is not visible to this view`);
+		}
+		return sessionId;
 	}
 
 	close() {
@@ -523,6 +672,7 @@ export class DshIdeHostBridge {
 		this.pending.entries.clear();
 		this.channelId = undefined;
 		this.sessionId = undefined;
+		this._generation = 0;
 	}
 
 	disposeSubscriptions() {
@@ -538,6 +688,21 @@ export class DshIdeHostBridge {
 			}
 		}
 	}
+}
+
+/**
+ * 显式行操作的前置：该行必须出现在当前主体可见的官方名单里。
+ *
+ * 为什么不要求它就是当前绑定会话：用户点了另一行的菜单，那一行不是「当前会话」，
+ * 但仍是用户可见的对象。也不能只凭一个 id 直接操作存储——所以先按官方名单核对可见性。
+ * @param {DshIdeHostBridge} bridge
+ * @param {unknown} sessionId
+ */
+async function assertVisibleRowForBridge(bridge, sessionId) {
+	const controller = service(bridge.ctx, 'sessionController');
+	const listed = await controller.list({}, callerSignal());
+	const items = listed && Array.isArray(listed.items) ? listed.items : [];
+	bridge.assertVisibleRow(sessionId, items);
 }
 
 /** 只把界面需要的字段送出去。agent 对象与 AbortSignal 不进线协议。 */
@@ -565,12 +730,17 @@ function createMethodHandlers(bridge) {
 	// 账号域是独立服务：官方服务名是 `deepseekAccount`（`accountController` 只是 Remote 包装类，
 	// 不是注册进 ctx 的服务名；用错会把调用打到一个不存在的服务上）。
 	const account = () => service(bridge.ctx, 'deepseekAccount');
-	const sessionIdOf = args => args.sessionId ?? bridge.sessionId;
-	const requireSession = () => {
-		if (bridge.sessionId === undefined) {
-			throw coded(INVALID_ARGUMENT, 'DSH-IDE view has no bound session');
-		}
-		return bridge.sessionId;
+	/**
+	 * 会话范围内的调用必须自带发起时的会话 id，并仍匹配本视图的绑定。
+	 *
+	 * 为什么不再回退到「当前绑定」：换绑之后到达的旧调用会写进新会话。身份由发起方固定，
+	 * Host 只做核对，不改写目标。
+	 * @param {object} args
+	 */
+	const sessionIdOf = args => {
+		const requested = args && args.sessionId;
+		bridge.assertOwnership(requested);
+		return requested;
 	};
 	const missing = capability => () => {
 		throw coded(FEATURE_UNAVAILABLE, `DSH-IDE capability "${capability}" has no verified DSH method yet`, { capability });
@@ -585,8 +755,7 @@ function createMethodHandlers(bridge) {
 	 * （官方 `EncodedImageAttachment`，`attachment/src/types.ts:85-92`）。
 	 * 结果经共享 `mapDshIdeCommandExecution` 收敛为动作类语义，不静默 accepted。
 	 */
-	const executeCommandLine = async (line, attachments = []) => {
-		const sessionId = requireSession();
+	const executeCommandLine = async (sessionId, line, attachments = []) => {
 		const agents = service(bridge.ctx, 'agents');
 		const agent = typeof agents.get === 'function' ? agents.get(sessionId) : undefined;
 		if (agent === undefined || agent === null) {
@@ -608,18 +777,12 @@ function createMethodHandlers(bridge) {
 
 	return {
 		async submit(args) {
-			if (typeof args.sessionId !== 'string' || args.sessionId === '') {
-				throw coded(INVALID_ARGUMENT, 'submit.sessionId must be a non-empty string');
-			}
-			if (bridge.sessionId === undefined) {
-				throw coded(INVALID_ARGUMENT, 'DSH-IDE view has no bound session');
-			}
 			// 视图已经换到别的会话时，不能把这句话写进新会话。
-			bridge.assertOwnership(args.sessionId);
+			const sessionId = sessionIdOf(args);
 			const attachments = Array.isArray(args.attachments) ? args.attachments : [];
 			await controller().prompt({
 				requestId: randomUUID(),
-				sessionId: args.sessionId,
+				sessionId,
 				mode: 'queue',
 				content: [
 					{ type: 'text', text: args.text },
@@ -635,20 +798,16 @@ function createMethodHandlers(bridge) {
 			return { accepted: true };
 		},
 		async interrupt(args) {
-			if (typeof args.sessionId !== 'string' || args.sessionId === '') {
-				throw coded(INVALID_ARGUMENT, 'interrupt.sessionId must be a non-empty string');
-			}
 			// 视图已经换到别的会话时，不能停掉新会话。
-			bridge.assertOwnership(args.sessionId);
-			await controller().cancel({ sessionId: args.sessionId });
+			const sessionId = sessionIdOf(args);
+			await controller().cancel({ sessionId });
 			return { accepted: true };
 		},
 		async resume(args) {
-			bridge.assertOwnership(args.sessionId);
-			if (args.sessionId !== undefined) {
-				await controller().state({ sessionId: args.sessionId }, callerSignal());
-				bridge.sessionId = args.sessionId;
-			}
+			// 只读确认该会话仍可解析。绑定由 IDE 主进程推进后随下一次调用上行，
+			// 这里不改本桥的绑定：迟到或并发的旧调用不得把绑定改回去。
+			const sessionId = sessionIdOf(args);
+			await controller().state({ sessionId }, callerSignal());
 			return { accepted: true };
 		},
 		async newSession(args) {
@@ -656,22 +815,17 @@ function createMethodHandlers(bridge) {
 				...(args.workspace === undefined ? {} : { cwd: args.workspace }),
 			});
 			const sessionId = created && created.sessionId;
-			if (typeof sessionId === 'string') {
-				bridge.sessionId = sessionId;
-			}
+			// 不在这里改绑定：IDE 主进程收到回包后自行换绑，下一次调用再带上新绑定。
 			notifySessionList();
 			return { accepted: true, ...(typeof sessionId === 'string' ? { sessionId } : {}) };
 		},
 		async fork(args) {
-			bridge.assertOwnership(args.sessionId);
+			const requested = sessionIdOf(args);
 			const created = await controller().fork({
-				sessionId: args.sessionId,
+				sessionId: requested,
 				...(args.point === undefined || args.point === '' ? {} : { atSeq: forkSeq(args.point) }),
 			});
 			const sessionId = created && (created.sessionId || created.childSessionId);
-			if (typeof sessionId === 'string') {
-				bridge.sessionId = sessionId;
-			}
 			notifySessionList();
 			return { accepted: true, ...(typeof sessionId === 'string' ? { sessionId } : {}) };
 		},
@@ -679,9 +833,8 @@ function createMethodHandlers(bridge) {
 			// core 没有 rewind remote。装上 dsh-rewind-plugin 后，Host 上的命令名是
 			// `rewind-plugin`（插件自己的 ENGINE_COMMAND）。入参是 `@<seq> chat|both`；
 			// 契约只有消息切点，没有文件恢复，所以模式固定为 chat。
-			bridge.assertOwnership(args.sessionId);
 			const point = rewindPoint(args.to);
-			const sessionId = requireSession();
+			const sessionId = sessionIdOf(args);
 			const agents = service(bridge.ctx, 'agents');
 			const agent = typeof agents.get === 'function' ? agents.get(sessionId) : undefined;
 			if (agent === undefined || agent === null) {
@@ -693,14 +846,13 @@ function createMethodHandlers(bridge) {
 			if (!installed) {
 				throw coded(FEATURE_UNAVAILABLE, 'message rewind is unavailable: install and enable dsh-rewind-plugin', { capability: 'rewind' });
 			}
-			return executeCommandLine(buildDshIdeCommandLine('rewind-plugin', [point, 'chat']));
+			return executeCommandLine(sessionId, buildDshIdeCommandLine('rewind-plugin', [point, 'chat']));
 		},
 		async loadOlder(args) {
 			// 官方 `session/page` 是独立只读端点，返回值就是这一页；
 			// follow 只在开头推一次 snapshot，page() 不会重推，所以必须把页带回去。
 			// 只投影 records + hasMore，丢掉官方 cursor（下一页用最小 seq 当 beforeSeq）。
-			const sessionId = args.sessionId ?? requireSession();
-			bridge.assertOwnership(sessionId);
+			const sessionId = sessionIdOf(args);
 			const page = await controller().page({
 				address: { kind: 'session', sessionId },
 				...(args.throughSeq === undefined ? {} : { throughSeq: args.throughSeq }),
@@ -732,7 +884,7 @@ function createMethodHandlers(bridge) {
 			return { accepted: true };
 		},
 		async setModel(args) {
-			const sessionId = requireSession();
+			const sessionId = sessionIdOf(args);
 			const [provider, model] = splitModel(args.model);
 			await controller().selectModel({ sessionId, provider, model });
 			return { accepted: true };
@@ -741,7 +893,7 @@ function createMethodHandlers(bridge) {
 			// D13/D16：官方无独立 setEffort remote；effort 是 session/selectModel 的
 			// reasoningEffort 字段（§8.10.9）。当前 provider/model 从 session/projections
 			// 的 modelSelection.next wire view 读取，避免凭记忆猜路由。
-			const sessionId = requireSession();
+			const sessionId = sessionIdOf(args);
 			if (typeof args.effort !== 'string' || args.effort === '') {
 				throw coded(INVALID_ARGUMENT, 'setEffort.effort must be a non-empty string');
 			}
@@ -763,12 +915,12 @@ function createMethodHandlers(bridge) {
 		},
 		async setPermissionPreset(args) {
 			// §8.10.9：官方无独立 setter，`/permission <preset>` 是注册的斜杠命令。
-			return executeCommandLine(buildDshIdeCommandLine('permission', [args.preset]));
+			return executeCommandLine(sessionIdOf(args), buildDshIdeCommandLine('permission', [args.preset]));
 		},
 		async runCommand(args) {
 			// 契约 `command` 为不带前导斜杠的命令名，`args` 单空格拼入 rawInput；
 			// 附件按官方 `CommandSubmitAttachment` 传给命令执行器。
-			return executeCommandLine(buildDshIdeCommandLine(args.command, args.args), Array.isArray(args.attachments) ? args.attachments : []);
+			return executeCommandLine(sessionIdOf(args), buildDshIdeCommandLine(args.command, args.args), Array.isArray(args.attachments) ? args.attachments : []);
 		},
 		async searchSessions(args) {
 			// D59 分批检索：官方 `session/search`，只读。依赖宿主挂载
@@ -836,10 +988,10 @@ function createMethodHandlers(bridge) {
 				bridge._sessionReads.delete(cancel);
 			}
 		},
-		async composerState() {
+		async composerState(args) {
 			// 输入框一次读齐：模型目录、当前选择、权限目录、预设名单。
 			// 权限 / 预设服务没挂上时对应控件为 null，不把整条读取打成失败。
-			const sessionId = requireSession();
+			const sessionId = sessionIdOf(args);
 			const projected = await controller().projections({ sessionId }, callerSignal());
 			const values = projected && typeof projected === 'object' ? projected.values : undefined;
 			const catalog = await controller().modelCatalog();
@@ -852,7 +1004,7 @@ function createMethodHandlers(bridge) {
 		},
 		async setTeamEnabled(args) {
 			// 官方 agentTeams.setEnabled(agent, enabled, signal)：只改根会话的团队开关。
-			const sessionId = requireSession();
+			const sessionId = sessionIdOf(args);
 			if (typeof args.enabled !== 'boolean') {
 				throw coded(INVALID_ARGUMENT, 'setTeamEnabled.enabled must be a boolean');
 			}
@@ -871,7 +1023,7 @@ function createMethodHandlers(bridge) {
 		},
 		async setAgentPreset(args) {
 			// 官方 agentPresets.select(agent, agentPreset)：会话已开聊时由官方拒绝。
-			const sessionId = requireSession();
+			const sessionId = sessionIdOf(args);
 			if (typeof args.preset !== 'string' || args.preset === '' || /[\s/]/.test(args.preset)) {
 				throw coded(INVALID_ARGUMENT, 'setAgentPreset.preset must be a non-empty id without whitespace or slash');
 			}
@@ -899,11 +1051,11 @@ function createMethodHandlers(bridge) {
 			}
 			return models;
 		},
-		async listCommands() {
+		async listCommands(args) {
 			// D13（第 32 轮）：官方 `commands.list(agent)` 是 agent-scoped remote
 			// （§8.10.9 第 31 轮核实的 wire 形状）。Host 半身进程内经官方 `agents`
 			// 服务把绑定 sessionId 解析为 Agent，再调 `commands.list`，只投影中立字段。
-			const sessionId = requireSession();
+			const sessionId = sessionIdOf(args);
 			const agents = service(bridge.ctx, 'agents');
 			const agent = typeof agents.get === 'function' ? agents.get(sessionId) : undefined;
 			if (agent === undefined || agent === null) {
@@ -925,6 +1077,8 @@ function createMethodHandlers(bridge) {
 		async readAttachment(args) {
 			// 官方 `session/attachment` 的进程内等价物：只按 attachmentId 读字节，
 			// 不接受路径/URL。依据 packages/api/session-controller/src/commands.ts:427-433。
+			// 会话身份先核对：附件必须属于本次发起视图仍在跟的会话，不能只凭 id 直接读存储。
+			sessionIdOf(args);
 			const attachments = service(bridge.ctx, 'attachments');
 			if (typeof attachments.readImage !== 'function') {
 				throw coded(FEATURE_UNAVAILABLE, 'DSH attachments service has no readImage()', { capability: 'readAttachment' });
@@ -964,8 +1118,8 @@ function createMethodHandlers(bridge) {
 		removeAttachment: missing('removeAttachment'),
 		async setGoal(args) {
 			// 官方 `goals` 服务（`packages/goal/goal/src/index.ts`）：create/edit/pause/resume/complete/clear。
-			// agent 从绑定会话解析；edit/pause/resume/complete/clear 需要 { id, revision } 这一 CAS 引用。
-			const sessionId = requireSession();
+			// agent 从本次调用声明的会话解析；edit/pause/resume/complete/clear 需要 { id, revision } 这一 CAS 引用。
+			const sessionId = sessionIdOf(args);
 			const agents = service(bridge.ctx, 'agents');
 			const agent = typeof agents.get === 'function' ? agents.get(sessionId) : undefined;
 			if (agent === undefined || agent === null) {
@@ -1008,13 +1162,13 @@ function createMethodHandlers(bridge) {
 			}
 		},
 		async renameSession(args) {
-			bridge.assertOwnership(args.sessionId);
+			await assertVisibleRowForBridge(bridge, args.sessionId);
 			await controller().rename({ sessionId: args.sessionId, title: args.title });
 			notifySessionList();
 			return { accepted: true };
 		},
-		setSessionFavorite(args) {
-			bridge.assertOwnership(args.sessionId);
+		async setSessionFavorite(args) {
+			await assertVisibleRowForBridge(bridge, args.sessionId);
 			const registry = service(bridge.ctx, 'workspaceRegistry');
 			if (typeof registry.setSessionFavorite !== 'function' || typeof registry.favoriteSessions !== 'function') {
 				throw coded(FEATURE_UNAVAILABLE, 'session favorite is unavailable: install and enable @michengai/dsh-archive-manager', { capability: 'setSessionFavorite' });
@@ -1027,8 +1181,8 @@ function createMethodHandlers(bridge) {
 				return { accepted: true };
 			});
 		},
-		setSessionPinned(args) {
-			bridge.assertOwnership(args.sessionId);
+		async setSessionPinned(args) {
+			await assertVisibleRowForBridge(bridge, args.sessionId);
 			const workspaces = service(bridge.ctx, 'workspaceController');
 			return bridge.enqueueToggle(`pin:${args.sessionId}`, async () => {
 				const registry = optionalService(bridge.ctx, 'workspaceRegistry');
@@ -1059,7 +1213,7 @@ function createMethodHandlers(bridge) {
 			});
 		},
 		async moveSession(args) {
-			bridge.assertOwnership(args.sessionId);
+			await assertVisibleRowForBridge(bridge, args.sessionId);
 			const registry = service(bridge.ctx, 'workspaceRegistry');
 			if (typeof registry.moveSessionToWorkspace !== 'function') {
 				throw coded(FEATURE_UNAVAILABLE, 'moving a session is unavailable: install and enable @michengai/dsh-archive-manager', { capability: 'moveSession' });
@@ -1069,7 +1223,7 @@ function createMethodHandlers(bridge) {
 			return { accepted: true };
 		},
 		async openSessionPath(args) {
-			bridge.assertOwnership(args.sessionId);
+			await assertVisibleRowForBridge(bridge, args.sessionId);
 			const listed = await controller().list({}, callerSignal());
 			const items = listed && Array.isArray(listed.items) ? listed.items : [];
 			const item = items.find(entry => entry && entry.sessionId === args.sessionId);
@@ -1083,12 +1237,12 @@ function createMethodHandlers(bridge) {
 			await controller().openWorkspacePath({ path: cwd }, callerSignal());
 			return { accepted: true };
 		},
-		listSkills: async () => {
+		listSkills: async args => {
 			// 官方落点是 `sessionSkillCatalog.list({ sessionId }, signal)`（`skills` Remote），
 			// 不是 `ctx.skills.list({ scope })`。scope 是 ScopeKey，把 sessionId 塞进去读不到会话目录。
 			// 返回的 `SkillEntry` 没有 provider：只投影官方字段，userInvocable 恒为 true
 			// （该目录已按 isUserInvocable 过滤）。
-			const sessionId = requireSession();
+			const sessionId = sessionIdOf(args);
 			const catalog = service(bridge.ctx, 'sessionSkillCatalog');
 			if (typeof catalog.list !== 'function') {
 				throw coded(FEATURE_UNAVAILABLE, 'DSH sessionSkillCatalog has no list()', { capability: 'listSkills' });
@@ -1118,7 +1272,7 @@ function createMethodHandlers(bridge) {
 		openInApp: missing('openInApp'),
 		dismissQuotaNotice: missing('dismissQuotaNotice'),
 		async deleteSession(args) {
-			bridge.assertOwnership(args.sessionId);
+			await assertVisibleRowForBridge(bridge, args.sessionId);
 			// 删除链由社区插件承担（§8.10.8 批准的端点），DSH-IDE 只做前置校验、调用与结果判定。
 			// 插件缺失或未 overlay 出该方法时明确拒绝：不回退到 rmSync / 归档 / 隐藏列表行。
 			const remove = resolveDeleteSessionMethod(bridge.ctx);
@@ -1166,8 +1320,8 @@ function createMethodHandlers(bridge) {
  * @param {'archiveSession' | 'unarchiveSession'} method
  * @param {string} sessionId
  */
-function changeArchive(bridge, method, sessionId) {
-	bridge.assertOwnership(sessionId);
+async function changeArchive(bridge, method, sessionId) {
+	await assertVisibleRowForBridge(bridge, sessionId);
 	const controller = optionalService(bridge.ctx, 'workspaceController');
 	if (controller !== undefined && typeof controller[method] === 'function') {
 		return Promise.resolve(controller[method]({ sessionId })).then(projectDshIdeArchiveSet);

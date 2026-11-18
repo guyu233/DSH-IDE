@@ -60,6 +60,13 @@ export const DSH_IDE_WATERFALL_EVENT = 'waterfall';
 export const DSH_IDE_SESSION_NOTICE_EVENT = 'session-notice';
 
 interface DshIdeConnection {
+	/**
+	 * 该连接独占的视图宿主。
+	 *
+	 * 为什么一个连接一个视图：窗口之间共享一个视图时，第二个窗口 `open` 会复用第一个窗口的
+	 * 绑定与订阅，两个窗口于是跟同一条会话。视图随连接创建、随连接释放，DSH 会话本身不因此取消。
+	 */
+	readonly view: IdeViewHost;
 	/** 该连接绑定的窗口级通道 id，守恒。 */
 	readonly channelId: string;
 	/** 该连接上最近一次发布的快照。 */
@@ -84,13 +91,22 @@ export class DshIdeChannel extends Disposable implements IServerChannel<string> 
 	/** 每个连接已发出的最大 version：丢弃重复/倒退帧，保证消费者看到严格 +1。 */
 	private readonly _lastSentVersion = new Map<string, number>();
 
-	private readonly view: IdeViewHost;
+	/** 每条连接一个视图实例；同一条连接内重复 `open` 仍复用该实例。 */
+	private readonly createView: () => IdeViewHost;
 	private readonly launcher: DshIdeLauncher | undefined;
+	/**
+	 * 通道整体释放时关闭共享传输。
+	 *
+	 * 传输是进程级资源（一条 cookie、一个 origin），不能由任一窗口关闭：窗口关闭只释放它自己的
+	 * 视图订阅，否则另一个窗口会被连坐断流。
+	 */
+	private readonly disposeBackend: (() => void) | undefined;
 
-	constructor(view: IdeViewHost, launcher?: DshIdeLauncher) {
+	constructor(createView: () => IdeViewHost, launcher?: DshIdeLauncher, disposeBackend?: () => void) {
 		super();
-		this.view = view;
+		this.createView = createView;
 		this.launcher = launcher;
+		this.disposeBackend = disposeBackend;
 	}
 
 	/**
@@ -175,24 +191,25 @@ export class DshIdeChannel extends Disposable implements IServerChannel<string> 
 			return existing.last;
 		}
 		const spec = exactRecord(arg, ['view', 'params'], 'DshIdeChannel.open');
-		const view = spec['view'];
-		if (typeof view !== 'string' || view.trim() === '') {
+		const viewName = spec['view'];
+		if (typeof viewName !== 'string' || viewName.trim() === '') {
 			throw toDshIdeError(new TypeError('DshIdeChannel.open.view must be a non-empty string'), DSH_IDE_INVALID_ARGUMENT);
 		}
-		const first = this.view.open(spec as { view: string; params?: Record<string, unknown> });
-		const waterfall = this.view.subscribeWaterfall(notice => {
+		const view = this.createView();
+		const first = view.open(spec as { view: string; params?: Record<string, unknown> });
+		const waterfall = view.subscribeWaterfall(notice => {
 			if (!this._connections.has(ctx)) {
 				return;
 			}
 			this._onDidWaterfall.fire({ ctx, notice });
 		});
-		const sessionNotice = this.view.subscribeSessionNotice(notice => {
+		const sessionNotice = view.subscribeSessionNotice(notice => {
 			if (!this._connections.has(ctx)) {
 				return;
 			}
 			this._onDidSessionNotice.fire({ ctx, notice });
 		});
-		const subscription = this.view.subscribe(snapshot => {
+		const subscription = view.subscribe(snapshot => {
 			const connection = this._connections.get(ctx);
 			if (connection === undefined || snapshot.channelId !== connection.channelId) {
 				// 归属过滤：别的视图的帧不会经由本连接发出。
@@ -207,7 +224,7 @@ export class DshIdeChannel extends Disposable implements IServerChannel<string> 
 			connection.last = snapshot;
 			this._onDidSnapshot.fire({ ctx, snapshot });
 		});
-		this._connections.set(ctx, { channelId: first.channelId, last: first, subscription, waterfall, sessionNotice });
+		this._connections.set(ctx, { view, channelId: first.channelId, last: first, subscription, waterfall, sessionNotice });
 		return first;
 	}
 
@@ -219,12 +236,12 @@ export class DshIdeChannel extends Disposable implements IServerChannel<string> 
 		if (typeof sessionId !== 'string' || sessionId === '') {
 			throw toDshIdeError(new TypeError('DshIdeChannel.rebind.sessionId must be a non-empty string'), DSH_IDE_INVALID_ARGUMENT);
 		}
-		return this.view.rebind(sessionId);
+		return this.assertOpen(ctx).view.rebind(sessionId);
 	}
 
 	/** 22 个 DTO method 的唯一分发路径：入参校验 → 宿主调用 → 出参校验。 */
 	private async invoke<T>(ctx: string, method: string, arg: unknown): Promise<T> {
-		this.assertOpen(ctx);
+		const connection = this.assertOpen(ctx);
 		let validated: unknown;
 		try {
 			validated = validateDshIdeInput(method as never, arg);
@@ -236,7 +253,7 @@ export class DshIdeChannel extends Disposable implements IServerChannel<string> 
 		}
 		let value: unknown;
 		try {
-			value = await this.view.invoke(method, validated);
+			value = await connection.view.invoke(method, validated);
 		} catch (error) {
 			throw (typeof error === 'object' && error !== null && 'code' in error) ? error : toDshIdeError(error, DSH_IDE_FEATURE_UNAVAILABLE);
 		}
@@ -247,10 +264,12 @@ export class DshIdeChannel extends Disposable implements IServerChannel<string> 
 		}
 	}
 
-	private assertOpen(ctx: string): void {
-		if (!this._connections.has(ctx)) {
+	private assertOpen(ctx: string): DshIdeConnection {
+		const connection = this._connections.get(ctx);
+		if (connection === undefined) {
 			throw { code: DSH_IDE_FEATURE_UNAVAILABLE, message: `${DSH_IDE_CHANNEL}: connection ${ctx} is not open` } satisfies DshRemoteError;
 		}
+		return connection;
 	}
 
 	/** 清理某窗口（ctx）拥有的资源；返回被清理的连接数。 */
@@ -264,6 +283,8 @@ export class DshIdeChannel extends Disposable implements IServerChannel<string> 
 		connection.subscription.dispose();
 		connection.waterfall.dispose();
 		connection.sessionNotice.dispose();
+		// 只释放本窗口的视图与订阅；不停止 DSH 会话，也不关闭共享传输。
+		connection.view.close();
 		return 1;
 	}
 
@@ -271,7 +292,8 @@ export class DshIdeChannel extends Disposable implements IServerChannel<string> 
 		for (const ctx of [...this._connections.keys()]) {
 			this.disposeOwner(ctx);
 		}
-		this.view.close();
+		// 所有窗口都已释放：共享传输在这里关闭一次。
+		this.disposeBackend?.();
 		super.dispose();
 	}
 }

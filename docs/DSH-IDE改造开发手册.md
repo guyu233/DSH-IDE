@@ -345,10 +345,12 @@ DshChatSession.acceptView / acceptConversation → DshChatModel（typed 节点�
 
 ### 5.2 层 1 冻结条件（契约已完成，不再变）
 
-1. `DSH_IDE_WIRE_REVISION = 4` 固定；冻结后非全局重开不允许再 bump。
+1. `DSH_IDE_WIRE_REVISION = 5` 固定；冻结后非全局重开不允许再 bump。5 相对 4 的唯一变化是把**视图绑定**（`binding: { viewId, generation, sessionId }`）带进快照、`ide/followSession` 与 `ide/dispatch`：两半必须同时是 5，缺字段或修订号不符一律拒绝，不按 4 的形状降级。
 2. `DshIdeViewSnapshot` 的 11 个 typed 字段（`conversation`、`deliverables`、`attachments`、`plan`、`goal`、`todos`、`skills`、`tokenUsageDelta`、`quotaNotice`、`composer`、`pending`）形状锁定；前端按这些类型写渲染器，不再等字段变更。
 3. 43 个 `DshIdeMethodArgs` 锁定；4 个无官方 remote 的 `missing()` method 语义锁定为「调用即 `FEATURE_UNAVAILABLE`」，前端按禁用态处理，不期待它们成功（`setGoal` / `listSkills` 已接线，见 §8.1）。
 4. 三条不变量（白名单、`version` 严格 +1、fail-closed）和 listen 白名单 3 事件冻结。
+5. **会话范围的方法必须自带发起时的 `sessionId`**（`DSH_IDE_VIEW_BOUND_METHODS`：`submit`、`interrupt`、`resume`、`rewind`、`loadOlder`、`setModel`、`setEffort`、`setPermissionPreset`、`runCommand`、`composerState`、`setTeamEnabled`、`setAgentPreset`、`listCommands`、`readAttachment`、`setGoal`、`listSkills`）。不存在「省略即当前会话」的回退；Host 只核对，不改写目标。
+6. **显式行操作按可见行校验**（rename / favorite / pin / move / openPath / delete / archive / unarchive / fork）：不要求等于当前绑定会话，但该行必须出现在官方可见名单里。`listSessions` 与 `capabilities` 按发起视图的绑定取范围；模型目录这类宿主级事实不借用活动会话。
 
 ### 5.3 层 2 冻结条件（Host 投影已完成，不再变）
 

@@ -27,7 +27,15 @@
 // 要传 `{ request: {...} }`。`signal` 由 Host 侧注入，客户端不传。真机实测：
 // 传自由字段会得到 `gateway/arguments-invalid: missing "_request"`。
 
-import type { DshIdeBackend, DshIdeMethod, DshIdeOpenSpec } from '../common/dshIdeProtocol.js';
+import {
+	DSH_IDE_INCOMPATIBLE_WIRE,
+	DSH_IDE_WIRE_REVISION,
+	requireDshIdeWireRevision,
+	type DshIdeBackend,
+	type DshIdeMethod,
+	type DshIdeOpenSpec,
+	type DshIdeViewBinding,
+} from '../common/dshIdeProtocol.js';
 import { safeErrorText } from '../common/dshIdeAuthRedaction.js';
 
 /** 通道 id：由 Host 侧绑定生成，这里只做透传。 */
@@ -109,7 +117,9 @@ export type DshIdeStreamFrame =
 	| { readonly type: 'baseline'; readonly value: { readonly items: readonly { readonly workspaceId: string; readonly sessionIds: readonly string[] }[] } }
 	| { readonly type: 'waterfall'; readonly eventId: string; readonly event: string; readonly agentId: string; readonly request: Readonly<Record<string, unknown>> }
 	| { readonly type: 'cancel'; readonly eventId: string }
-	| { readonly type: 'ready'; readonly clientId: string; readonly host?: Readonly<Record<string, unknown>> };
+	| { readonly type: 'ready'; readonly clientId: string; readonly host?: Readonly<Record<string, unknown>> }
+	/** Host 对流首帧的身份确认：之后才允许送会话内容。 */
+	| { readonly type: 'ide-view-bound'; readonly binding: DshIdeViewBinding };
 
 /** 界面决议：`next` 交还下一个 answerer，`result` 提交答案。 */
 export type DshIdeDecision = { readonly kind: 'next' } | { readonly kind: 'result'; readonly value?: unknown };
@@ -230,6 +240,26 @@ export class DshIdeTransport {
 			eventId,
 			outcome: decision,
 		});
+	}
+
+	/**
+	 * 确认对端声明同一线协议修订号。
+	 *
+	 * 为什么需要：同一包里的 Host 与 IDE 载荷仍可能被开发启动或旧安装拆开使用；
+	 * 只比对包版本号不能证明两半的调用形状一致。这里用官方 `ide/ping` 读对方声明的
+	 * 修订号，不一致就拒绝，绝不按旧形状继续调用。
+	 */
+	async checkContract(): Promise<void> {
+		const value = await this.call('ide', 'ping', {});
+		if (!isRecord(value)) {
+			throw new DshIdeTransportError(DSH_IDE_INCOMPATIBLE_WIRE, 'Host ping did not return a contract declaration');
+		}
+		try {
+			requireDshIdeWireRevision(value['wireRevision']);
+		} catch {
+			throw new DshIdeTransportError(DSH_IDE_INCOMPATIBLE_WIRE,
+				`Host declares wireRevision ${String(value['wireRevision'])}, this IDE requires ${DSH_IDE_WIRE_REVISION}`);
+		}
 	}
 
 	/** 关闭全部逻辑流与物理 socket。 */
@@ -369,6 +399,9 @@ function isFrame(value: unknown): value is DshIdeStreamFrame {
 	if (value['type'] === 'ready') {
 		return typeof value['clientId'] === 'string';
 	}
+	if (value['type'] === 'ide-view-bound') {
+		return isRecord(value['binding']);
+	}
 	return true;
 }
 
@@ -403,15 +436,31 @@ export class DshIdeTransportBackend implements DshIdeBackend {
 	follow(
 		sessionId: string | undefined,
 		onEvent: (raw: unknown) => void,
-		onDisconnect?: (error: unknown) => void,
+		onDisconnect: ((error: unknown) => void) | undefined,
+		binding: DshIdeViewBinding,
 	): { dispose(): void } {
 		// 会话帧和批准帧都由内核的 followSession 送出。没有绑定会话时这条流只收 api-session 状态。
 		// 传输层断开会回调 onError：这里必须把它交给 onDisconnect，
 		// 否则 DSH 重启后这条流就永久消失，上层无从得知需要重连。
+		//
+		// 身份先于内容：Host 先回 `ide-view-bound` 确认这次流的逻辑视图，之后才送会话帧。
+		// 未确认就收到内容，说明对端不是本修订号的 Host，按断线处理，不把帧交给视图。
+		let bound = false;
 		const content = this.transport.openStream(
 			'ide/followSession',
-			{ sessionId: sessionId ?? '' },
-			frame => onEvent(frame),
+			{ sessionId: sessionId ?? '', binding, wireRevision: DSH_IDE_WIRE_REVISION },
+			frame => {
+				if (!bound) {
+					if (frame.type === 'ide-view-bound') {
+						bound = true;
+						return;
+					}
+					onDisconnect?.(new DshIdeTransportError(DSH_IDE_INCOMPATIBLE_WIRE,
+						'Host streamed session content before confirming the IDE view binding'));
+					return;
+				}
+				onEvent(frame);
+			},
 			error => { onDisconnect?.(error); },
 		);
 		this.streams.add(content);
@@ -424,11 +473,14 @@ export class DshIdeTransportBackend implements DshIdeBackend {
 	}
 
 
-	async invoke(method: DshIdeMethod, args: unknown): Promise<unknown> {
+	async invoke(method: DshIdeMethod, args: unknown, binding: DshIdeViewBinding): Promise<unknown> {
 		// 操作只交给内核桥接。这里不再把 prompt / cancel / selectModel 重写成 session/* 请求。
+		// 视图身份随每次调用上行：Host 据此判定这次调用代表哪个窗口的哪一代绑定。
 		return this.transport.call('ide', 'dispatch', {
 			method,
 			payload: isRecord(args) ? args : {},
+			binding,
+			wireRevision: DSH_IDE_WIRE_REVISION,
 		});
 	}
 

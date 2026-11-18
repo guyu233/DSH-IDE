@@ -31,6 +31,7 @@ function project(state: ConversationState, frame: Record<string, unknown>): DshI
 	validateDshIdeSnapshot({
 		wireRevision: DSH_IDE_WIRE_REVISION,
 		channelId: 'c1',
+		binding: { viewId: 'c1', generation: 1, sessionId: null },
 		version: 1,
 		state: { state: 'ready', view: { frame, conversation } },
 	});
@@ -152,6 +153,7 @@ test('deliverables/presented 累计为交付物字段并过协议校验', () => 
 	validateDshIdeSnapshot({
 		wireRevision: DSH_IDE_WIRE_REVISION,
 		channelId: 'c1',
+		binding: { viewId: 'c1', generation: 1, sessionId: null },
 		version: 1,
 		state: { state: 'ready', view: { frame, deliverables } },
 	});
@@ -186,6 +188,7 @@ test('quotaNotice 只在 turn/end 的 error.code 为 QUOTA/ACCOUNT_QUOTA 时记�
 	validateDshIdeSnapshot({
 		wireRevision: DSH_IDE_WIRE_REVISION,
 		channelId: 'c1',
+		binding: { viewId: 'c1', generation: 1, sessionId: null },
 		version: 1,
 		state: { state: 'ready', view: { frame: { type: 'event' }, quotaNotice: quotaNoticeOf(state) } },
 	});
@@ -232,6 +235,7 @@ test('attachments 从消息 content 收集图片引用并去重', () => {
 	validateDshIdeSnapshot({
 		wireRevision: DSH_IDE_WIRE_REVISION,
 		channelId: 'c1',
+		binding: { viewId: 'c1', generation: 1, sessionId: null },
 		version: 1,
 		state: { state: 'ready', view: { frame: { type: 'snapshot' }, attachments } },
 	});

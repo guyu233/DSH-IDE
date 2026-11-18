@@ -193,6 +193,17 @@ export class DshComposerSource extends Disposable implements IDshComposerSource 
 	private loadGeneration = 0;
 	private loadingGeneration = 0;
 	private disposed = false;
+	/** 输入框当前代表的会话；由绑定方写入，未绑定时读取不发请求。 */
+	private currentSessionId: string | undefined;
+
+	/** 绑定当前会话：之后所有读取与写回都带这个会话，不跟随之后换上的会话。 */
+	setSession(sessionId: string | undefined): void {
+		this.currentSessionId = sessionId;
+	}
+
+	private sessionId(): string | undefined {
+		return this.currentSessionId;
+	}
 
 	constructor(
 		private readonly client: IDshClientService,
@@ -230,7 +241,12 @@ export class DshComposerSource extends Disposable implements IDshComposerSource 
 	}
 
 	private async load(generation: number): Promise<void> {
-		const result = await this.client.call('composerState', {});
+		const sessionId = this.sessionId();
+		if (sessionId === undefined) {
+			// 还没有绑定会话：不猜「当前会话」，保持上一次的值。
+			return;
+		}
+		const result = await this.client.call('composerState', { sessionId });
 		if (this.disposed || generation !== this.loadGeneration) {
 			return;
 		}
@@ -250,7 +266,8 @@ export class DshComposerSource extends Disposable implements IDshComposerSource 
 	// ---- 写回：全部走已有 method，不新增接口 ----
 
 	async selectModel(provider: string, model: string): Promise<void> {
-		await this.write('setModel', { provider, model });
+		// 线协议只有一个 `model` 字段：`provider/model` 整串交给 Host 拆分，不另设 provider 字段。
+		await this.write('setModel', { model: `${provider}/${model}` });
 	}
 
 	async selectEffort(effort: string): Promise<void> {
@@ -270,7 +287,12 @@ export class DshComposerSource extends Disposable implements IDshComposerSource 
 	}
 
 	private async write(method: string, args: Record<string, unknown>): Promise<void> {
-		const result = await this.client.call(method, args);
+		const sessionId = this.sessionId();
+		if (sessionId === undefined) {
+			this.logService.trace(`[dsh] ${method} skipped: no bound session`);
+			return;
+		}
+		const result = await this.client.call(method, { sessionId, ...args });
 		if (!result.ok) {
 			this.logService.warn(`[dsh] ${method} 被拒绝`, result.error.code, result.error.message);
 			return;

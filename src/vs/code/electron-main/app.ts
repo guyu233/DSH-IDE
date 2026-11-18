@@ -1450,7 +1450,9 @@ export class CodeApplication extends Disposable {
 		// 端口按环境选择：配置了 Host origin + cookie 时用官方客户端传输适配（本机 loopback 官方端点，
 		// 见第 2 章 §2.2.1）；未配置时退化为 `UnavailableDshIdeBackend`，所有调用以 feature-unavailable
 		// 明确拒绝，绝不伪造事件或快照。
-		const dshIdeViewHost = new DshIdeViewService(createDshIdeBackendFromEnv());
+		// 后端是进程级共享传输：一条 cookie、一个 origin。视图则每窗口一份（见通道 `open`），
+		// 因此这里只建一次后端，由通道在所有窗口释放后关闭它。
+		const dshIdeBackend = createDshIdeBackendFromEnv();
 		// P5 开窗（用户授权先于 K5 实施，见第 3 章 §1 第 3 条例外）：按钮 → 本通道 `launch` 命令
 		// → 主进程开/唤起 IDE 窗口。只开窗，不携带 token、不建第二条通道。
 		// 已有窗口时 userEnv 不会再生效。把会话资源交给渲染进程已有的 openChatSession，
@@ -1530,7 +1532,11 @@ export class CodeApplication extends Disposable {
 				}
 			},
 		};
-		const dshIdeChannel = new DshIdeChannel(dshIdeViewHost, dshIdeLauncher);
+		const dshIdeChannel = new DshIdeChannel(
+			() => new DshIdeViewService(dshIdeBackend),
+			dshIdeLauncher,
+			() => dshIdeBackend.close(),
+		);
 		mainProcessElectronServer.registerChannel(DSH_IDE_CHANNEL, dshIdeChannel);
 
 		// P5 开窗接单：IDE 必须自己向 Host 报到，否则 DSH 主窗口的按钮无法跨进程调用本窗口。

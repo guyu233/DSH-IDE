@@ -20,6 +20,14 @@ import { Service } from '@deepseek-ai/cordis';
 import { bindTypertRemote } from '@deepseek-ai/dsh-typert-protocol';
 import { materializeElectronHome } from './electron-home.js';
 import { IdeLaunchQueue, ideWorkspaceArgs } from './ide-launch-queue.js';
+// Host 与 IDE 共用同一份契约真源：字段白名单、方法校验与修订号只有一处定义。
+import {
+	DSH_IDE_INCOMPATIBLE_WIRE,
+	DSH_IDE_WIRE_REVISION,
+	requireDshIdeWireRevision,
+	validateDshIdeInput,
+	validateDshIdeViewBinding,
+} from '../common/dshIdeProtocol.js';
 
 const REMOTE_METHOD_DESCRIPTOR = '@deepseek-ai/dsh-typert-protocol/remote-methods';
 
@@ -60,7 +68,33 @@ export class IdeRemoteService extends Service {
   }
 
   ping() {
-    return { ok: true, root: this.root, hostPid: process.pid };
+    // 声明本半身实现的线协议修订号：IDE 在建立任何业务调用之前先核这一项。
+    return { ok: true, root: this.root, hostPid: process.pid, wireRevision: DSH_IDE_WIRE_REVISION };
+  }
+
+  /**
+   * 本次调用是否来自可信的本地所有者。
+   *
+   * 依据官方 Gateway 在调用上下文提供的 `this.ctx.invocation.peer.principal`：它由 Host 在
+   * 建立连接时固定，请求 DTO 里的任何字段都无法设置。没有调用上下文（进程内直接调用）时
+   * 不做主体判断——那不是远程入口。
+   * @returns {boolean}
+   */
+  _trustedCaller() {
+    const invocation = this.ctx && typeof this.ctx === 'object' ? this.ctx.invocation : undefined;
+    if (invocation === undefined) {
+      return true;
+    }
+    const peer = invocation && typeof invocation === 'object' ? invocation.peer : undefined;
+    const principal = peer && typeof peer === 'object' ? peer.principal : undefined;
+    return principal !== null && typeof principal === 'object' && principal.kind === 'owner';
+  }
+
+  /** 远程入口的主体检查：不通过就明确拒绝，不降级成匿名调用。 */
+  _requireTrustedCaller(entry) {
+    if (!this._trustedCaller()) {
+      throw Object.assign(new Error(`${entry} is only available to the local owner of this Host`), { code: 'dsh-ide/forbidden' });
+    }
   }
 
   /**
@@ -254,7 +288,9 @@ export class IdeRemoteService extends Service {
    * @param clientId - IDE 侧生成的标识（用于注销）
    * @returns 注销函数（进程退出时调用）
    */
-  registerIdeClient(clientId) {
+  registerIdeClient(clientId, wireRevision) {
+    requireDshIdeWireRevision(wireRevision);
+    this._requireTrustedCaller('registerIdeClient');
     return this.launchQueue.register(clientId);
   }
 
@@ -266,12 +302,16 @@ export class IdeRemoteService extends Service {
    * 表现为「点了没反应，要等很久再点一次才打开」。IDE 侧退出前调用本方法即可立刻清掉。
    * @param clientId - 报到时使用的标识
    */
-  unregisterIdeClient(clientId) {
+  unregisterIdeClient(clientId, wireRevision) {
+    requireDshIdeWireRevision(wireRevision);
+    this._requireTrustedCaller('unregisterIdeClient');
     return this.launchQueue.unregister(clientId);
   }
 
   /** IDE 侧轮询待开窗请求（由 `registerIdeClient` 建立的登记项）。 */
-  pollLaunch(clientId) {
+  pollLaunch(clientId, wireRevision) {
+    requireDshIdeWireRevision(wireRevision);
+    this._requireTrustedCaller('pollLaunch');
     return this.launchQueue.poll(clientId);
   }
 
@@ -285,12 +325,14 @@ export class IdeRemoteService extends Service {
    * @param {string} sessionId
    * @param {AbortSignal} signal
    */
-  async *followSession(sessionId, signal) {
+  async *followSession(binding, wireRevision, signal) {
+    requireDshIdeWireRevision(wireRevision);
+    this._requireTrustedCaller('followSession');
     const bridge = this.bridge;
     if (bridge === undefined || typeof bridge.followSession !== 'function') {
       throw Object.assign(new Error('DSH-IDE host bridge is not attached'), { code: 'dsh-ide/feature-unavailable' });
     }
-    yield* bridge.followSession(sessionId, signal);
+    yield* bridge.followSession(validateDshIdeViewBinding(binding), signal);
   }
 
   /**
@@ -298,13 +340,18 @@ export class IdeRemoteService extends Service {
    * @param {string} method
    * @param {unknown} payload
    */
-  dispatch(method, payload) {
+  dispatch(method, payload, binding, wireRevision) {
     const bridge = this.bridge;
     if (bridge === undefined || typeof bridge.invoke !== 'function') {
       return Promise.reject(Object.assign(new Error('DSH-IDE host bridge is not attached'), { code: 'dsh-ide/feature-unavailable' }));
     }
-    const args = payload !== null && typeof payload === 'object' && !Array.isArray(payload) ? payload : {};
-    return bridge.invoke(method, args);
+    return Promise.resolve().then(() => {
+      requireDshIdeWireRevision(wireRevision);
+      this._requireTrustedCaller('dispatch');
+      // 与 IDE 侧通道同一个共享校验器：字段白名单与方法名只在这里判定一次。
+      const args = validateDshIdeInput(method, payload);
+      return bridge.invoke(method, args, validateDshIdeViewBinding(binding));
+    });
   }
 
   /** 读取已发布的 IDE 端点（由 host/ide-view-host.js 的 publishHostEndpoint 写入）。 */

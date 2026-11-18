@@ -95,6 +95,11 @@ export class DshChatSession extends Disposable implements IDshChatSession {
 	private _current: { provider: string; model: string } | undefined;
 	private _running = false;
 	private boundSessionId: string | undefined;
+
+	/** 当前绑定会话（只读）。模型目录等会话投影的读取方据此带上发起会话。 */
+	get activeSessionId(): string | undefined {
+		return this.boundSessionId;
+	}
 	/**
 	 * 绑定已「脏」：上一次 bind 已经把模型清空但 rebind 失败。
 	 *
@@ -500,7 +505,10 @@ export class DshChatSession extends Disposable implements IDshChatSession {
 	async selectModel(provider: string, model: string): Promise<void> {
 		const generation = this.generation;
 		const sessionId = this.boundSessionId;
-		const result = await this.client.call('setModel', { model: `${provider}/${model}` });
+		if (sessionId === undefined) {
+			return;
+		}
+		const result = await this.client.call('setModel', { sessionId, model: `${provider}/${model}` });
 		if (generation !== this.generation || sessionId !== this.boundSessionId || !result.ok) {
 			return;
 		}
@@ -557,9 +565,11 @@ export class DshChatSession extends Disposable implements IDshChatSession {
 		const generation = this.generation;
 		const sessionId = this.boundSessionId;
 		if (sessionId === undefined) {
+			this._skills = [];
+			this._onDidChangeExtras.fire();
 			return;
 		}
-		const result = await this.client.call<readonly DshIdeSkillView[]>('listSkills', {});
+		const result = await this.client.call<readonly DshIdeSkillView[]>('listSkills', { sessionId });
 		if (generation !== this.generation || sessionId !== this.boundSessionId || !result.ok || !Array.isArray(result.value)) {
 			return;
 		}
@@ -574,12 +584,16 @@ export class DshChatSession extends Disposable implements IDshChatSession {
 	async refreshComposer(): Promise<void> {
 		const generation = this.generation;
 		const sessionId = this.boundSessionId;
+		if (sessionId === undefined) {
+			// 还没有绑定会话：不猜「当前会话」，保持已有目录。
+			return;
+		}
 		const result = await this.client.call<{
 			readonly model?: {
 				readonly current?: { readonly provider?: string; readonly model?: string; readonly effort?: string } | null;
 				readonly groups?: readonly { readonly id?: string; readonly models?: readonly ComposerModelCatalog[] }[];
 			};
-		}>('composerState', {});
+		}>('composerState', { sessionId });
 		// 等待期间换了会话：这份目录属于旧绑定，不能写到新会话上。
 		if (generation !== this.generation || sessionId !== this.boundSessionId || !result.ok) {
 			return;

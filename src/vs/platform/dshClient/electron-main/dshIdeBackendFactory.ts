@@ -17,6 +17,7 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { env } from '../../../base/common/process.js';
 import { DSH_IDE_COOKIE_ENV, DSH_IDE_ENDPOINT_ENV, DSH_IDE_ENDPOINT_FILE_ENV, DSH_IDE_LAUNCH_URL_ENV } from '../common/env.js';
+import type { DshIdeViewBinding } from '../common/dshIdeProtocol.js';
 import { DshIdeTransport, DshIdeTransportBackend, authenticateHost } from '../transport/dshIdeTransport.js';
 import { UnavailableDshIdeBackend, type DshIdeBackend } from './ide-view-service.js';
 
@@ -135,7 +136,8 @@ class LazyDshIdeTransportBackend implements DshIdeBackend {
 	follow(
 		sessionId: string | undefined,
 		onEvent: (raw: unknown) => void,
-		onDisconnect?: (error: unknown) => void,
+		onDisconnect: ((error: unknown) => void) | undefined,
+		binding: DshIdeViewBinding,
 	): { dispose(): void } {
 		let disposed = false;
 		let handle: { dispose(): void } | undefined;
@@ -162,7 +164,7 @@ class LazyDshIdeTransportBackend implements DshIdeBackend {
 					// 传输断开（DSH 重启）：立刻排一次重连，并把原因交给上层显示。
 					onDisconnect?.(error);
 					scheduleRetry();
-				});
+				}, binding);
 			} catch (error) {
 				onDisconnect?.(error);
 				scheduleRetry();
@@ -206,16 +208,16 @@ class LazyDshIdeTransportBackend implements DshIdeBackend {
 			},
 		};
 	}
-	async invoke(method: Parameters<DshIdeBackend['invoke']>[0], args: unknown): Promise<unknown> {
+	async invoke(method: Parameters<DshIdeBackend['invoke']>[0], args: unknown, binding: DshIdeViewBinding): Promise<unknown> {
 		try {
 			const impl = await this.ensureImpl();
-			return await impl.invoke(method, args);
+			return await impl.invoke(method, args, binding);
 		} catch (error) {
 			// 端点变了才重试一次：DSH 可能就是刚重启换端口，旧连接必然失败。
 			// 端点没变说明是真正的业务失败，不做无意义重放。
 			if (await this.refreshEndpoint()) {
 				const impl = await this.ensureImpl();
-				return await impl.invoke(method, args);
+				return await impl.invoke(method, args, binding);
 			}
 			throw error;
 		}

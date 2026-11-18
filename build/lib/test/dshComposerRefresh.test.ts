@@ -40,6 +40,8 @@ test('a composerState started before a write cannot roll the selection back', as
 		},
 	};
 	const source = new DshComposerSource(client as never, { trace() { }, warn() { } } as never);
+	// 写回与读取都带会话身份：未绑定时两者都必须拒绝发出（read 保旧值、write 跳过）。
+	source.setSession('session-1');
 	const first = source.refresh();
 	const written = source.selectModel('p', 'new');
 	releaseOld?.();

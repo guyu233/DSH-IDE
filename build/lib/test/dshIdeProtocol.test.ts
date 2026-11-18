@@ -45,30 +45,30 @@ const VALID_ARGS: Record<DshIdeMethod, unknown> = {
 	answerApproval: { requestId: 'r1', decision: 'approve' },
 	answerQuestion: { requestId: 'r1', answer: { answers: [{ id: 'q', selected: ['yes', 'no'] }] } },
 	cancelRequest: { requestId: 'r1' },
-	setModel: { model: 'deepseek-chat' },
-	setEffort: { effort: 'high' },
-	setPermissionPreset: { preset: 'balanced' },
-	runCommand: { command: 'help', args: ['a', 'b'] },
+	setModel: { sessionId: 's1', model: 'deepseek-chat' },
+	setEffort: { sessionId: 's1', effort: 'high' },
+	setPermissionPreset: { sessionId: 's1', preset: 'balanced' },
+	runCommand: { sessionId: 's1', command: 'help', args: ['a', 'b'] },
 	listSessions: {},
 	presentationSettings: {},
 	listModels: { workspace: 'w1' },
-	listCommands: {},
+	listCommands: { sessionId: 's1' },
 	fetchRowDetail: { rowId: 'row1' },
-	readAttachment: { attachment: { attachmentId: 'img-1', mediaType: 'image/png', bytes: 3, width: 1, height: 1 } },
+	readAttachment: { sessionId: 's1', attachment: { attachmentId: 'img-1', mediaType: 'image/png', bytes: 3, width: 1, height: 1 } },
 	refreshSnapshot: {},
 	deleteSession: { sessionId: 's1' },
 	archiveSession: { sessionId: 's1' },
 	unarchiveSession: { sessionId: 's1' },
 	searchSessions: { query: 'hello' },
-	composerState: {},
-	setTeamEnabled: { enabled: true },
-	setAgentPreset: { preset: 'create' },
+	composerState: { sessionId: 's1' },
+	setTeamEnabled: { sessionId: 's1', enabled: true },
+	setAgentPreset: { sessionId: 's1', preset: 'create' },
 	accountGetState: { client: { version: '2.0.0', locale: 'zh-CN', timezoneOffsetSeconds: 28800 } },
 	accountGetProfile: { client: { version: '2.0.0', locale: 'zh-CN', timezoneOffsetSeconds: 28800 } },
 	addAttachment: { attachment: { attachmentId: 'img-1', mediaType: 'image/png', bytes: 3, width: 1, height: 1 } },
 	removeAttachment: { attachmentId: 'img-1' },
-	setGoal: { action: 'create', objective: 'ship the chat baseline' },
-	listSkills: {},
+	setGoal: { sessionId: 's1', action: 'create', objective: 'ship the chat baseline' },
+	listSkills: { sessionId: 's1' },
 	openInApp: { target: 'file:///workspace/readme.md' },
 	dismissQuotaNotice: { seq: 1 },
 	capabilities: {},
@@ -130,9 +130,9 @@ test('validateDshIdeInput rejects missing/invalid required fields', () => {
 	assert.throws(() => validateDshIdeInput('answerApproval', { requestId: 'r1', decision: 'maybe' }), /decision/);
 	assert.throws(() => validateDshIdeInput('answerQuestion', { requestId: 'r1' }), /must be an object/);
 	assert.throws(() => validateDshIdeInput('answerQuestion', { requestId: 'r1', answer: 'yes' }), /must be an object/);
-	assert.throws(() => validateDshIdeInput('setGoal', { action: 'create' }), /non-empty string/);
-	assert.throws(() => validateDshIdeInput('setGoal', { action: 'pause', id: 'g1' }), /revision/);
-	assert.throws(() => validateDshIdeInput('runCommand', { command: 'help', args: [1] }), /array of strings/);
+	assert.throws(() => validateDshIdeInput('setGoal', { sessionId: 's1', action: 'create' }), /non-empty string/);
+	assert.throws(() => validateDshIdeInput('setGoal', { sessionId: 's1', action: 'pause', id: 'g1' }), /revision/);
+	assert.throws(() => validateDshIdeInput('runCommand', { sessionId: 's1', command: 'help', args: [1] }), /array of strings/);
 	assert.throws(() => validateDshIdeInput('fetchRowDetail', { rowId: '' }), /non-empty string/);
 });
 
@@ -175,7 +175,9 @@ function snapshot(overrides: Record<string, unknown> = {}): DshIdeSnapshot {
 	return {
 		wireRevision: DSH_IDE_WIRE_REVISION,
 		channelId: 'c1',
+		binding: { viewId: 'c1', generation: 1, sessionId: null },
 		version: 0,
+		binding: { viewId: 'c1', generation: 1, sessionId: null },
 		state: { state: 'starting' },
 		...overrides,
 	} as DshIdeSnapshot;
@@ -387,42 +389,44 @@ test('D18 legacy account endpoints file is gone and the consumer uses the protoc
 // ---------------------------------------------------------------------------
 
 test('runCommand contract: command is a bare slash-command token', () => {
-	assert.doesNotThrow(() => validateDshIdeInput('runCommand', { command: 'plan', args: ['topic'] }));
-	assert.doesNotThrow(() => validateDshIdeInput('runCommand', { command: 'my_cmd-2' }));
+	assert.doesNotThrow(() => validateDshIdeInput('runCommand', { sessionId: 's1', command: 'plan', args: ['topic'] }));
+	assert.doesNotThrow(() => validateDshIdeInput('runCommand', { sessionId: 's1', command: 'my_cmd-2' }));
 	for (const bad of ['/plan', 'Plan', '', 'plan extra', 'plan/sub', '1plan']) {
-		assert.throws(() => validateDshIdeInput('runCommand', { command: bad }), /slash-command token/,
+		assert.throws(() => validateDshIdeInput('runCommand', { sessionId: 's1', command: bad }), /slash-command token/,
 			`command ${JSON.stringify(bad)} must be rejected`);
 	}
 });
 
 test('runCommand contract: args forbid whitespace and slash injection', () => {
-	assert.doesNotThrow(() => validateDshIdeInput('runCommand', { command: 'plan', args: ['a', 'b-c'] }));
+	assert.doesNotThrow(() => validateDshIdeInput('runCommand', { sessionId: 's1', command: 'plan', args: ['a', 'b-c'] }));
 	for (const bad of ['a b', 'a/b', '', 'a\nb']) {
-		assert.throws(() => validateDshIdeInput('runCommand', { command: 'plan', args: [bad] }), /whitespace\/slash/,
+		assert.throws(() => validateDshIdeInput('runCommand', { sessionId: 's1', command: 'plan', args: [bad] }), /whitespace\/slash/,
 			`arg ${JSON.stringify(bad)} must be rejected`);
 	}
 });
 
 test('runCommand contract: attachments follow the image attachment whitelist', () => {
 	const image = { attachmentId: 'img-1', mediaType: 'image/png', bytes: 3, width: 1, height: 1 };
-	assert.doesNotThrow(() => validateDshIdeInput('runCommand', { command: 'present', args: ['x'], attachments: [image] }));
-	assert.doesNotThrow(() => validateDshIdeInput('runCommand', { command: 'present', attachments: [] }));
+	assert.doesNotThrow(() => validateDshIdeInput('runCommand', { sessionId: 's1', command: 'present', args: ['x'], attachments: [image] }));
+	assert.doesNotThrow(() => validateDshIdeInput('runCommand', { sessionId: 's1', command: 'present', attachments: [] }));
 	// 附件必须逐字段命中 ImageAttachmentRef，路径/URL 形状一律拒绝。
 	assert.throws(() => validateDshIdeInput('runCommand', {
+		sessionId: 's1',
 		command: 'present',
 		attachments: [{ path: 'C:/secret.png' }],
 	}), /unknown field/);
 	assert.throws(() => validateDshIdeInput('runCommand', {
+		sessionId: 's1',
 		command: 'present',
 		attachments: [{ ...image, mediaType: 'text/plain' }],
 	}), /supported image media type/);
-	assert.throws(() => validateDshIdeInput('runCommand', { command: 'present', attachments: 'nope' }), /must be an array/);
+	assert.throws(() => validateDshIdeInput('runCommand', { sessionId: 's1', command: 'present', attachments: 'nope' }), /must be an array/);
 });
 
 test('setPermissionPreset contract: preset uses the same token constraint', () => {
-	assert.doesNotThrow(() => validateDshIdeInput('setPermissionPreset', { preset: 'workspace-write' }));
+	assert.doesNotThrow(() => validateDshIdeInput('setPermissionPreset', { sessionId: 's1', preset: 'workspace-write' }));
 	for (const bad of ['/plan', 'Plan', 'a b', '']) {
-		assert.throws(() => validateDshIdeInput('setPermissionPreset', { preset: bad }), /slash-command token/,
+		assert.throws(() => validateDshIdeInput('setPermissionPreset', { sessionId: 's1', preset: bad }), /slash-command token/,
 			`preset ${JSON.stringify(bad)} must be rejected`);
 	}
 });

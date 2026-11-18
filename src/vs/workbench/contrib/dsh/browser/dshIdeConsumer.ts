@@ -18,6 +18,7 @@ import {
 	assertSnapshotContinuity,
 	validateDshIdeSnapshot,
 	type DshIdeSnapshot,
+	type DshIdeViewBinding,
 	type DshIdeViewSnapshot,
 	type DshRemoteError,
 } from '../../../../platform/dshClient/common/dshIdeProtocol.js';
@@ -37,6 +38,8 @@ export interface DshIdeConsumerState {
 	readonly channelId: string | undefined;
 	/** 最近一次被接受帧的整体状态（starting/ready/rebuild）。 */
 	readonly phase: 'starting' | 'ready' | 'rebuild' | 'none';
+	/** 该帧声明的视图绑定：渲染层据此判断内容是否仍属于当前资源与代次。 */
+	readonly binding: DshIdeViewBinding | undefined;
 }
 
 /** 合并窗口：一帧内到达的多次 accept 合并成一次渲染（第 4 章 T7 的 16ms）。 */
@@ -67,6 +70,7 @@ export class DshIdeConsumer extends Disposable {
 			version: this.last?.version ?? -1,
 			channelId: this.last?.channelId,
 			phase: this.last?.state.state ?? 'none',
+			binding: this.last?.binding,
 		};
 	}
 

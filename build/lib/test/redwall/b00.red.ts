@@ -11,6 +11,7 @@ import { fileURLToPath } from 'node:url';
 import semver from 'semver';
 import {
 	DSH_IDE_ALREADY_RESOLVED,
+	DSH_IDE_SESSION_SWITCHED,
 	DSH_IDE_WIRE_REVISION,
 	validateDshIdeInput,
 	type DshIdeBackend,
@@ -79,11 +80,13 @@ const content = (text: string) => [{ type: 'text' as const, text }];
 const userNode = (seq: number, text: string): DshIdeConversationNode => ({ kind: 'user', seq, time: seq, content: content(text) });
 
 function readyFrame(version: number, view: DshIdeViewSnapshot): DshIdeSnapshot {
-	return { wireRevision: DSH_IDE_WIRE_REVISION, channelId: 'local-view', version, state: { state: 'ready', view } };
+	return { wireRevision: DSH_IDE_WIRE_REVISION, channelId: 'local-view', version, binding: { viewId: 'local-view', generation: version, sessionId: null }, state: { state: 'ready', view } };
 }
 
-test('BUG-008: two local owners independently open their selected sessions', async () => {
+function createIdentityFixture(invoke: DshIdeBackend['invoke'] = async () => ({ accepted: true })) {
 	const followed: (string | undefined)[] = [];
+	const released: (string | undefined)[] = [];
+	const dispatched: string[] = [];
 	const backend: DshIdeBackend = {
 		open: ({ params }) => {
 			const sessionId = params?.sessionId;
@@ -92,17 +95,69 @@ test('BUG-008: two local owners independently open their selected sessions', asy
 		},
 		follow: sessionId => {
 			followed.push(sessionId);
-			return { dispose() { } };
+			return { dispose: () => { released.push(sessionId); } };
 		},
-		async invoke() { return { accepted: true }; },
+		invoke: (method, args) => {
+			dispatched.push(method);
+			return invoke(method, args);
+		},
 		close() { },
 	};
-	const channel = new DshIdeChannel(new DshIdeViewService(backend));
+	// 生产装配是一个共享后端 + 每条连接一个视图：夹具必须照这个形状建立。
+	return { channel: new DshIdeChannel(() => new DshIdeViewService(backend)), followed, released, dispatched };
+}
+
+test('BUG-008: two local owners independently open their selected sessions', async () => {
+	const { channel, followed } = createIdentityFixture();
 	try {
 		const first: DshIdeSnapshot = await channel.call('local-owner-A', 'open', { view: 'chat', params: { sessionId: 'A' } });
 		const second: DshIdeSnapshot = await channel.call('local-owner-B', 'open', { view: 'chat', params: { sessionId: 'B' } });
 		assert.deepEqual(followed, ['A', 'B'], 'opening B must not reuse the subscription for A');
 		assert.notEqual(second.channelId, first.channelId);
+	} finally {
+		channel.dispose();
+	}
+});
+
+for (const method of ['newSession', 'fork'] as const) {
+	test(`BUG-008: a late ${method} result does not take over a newer binding`, { timeout: 5000 }, async () => {
+		const started = Promise.withResolvers<void>();
+		const delayed = Promise.withResolvers<{ accepted: true; sessionId: string }>();
+		const { channel, followed } = createIdentityFixture(async actualMethod => {
+			assert.equal(actualMethod, method);
+			started.resolve();
+			return delayed.promise;
+		});
+		const owner = 'local-owner-A';
+		try {
+			await channel.call(owner, 'open', { view: 'chat', params: { sessionId: 'A' } });
+			const result = channel.call(owner, method, method === 'fork' ? { sessionId: 'A' } : {});
+			const settled = Promise.allSettled([result]);
+			await Promise.race([started.promise, settled.then(() => assert.fail('the fixture must dispatch before settling'))]);
+			await channel.call(owner, 'rebind', { sessionId: 'B' });
+			assert.deepEqual(followed, ['A', 'B'], 'the user selection must have started before the reply');
+			delayed.resolve({ accepted: true, sessionId: 'created' });
+			const [outcome] = await settled;
+			if (outcome.status === 'rejected') {
+				assert.equal(outcome.reason?.code, DSH_IDE_SESSION_SWITCHED, 'only a stale binding error is expected');
+			}
+			assert.deepEqual(followed, ['A', 'B'], 'a late reply must not start a follow on behalf of a newer binding');
+		} finally {
+			delayed.resolve({ accepted: true, sessionId: 'created' });
+			channel.dispose();
+		}
+	});
+}
+
+test('BUG-008: closing the last local owner releases its follow without stopping the session', async () => {
+	const { channel, followed, released, dispatched } = createIdentityFixture();
+	try {
+		const owner = 'local-owner-A';
+		await channel.call(owner, 'open', { view: 'chat', params: { sessionId: 'A' } });
+		assert.deepEqual(followed, ['A']);
+		assert.deepEqual(await channel.call(owner, 'close', {}), { closed: true });
+		assert.deepEqual(dispatched.filter(method => method === 'interrupt' || method === 'cancelRequest'), []);
+		assert.deepEqual(released, ['A'], 'last-owner close must release the logical follow');
 	} finally {
 		channel.dispose();
 	}
@@ -153,7 +208,7 @@ test('BUG-013: starting a new binding never republishes the previous ready view'
 		assert.equal(consumer.accept(readyFrame(1, previous)), true);
 		t.mock.timers.tick(DSH_IDE_MERGE_WINDOW_MS);
 		assert.ok(consumer.state.view, 'the first ready view must be applied');
-		assert.equal(consumer.accept({ wireRevision: DSH_IDE_WIRE_REVISION, channelId: 'local-view', version: 2, state: { state: 'starting' } }), true);
+		assert.equal(consumer.accept({ wireRevision: DSH_IDE_WIRE_REVISION, channelId: 'local-view', version: 2, binding: { viewId: 'local-view', generation: 2, sessionId: null }, state: { state: 'starting' } }), true);
 		t.mock.timers.tick(DSH_IDE_MERGE_WINDOW_MS);
 		assert.equal(consumer.state.phase, 'starting');
 		assert.equal(consumer.state.view, undefined);
@@ -224,6 +279,8 @@ test('BUG-015: model selection with a slash-qualified model reaches the real DTO
 	};
 	const log = { trace() { }, warn() { } };
 	const source = new DshComposerSource(client, log);
+	// 写回带会话身份：未绑定时写回被跳过，写不进 DTO schema。
+	source.setSession('s-1');
 	try {
 		await source.selectModel('provider-a', 'family/model-a');
 		await source.selectModel('provider-b', 'family/model-b');

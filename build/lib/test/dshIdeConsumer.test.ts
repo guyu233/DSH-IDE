@@ -19,17 +19,22 @@ function frame(type = 'event'): Record<string, unknown> {
 	return { type, event: { type: 'user/message', seq: 1, time: 1, data: {} } };
 }
 
+function binding(channelId = 'ch-1') {
+	return { viewId: channelId, generation: 1, sessionId: null };
+}
+
 function ready(version: number, payload: Record<string, unknown> = frame(), channelId = 'ch-1'): DshIdeSnapshot {
 	return {
 		wireRevision: DSH_IDE_WIRE_REVISION,
 		channelId,
 		version,
+		binding: binding(channelId),
 		state: { state: 'ready', view: { frame: payload } },
 	};
 }
 
 function starting(version: number, channelId = 'ch-1'): DshIdeSnapshot {
-	return { wireRevision: DSH_IDE_WIRE_REVISION, channelId, version, state: { state: 'starting' } };
+	return { wireRevision: DSH_IDE_WIRE_REVISION, channelId, version, binding: binding(channelId), state: { state: 'starting' } };
 }
 
 const tick = () => new Promise<void>(resolve => setTimeout(resolve, DSH_IDE_MERGE_WINDOW_MS + 8));
@@ -92,7 +97,9 @@ test('a ready view keeps the whole typed payload for renderers', async () => {
 	const snapshot: DshIdeSnapshot = {
 		wireRevision: DSH_IDE_WIRE_REVISION,
 		channelId: 'ch-1',
+		binding: { viewId: 'ch-1', generation: 1, sessionId: null },
 		version: 1,
+		binding: binding(),
 		state: { state: 'ready', view: { frame: frame(), conversation, quotaNotice: { code: 'QUOTA', seq: 3 } } },
 	};
 	consumer.accept(snapshot);

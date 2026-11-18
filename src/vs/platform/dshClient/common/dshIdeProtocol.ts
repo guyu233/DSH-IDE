@@ -3,7 +3,7 @@
  *  Licensed under the MIT License.
  *--------------------------------------------------------------------------------------------*/
 
-// DSH-IDE 连接层协议真源（P1 冻结，当前 wireRevision 4）。
+// DSH-IDE 连接层协议真源（P1 冻结，当前 wireRevision 5）。
 //
 // 模式直接从 dsh-TUI 的 `tui-profile/protocols/tui-channel.js` + `src/adapter/channel/{provider,consumer}.ts`
 // 平移：校验原语（exactRecord / jsonValue）、双向校验器（输入/快照）、Consumer 连续性 fail-closed。
@@ -20,12 +20,37 @@ export const DSH_IDE_CHANNEL = 'dshIde';
 export const DSH_IDE_API_VERSION = '0.2.2-rc.1';
 
 /**
- * 线协议修订号（快照连续性校验依据；wireRevision 不变则协议相容）。
- * 4：`DshIdeViewSnapshot` 在保留 `frame` 的同时增加官方聊天页 typed 投影。
- * `capabilities` 最终采用独立 method（方案一），不占用修订号——故值停在 4。
- * 这些字段都可缺省；一旦出现就必须命中白名单，否则 fail-closed。
+ * 两半共用的线协议修订号。5 将窗口绑定及代次带到官方 Remote 与 IPC 快照；
+ * 任一半未声明该修订号，业务调用不得降级到不带身份的形状。
  */
-export const DSH_IDE_WIRE_REVISION = 4;
+export const DSH_IDE_WIRE_REVISION = 5;
+export const DSH_IDE_INCOMPATIBLE_WIRE = 'dsh-ide/incompatible-wire';
+export const DSH_IDE_VIEW_BOUND_FRAME = 'ide-view-bound';
+
+/** 由 IDE 主进程捕获的逻辑视图。窗口身份不代替 Gateway 的认证主体。 */
+export interface DshIdeViewBinding {
+	readonly viewId: string;
+	readonly generation: number;
+	readonly sessionId: string | null;
+}
+
+export function requireDshIdeWireRevision(value: unknown): void {
+	if (value !== DSH_IDE_WIRE_REVISION) {
+		throw Object.assign(new TypeError(`DSH-IDE wireRevision mismatch: expected ${DSH_IDE_WIRE_REVISION}`), { code: DSH_IDE_INCOMPATIBLE_WIRE });
+	}
+}
+
+export function validateDshIdeViewBinding(value: unknown): DshIdeViewBinding {
+	const binding = exactRecord(value, ['viewId', 'generation', 'sessionId'], 'DshIdeViewBinding');
+	const viewId = nonEmptyString(binding['viewId'], 'DshIdeViewBinding.viewId');
+	const generation = nonNegativeInteger(binding['generation'], 'DshIdeViewBinding.generation');
+	const sessionId = binding['sessionId'] === null ? null : nonEmptyString(binding['sessionId'], 'DshIdeViewBinding.sessionId');
+	return { viewId, generation, sessionId };
+}
+
+export function sameDshIdeViewBinding(a: DshIdeViewBinding, b: DshIdeViewBinding): boolean {
+	return a.viewId === b.viewId && a.generation === b.generation && a.sessionId === b.sessionId;
+}
 
 /**
  * `deleteSession` 依赖的社区插件版本（§8.10.8（4）版本绑定）。
@@ -133,6 +158,7 @@ export interface DshIdeSnapshot {
 	readonly wireRevision: number;
 	readonly channelId: string;
 	readonly version: number;
+	readonly binding: DshIdeViewBinding;
 	readonly state: DshIdeViewState;
 }
 
@@ -374,8 +400,8 @@ export interface DshIdeMethodArgs {
 	submit: { text: string; sessionId: string; attachments?: readonly DshIdeImageAttachmentRef[] };
 	/** 中断点击时绑定的那条会话，不跟随之后换上的会话。 */
 	interrupt: { sessionId: string };
-	/** 恢复一个会话（可选指定）。 */
-	resume: { sessionId?: string };
+	/** 恢复点击时绑定的会话。 */
+	resume: { sessionId: string };
 	/** 开新会话。 */
 	newSession: { workspace?: string; options?: unknown };
 	/** 从某点 fork 会话。 */
@@ -412,13 +438,13 @@ export interface DshIdeMethodArgs {
 	/** 取消一个进行中的请求（审批/问卷/生成等）。 */
 	cancelRequest: { requestId: string };
 	/** 设置模型。 */
-	setModel: { model: string };
+	setModel: { sessionId: string; model: string };
 	/** 设置 effort。 */
-	setEffort: { effort: string };
+	setEffort: { sessionId: string; effort: string };
 	/** 设置权限预设；预设名作为 `/permission <preset>` 的唯一参数（§8.10.10 前置②，禁空白/斜杠）。 */
-	setPermissionPreset: { preset: string };
+	setPermissionPreset: { sessionId: string; preset: string };
 	/** 运行斜杠命令；`command` 为不带前导 `/` 的命令名，`args` 以单空格拼成 rawInput（§8.10.10 前置①②）。 */
-	runCommand: { command: string; args?: readonly string[]; attachments?: readonly DshIdeImageAttachmentRef[] };
+	runCommand: { sessionId: string; command: string; args?: readonly string[]; attachments?: readonly DshIdeImageAttachmentRef[] };
 	/**
 	 * 列出一个工作区的可见会话，返回 readonly IDshIdeSessionSummary[]。
 	 * workspace 是 IDE 当前打开的文件夹。没给出时才退回已绑定会话所在工作区；
@@ -450,22 +476,22 @@ export interface DshIdeMethodArgs {
 	 * 一次取齐模型目录与当前选择、权限预设、团队开关、开聊前的智能体预设。
 	 * 缺哪一项，投影里对应字段就是 `null`，界面藏起该控件，不伪造选项。
 	 */
-	composerState: Record<string, never>;
+	composerState: { sessionId: string };
 	/** 开关当前根会话的智能体团队。`enabled` 必须是布尔值。 */
-	setTeamEnabled: { enabled: boolean };
+	setTeamEnabled: { sessionId: string; enabled: boolean };
 	/** 在会话尚未开始前切换智能体预设。已开聊时官方拒绝，原样透传。 */
-	setAgentPreset: { preset: string };
+	setAgentPreset: { sessionId: string; preset: string };
 	/** 列出可用模型。 */
 	listModels: { workspace?: string };
 	/** 列出可用命令。 */
-	listCommands: { workspace?: string };
+	listCommands: { sessionId: string; workspace?: string };
 	/** 取某行的完整内容（折叠行回 Host 取详情）。 */
 	fetchRowDetail: { rowId: string };
 	/**
 	 * 读取一张 durable 图片附件的字节（官方 `session/attachment` 的进程内等价物）。
 	 * 只按 attachmentId 授权读取，不接受路径/URL；返回 base64，绝不返回本地文件路径。
 	 */
-	readAttachment: { attachment: DshIdeImageAttachmentRef };
+	readAttachment: { sessionId: string; attachment: DshIdeImageAttachmentRef };
 	/** 主动刷新快照。 */
 	refreshSnapshot: Record<string, never>;
 	/** 读取 DeepSeek 账号投影（登录态）；`client` 为官方 `AccountClientMetadata` 三元组。 */
@@ -486,6 +512,7 @@ export interface DshIdeMethodArgs {
 	 * Host 在接线前 fail-closed，不猜测服务名。
 	 */
 	setGoal: {
+		sessionId: string;
 		action: 'create' | 'edit' | 'pause' | 'resume' | 'complete' | 'clear';
 		objective?: string;
 		maxGoalRounds?: number;
@@ -493,7 +520,7 @@ export interface DshIdeMethodArgs {
 		revision?: number;
 	};
 	/** 列出当前会话可见的技能摘要。落点未核对前 fail-closed。 */
-	listSkills: Record<string, never>;
+	listSkills: { sessionId: string };
 	/**
 	 * 在 DSH 里打开一个目标。官方没有已核对的 open remote，Host fail-closed。
 	 * IDE 自己用编辑器 / `IOpenerService` 打开文件和外链，不走这个 method。
@@ -559,6 +586,13 @@ export function dshAccountClientMetadata(locale?: string, version?: string): IDs
 /** 方法白名单（由 DshIdeMethodArgs 键派生，单一真源）。 */
 export type DshIdeMethod = keyof DshIdeMethodArgs;
 
+/** 必须匹配发起视图的会话；带显式可见行 ID 的操作不在这组。 */
+export const DSH_IDE_VIEW_BOUND_METHODS: readonly DshIdeMethod[] = [
+	'submit', 'interrupt', 'resume', 'rewind', 'loadOlder', 'setModel', 'setEffort',
+	'setPermissionPreset', 'runCommand', 'composerState', 'setTeamEnabled', 'setAgentPreset',
+	'listCommands', 'readAttachment', 'setGoal', 'listSkills',
+];
+
 /** 每个 method 的 exactRecord 允许字段（与 DshIdeMethodArgs 同步；空数组=无字段）。 */
 const DSH_IDE_METHOD_KEYS: Record<DshIdeMethod, readonly string[]> = {
 	submit: ['text', 'sessionId', 'attachments'],
@@ -571,30 +605,30 @@ const DSH_IDE_METHOD_KEYS: Record<DshIdeMethod, readonly string[]> = {
 	answerApproval: ['requestId', 'decision', 'reason', 'agentId', 'callId'],
 	answerQuestion: ['requestId', 'answer'],
 	cancelRequest: ['requestId'],
-	setModel: ['model'],
-	setEffort: ['effort'],
-	setPermissionPreset: ['preset'],
-	runCommand: ['command', 'args', 'attachments'],
+	setModel: ['sessionId', 'model'],
+	setEffort: ['sessionId', 'effort'],
+	setPermissionPreset: ['sessionId', 'preset'],
+	runCommand: ['sessionId', 'command', 'args', 'attachments'],
 	listSessions: ['workspace'],
 	presentationSettings: [],
 	deleteSession: ['sessionId'],
 	archiveSession: ['sessionId'],
 	unarchiveSession: ['sessionId'],
 	searchSessions: ['query'],
-	composerState: [],
-	setTeamEnabled: ['enabled'],
-	setAgentPreset: ['preset'],
+	composerState: ['sessionId'],
+	setTeamEnabled: ['sessionId', 'enabled'],
+	setAgentPreset: ['sessionId', 'preset'],
 	listModels: ['workspace'],
-	listCommands: ['workspace'],
+	listCommands: ['sessionId', 'workspace'],
 	fetchRowDetail: ['rowId'],
-	readAttachment: ['attachment'],
+	readAttachment: ['sessionId', 'attachment'],
 	refreshSnapshot: [],
 	accountGetState: ['client'],
 	accountGetProfile: ['client'],
 	addAttachment: ['attachment'],
 	removeAttachment: ['attachmentId'],
-	setGoal: ['action', 'objective', 'maxGoalRounds', 'id', 'revision'],
-	listSkills: [],
+	setGoal: ['sessionId', 'action', 'objective', 'maxGoalRounds', 'id', 'revision'],
+	listSkills: ['sessionId'],
 	openInApp: ['target'],
 	dismissQuotaNotice: ['seq'],
 	renameSession: ['sessionId', 'title'],
@@ -756,6 +790,9 @@ export function validateDshIdeInput<K extends DshIdeMethod>(command: K, args: un
 	}
 	const keys = DSH_IDE_METHOD_KEYS[command];
 	const record = exactRecord(args, keys, `DshIdeInput.${command}`);
+	if (DSH_IDE_VIEW_BOUND_METHODS.includes(command)) {
+		nonEmptyString(record['sessionId'], `DshIdeInput.${command}.sessionId`);
+	}
 	switch (command) {
 		case 'submit':
 			nonEmptyString(record['text'], 'DshIdeInput.submit.text');
@@ -1165,11 +1202,12 @@ function validateQuestionItem(value: unknown, index: number): DshIdeQuestionItem
 
 /** 快照结构校验（在 `DshIdeConsumer.accept()` 入口使用）。 */
 export function validateDshIdeSnapshot(value: unknown): DshIdeSnapshot {
-	const s = exactRecord(value, ['wireRevision', 'channelId', 'version', 'state'], 'DshIdeSnapshot');
-	if (s['wireRevision'] !== DSH_IDE_WIRE_REVISION) {
-		throw new TypeError(`DshIdeSnapshot.wireRevision mismatch: expected ${DSH_IDE_WIRE_REVISION}`);
+	const s = exactRecord(value, ['wireRevision', 'channelId', 'version', 'binding', 'state'], 'DshIdeSnapshot');
+	requireDshIdeWireRevision(s['wireRevision']);
+	const channelId = nonEmptyString(s['channelId'], 'DshIdeSnapshot.channelId');
+	if (validateDshIdeViewBinding(s['binding']).viewId !== channelId) {
+		throw new TypeError('DshIdeSnapshot binding must belong to its channel');
 	}
-	nonEmptyString(s['channelId'], 'DshIdeSnapshot.channelId');
 	nonNegativeInteger(s['version'], 'DshIdeSnapshot.version');
 	const state = exactRecord(s['state'], ['state', 'message', 'view'], 'DshIdeSnapshot.state');
 	if (state['state'] !== 'starting' && state['state'] !== 'ready' && state['state'] !== 'rebuild') {
@@ -2024,10 +2062,11 @@ export interface DshIdeBackend {
 		 * 界面会停在最后一帧，用户看到的是「不动了」而不是「重连中」。
 		 * 上层据此重新发现端点并重建订阅，不把断线当业务失败。
 		 */
-		onDisconnect?: (error: unknown) => void,
+		onDisconnect: ((error: unknown) => void) | undefined,
+		binding: DshIdeViewBinding,
 	): { dispose(): void };
 	/** 执行一个 DTO method（参数已过 `validateDshIdeInput`）。 */
-	invoke(method: DshIdeMethod, args: unknown): Promise<unknown>;
+	invoke(method: DshIdeMethod, args: unknown, binding: DshIdeViewBinding): Promise<unknown>;
 	/** 释放传输资源；不取消 DSH 会话。 */
 	close(): void;
 }

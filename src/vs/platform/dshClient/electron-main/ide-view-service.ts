@@ -24,6 +24,7 @@ import {
 	type DshIdeOpenSpec,
 	type DshIdePendingItem,
 	type DshIdeSnapshot,
+	type DshIdeViewBinding,
 	type DshIdeViewSnapshot,
 	type DshIdeSessionNotice,
 	type DshIdeWaterfallNotice,
@@ -59,6 +60,14 @@ export class DshIdeViewService extends Disposable implements IdeViewHost {
 	private version = 0;
 	private last: DshIdeSnapshot | undefined;
 	private _boundSessionId: string | undefined;
+	/**
+	 * 本视图的绑定代次：`open` 起为 1，每次真正换绑 +1。
+	 *
+	 * 为什么不能只看 `sessionId`：一次换绑之前的异步回调（旧流的帧、迟到的
+	 * `newSession`/`fork` 回包）与换绑之后同名的会话无法靠 id 区分。代次让
+	 * 「这次结果属于哪一代绑定」可判定，旧代结果一律丢弃。
+	 */
+	private generation = 1;
 	/** 结构化会话投影状态：换会话即重置，保证不把上一个会话的节点带过来。 */
 	private conversation = createDshIdeConversationState();
 	/** 待决议项：按 eventId 聚合，request 加入、cancel 移除。 */
@@ -71,6 +80,11 @@ export class DshIdeViewService extends Disposable implements IdeViewHost {
 		this.backend = backend;
 	}
 
+	/** 当前绑定：通道 id 即视图 id，与快照里的 `binding` 同源。 */
+	private get binding(): DshIdeViewBinding {
+		return { viewId: this.channelId ?? '', generation: this.generation, sessionId: this.sessionId ?? null };
+	}
+
 	open(spec: Record<string, unknown>): DshIdeSnapshot {
 		if (this.channelId !== undefined) {
 			// 重复触发复用既有连接与 channelId，不创建第二个实例（第 4 章 §1）。
@@ -80,15 +94,19 @@ export class DshIdeViewService extends Disposable implements IdeViewHost {
 		this.channelId = binding.channelId;
 		this.sessionId = binding.sessionId;
 		this.conversation = createDshIdeConversationState();
+		// 代次在订阅建立前固定：旧代回调即使晚到也带自己的代次，发布侧据它丢弃。
+		const generation = this.generation;
 		this.subscription = this.backend.follow(
 			binding.sessionId,
-			raw => this.receive(raw),
-			error => this.publishDisconnected(error),
+			raw => this.receive(generation, raw),
+			error => this.publishDisconnected(generation, error),
+			this.binding,
 		);
 		const first: DshIdeSnapshot = {
 			wireRevision: DSH_IDE_WIRE_REVISION,
 			channelId: binding.channelId,
 			version: 1,
+			binding: this.binding,
 			state: { state: 'starting' },
 		};
 		this.version = 1;
@@ -108,18 +126,22 @@ export class DshIdeViewService extends Disposable implements IdeViewHost {
 		this.subscription = undefined;
 		this.sessionId = sessionId;
 		this._boundSessionId = sessionId;
+		this.generation += 1;
 		this.conversation = createDshIdeConversationState();
 		this._pending.clear();
+		const generation = this.generation;
 		this.subscription = this.backend.follow(
 			sessionId,
-			raw => this.receive(raw),
-			error => this.publishDisconnected(error),
+			raw => this.receive(generation, raw),
+			error => this.publishDisconnected(generation, error),
+			this.binding,
 		);
 		this.version += 1;
 		const next: DshIdeSnapshot = {
 			wireRevision: DSH_IDE_WIRE_REVISION,
 			channelId: this.channelId,
 			version: this.version,
+			binding: this.binding,
 			state: { state: 'starting' },
 		};
 		this.last = next;
@@ -148,13 +170,19 @@ export class DshIdeViewService extends Disposable implements IdeViewHost {
 		if (this.channelId === undefined) {
 			throw { code: DSH_IDE_FEATURE_UNAVAILABLE, message: 'DSH-IDE view is not open' };
 		}
-		const value = await this.backend.invoke(method as DshIdeMethod, args);
+		// 调用上行时固定发起时的绑定：Host 据此判断这次调用代表哪个窗口的哪一代。
+		const sent = this.binding;
+		const value = await this.backend.invoke(method as DshIdeMethod, args, sent);
 		// 新建 / 分叉成功后，画面跟着新会话走。
 		const nextSessionId = value !== null && typeof value === 'object' && typeof (value as Record<string, unknown>)['sessionId'] === 'string'
 			? (value as Record<string, unknown>)['sessionId'] as string
 			: undefined;
 		if ((method === 'newSession' || method === 'fork') && nextSessionId !== undefined) {
-			this.rebind(nextSessionId);
+			// 只有发起时的绑定仍是当前绑定，画面才跟着新会话走。用户已经换到别的会话时，
+			// 迟到回包不得把画面拉回它创建的会话。
+			if (sent.generation === this.generation && sent.viewId === this.channelId) {
+				this.rebind(nextSessionId);
+			}
 		}
 		return value;
 	}
@@ -166,6 +194,7 @@ export class DshIdeViewService extends Disposable implements IdeViewHost {
 		this.channelId = undefined;
 		this.sessionId = undefined;
 		this._boundSessionId = undefined;
+		this.generation += 1;
 		this.conversation = createDshIdeConversationState();
 		this._pending.clear();
 		this.last = undefined;
@@ -181,8 +210,8 @@ export class DshIdeViewService extends Disposable implements IdeViewHost {
 	 * 不推任何伪造的会话内容；重连成功后由下一帧真实内容接管。
 	 * @param error - 传输层给出的断开原因（只用于日志，不外泄凭据）。
 	 */
-	private publishDisconnected(error: unknown): void {
-		if (this.channelId === undefined || this.last === undefined) {
+	private publishDisconnected(generation: number, error: unknown): void {
+		if (this.channelId === undefined || this.last === undefined || generation !== this.generation) {
 			return;
 		}
 		void error;
@@ -191,6 +220,7 @@ export class DshIdeViewService extends Disposable implements IdeViewHost {
 			wireRevision: DSH_IDE_WIRE_REVISION,
 			channelId: this.channelId,
 			version: this.version,
+			binding: this.binding,
 			state: { state: 'rebuild', message: 'DSH 连接已断开，正在重新连接…' },
 		};
 		this.last = next;
@@ -200,8 +230,12 @@ export class DshIdeViewService extends Disposable implements IdeViewHost {
 	}
 
 	/** 收一帧跟会话结果：内容帧直接发布，批准 / 问卷帧交给独立订阅者。 */
-	private receive(raw: unknown): void {
+	private receive(generation: number, raw: unknown): void {
 		if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) {
+			return;
+		}
+		// 旧代订阅的帧不得写进新代视图：换绑之后旧流仍可能再送几帧。
+		if (generation !== this.generation) {
 			return;
 		}		const notice = projectDshIdeWaterfallNotice(raw);
 		if (notice !== undefined) {
@@ -283,6 +317,7 @@ export class DshIdeViewService extends Disposable implements IdeViewHost {
 			wireRevision: DSH_IDE_WIRE_REVISION,
 			channelId: this.channelId,
 			version: this.version,
+			binding: this.binding,
 			state: { state: 'ready', view },
 		};
 		this.last = next;

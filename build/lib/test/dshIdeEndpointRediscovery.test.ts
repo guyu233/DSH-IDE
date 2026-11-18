@@ -85,8 +85,11 @@ test('the follow stream reconnects by itself after the host goes away', () => {
 
 test('a transport stream reports disconnect through the port contract', () => {
 	const protocol = read('src/vs/platform/dshClient/common/dshIdeProtocol.ts');
-	assert.match(protocol, /onDisconnect\?: \(error: unknown\) => void/,
+	// 端口仍必须暴露断线回调；现在它排在绑定参数之前，签名因此显式可缺省。
+	assert.match(protocol, /onDisconnect: \(\(error: unknown\) => void\) \| undefined/,
 		'the port must expose a disconnect signal, otherwise no layer can reconnect');
+	assert.match(protocol, /binding: DshIdeViewBinding/,
+		'the same port must carry the originating view binding');
 	const transport = read('src/vs/platform/dshClient/transport/dshIdeTransport.ts');
 	assert.match(transport, /onDisconnect\?\.\(error\)/,
 		'the transport must forward the stream error to the disconnect callback');
@@ -94,8 +97,11 @@ test('a transport stream reports disconnect through the port contract', () => {
 
 test('a disconnected view tells the UI it is rebuilding instead of freezing', () => {
 	const service = read('src/vs/platform/dshClient/electron-main/ide-view-service.ts');
-	assert.match(service, /private publishDisconnected\(error: unknown\): void/,
+	// 断线回调按代次过滤：只有当前代的断开才允许把界面切到 rebuild。
+	assert.match(service, /private publishDisconnected\(generation: number, error: unknown\): void/,
 		'the view service must publish a rebuild state on disconnect');
+	assert.match(service, /generation !== this\.generation/,
+		'a stale generation must not publish a rebuild over a newer binding');
 	assert.match(service, /state: \{ state: 'rebuild'/, 'the published state must be rebuild');
 });
 

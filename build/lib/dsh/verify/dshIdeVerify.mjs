@@ -127,8 +127,12 @@ function boundary() {
 	const channel = read('platform/dshClient/electron-main/dshIdeChannel.ts');
 	assert.doesNotMatch(channel, /\bCordis\b|\bCordisContext\b|\bdshCtx\b|apply\s*\(\s*ctx\s*\)/,
 		'DshIdeChannel must not depend on Cordis Context');
-	assert.match(channel, /constructor\([^)]*IdeViewHost[^)]*\)/,
-		'DshIdeChannel constructor must take the IdeViewHost narrow interface');
+	// 通道仍只依赖窄接口：现在按连接创建一个视图，因此构造参数是返回 IdeViewHost 的工厂，
+	// 而不是某个具体视图实例。两条断言一起保证「窄接口」这一约束没有被放宽。
+	assert.match(channel, /constructor\([^)]*\(\)\s*=>\s*IdeViewHost[^)]*\)/,
+		'DshIdeChannel constructor must take an IdeViewHost factory (one view per connection)');
+	assert.doesNotMatch(channel, /\bDshIdeViewService\b/,
+		'DshIdeChannel must not depend on the concrete view service');
 
 	// 插件侧 TS 生产文件零 electron / DSH 运行时包 / Cordis Context 直接引用。
 	// 范围由**目录扫描**决定，不维护文件名白名单：新增 .ts 自动纳入，避免「新建文件漏检、
@@ -241,8 +245,16 @@ async function projectionGolden() {
 		wireRevision: DSH_IDE_WIRE_REVISION,
 		channelId: 'projection-golden',
 		version: 1,
+		binding: { viewId: 'projection-golden', generation: 1, sessionId: null },
 		state: { state: 'ready', view: { frame: { type: 'event' }, conversation: view } },
 	}), 'the projected conversation must satisfy the protocol contract');
+	// 绑定是必填项：缺它或与通道不一致都必须被拒绝，不能静默接受无身份的快照。
+	assert.throws(() => validateDshIdeSnapshot({
+		wireRevision: DSH_IDE_WIRE_REVISION,
+		channelId: 'projection-golden',
+		version: 1,
+		state: { state: 'ready', view: { frame: { type: 'event' }, conversation: view } },
+	}), /DshIdeViewBinding/, 'a snapshot without a view binding must be rejected');
 
 	const kinds = view.nodes.map(node => node.kind);
 	assert.deepEqual(kinds, ['user', 'assistant', 'subagent-catalog', 'subagent-notice'],

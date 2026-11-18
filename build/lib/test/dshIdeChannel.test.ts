@@ -24,6 +24,7 @@ import {
 	type DshIdeMethod,
 	type DshIdeSnapshot,
 	type DshIdeWaterfallNotice,
+	type DshIdeViewBinding,
 } from '../../../src/vs/platform/dshClient/common/dshIdeProtocol.ts';
 import {
 	DSH_IDE_CONTROL_CLOSE,
@@ -55,18 +56,22 @@ const ALL_METHODS: DshIdeMethod[] = [
 
 interface FakeBackend extends DshIdeBackend {
 	readonly calls: string[];
+	readonly bindings: (DshIdeViewBinding | undefined)[];
 	emit(raw: unknown): void;
 }
 
 /** 假后端：记录调用，并暴露 `emit` 让测试从 follow 回调注入真实事件。 */
 function fakeBackend(overrides: Partial<DshIdeBackend> = {}): FakeBackend {
 	const calls: string[] = [];
+	const bindings: (DshIdeViewBinding | undefined)[] = [];
 	let sink: ((raw: unknown) => void) | undefined;
 	const backend: FakeBackend = {
 		calls,
+		bindings,
 		emit: raw => sink?.(raw),
 		open: () => ({ channelId: 'ch-1', sessionId: 's-1' }),
-		follow: (_sessionId, onEvent) => {
+		follow: (_sessionId, onEvent, _onDisconnect, binding) => {
+			bindings.push(binding);
 			sink = onEvent;
 			return { dispose: () => { calls.push('unfollow'); sink = undefined; } };
 		},
@@ -88,7 +93,7 @@ test('P3 error codes are declared and distinct', () => {
 	const all = [DSH_IDE_FEATURE_UNAVAILABLE, DSH_IDE_INVALID_ARGUMENT, DSH_IDE_ALREADY_RESOLVED, DSH_IDE_SESSION_SWITCHED, DSH_IDE_SNAPSHOT_STALE];
 	assert.equal(new Set(all).size, all.length);
 	assert.equal(DSH_IDE_CHANNEL, 'dshIde');
-	assert.equal(DSH_IDE_WIRE_REVISION, 4, 'typed chat projections bump the snapshot revision');
+	assert.equal(DSH_IDE_WIRE_REVISION, 5, 'view binding identity bumps the snapshot revision');
 });
 
 // ---------------------------------------------------------------------------
@@ -96,7 +101,7 @@ test('P3 error codes are declared and distinct', () => {
 // ---------------------------------------------------------------------------
 
 function starting(): DshIdeSnapshot {
-	return { wireRevision: DSH_IDE_WIRE_REVISION, channelId: 'c1', version: 1, state: { state: 'starting' } };
+	return { wireRevision: DSH_IDE_WIRE_REVISION, channelId: 'c1', version: 1, binding: { viewId: 'c1', generation: 1, sessionId: null }, state: { state: 'starting' } };
 }
 
 test('validateDshIdeSnapshot accepts starting without view', () => {
@@ -209,30 +214,30 @@ const VALID: Record<DshIdeMethod, unknown> = {
 	answerApproval: { requestId: 'r1', decision: 'approve' },
 	answerQuestion: { requestId: 'r1', answer: { answers: [{ id: 'q', selected: ['yes'] }] } },
 	cancelRequest: { requestId: 'r1' },
-	setModel: { model: 'deepseek/deepseek-chat' },
-	setEffort: { effort: 'high' },
-	setPermissionPreset: { preset: 'balanced' },
-	runCommand: { command: 'help', args: ['a'] },
+	setModel: { sessionId: 's-1', model: 'deepseek/deepseek-chat' },
+	setEffort: { sessionId: 's-1', effort: 'high' },
+	setPermissionPreset: { sessionId: 's-1', preset: 'balanced' },
+	runCommand: { sessionId: 's-1', command: 'help', args: ['a'] },
 	listSessions: {},
 	deleteSession: { sessionId: 's-1' },
 	listModels: { workspace: 'w1' },
-	listCommands: { workspace: 'w1' },
+	listCommands: { sessionId: 's-1', workspace: 'w1' },
 	fetchRowDetail: { rowId: 'row:1' },
-	readAttachment: { attachment: { attachmentId: 'img-1', mediaType: 'image/png', bytes: 3, width: 1, height: 1 } },
+	readAttachment: { sessionId: 's-1', attachment: { attachmentId: 'img-1', mediaType: 'image/png', bytes: 3, width: 1, height: 1 } },
 	refreshSnapshot: {},
 	accountGetState: { client: { version: '2.0.0', locale: 'zh-CN', timezoneOffsetSeconds: 28800 } },
 	accountGetProfile: { client: { version: '2.0.0', locale: 'zh-CN', timezoneOffsetSeconds: 28800 } },
 	archiveSession: { sessionId: 's-1' },
 	unarchiveSession: { sessionId: 's-1' },
 	searchSessions: { query: 'hello' },
-	composerState: {},
+	composerState: { sessionId: 's-1' },
 	presentationSettings: {},
-	setTeamEnabled: { enabled: false },
-	setAgentPreset: { preset: 'create' },
+	setTeamEnabled: { sessionId: 's-1', enabled: false },
+	setAgentPreset: { sessionId: 's-1', preset: 'create' },
 	addAttachment: { attachment: { attachmentId: 'img-1', mediaType: 'image/png', bytes: 3, width: 1, height: 1 } },
 	removeAttachment: { attachmentId: 'img-1' },
-	setGoal: { action: 'create', objective: 'ship the chat baseline' },
-	listSkills: {},
+	setGoal: { sessionId: 's-1', action: 'create', objective: 'ship the chat baseline' },
+	listSkills: { sessionId: 's-1' },
 	openInApp: { target: 'readme.md' },
 	dismissQuotaNotice: { seq: 1 },
 	capabilities: {},
@@ -245,10 +250,15 @@ const VALID: Record<DshIdeMethod, unknown> = {
 };
 
 async function openedChannel(backend = fakeBackend()) {
-	const view = new DshIdeViewService(backend);
-	const channel = new DshIdeChannel(view);
+	// 生产装配是「每条连接一个视图」：夹具照此每连接新建，第一个视图即 ctx-a 的视图。
+	const views: DshIdeViewService[] = [];
+	const channel = new DshIdeChannel(() => {
+		const next = new DshIdeViewService(backend);
+		views.push(next);
+		return next;
+	});
 	const first = await channel.call<DshIdeSnapshot>('ctx-a', DSH_IDE_CONTROL_OPEN, { view: 'chat', params: { sessionId: 's-1' } });
-	return { view, channel, backend, first };
+	return { view: views[0]!, views, channel, backend, first };
 }
 
 test('channel dispatches all 43 DTO methods through validateDshIdeInput', async () => {
@@ -269,7 +279,7 @@ test('channel rejects unknown method and malformed args with defined codes', asy
 });
 
 test('channel requires an open connection for DTO calls', async () => {
-	const channel = new DshIdeChannel(new DshIdeViewService(fakeBackend()));
+	const channel = new DshIdeChannel(() => new DshIdeViewService(fakeBackend()));
 	await assert.rejects(() => channel.call('ctx-x', 'listSessions', {}), (error: { code?: string }) => error.code === DSH_IDE_FEATURE_UNAVAILABLE);
 });
 
@@ -351,7 +361,8 @@ test('listen filters frames by owning connection and drops non-advancing version
 });
 
 test('disposeOwner removes only the named connection and is idempotent', async () => {
-	const { channel } = await openedChannel();
+	const { channel, backend } = await openedChannel();
+	// 每条连接一个视图：ctx-b 的 open 会创建自己的视图，ctx-a 被 dispose 后 ctx-b 仍可用。
 	await channel.call('ctx-b', DSH_IDE_CONTROL_OPEN, { view: 'chat' });
 	assert.equal(channel.disposeOwner('ctx-a'), 1);
 	assert.equal(channel.disposeOwner('ctx-a'), 0);
@@ -393,7 +404,7 @@ function fakeLauncher(result: { ok: true } | { ok: false; message: string }): Ds
 
 test('launch control command delegates to the injected launcher', async () => {
 	const launcher = fakeLauncher({ ok: true });
-	const channel = new DshIdeChannel(new DshIdeViewService(fakeBackend()), launcher);
+	const channel = new DshIdeChannel(() => new DshIdeViewService(fakeBackend()), launcher);
 	const result = await channel.call('ctx-a', DSH_IDE_CONTROL_LAUNCH, { workspace: 'E:\DSH-IDE', sessionId: 's-1' });
 	assert.deepEqual(result, { ok: true });
 	assert.deepEqual(launcher.calls, [{ workspace: 'E:\DSH-IDE', sessionId: 's-1' }]);
@@ -401,13 +412,13 @@ test('launch control command delegates to the injected launcher', async () => {
 
 test('launch accepts an empty spec (open the current workspace)', async () => {
 	const launcher = fakeLauncher({ ok: true });
-	const channel = new DshIdeChannel(new DshIdeViewService(fakeBackend()), launcher);
+	const channel = new DshIdeChannel(() => new DshIdeViewService(fakeBackend()), launcher);
 	await channel.call('ctx-a', DSH_IDE_CONTROL_LAUNCH, {});
 	assert.deepEqual(launcher.calls, [{}], 'no fields means the current workspace');
 });
 
 test('launch refuses without a launcher instead of pretending success', async () => {
-	const channel = new DshIdeChannel(new DshIdeViewService(fakeBackend()));
+	const channel = new DshIdeChannel(() => new DshIdeViewService(fakeBackend()));
 	const result = await channel.call<{ ok: boolean; code?: string }>('ctx-a', DSH_IDE_CONTROL_LAUNCH, {});
 	assert.equal(result.ok, false);
 	assert.equal(result.code, DSH_IDE_FEATURE_UNAVAILABLE, 'an unwired launcher must be feature-unavailable');
@@ -415,7 +426,7 @@ test('launch refuses without a launcher instead of pretending success', async ()
 
 test('launch rejects malformed specs and never reaches the launcher', async () => {
 	const launcher = fakeLauncher({ ok: true });
-	const channel = new DshIdeChannel(new DshIdeViewService(fakeBackend()), launcher);
+	const channel = new DshIdeChannel(() => new DshIdeViewService(fakeBackend()), launcher);
 	for (const bad of [{ workspace: '' }, { sessionId: '   ' }, { workspace: 1 }, { __extra: 1 }]) {
 		const result = await channel.call<{ ok: boolean; code?: string }>('ctx-a', DSH_IDE_CONTROL_LAUNCH, bad);
 		assert.equal(result.ok, false, `${JSON.stringify(bad)} must be refused`);
@@ -426,7 +437,7 @@ test('launch rejects malformed specs and never reaches the launcher', async () =
 
 test('launch surfaces launcher failure messages verbatim', async () => {
 	const launcher = fakeLauncher({ ok: false, message: 'spawn failed' });
-	const channel = new DshIdeChannel(new DshIdeViewService(fakeBackend()), launcher);
+	const channel = new DshIdeChannel(() => new DshIdeViewService(fakeBackend()), launcher);
 	const result = await channel.call<{ ok: boolean; message?: string }>('ctx-a', DSH_IDE_CONTROL_LAUNCH, {});
 	assert.deepEqual(result, { ok: false, message: 'spawn failed' });
 });
@@ -436,7 +447,7 @@ test('launch forwards the session id to the launcher so the window can follow it
 	// 会话由 DSH 决定（不变量 I4）：开窗方必须把 sessionId 交给窗口，否则窗口只订阅 $events，
 	// 拿不到会话内容，Chat 面板永远没有行。
 	const launcher = fakeLauncher({ ok: true });
-	const channel = new DshIdeChannel(new DshIdeViewService(fakeBackend()), launcher);
+	const channel = new DshIdeChannel(() => new DshIdeViewService(fakeBackend()), launcher);
 	await channel.call('ctx-a', DSH_IDE_CONTROL_LAUNCH, { sessionId: 'session-42' });
 	assert.deepEqual(launcher.calls, [{ sessionId: 'session-42' }], 'the session id must reach the launcher');
 });

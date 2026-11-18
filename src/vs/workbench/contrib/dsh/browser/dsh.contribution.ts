@@ -150,6 +150,8 @@ class DshClientContribution extends Disposable implements IWorkbenchContribution
 
 		const sessionId = env[DSH_IDE_SESSION_ENV];
 		const boundSessionId = sessionId === undefined || sessionId === '' ? undefined : sessionId;
+		// 输入框的读取与写回同样带会话身份：未绑定时不发请求，换绑后不跟随新会话。
+		composer.setSession(boundSessionId);
 		void client.openView({ view: 'chat', params: boundSessionId === undefined ? {} : { sessionId: boundSessionId } }).then(result => {
 			if (!result.ok) {
 				this.notifications.info(localize(

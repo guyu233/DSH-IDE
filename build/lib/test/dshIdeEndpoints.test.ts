@@ -202,8 +202,9 @@ test('D17 deleteSession calls the approved physical-delete endpoint, never a clo
 	assert.match(transport, /call\('ide', 'dispatch'/, 'window only forwards the delete to the kernel');
 	assert.match(host, /result\.deleted !== true/, 'Host must require the confirmed delete result');
 	// 归属与判活前置必须保留。
-	assert.match(host, /async deleteSession\(args\)\s*\{\s*bridge\.assertOwnership\(args\.sessionId\)/,
-		'Host deleteSession must assert ownership first');
+	// 显式行操作按「该行对当前主体可见」校验，不再要求它等于当前绑定会话。
+	assert.match(host, /async deleteSession\(args\)\s*\{\s*await assertVisibleRowForBridge\(bridge, args\.sessionId\)/,
+		'Host deleteSession must verify the row is visible before touching storage');
 	assert.match(host, /if \(!\(await sessionExists\(bridge\.ctx, args\.sessionId\)\)\)/,
 		'Host deleteSession must verify the session exists before calling the plugin');
 });

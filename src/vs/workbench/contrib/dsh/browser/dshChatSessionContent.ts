@@ -49,7 +49,14 @@ export class DshChatSessionContent extends Disposable implements IChatSession {
 	) {
 		super();
 		this._session = session;
+		// 本对象只代表这一个会话资源。共享会话被换绑到别的会话之后，
+		// 它的事件仍会触发，但那时共享状态已经不是本资源的内容——必须拒绝重建，
+		// 否则缓存里的 A 会显示 B 的历史。
+		this._sessionId = dshSessionIdFromResource(sessionResource);
 		const rebuild = () => {
+			if (!this.isActiveBinding()) {
+				return;
+			}
 			this._history = toHistory(session, session.pending(), extrasOf(session)) as readonly IChatSessionHistoryItem[];
 			this._onDidChangeHistory.fire(this._history);
 		};
@@ -60,6 +67,18 @@ export class DshChatSessionContent extends Disposable implements IChatSession {
 		this._register(session.onDidChangePending(rebuild));
 		// 交付物 / 附件 / 额度变化同样要重建 history。
 		this._register(session.onDidChangeExtras(rebuild));
+	}
+
+	/** 本内容对象代表的会话 id（资源里解析出来的那个）。 */
+	private readonly _sessionId: string | undefined;
+
+	/**
+	 * 共享会话此刻是否仍代表本资源。
+	 *
+	 * 资源与绑定必须同时匹配：只有「共享会话当前绑的就是我这条」时，它的事件才是我的内容。
+	 */
+	private isActiveBinding(): boolean {
+		return this._sessionId !== undefined && this._session.activeSessionId === this._sessionId;
 	}
 
 	get history(): readonly IChatSessionHistoryItem[] {
@@ -89,6 +108,10 @@ export class DshChatSessionContent extends Disposable implements IChatSession {
 	 * 返回 `true` 表示已交给内核；失败时原生面板保留输入并提示。
 	 */
 	async submit(text: string): Promise<boolean> {
+		// 陈旧内容不得把文字发进当前绑定到的另一个会话。
+		if (!this.isActiveBinding()) {
+			return false;
+		}
 		return this._session.submit(text);
 	}
 
@@ -98,6 +121,10 @@ export class DshChatSessionContent extends Disposable implements IChatSession {
 	 * 返回 false 表示没有可中断的运行；原生面板据此决定是否继续显示停止态。
 	 */
 	async interruptActiveResponseCallback(): Promise<boolean> {
+		// 陈旧内容不得停掉当前绑定到的另一个会话。
+		if (!this.isActiveBinding()) {
+			return false;
+		}
 		if (!this._session.running()) {
 			return false;
 		}

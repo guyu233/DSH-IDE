@@ -21,6 +21,7 @@ function assertValidView(fields: ReturnType<typeof projectDshIdeProjections>): v
 	assert.doesNotThrow(() => validateDshIdeSnapshot({
 		wireRevision: DSH_IDE_WIRE_REVISION,
 		channelId: 'c1',
+		binding: { viewId: 'c1', generation: 1, sessionId: null },
 		version: 1,
 		state: { state: 'ready', view: { frame: { type: 'snapshot' }, ...fields } },
 	}));
@@ -117,6 +118,7 @@ test('assistant 节点的单次 usage 能过协议校验（tokenUsageDelta 的�
 	assert.doesNotThrow(() => validateDshIdeSnapshot({
 		wireRevision: DSH_IDE_WIRE_REVISION,
 		channelId: 'c1',
+		binding: { viewId: 'c1', generation: 1, sessionId: null },
 		version: 1,
 		state: {
 			state: 'ready',
@@ -132,6 +134,7 @@ test('skills 与 pending 的形状能过协议校验', () => {
 	assert.doesNotThrow(() => validateDshIdeSnapshot({
 		wireRevision: DSH_IDE_WIRE_REVISION,
 		channelId: 'c1',
+		binding: { viewId: 'c1', generation: 1, sessionId: null },
 		version: 1,
 		state: {
 			state: 'ready',
@@ -159,6 +162,7 @@ test('skills 与 pending 的形状能过协议校验', () => {
 	assert.throws(() => validateDshIdeSnapshot({
 		wireRevision: DSH_IDE_WIRE_REVISION,
 		channelId: 'c1',
+		binding: { viewId: 'c1', generation: 1, sessionId: null },
 		version: 1,
 		state: {
 			state: 'ready',

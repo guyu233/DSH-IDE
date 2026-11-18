@@ -20,6 +20,7 @@ import { setImmediate } from 'node:timers/promises';
 import {
 	DSH_IDE_FEATURE_UNAVAILABLE,
 	DSH_IDE_SESSION_SWITCHED,
+	DSH_IDE_WIRE_REVISION,
 	type DshIdeMethod,
 } from '../../../src/vs/platform/dshClient/common/dshIdeProtocol.ts';
 import {
@@ -28,7 +29,7 @@ import {
 	DshIdeTransportError,
 	authenticateHost,
 	type DshIdeStreamFrame,
-} from '../../../src/vs/platform/dshClient/transport/dshIdeTransport.ts';
+} from '../../../out/vs/platform/dshClient/transport/dshIdeTransport.js';
 
 interface RecordedRequest {
 	readonly url: string;
@@ -314,6 +315,8 @@ test('waterfall decision before ready fails with a defined code', async () => {
 // DshIdeBackend 适配：窗口只把操作交给内核，自己不再重写 session/* 请求
 // ---------------------------------------------------------------------------
 
+const BINDING = { viewId: 'v-1', generation: 1, sessionId: 's-1' } as const;
+
 function backendWithHost(handler: (url: string, body: unknown) => FakeHostResponse | Promise<FakeHostResponse>) {
 	resetSockets();
 	const host = fakeHost(handler);
@@ -330,14 +333,15 @@ const OK = (url: string, body: unknown) => ({
 test('backend sends every operation to ide/dispatch with the method and payload', async () => {
 	const { backend, transport, requests } = backendWithHost(OK);
 
-	await backend.invoke('submit', { text: 'hi', sessionId: 's-1' });
-	await backend.invoke('interrupt', { sessionId: 's-1' });
-	await backend.invoke('setModel', { model: 'deepseek/deepseek-chat' });
+	await backend.invoke('submit', { text: 'hi', sessionId: 's-1' }, BINDING);
+	await backend.invoke('interrupt', { sessionId: 's-1' }, BINDING);
+	await backend.invoke('setModel', { sessionId: 's-1', model: 'deepseek/deepseek-chat' }, BINDING);
 
 	assert.deepEqual(requests.map(request => request.url.split('/api/')[1]), ['ide/dispatch', 'ide/dispatch', 'ide/dispatch']);
 	const first = requests[0].body as { payload: { args: { method: string; payload: Record<string, unknown> } } };
 	assert.equal(first.payload.args.method, 'submit');
 	assert.deepEqual(first.payload.args.payload, { text: 'hi', sessionId: 's-1' });
+	assert.deepEqual(first.payload.args.binding, BINDING, 'every dispatch carries the originating view binding');
 	const second = requests[1].body as { payload: { args: { method: string; payload: Record<string, unknown> } } };
 	assert.equal(second.payload.args.method, 'interrupt');
 	assert.deepEqual(second.payload.args.payload, { sessionId: 's-1' });
@@ -347,7 +351,7 @@ test('backend sends every operation to ide/dispatch with the method and payload'
 test('backend forwards rewind to the kernel, which refuses it', async () => {
 	const { backend, transport, requests } = backendWithHost(OK);
 	// 窗口只把 rewind 交给内核；内核再决定调不调 dsh-rewind-plugin。
-	await backend.invoke('rewind', { sessionId: 's-1', to: '0' });
+	await backend.invoke('rewind', { sessionId: 's-1', to: '0' }, BINDING);
 	assert.deepEqual(requests.map(request => request.url.split('/api/')[1]), ['ide/dispatch']);
 	const payload = requests[0].body as { payload: { args: { method: string } } };
 	assert.equal(payload.payload.args.method, 'rewind');
@@ -357,15 +361,18 @@ test('backend forwards rewind to the kernel, which refuses it', async () => {
 test('backend opens one ide/followSession stream and closes it', () => {
 	const { backend, transport } = backendWithHost(OK);
 	const seen: unknown[] = [];
-	const handle = backend.follow('s-1', event => seen.push(event));
+	const binding = { viewId: 'v-1', generation: 1, sessionId: 's-1' };
+	const handle = backend.follow('s-1', event => seen.push(event), undefined, binding);
 	const socket = FakeWebSocket.instances[0];
 	socket.open();
 	const opened = socket.sent as { endpoint: string; streamId: string; payload?: { args?: Record<string, unknown> } }[];
 	assert.deepEqual(opened.map(s => s.endpoint), ['ide/followSession']);
-	assert.deepEqual(opened[0]!.payload?.args, { sessionId: 's-1' });
+	assert.deepEqual(opened[0]!.payload?.args, { sessionId: 's-1', binding, wireRevision: DSH_IDE_WIRE_REVISION });
 
+	// 身份先于内容：Host 先确认绑定，之后才是会话帧。
+	socket.deliver({ type: 'item', streamId: opened[0]!.streamId, value: { type: 'ide-view-bound', binding } });
 	socket.deliver({ type: 'item', streamId: opened[0]!.streamId, value: { type: 'event', event: { type: 'user/message', seq: 1 } } });
-	assert.equal(seen.length, 1);
+	assert.equal(seen.length, 1, 'only the content frame reaches the view');
 
 	handle.dispose();
 	const cancels = (socket.sent as { type: string }[]).filter(s => s.type === 'cancel');
@@ -375,7 +382,7 @@ test('backend opens one ide/followSession stream and closes it', () => {
 
 test('unbound follow opens one status-only stream and closes it on dispose', () => {
 	const { backend, transport } = backendWithHost(OK);
-	const handle = backend.follow(undefined, () => undefined);
+	const handle = backend.follow(undefined, () => undefined, undefined, { viewId: 'v-2', generation: 1, sessionId: null });
 	// 没有绑定会话时仍要收 api-session/status，否则未开聊的窗口收不到会话状态变化。
 	assert.equal(FakeWebSocket.instances.length, 1, 'unbound follow must open one status stream');
 	const socket = FakeWebSocket.instances[0];

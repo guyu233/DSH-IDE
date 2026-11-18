@@ -28,6 +28,7 @@ function ready(text: string): DshIdeSnapshot {
 		wireRevision: DSH_IDE_WIRE_REVISION,
 		channelId: 'native-fixture',
 		version: 1,
+		binding: { viewId: 'native-fixture', generation: 1, sessionId: null },
 		state: { state: 'ready', view: {
 			frame: { type: 'snapshot' },
 			conversation: { hasMore: false, nodes: [{ kind: 'user', seq: 1, time: 1, content: [{ type: 'text', text }] }] },
@@ -95,10 +96,12 @@ function receiveSubmission(sessionResource: URI, result: boolean) {
 suite('DSH B00 redwall', () => {
 	const store = ensureNoDisposablesAreLeakedInTestSuite();
 
-	test('BUG-009: a cached resource retains its own history after another resource binds', async () => {
+	async function openTwoCachedResources() {
 		const client = mockObject<IDshClientService>()({ _serviceBrand: undefined });
 		client.rebindView.callsFake(async id => ({ ok: true, value: ready(`History for ${id}`) }));
 		client.call.resolves({ ok: false, error: { code: 'fixture/unavailable', message: 'No extras for this fixture' } });
+		client.call.withArgs('submit').resolves({ ok: true, value: { accepted: true } });
+		client.call.withArgs('interrupt').resolves({ ok: true, value: { accepted: true } });
 		const session = store.add(new DshChatSession(client));
 		const a = URI.parse('dsh:/A');
 		const b = URI.parse('dsh:/B');
@@ -115,11 +118,33 @@ suite('DSH B00 redwall', () => {
 			_pendingSessionResolutions: new Map(),
 			_logService: new NullLogService(),
 		}) as ChatSessionsService;
+		return { client, session, native, a, first, second };
+	}
+
+	test('BUG-009: a cached resource retains its own history after another resource binds', async () => {
+		const { native, a, first, second } = await openTwoCachedResources();
 		const cachedA = await native.getOrCreateChatSession(a, CancellationToken.None);
 		assert.strictEqual(cachedA, first, 'A must take the actual native cache-hit path');
 		assert.deepStrictEqual(prompts(second), ['History for B']);
 		assert.deepStrictEqual(prompts(cachedA), ['History for A']);
 	});
+
+	for (const method of ['submit', 'interrupt'] as const) {
+		test(`BUG-009: a stale cached resource cannot send ${method} to another resource`, async () => {
+			const { client, session, native, a, first, second } = await openTwoCachedResources();
+			const perform = (content: DshChatSessionContent) => method === 'submit'
+				? content.submit('Fixture prompt')
+				: content.interruptActiveResponseCallback();
+			const targets = () => client.call.getCalls().filter(call => call.args[0] === method).map(call => call.args[1]?.sessionId);
+			session.acceptSessionStatus('B', true);
+			assert.strictEqual(await perform(second), true, 'the active resource must still accept the ordinary action');
+			assert.deepStrictEqual(targets(), ['B']);
+			session.acceptSessionStatus('B', true);
+			assert.strictEqual(await native.getOrCreateChatSession(a, CancellationToken.None), first);
+			const result = await perform(first);
+			assert.deepStrictEqual({ result, targets: targets() }, { result: false, targets: ['B'] });
+		});
+	}
 
 	test('BUG-011: provider acceptance consumes the native draft once', async () => {
 		const fixture = receiveSubmission(URI.parse('dsh:/A'), true);

@@ -337,11 +337,15 @@ test('a late composerState cannot overwrite the session bound while it was in fl
 				return unavailable;
 			}
 			reads += 1;
-			return reads === 1 ? late.promise : { ok: true, value: { model: { current: { provider: 'unit', model: 'B' }, groups: [] } } };
+			// 1：bind('A') 的首屏目录；2：换绑前发出的旧读取（挂起）；3：bind('B') 的目录。
+			return reads === 2
+				? late.promise
+				: { ok: true, value: { model: { current: { provider: 'unit', model: reads === 1 ? 'A' : 'B' }, groups: [] } } };
 		},
 		rebindView: async (sessionId: string) => readySnapshot(sessionId),
 	} as never);
 	try {
+		assert.equal(await session.bind('A'), true);
 		const oldRefresh = session.refreshComposer();
 		assert.equal(await session.bind('B'), true);
 		assert.equal(session.currentModel()?.model, 'B');

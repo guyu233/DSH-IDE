@@ -24,8 +24,8 @@ import {
 	removeHostEndpoint,
 	endpointLogText,
 	resolveHostEndpoint,
-} from '../../host/ide-view-host.js';
-import { redactAuthMaterial, safeErrorText } from '../../common/dshIdeAuthRedaction.js';
+} from '../../../../../../out/vs/platform/dshClient/host/ide-view-host.js';
+import { redactAuthMaterial, safeErrorText } from '../../../../../../out/vs/platform/dshClient/common/dshIdeAuthRedaction.js';
 
 /** 最小假上下文：记录监听、支持 emit，并按名字返回服务。 */
 function fakeCtx(services = {}) {
@@ -233,7 +233,7 @@ test('followSession delivers frames until aborted and then returns', async () =>
 	const abort = new AbortController();
 	const seen = [];
 	const reading = (async () => {
-		for await (const frame of bridge.followSession('s-1', abort.signal)) {
+		for await (const frame of bridge.followSession({ viewId: 'v-1', generation: 1, sessionId: 's-1' }, abort.signal)) {
 			seen.push(frame);
 		}
 	})();
@@ -244,7 +244,8 @@ test('followSession delivers frames until aborted and then returns', async () =>
 		reading,
 		new Promise((_resolve, reject) => setTimeout(() => reject(new Error('abort did not wake the stream')), 1000)),
 	]);
-	assert.deepEqual(seen, []);
+	// 身份先于内容：第一帧只确认归属，之后才是会话内容；这里没有内容，所以只有确认帧。
+	assert.deepEqual(seen.map(frame => frame.type), ['ide-view-bound'], 'identity is confirmed before any session content');
 });
 
 test('answerer delegates with next() when no transport is wired', async () => {
@@ -385,13 +386,13 @@ test('readAttachment projects only image bytes through the official attachment s
 		},
 	} });
 	bridge.open({ view: 'chat', params: { sessionId: 's-1' } });
-	assert.deepEqual(await bridge.invoke('readAttachment', { attachment: ref }), { mediaType: 'image/png', data: 'AQID' });
+	assert.deepEqual(await bridge.invoke('readAttachment', { sessionId: 's-1', attachment: ref }), { mediaType: 'image/png', data: 'AQID' });
 });
 
 test('readAttachment refuses when the official attachment service is unavailable', async () => {
 	const { bridge } = bridgeWith();
 	bridge.open({ view: 'chat', params: { sessionId: 's-1' } });
-	await assert.rejects(() => bridge.invoke('readAttachment', { attachment: {
+	await assert.rejects(() => bridge.invoke('readAttachment', { sessionId: 's-1', attachment: {
 		attachmentId: 'img-1', mediaType: 'image/png', bytes: 1, width: 1, height: 1,
 	} }), error => error.code === FEATURE_UNAVAILABLE && /attachments/.test(error.message));
 });
@@ -594,17 +595,19 @@ test('deleteSession refuses a result that does not confirm deletion', async () =
 
 test('deleteSession rejects unknown and foreign sessions before calling the plugin', async () => {
 	const registry = archiveRegistryStub();
-	// 归属校验：绑定了 s-1 的视图不能删 s-2。
+	// 显式行操作不要求等于当前绑定会话，但该行必须对当前主体可见：
+	// 绑定了 s-1 的视图可以删同一名单里的 s-2，不能删名单外的 s-9。
 	const { bridge } = bridgeWith({ workspaceRegistry: registry });
 	bridge.open({ view: 'chat', params: { sessionId: 's-1' } });
-	await assert.rejects(() => bridge.invoke('deleteSession', { sessionId: 's-2' }), error => error.code === SESSION_SWITCHED);
+	await assert.rejects(() => bridge.invoke('deleteSession', { sessionId: 's-9' }), error => error.code === SESSION_SWITCHED);
 	// 未知会话：内核 live registry 与 API 列表都查不到。
 	const unknown = bridgeWith({
 		workspaceRegistry: registry,
 		sessions: { get: () => undefined },
 		sessionController: sessionControllerStub({ list: async () => ({ items: [] }) }),
 	});
-	await assert.rejects(() => unknown.bridge.invoke('deleteSession', { sessionId: 's-1' }), error => error.code === INVALID_ARGUMENT);
+	// 名单里查不到的行不进入任何物理动作：按不可见拒绝。
+	await assert.rejects(() => unknown.bridge.invoke('deleteSession', { sessionId: 's-1' }), error => error.code === SESSION_SWITCHED);
 	assert.deepEqual(registry.calls, [], 'no physical action may happen for a rejected request');
 });
 
@@ -948,7 +951,7 @@ test('setEffort reads the current route from projections and re-selects with rea
 	});
 	const { bridge } = bridgeWith({ sessionController: controller });
 	bridge.open({ view: 'chat', params: { sessionId: 's-1' } });
-	assert.deepEqual(await bridge.invoke('setEffort', { effort: 'high' }), { accepted: true });
+	assert.deepEqual(await bridge.invoke('setEffort', { sessionId: 's-1', effort: 'high' }), { accepted: true });
 	assert.deepEqual(calls.map(c => c.name), ['projections', 'selectModel']);
 	assert.deepEqual(calls[0].request, { sessionId: 's-1' });
 	assert.deepEqual(calls[1].request, { sessionId: 's-1', provider: 'deepseek', model: 'chat', reasoningEffort: 'high' });
@@ -958,7 +961,7 @@ test('setEffort refuses an empty effort without querying the Host', async () => 
 	const unexpected = () => { assert.fail('an invalid effort must not query the Host'); };
 	const { bridge } = bridgeWith({ sessionController: { projections: unexpected, selectModel: unexpected } });
 	bridge.open({ view: 'chat', params: { sessionId: 's-1' } });
-	await assert.rejects(() => bridge.invoke('setEffort', { effort: '' }), error => error.code === INVALID_ARGUMENT);
+	await assert.rejects(() => bridge.invoke('setEffort', { sessionId: 's-1', effort: '' }), error => error.code === INVALID_ARGUMENT);
 });
 
 test('setEffort refuses when the session has no current model selection', async () => {
@@ -968,7 +971,7 @@ test('setEffort refuses when the session has no current model selection', async 
 	});
 	const { bridge } = bridgeWith({ sessionController: controller });
 	bridge.open({ view: 'chat', params: { sessionId: 's-1' } });
-	await assert.rejects(() => bridge.invoke('setEffort', { effort: 'high' }), error => error.code === FEATURE_UNAVAILABLE);
+	await assert.rejects(() => bridge.invoke('setEffort', { sessionId: 's-1', effort: 'high' }), error => error.code === FEATURE_UNAVAILABLE);
 });
 
 // ---------------------------------------------------------------------------
@@ -1001,7 +1004,7 @@ test('listCommands resolves the bound agent and projects only neutral command fi
 	});
 	const { bridge } = bridgeWith(services);
 	bridge.open({ view: 'chat', params: { sessionId: 's-1' } });
-	const result = await bridge.invoke('listCommands', {});
+	const result = await bridge.invoke('listCommands', { sessionId: 's-1' });
 	assert.deepEqual(seenAgent, { id: 's-1' });
 	assert.deepEqual(result, [
 		{ name: 'plan', description: 'Plan a task' },
@@ -1015,13 +1018,13 @@ test('listCommands resolves the bound agent and projects only neutral command fi
 test('listCommands refuses when the DSH commands service is unavailable', async () => {
 	const { bridge } = bridgeWith({ agents: { get: () => ({ id: 's-1' }) } });
 	bridge.open({ view: 'chat', params: { sessionId: 's-1' } });
-	await assert.rejects(() => bridge.invoke('listCommands', {}), error => error.code === FEATURE_UNAVAILABLE && /commands/.test(error.message));
+	await assert.rejects(() => bridge.invoke('listCommands', { sessionId: 's-1' }), error => error.code === FEATURE_UNAVAILABLE && /commands/.test(error.message));
 });
 
 test('listCommands refuses when the bound session has no live agent', async () => {
 	const { bridge } = bridgeWith(commandServices({ agents: { get: () => undefined } }));
 	bridge.open({ view: 'chat', params: { sessionId: 's-1' } });
-	await assert.rejects(() => bridge.invoke('listCommands', {}), error => error.code === FEATURE_UNAVAILABLE && /no live agent/.test(error.message));
+	await assert.rejects(() => bridge.invoke('listCommands', { sessionId: 's-1' }), error => error.code === FEATURE_UNAVAILABLE && /no live agent/.test(error.message));
 });
 
 // ---------------------------------------------------------------------------
@@ -1042,7 +1045,7 @@ function commandExecuteServices(outcome) {
 test('runCommand builds a slash line and maps a success result to accepted', async () => {
 	const { bridge } = bridgeWith(commandExecuteServices({ commandId: 'c1', result: { kind: 'success', text: 'ok' } }));
 	bridge.open({ view: 'chat', params: { sessionId: 's-1' } });
-	assert.deepEqual(await bridge.invoke('runCommand', { command: 'plan', args: ['a', 'b-c'] }), { accepted: true });
+	assert.deepEqual(await bridge.invoke('runCommand', { sessionId: 's-1', command: 'plan', args: ['a', 'b-c'] }), { accepted: true });
 	const call = commandExecuteServices.lastCall;
 	assert.equal(call.line, '/plan a b-c');
 	assert.deepEqual(call.attachments, []);
@@ -1052,7 +1055,7 @@ test('runCommand builds a slash line and maps a success result to accepted', asy
 test('setPermissionPreset reuses the same executor with /permission <preset>', async () => {
 	const { bridge } = bridgeWith(commandExecuteServices({ commandId: 'c1', result: { kind: 'success' } }));
 	bridge.open({ view: 'chat', params: { sessionId: 's-1' } });
-	assert.deepEqual(await bridge.invoke('setPermissionPreset', { preset: 'workspace-write' }), { accepted: true });
+	assert.deepEqual(await bridge.invoke('setPermissionPreset', { sessionId: 's-1', preset: 'workspace-write' }), { accepted: true });
 	assert.equal(commandExecuteServices.lastCall.line, '/permission workspace-write');
 });
 
@@ -1060,12 +1063,12 @@ test('runCommand rejects a non-admitted (undefined) or error result instead of f
 	{
 		const { bridge } = bridgeWith(commandExecuteServices(undefined));
 		bridge.open({ view: 'chat', params: { sessionId: 's-1' } });
-		await assert.rejects(() => bridge.invoke('runCommand', { command: 'nope' }), error => error.code === INVALID_ARGUMENT && /not admitted/.test(error.message));
+		await assert.rejects(() => bridge.invoke('runCommand', { sessionId: 's-1', command: 'nope' }), error => error.code === INVALID_ARGUMENT && /not admitted/.test(error.message));
 	}
 	{
 		const { bridge } = bridgeWith(commandExecuteServices({ commandId: 'c1', result: { kind: 'error', text: 'unknown preset "x"' } }));
 		bridge.open({ view: 'chat', params: { sessionId: 's-1' } });
-		await assert.rejects(() => bridge.invoke('setPermissionPreset', { preset: 'x' }), error => error.code === FEATURE_UNAVAILABLE && /unknown preset/.test(error.message));
+		await assert.rejects(() => bridge.invoke('setPermissionPreset', { sessionId: 's-1', preset: 'x' }), error => error.code === FEATURE_UNAVAILABLE && /unknown preset/.test(error.message));
 	}
 });
 
@@ -1170,10 +1173,10 @@ test('archiveSession keeps ownership checks and propagates the official active-s
 		},
 	});
 	bridge.open({ view: 'chat', params: { sessionId: 's-1' } });
-	// 归属校验：其它会话被拒绝，且不触达官方端点。
-	await assert.rejects(() => bridge.invoke('archiveSession', { sessionId: 's-2' }),
+	// 名单外的会话被拒绝，且不触达官方端点；名单内的行即使不是当前会话也允许操作。
+	await assert.rejects(() => bridge.invoke('archiveSession', { sessionId: 's-9' }),
 		error => error.code === SESSION_SWITCHED);
-	assert.equal(called, false, 'a foreign session must not reach archiveSession');
+	assert.equal(called, false, 'an invisible session must not reach archiveSession');
 	// 官方拒绝原样透传（不吞成 accepted、不自行决定强停）。
 	await assert.rejects(() => bridge.invoke('archiveSession', { sessionId: 's-1' }),
 		error => /workspace\/session-active/.test(error.message));
@@ -1192,10 +1195,10 @@ test('loadOlder calls sessionController.page with the official request shape', a
 		sessionController: { ...sessionControllerStub(), page: async request => { calls.push(request); return calls.length === 1 ? older : tail; } },
 	});
 	bridge.open({ view: 'chat', params: { sessionId: 's-1' } });
-	assert.deepEqual(await bridge.invoke('loadOlder', { throughSeq: 9, beforeSeq: 7, maxMessages: 20 }), { accepted: true, page: older });
+	assert.deepEqual(await bridge.invoke('loadOlder', { sessionId: 's-1', throughSeq: 9, beforeSeq: 7, maxMessages: 20 }), { accepted: true, page: older });
 	assert.deepEqual(calls[0], { address: { kind: 'session', sessionId: 's-1' }, throughSeq: 9, beforeSeq: 7, maxMessages: 20 });
 	// 省略可选字段时不传该键；官方 cursor 被丢掉，只留 records + hasMore。
-	assert.deepEqual(await bridge.invoke('loadOlder', {}), { accepted: true, page: { records: [], hasMore: false } });
+	assert.deepEqual(await bridge.invoke('loadOlder', { sessionId: 's-1' }), { accepted: true, page: { records: [], hasMore: false } });
 	assert.deepEqual(calls[1], { address: { kind: 'session', sessionId: 's-1' } });
 });
 
@@ -1204,7 +1207,7 @@ test('loadOlder refuses a page that is not records plus hasMore', async () => {
 		sessionController: { ...sessionControllerStub(), page: async () => ({ cursor: 1, events: [] }) },
 	});
 	bridge.open({ view: 'chat', params: { sessionId: 's-1' } });
-	await assert.rejects(() => bridge.invoke('loadOlder', {}), error => error.code === FEATURE_UNAVAILABLE);
+	await assert.rejects(() => bridge.invoke('loadOlder', { sessionId: 's-1' }), error => error.code === FEATURE_UNAVAILABLE);
 });
 
 test('loadOlder refuses a foreign session before touching the Host', async () => {
@@ -1333,7 +1336,7 @@ test('composerState keeps only the fields the input bar renders', async () => {
 		agentPresets: { list: async () => [{ id: 'create', name: '创造模式' }, { id: 'bad', name: '坏的', broken: 'no' }] },
 	});
 	bridge.open({ view: 'chat', params: { sessionId: 's-1' } });
-	assert.deepEqual(await bridge.invoke('composerState', {}), {
+	assert.deepEqual(await bridge.invoke('composerState', { sessionId: 's-1' }), {
 		model: {
 			current: { provider: 'xai', model: 'grok-4.7', effort: 'xhigh' },
 			groups: [{ id: 'xai', name: 'xAI', models: [{ id: 'grok-4.7', name: 'grok-4.7', efforts: [{ id: 'xhigh', name: 'Xhigh' }], defaultEffort: 'xhigh' }] }],
@@ -1373,7 +1376,7 @@ test('listSkills projects only the neutral skill card fields', async () => {
 		},
 	});
 	bridge.open({ view: 'chat', params: { sessionId: 's-1' } });
-	const skills = await bridge.invoke('listSkills', {});
+	const skills = await bridge.invoke('listSkills', { sessionId: 's-1' });
 	assert.equal(calls.length, 1);
 	assert.deepEqual(calls[0].request, { sessionId: 's-1' });
 	assert.equal(calls[0].hasSignal, true);
@@ -1402,7 +1405,7 @@ test('listSkills rejects explicitly when the session skill catalog is unavailabl
 	const { bridge } = bridgeWith();
 	bridge.open({ view: 'chat', params: { sessionId: 's-1' } });
 	await assert.rejects(
-		() => bridge.invoke('listSkills', {}),
+		() => bridge.invoke('listSkills', { sessionId: 's-1' }),
 		error => error.code === 'dsh-ide/feature-unavailable',
 	);
 });
@@ -1416,10 +1419,10 @@ test('setTeamEnabled and setAgentPreset call the official services on the live a
 		agentPresets: { select: async (who, preset) => { calls.push(['preset', who, preset]); return preset; } },
 	});
 	bridge.open({ view: 'chat', params: { sessionId: 's-1' } });
-	assert.deepEqual(await bridge.invoke('setTeamEnabled', { enabled: true }), { accepted: true });
-	assert.deepEqual(await bridge.invoke('setAgentPreset', { preset: 'create' }), { accepted: true });
+	assert.deepEqual(await bridge.invoke('setTeamEnabled', { sessionId: 's-1', enabled: true }), { accepted: true });
+	assert.deepEqual(await bridge.invoke('setAgentPreset', { sessionId: 's-1', preset: 'create' }), { accepted: true });
 	assert.deepEqual(calls, [['team', agent, true], ['preset', agent, 'create']]);
-	await assert.rejects(() => bridge.invoke('setAgentPreset', { preset: 'has space' }), error => error.code === INVALID_ARGUMENT);
+	await assert.rejects(() => bridge.invoke('setAgentPreset', { sessionId: 's-1', preset: 'has space' }), error => error.code === INVALID_ARGUMENT);
 });
 
 test('setGoal routes each action to the official goals service', async () => {
@@ -1443,15 +1446,15 @@ test('setGoal routes each action to the official goals service', async () => {
 	});
 	bridge.open({ view: 'chat', params: { sessionId: 's-1' } });
 
-	const created = await bridge.invoke('setGoal', { action: 'create', objective: '完成手册', maxGoalRounds: 8 });
+	const created = await bridge.invoke('setGoal', { sessionId: 's-1', action: 'create', objective: '完成手册', maxGoalRounds: 8 });
 	assert.equal(created.goal.id, 'g-1');
 	assert.equal(created.goal.objective, '完成手册');
 	assert.equal(created.activation, 'armed');
-	await bridge.invoke('setGoal', { action: 'edit', id: 'g-1', revision: 1, objective: '新目标' });
-	await bridge.invoke('setGoal', { action: 'pause', id: 'g-1', revision: 2 });
-	await bridge.invoke('setGoal', { action: 'resume', id: 'g-1', revision: 3 });
-	await bridge.invoke('setGoal', { action: 'complete', id: 'g-1', revision: 4 });
-	await bridge.invoke('setGoal', { action: 'clear', id: 'g-1', revision: 5 });
+	await bridge.invoke('setGoal', { sessionId: 's-1', action: 'edit', id: 'g-1', revision: 1, objective: '新目标' });
+	await bridge.invoke('setGoal', { sessionId: 's-1', action: 'pause', id: 'g-1', revision: 2 });
+	await bridge.invoke('setGoal', { sessionId: 's-1', action: 'resume', id: 'g-1', revision: 3 });
+	await bridge.invoke('setGoal', { sessionId: 's-1', action: 'complete', id: 'g-1', revision: 4 });
+	await bridge.invoke('setGoal', { sessionId: 's-1', action: 'clear', id: 'g-1', revision: 5 });
 
 	assert.deepEqual(calls.map(call => call[0]), ['create', 'edit', 'pause', 'resume', 'complete', 'clear']);
 	// create 走进程内 goals.create，入参形状对齐 CreateGoalRequest，返回值是投影后的 GoalView。
@@ -1464,7 +1467,7 @@ test('setGoal refuses when there is no live agent', async () => {
 	const { bridge } = bridgeWith();
 	bridge.open({ view: 'chat', params: { sessionId: 's-1' } });
 	await assert.rejects(
-		() => bridge.invoke('setGoal', { action: 'create', objective: 'x' }),
+		() => bridge.invoke('setGoal', { sessionId: 's-1', action: 'create', objective: 'x' }),
 		error => error.code === 'dsh-ide/feature-unavailable',
 	);
 });
