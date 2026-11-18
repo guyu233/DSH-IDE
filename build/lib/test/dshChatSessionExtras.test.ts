@@ -398,6 +398,25 @@ test('a late failed submit does not clear running on the session bound meanwhile
 	}
 });
 
+test('attach does not replace a session the user already bound', async () => {
+	let rebinds = 0;
+	const session = new DshChatSession({
+		call: async () => unavailable,
+		rebindView: async (sessionId: string) => {
+			rebinds++;
+			return readySnapshot(sessionId);
+		},
+	} as never);
+	try {
+		assert.equal(await session.bind('B'), true);
+		await session.attach('A');
+		assert.equal(await session.bind('B'), true);
+		assert.equal(rebinds, 1, 'attach must not move the binding back to the launch session');
+	} finally {
+		session.dispose();
+	}
+});
+
 test('a rejected approval puts the card back', async () => {
 	const session = new DshChatSession({
 		call: async () => unavailable,

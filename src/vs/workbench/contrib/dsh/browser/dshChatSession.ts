@@ -298,8 +298,16 @@ export class DshChatSession extends Disposable implements IDshChatSession {
 
 	/** 启动时连接已由 `openView` 按开窗参数建好：只登记绑定并补读目录，不重开流。 */
 	async attach(sessionId: string | undefined): Promise<void> {
+		// 用户已经点过别的会话时，开窗回包不能把绑定改回去。
+		if (this.generation !== 0 || this.boundSessionId !== undefined || this._bindInFlight !== undefined) {
+			return;
+		}
+		const generation = this.generation;
 		this.boundSessionId = sessionId;
 		await this.refreshComposer();
+		if (generation !== this.generation || this.boundSessionId !== sessionId) {
+			return;
+		}
 		await this.refreshSkills();
 	}
 
