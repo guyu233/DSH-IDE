@@ -74,6 +74,14 @@ class LazyDshIdeTransportBackend implements DshIdeBackend {
 	private readonly endpointFile: string | undefined;
 	private impl: DshIdeTransportBackend | undefined;
 	private authenticating: Promise<DshIdeTransportBackend> | undefined;
+	/**
+	 * 关闭世代。每次 `close()` 递增。
+	 *
+	 * 为什么需要：`close()` 之后，正在进行中的握手（cookie 交换）并不会自动停下。
+	 * 它一旦完成就会建出传输并真的发出请求——窗口已经关了，这条读取属于一个不存在的视图。
+	 * 所以在每个 await 之后的恢复点比对世代，变了就丢弃这次调用。
+	 */
+	private epoch = 0;
 
 	constructor(origin: string, cookie: string | undefined, launchUrl: string | undefined, endpointFile?: string) {
 		this.origin = origin;
@@ -143,6 +151,8 @@ class LazyDshIdeTransportBackend implements DshIdeBackend {
 		let handle: { dispose(): void } | undefined;
 		let retryTimer: ReturnType<typeof setTimeout> | undefined;
 		let attempt = 0;
+		// 建立订阅时也要记住关闭世代：握手期间关窗同样不该建出跟随。
+		const epoch = this.epoch;
 
 		/**
 		 * 建立（或重建）订阅。DSH 重启会换端口：先重新发现端点，再重连。
@@ -155,7 +165,7 @@ class LazyDshIdeTransportBackend implements DshIdeBackend {
 				return;
 			}
 			try {
-				const impl = await this.ensureImpl();
+				const impl = await this.ensureImpl(epoch);
 				if (disposed) {
 					return;
 				}
@@ -209,28 +219,31 @@ class LazyDshIdeTransportBackend implements DshIdeBackend {
 		};
 	}
 	async invoke(method: Parameters<DshIdeBackend['invoke']>[0], args: unknown, binding: DshIdeViewBinding): Promise<unknown> {
+		const epoch = this.epoch;
 		try {
-			const impl = await this.ensureImpl();
+			const impl = await this.ensureImpl(epoch);
 			return await impl.invoke(method, args, binding);
 		} catch (error) {
 			// 端点变了才重试一次：DSH 可能就是刚重启换端口，旧连接必然失败。
 			// 端点没变说明是真正的业务失败，不做无意义重放。
-			if (await this.refreshEndpoint()) {
-				const impl = await this.ensureImpl();
-				return await impl.invoke(method, args, binding);
+			if (!(await this.refreshEndpoint())) {
+				throw error;
 			}
-			throw error;
+			const impl = await this.ensureImpl(epoch);
+			return await impl.invoke(method, args, binding);
 		}
 	}
 
 	close(): void {
+		// 世代先递增：之后任何恢复点都会发现「这次调用属于已关闭的窗口」。
+		this.epoch += 1;
 		this.impl?.close();
 		this.impl = undefined;
 		this.authenticating = undefined;
 		this.pendingOpen = undefined;
 	}
 
-	private ensureImpl(): Promise<DshIdeTransportBackend> {
+	private ensureImpl(epoch: number): Promise<DshIdeTransportBackend> {
 		if (this.impl !== undefined) {
 			return Promise.resolve(this.impl);
 		}
@@ -239,6 +252,8 @@ class LazyDshIdeTransportBackend implements DshIdeBackend {
 		}
 		const attempt = (async () => {
 			const cookie = this.cookie ?? await this.exchangeCookie();
+			// 握手期间窗口可能已经关闭：此时不得建连接，也不得把结果写回实例。
+			this.assertLive(epoch);
 			const transport = new DshIdeTransport({ origin: this.origin, cookie });
 			const backend = new DshIdeTransportBackend(transport);
 			if (this.pendingOpen !== undefined) {
@@ -256,6 +271,16 @@ class LazyDshIdeTransportBackend implements DshIdeBackend {
 		});
 		this.authenticating = attempt;
 		return attempt;
+	}
+
+	/**
+	 * 恢复点校验：调用发起之后窗口被关闭就丢弃这次调用。
+	 * @param epoch 发起时的关闭世代
+	 */
+	private assertLive(epoch: number): void {
+		if (this.epoch !== epoch) {
+			throw Object.assign(new Error('the IDE view was closed before the call could be dispatched'), { code: 'dsh-ide/cancelled' });
+		}
 	}
 
 	private async exchangeCookie(): Promise<string> {
