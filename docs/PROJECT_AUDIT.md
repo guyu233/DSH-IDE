@@ -78,7 +78,7 @@ esolved/integrity 三行，未整体重写锁文件；实体包同步。1 条隔
 | BUG-019 | 已修（隔离证据） | 远端图片尺寸探测有界且必结算：2 MB 字节上限 + 5 s 时限，超限/超时明确返回「读不到」并销毁响应；解析失败只在流结束时才是最终结论，此时结算为 undefined，不再吞错悬空。本地桩实测四种情形（正常图 / 非图片 / 超大 / 不结束）均结算。真机 Emmet 命令 PENDING。 |
 | BUG-024 | 已修（隔离证据） | 模拟器工具名模式不匹配改为显式失败：四条协议路径（Responses API + 三处）都不再静默回退成请求里的第一个工具，避免把「执行了另一个工具」统计成原场景性能数据。1 条隔离用例锁定四条路径。真机性能基线与模拟运行 PENDING。 |
 | OPT-001 | 仍存在 | 需实测 P95 与内存斜率后才能决定是否优化；无实测不优化。 |
-| OPT-002 | 已修（实测证据） | watch 与一次性 transpile 参数语义统一：watch(outDir, excludeTests) 接收 --out 与 --exclude-tests，不再固定 OUT_DIR；监听器改用绝对 glob 与绝对 cwd/ase，非仓库 cwd 启动不再偏移；去掉底层 watcher 不支持的 
+| OPT-002 | 已修（实测证据） | watch 与一次性 transpile 参数语义统一：watch(outDir, excludeTests) 接收 --out 与 --exclude-tests，不再固定 OUT_DIR；监听器改用绝对 glob 与绝对 cwd/ase，非仓库 cwd 启动不再偏移；去掉底层 watcher 不支持的
 eadDelay。实测从 C:\ 启动 	ranspile --watch --out out-watch-probe：目录被创建、out/ 未被写入。1 条隔离用例锁定。 |
 | CLN-004 | 存疑保留（已核引用） | sessionIdOf 实测 18 处引用（非零引用）；裸帧入口 ccept() 仍被测试调用；零字节文件多为 fixture，不按大小删。按审计要求**不删**。 |
 | CLN-005 | 存疑保留（已核引用） | dsh.hostBaseUrl 全仓仅配置注册与 NLS 两处命中，实际端点由 env/文件决定。但「无人配置」未被证明，**不删 schema**。 |
