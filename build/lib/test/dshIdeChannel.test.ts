@@ -200,7 +200,7 @@ test('unavailable backend never fabricates snapshots or events', () => {
 
 const VALID: Record<DshIdeMethod, unknown> = {
 	submit: { text: 'hello' },
-	interrupt: {},
+	interrupt: { sessionId: 's-1' },
 	resume: { sessionId: 's-1' },
 	newSession: { workspace: 'w1', options: { preset: 'standard' } },
 	fork: { sessionId: 's-1', point: 'p1' },

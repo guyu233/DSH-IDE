@@ -486,7 +486,12 @@ export class DshChatSession extends Disposable implements IDshChatSession {
 	}
 
 	async cancel(): Promise<void> {
-		await this.client.call('interrupt', {});
+		const sessionId = this.boundSessionId;
+		if (sessionId === undefined) {
+			return;
+		}
+		// 带上点击时的会话。Host 若已换绑，会拒绝，从而不停新会话。
+		await this.client.call('interrupt', { sessionId });
 	}
 
 	async selectModel(provider: string, model: string): Promise<void> {

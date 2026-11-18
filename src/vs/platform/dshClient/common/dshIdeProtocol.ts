@@ -372,8 +372,8 @@ export interface DshIdeQuestionAnswer {
 export interface DshIdeMethodArgs {
 	/** 提交一条用户消息。图片附件跟在正文后面，形状是官方 `ImageAttachmentRef`。 */
 	submit: { text: string; attachments?: readonly DshIdeImageAttachmentRef[] };
-	/** 中断当前生成。 */
-	interrupt: Record<string, never>;
+	/** 中断点击时绑定的那条会话，不跟随之后换上的会话。 */
+	interrupt: { sessionId: string };
 	/** 恢复一个会话（可选指定）。 */
 	resume: { sessionId?: string };
 	/** 开新会话。 */
@@ -562,7 +562,7 @@ export type DshIdeMethod = keyof DshIdeMethodArgs;
 /** 每个 method 的 exactRecord 允许字段（与 DshIdeMethodArgs 同步；空数组=无字段）。 */
 const DSH_IDE_METHOD_KEYS: Record<DshIdeMethod, readonly string[]> = {
 	submit: ['text', 'attachments'],
-	interrupt: [],
+	interrupt: ['sessionId'],
 	resume: ['sessionId'],
 	newSession: ['workspace', 'options'],
 	fork: ['sessionId', 'point'],
@@ -912,8 +912,10 @@ export function validateDshIdeInput<K extends DshIdeMethod>(command: K, args: un
 				nonEmptyString(record['workspace'], 'DshIdeInput.listSessions.workspace');
 			}
 			break;
-		case 'composerState':
 		case 'interrupt':
+			nonEmptyString(record['sessionId'], 'DshIdeInput.interrupt.sessionId');
+			break;
+		case 'composerState':
 		case 'presentationSettings':
 		case 'refreshSnapshot':
 		case 'listSkills':

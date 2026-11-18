@@ -626,8 +626,13 @@ function createMethodHandlers(bridge) {
 			}, callerSignal());
 			return { accepted: true };
 		},
-		async interrupt() {
-			await controller().cancel({ sessionId: requireSession() });
+		async interrupt(args) {
+			if (typeof args.sessionId !== 'string' || args.sessionId === '') {
+				throw coded(INVALID_ARGUMENT, 'interrupt.sessionId must be a non-empty string');
+			}
+			// 视图已经换到别的会话时，不能停掉新会话。
+			bridge.assertOwnership(args.sessionId);
+			await controller().cancel({ sessionId: args.sessionId });
 			return { accepted: true };
 		},
 		async resume(args) {

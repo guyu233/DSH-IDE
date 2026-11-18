@@ -36,7 +36,7 @@ import {
 
 const VALID_ARGS: Record<DshIdeMethod, unknown> = {
 	submit: { text: 'hello' },
-	interrupt: {},
+	interrupt: { sessionId: 's1' },
 	resume: { sessionId: 's1' },
 	newSession: { workspace: 'w1', options: { theme: 'dark' } },
 	fork: { sessionId: 's1', point: 'p1' },

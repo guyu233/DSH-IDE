@@ -331,7 +331,7 @@ test('backend sends every operation to ide/dispatch with the method and payload'
 	const { backend, transport, requests } = backendWithHost(OK);
 
 	await backend.invoke('submit', { text: 'hi' });
-	await backend.invoke('interrupt', {});
+	await backend.invoke('interrupt', { sessionId: 's-1' });
 	await backend.invoke('setModel', { model: 'deepseek/deepseek-chat' });
 
 	assert.deepEqual(requests.map(request => request.url.split('/api/')[1]), ['ide/dispatch', 'ide/dispatch', 'ide/dispatch']);
@@ -340,7 +340,7 @@ test('backend sends every operation to ide/dispatch with the method and payload'
 	assert.deepEqual(first.payload.args.payload, { text: 'hi' });
 	const second = requests[1].body as { payload: { args: { method: string; payload: Record<string, unknown> } } };
 	assert.equal(second.payload.args.method, 'interrupt');
-	assert.deepEqual(second.payload.args.payload, {});
+	assert.deepEqual(second.payload.args.payload, { sessionId: 's-1' });
 	transport.dispose();
 });
 
