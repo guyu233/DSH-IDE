@@ -775,6 +775,19 @@ test('DOC-002: dev header version and runtime ABI are documented as different th
 	assert.match(agents, /不是\*\*运行 ABI/, 'AGENTS must distinguish the dev target from the runtime ABI');
 });
 
+test('DOC-006: historical provenance is corrected by errata, never rewritten', () => {
+	const manual = source('docs/DSH-IDE改造开发手册.md');
+	// 勘误必须写在现行手册里，并明确「不回写原文」的处置方式。
+	assert.match(manual, /历史凭据勘误/, 'the manual must carry the errata section');
+	assert.match(manual, /保留原文、不得删改/, 'the errata must state the originals are preserved');
+	assert.match(manual, /不再有 sidecar 产物|没有\*\* sidecar 运行时产物/, 'the errata must state there is no sidecar runtime output');
+	// 凭据原文必须仍保留旧表述（证明未被回写）。
+	const libProvenance = source('build/lib/dsh/PROVENANCE.md');
+	const chatRenderProvenance = source('build/dsh/chat-render/PROVENANCE.md');
+	assert.match(libProvenance, /旁挂 sidecar esbuild 编译/, 'the preserved original must keep its wording');
+	assert.match(chatRenderProvenance, /旁挂 sidecar esbuild 编译/, 'the preserved copy must keep its wording');
+});
+
 test('SEC-003: Host dispatch shares the packaged protocol validator', () => {
 	// 只审查装配和单一校验器的接线；不发送非法 DTO，不调用真实 Host。
 	const host = source('src/vs/platform/dshClient/host/ide-view-host.js');

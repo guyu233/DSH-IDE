@@ -406,6 +406,15 @@ DshChatSession.acceptView / acceptConversation → DshChatModel（typed 节点�
 
 前端不需要也不允许知道：裸 follow 帧形状、官方 event 名、Host 服务名、投影函数、wireRevision、channel 白名单、version 合并。
 
+### 5.7 历史凭据勘误（不修改保留原文）
+
+`build/lib/dsh/PROVENANCE.md` 与 `build/dsh/chat-render/PROVENANCE.md` 是**留存的历史凭据**，按 §5 与 AGENTS §5 的规定**保留原文、不得删改**。其中两处描述已与现行实现不符，在此集中勘误，避免读者按旧文理解现状：
+
+1. **「旁挂 sidecar esbuild 编译（运行时唯一构建入口）」**（`build-render.mjs` 条目）：现行实现**没有** sidecar 运行时产物。聊天内容由 `dshChatSessionContent` 的 content provider 直接提供 history；打包期 `prepare-dsh-chat-render` 只把鲸鱼图标写进 bundle 的 `media` 目录（见 `build/gulpfile.vscode.ts` 中该任务注释「不再有 sidecar 产物」）。因此该条应读作「历史说明：早期用 sidecar 渲染」，不是当前运行路径。
+2. **`dist/dsh-chat.js` / `dist/dsh-chat.css` 的入库边界**：该段描述的产物与 `.gitignore` 规则仍成立（产物不入库），但**不再**是运行时加载路径——运行时不加载这两个文件。
+
+处置方式固定为「只在此处加勘误，不回写原文」：修改 PROVENANCE 会破坏凭据的可核对性，也让「原文」与「当前状态」混为一谈。若后续需要更新凭据，另立新文件并在本小节登记，不覆盖既有原文。
+
 ---
 
 ## 6. 验收与防回归
