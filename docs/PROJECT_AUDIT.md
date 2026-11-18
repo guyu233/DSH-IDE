@@ -1,150 +1,184 @@
-# DSH-IDE 审计总摘要
+# DSH-IDE 项目审计与施工状态
 
-唯一生效的审计结论在本文。其它文档只保留链接。
-
-当前基线：`cbf54c1b`。访问日期 2026-11-18。
+本文件是唯一的持续审计与决策台账。问题 ID 源自只读归档 `DSH-IDE-READONLY-AUDIT-44e0a348.md`，不重录归档正文。取证日期：2026-11-18（Asia/Shanghai）。归档 SHA-256：`12f8550bd4f78adfec8cfe0eb1a8430635cc52d692a0520e83074c221a69c967`。
 
 ## 当前总摘要
 
-健康度：`npm run compile` 0 error（4.5 min）；`verify:dsh-ide-ci` 五项 PASS（`DSH_INSTALLED_VERSION=0.2.2-rc.3`）；node 测试 417、mocha 7、fail 0。覆盖率没有命令。全仓 ESLint 未作为通过项。真机界面未验。`verify:dsh-install-drift` 仍对 2026-11-17 的旧 Host 产物失败，开发期不打包。
+**B00 的基线、红测和裁决草案已交付；未修复产品缺陷。** 起点为 `44e0a34827f83c3a87891bc8d0ebf93b96ff09b0`，与审计提交逐字相同；比较 merge-base 为 `d07799b88abd0b84bb4935e0527798d868782f3d`。分支 `audit/b00-baseline-redwall`。B00 附加两份隔离测试和本台账，不改生产、原有测试入口、契约、配置、打包或手册。未确认 P0，不等于证明不存在 P0。
 
-最危险的 3 件事：
+| 当前重点风险 | 下一步 |
+|---|---|
+| BUG-008/009、SEC-003：窗口、资源、请求归属不一致，Host 入口装配未对称。 | B01 先核实官方 Host 主体来源与两半的配对条件，再在唯一通道上原子迁移。 |
+| BUG-010/012/013：已结束请求与较早历史会被错误复用或覆盖。 | 按 B02 → B05 依赖顺序落实，保留现有连续性校验。 |
+| 本机全量 Node、Electron 单测及 ESLint 基线为 FAIL；SEC-005 四个锁仍为受影响版本。 | 先复核全量门禁失败的环境原因；B09 分别记录修复版本、真实调用路径和兼容性结果。 |
 
-1. 安装漂移未重新打包，真机用的 Host 半身可能不是当前源码。
-2. 首次开窗把工作区放在 `--` 后面。普通目录是否仍被打开，要真机看一次。
-3. 删除成功后若下一次 `listSessions` 仍带回该 id，行会再出现。这是有意的。
+生效约束：一个 DSH bundle、一个 `dshIde` 通道、一套契约和校验器、原生 Chat；发送与停止带发起时的会话；换绑不取消合法审批；先保行为与外部契约，再做安全、正确性和优化。参见 [协作约定](../AGENTS.md)、[开发手册](DSH-IDE改造开发手册.md) 与 [协议真源](../src/vs/platform/dshClient/common/dshIdeProtocol.ts)。
 
-下一步 3 件事：
-
-1. 真机在开窗完成前点另一条会话，确认不会被开窗回包拉回去。
-2. 开发完成后重新打包，再跑 `verify:dsh-install-drift`。
-3. 收藏/置顶没有原生行字段。找不到就保持现状，不另画标记。
+版本口径：VS Code `1.143.1` 是产品基线；DSH bundle `2.0.0` 是包版本；`0.2.2-rc.1` 是 DSH 契约校验基线；桌面 Host 运行时清单是 `0.2.2-rc.3`；开发 Electron 实际读取根 [`.npmrc`](../.npmrc#L2)，为 `43.7.7`，缓存版本也为 `43.7.7`。[取版本脚本](../build/lib/electronVersion.ts#L11)不使用协作约定中的宿主 `44.7.0` 作为开发下载版本。两者不直接证明 ABI 兼容；B11 澄清，B00 不改动。
 
 ## 决策台账
 
-| ID | 主题 | 结论 | 依据 | 范围 | 状态 | 回滚 |
-|---|---|---|---|---|---|---|
-| DEC-011 | 发送请求 | `submit` 必填 `sessionId`。Host 只在仍绑定该会话时写入。已经换绑则拒绝。方法数仍是 43。与 DEC-010 同一条规则，不另留「空参数写当前会话」 | `dshIdeProtocol.ts` `submit`；`ide-view-host.js` `assertOwnership` | 聊天发送 | 生效 | `git revert cbf54c1b` |
-| DEC-010 | 停止请求 | `interrupt` 必填 `sessionId`。Host 只在仍绑定该会话时 `cancel`。已经换绑则拒绝，不停新会话。方法数仍是 43。取代上一轮「不加 sessionId」的暂缓 | `dshIdeProtocol.ts` `interrupt`；`ide-view-host.js` `assertOwnership` | 聊天停止 | 生效 | `git revert 8915453f` |
-| DEC-009 | 收藏/置顶切换 | 同一会话的收藏、置顶各自排队。下一次读取发生在上一次写入返回之后。契约仍只传 sessionId，由 Host 按当前状态切换 | `ide-view-host.js` `enqueueToggle`。检索 `favoriteSessions()` 与 `pinnedSessionIds`，各 1 处读取 | Host 会话操作 | 生效 | `git revert 051dd6dd` |
-| DEC-008 | 开窗回包绑定 | `attach` 只在 `generation` 仍为 0、且没有绑定、也没有正在进行的 `bind` 时登记开窗会话。用户已经换过会话就返回 | `dshChatSession.ts` `attach`。`generation` 只在 `bind` 和 `dispose` 时增加 | 聊天会话 | 生效 | `git revert 51596740` |
-| DEC-007 | 批准/问卷失败 | 先拿掉卡片，避免连点。通道返回失败才放回原卡。换会话，或该 eventId 已有新卡，不写回 | `dshChatSession.ts` `restorePending` | 聊天待决议 | 生效 | `git revert c3bdf2ec` |
-| DEC-006 | 开窗参数 | 首次 `spawn` 的位置参数是 `['--', workspace]`。空路径不传参数。已打开的窗口仍用 `URI.file` | `ide-service.js` 只一处 `spawn(home.exe)` | Host 拉起 IDE | 生效 | `git revert 88b1b159` |
-| DEC-001 | 流式临时节点 | 正常 end 后节点先留着；同回合 `assistant/message` 写入后删掉。`abandoned` 立刻删。空内容的正式消息不接管 | `dshIdeConversation.ts` `retireTurnStreams` | 会话投影 | 生效 | `git revert 40de7e42` |
-| DEC-002 | 审计文档 | 结论只写本文 | 禁止两份生效清单 | 文档 | 生效 | 从 git 历史恢复旧摘要 |
-| DEC-003 | 切会话不取消批准 | `rebind` 不调用 `cancelRequest` | 旧会话仍可能被桌面端回答 | Host 视图 | 生效 | 不引入取消 |
-| DEC-004 | 删除后不立刻拉名单 | 只从当前树摘行，子会话升到原位 | `deleteChatSessionItem` | 会话列表 | 生效 | `git revert 1d3f4cf2` |
-| DEC-005 | 不做的原生部件 | 不做 planReview、changesSummary、multiDiffData、confirmation、questionCarousel、working、附件 chip | 原生回传或 history 类型接不住 | 聊天历史 | 生效 | 不单开这些部件 |
+| ID | 状态 | 生效规则、依据和范围 | 取代关系 / 回滚 |
+|---|---|---|---|
+| DEC-001 | 生效 | 正常流结束后保留临时节点，正式可见消息接管；`abandoned` 立即移除。会话投影。 | 未取代；`40de7e42`。 |
+| DEC-002 | 生效 | 单一 bundle、官方传输、唯一通道与协议、原生 Chat、唯一持续审计。协作约定 §1。 | 未取代；`041d17ed` 留存文档历史，不退回并行报告。 |
+| DEC-003 | 生效 | 换绑不调用 `cancelRequest`，桌面和 IDE 都可先答。会话绑定与审批。 | 未取代；不引入跨视图取消。 |
+| DEC-004 | 生效 | 删除成功摘除本地行，保留子项，不立即重拉最终一致名单。会话列表。 | 未取代；`1d3f4cf2`。 |
+| DEC-005 | 生效 | 只承接选定的原生数据结果，不另做此前排除的原生部件。Chat 历史。 | 未取代；不新增第二种渲染模具。 |
+| DEC-006 | 生效 | 首次 argv 中 `--` 隔开工作区；现有窗口保持 URI 入口。启动。 | 未取代；`88b1b159`。 |
+| DEC-007 | 生效 | 批准或问卷提交时先隐藏，失败恢复限同代且未被新卡占用。待决议。 | 未取代；`c3bdf2ec`。终态失败的分类由 B02 裁决。 |
+| DEC-008 | 生效 | 迟到 `attach` 不覆盖用户已作出的绑定。首窗初始化。 | 未取代；`51596740`。 |
+| DEC-009 | 生效 | 收藏、置顶按同类型和同会话串行。Host 列表写入。 | 未取代；`051dd6dd`。 |
+| DEC-010 | 生效 | 停止必填发起时的 `sessionId`，无空参数回退。 | 未取代；`8915453f`。 |
+| DEC-011 | 生效 | 发送必填发起时的 `sessionId`，Host 不改写目标。 | 未取代；`cbf54c1b`。不以方法数量证明两半相容。 |
 
-冲突检测：DEC-011 沿用 DEC-010，不取消 `rebind`（DEC-003），不改删除路径（DEC-004）。方法数仍是 43。`setModel`、`setEffort`、`setGoal`、`runCommand` 等仍用 `requireSession()`，本轮不改，避免半套迁移。
+### D1–D6 草案
+
+以下均为 **PENDING / 草案**，不是运行规则；B00 不宣布旧决策被取代。生效条件是对应批次将影响文件、测试、门禁及手册原子落地并验收。
+
+| 草案 ID / 批次 | 唯一规则与依据 | 影响面及取代关系 | 回滚 |
+|---|---|---|---|
+| DEC-012 / D1 / B01 | 窗口拥有视图绑定；内容绑定到原生缓存 URI 与当前代次；请求在发起时固定身份。当前会话写必须匹配绑定，显式行操作核对同一主体下可见对象。依据 BUG-008/009。 | 主进程 `app`/`channel`/`view-service`、传输、Host 入口、状态及内容对象、菜单、测试。替代当前进程级可变绑定的假设，不替代 DEC-008/010/011；`ctx` 不是远程认证主体。 | 完整 B01 一起撤销，不能单独退 DTO。 |
+| DEC-013 / D2 / B01 | 配对构建可用同一 staging 证实，当前安装与开发混跑不可仅据此证明。先确认配对识别和混装拒绝是否适用于支持的启动入口；证据不足时做显式契约迁移裁决，保持 revision `4` 直至原子交付。依据 DOC-001/SEC-003。 | 协议、Host 守卫、两半装配、源码与 staging 决定的模块、配对矩阵、门禁、手册。不设旧参数回退，不用方法数量替代兼容性判断。 | 配对校验、协议、Host 与 staging 同批撤销。 |
+| DEC-014 / D3 / B02 | 请求种类一致、一次结算，统一投递最后状态；只有仍有效的可重试失败可恢复原卡。问卷必须完整交付答案和意图，无法完整承接时明确交还桌面。依据 BUG-010/017。 | Host pending、mux DTO、投影、renderer、恢复测试。补足 DEC-007 的终态分类，DEC-003/005 不动。 | 结算和卡片状态守卫一起撤销。 |
+| DEC-015 / D4 / B03 | 发送入口以资源确立唯一 provider 和真实接纳结果；沿原生接受与历史语义结算。选择器写回同一目标的真实 Host DTO，失败不显示成已生效。依据 BUG-011/015。 | 原生 `ChatWidget`、DSH 内容对象、composer/命令、契约参数与测试；替代失败后尝试走另一内核及仅界面选中的做法。 | 发送、选择写回及配套断言完整撤销。 |
+| DEC-016 / D5 / B04 | durable 边界按资源和日志位置维护，首个有效基线触发分页，增量不擦除旧页。投影使用版本匹配的 surface/attempt 锚点。依据 BUG-012/022。 | 投影、模型、loadOlder 与真源边界、golden。需要调整 DEC-001 时显式记录，未验证前保留其既有接管语义。 | durable 分页和 projector 变更同批撤销。 |
+| DEC-017 / D6 / B06 | 鉴权由单一所有者管理。结算绑定 origin 和代次，过期任务不能写缓存或环境；重放按请求语义分类，不可确认的写和消费型轮询不盲重发。依据 BUG-014/020、SEC-004。 | `app` caller、backend、传输、端点验证与延迟桩；替代两处缓存各自更新的做法，不另设传输。 | 认证所有者、清理和重试分类一起撤销。 |
 
 ## 问题总表
 
-| ID | 状态 | 位置 | 类型 | 证据 | 处理 |
-|---|---|---|---|---|---|
-| BUG-007 | 已闭环 | `dshIdeProtocol.ts` `submit`；`ide-view-host.js` `submit` | 竞态 | 发送不带会话，Host 用当时绑定的会话调用 `prompt`。换绑后到达的请求会把文字写进新会话 | 必填 `sessionId`。换绑后 `assertOwnership` 拒绝。测试 `submit sends the session that was bound when the text was sent` |
-| BUG-006 | 已闭环 | `dshIdeProtocol.ts` `interrupt`；`ide-view-host.js` `interrupt` | 竞态 | 停止请求不带会话，Host 用当时绑定的会话调用 `cancel`。换绑后到达的请求会停掉新会话 | 必填 `sessionId`。换绑后 `assertOwnership` 拒绝。测试 `submit and interrupt use the verified sessionController shapes` 与 `cancel sends the session that was bound when stop was clicked` |
-| BUG-005 | 已闭环 | `ide-view-host.js` `setSessionFavorite` / `setSessionPinned` | 竞态 | 两次调用会同时读到同一份收藏或置顶状态，然后都写成同一种结果。测试 `two favorite toggles for one session apply in order` | 按会话串行。第一次写成收藏，第二次取消收藏 |
-| BUG-004 | 已闭环 | `dshChatSession.ts` `attach` | 竞态 | `openView` 的回包无条件写 `boundSessionId`。用户已 `bind` 别的会话时，绑定被改回开窗会话。检索 `.attach(`，DSH 渲染层只有贡献点这一处调用 | 已有绑定或 `generation !== 0` 时直接返回。测试 `attach does not replace a session the user already bound` |
-| BUG-003 | 已闭环 | `dshChatSession.ts` `answerApproval` / `answerQuestion` | 状态不一致 | 卡片在 `await` 之前删除，通道失败后不再出现 | `c3bdf2ec` |
-| SEC-002 | 已闭环 | `ide-service.js` `spawn(home.exe, args)` | 启动参数 | 以 `-` 开头的 cwd 会被当成开关。`spawn(home.exe` 命中 1 处 | `88b1b159` |
-| BUG-001 | 已闭环 | `dshIdeConversation.ts` 流式 end | 内容重复 | end 移走 attempt 后正式消息清不掉临时节点 | `40de7e42` |
-| BUG-002 | 已闭环 | 绑定、发送、换模型、归档、未读、开窗 sessionId、composer、custom、vendor、名单通知、steering、删除摘行 | 竞态 / 状态 | `1d3f4cf2`、`2126de72`、`245a025b`、`c6b514dd` | 保持测试 |
-| SEC-001 | 存疑保留 | `inlineCompletion.ts` 调用 `ide/inlineComplete` | 不在 43 个契约方法里 | 通道拒绝未知 method，结果是无补全 | 不绕过校验，不加第 44 个方法 |
-| OPT-001 | 存疑保留 | `acceptConversation` 每帧清空再重建 | 性能 | 没有基准数字 | 没有测量前不改 |
-| CLN-001 | 已闭环 | 死模块、断链脚本、零引用导出 | 瘦身 | 删除前做过引用检索。许可证未动 | 依赖 68→66，dev 100→93，scripts 86→79，锁 1649→1536 |
-| CLN-002 | 仍存在 | 新的零引用符号 | 瘦身 | 本轮没有可证明零引用的新符号 | 不删 |
-
-## 瘦身报告
-
-本轮没有删除文件，没有改依赖，没有改产物体积。
-
-| 项 | 之前 | 现在 |
+| ID | 产品状态 | 验收状态 / 批次 |
 |---|---|---|
-| dependencies | 68 | 66 |
-| devDependencies | 100 | 93 |
-| scripts | 86 | 79 |
-| 锁文件条目 | 1649 | 1536 |
-| tsc 错误 | 137 | 0 |
-| node 测试 | 384 | 417 |
-| mocha | 7 | 7 |
+| BUG-008 | 仍存在 | 两个本地 owner 的 open 红；完整隔离与生命周期 PENDING / B01。 |
+| BUG-009 | 仍存在 | 原生 A 缓存命中读到 B 的 history，红；发送、停止与重新激活 PENDING / B01。 |
+| DOC-001 | 仍存在 | 源码配对可查，装载与混装矩阵 PENDING / B01。 |
+| SEC-003 | 仍存在 | 一份 validator 的 Host 接线与 staging 静态红；真实主体范围待证 / B01。 |
+| BUG-010 | 仍存在 | 已结算卡片重新出现，红；完整终态组合 PENDING / B02。 |
+| BUG-017 | 仍存在 | 问卷完整承接与桌面委托验收 PENDING / B02。 |
+| BUG-011 | 仍存在 | 原生接纳后不结算输入，红；原生拒绝与普通分流两个对照通过；图片及 provider 失效 PENDING / B03。 |
+| BUG-015 | 仍存在 | 两个 provider 的模型参数不符合真正 schema，红；选择器、档位和门控 PENDING / B03。 |
+| BUG-012 | 仍存在 | 较早页在下一帧消失，红；稀疏页等完整矩阵 PENDING / B04。 |
+| BUG-022 | 仍存在 | rc.3 事件/锚点 golden PENDING / B04。 |
+| BUG-013 | 仍存在 | starting 重发旧 view、合并丢基线字段，两条红；恢复和世代矩阵 PENDING / B05。 |
+| BUG-016 | 仍存在 | 共用流基线、结束和释放场景 PENDING / B05。 |
+| BUG-014 | 仍存在 | close 后旧鉴权仍发一次只读调用，桩内红；代次完整矩阵 PENDING / B06。 |
+| BUG-020、SEC-004 | 仍存在 | 重放边界与端点信任/ACL 证据 PENDING / B06。 |
+| BUG-018 | 仍存在 | 进程启动与队列确认 PENDING / B07。 |
+| BUG-021、BUG-023、CLN-003 | 仍存在 / 存疑保留 | 归档、可见性与实际消费路径 PENDING / B08。 |
+| SEC-005 | 仍存在 | 四个锁仍解析 `14.3.2`，安全版本断言红；未运行极端输入；发布物及普通文档验收 PENDING / B09。 |
+| SEC-006 | 存疑保留 | 按原审计逐公告核可达性，不能单凭锁宣告生产漏洞 / B09。 |
+| DOC-003、DOC-005、DOC-007 | 仍存在 | 发布、版本、cwd 验收 PENDING / B10。 |
+| DOC-002、DOC-004、DOC-006、SEC-001 | 仍存在 | 平台支持、上游来源、历史凭据说明、行内补全声明 PENDING / B11。 |
+| BUG-019、BUG-024、OPT-001、OPT-002、CLN-004、CLN-005 | 仍存在 / 存疑保留 | 依赖前序结论；维持现状，需独立复核 / B12。 |
 
-## 存疑保留
+历史关闭项 BUG-001–007、SEC-002、CLN-001 不重开。其原有验收范围不覆盖本表的跨模块问题。CLN-002 没有可删除零引用项的新增证据。
 
-- `agentsWindow` 配置仍被代码读，不删。
-- 上游 `it.skip` 的 smoke 不启用。
-- `build/next` 的 watch 在非仓库根可能监听空目录。
-- 已有窗口的会话 URI 与 `dshSessionResource` 写法相同，但没有抽成同一个函数。
-- 收藏、置顶没有原生行字段。
+## 漂移重锚表
 
-## 假设与待验证
+审计与 B00 批前提交等同。下表为旧锚 → 现场复核的现锚，只列本批 ID 与 D2 的 DOC-001；后续批次按各自分支再重锚。
 
-- 【事实】发送带上点击时的 `sessionId`。视图已换到别的会话时，Host 拒绝且不再调用 `prompt`。
-- 【事实】停止请求带上点击时的 `sessionId`。视图已换到别的会话时，Host 拒绝且不再调用 `cancel`。
-- 【事实】同一会话两次收藏切换按顺序写成收藏、再取消。测试断言了写入序列。
-- 【事实】用户先 `bind` 再 `attach` 时，第二次 `bind` 同一 id 不会再 `rebind`。测试断言了 `rebind` 只发生一次。
-- 【事实】还没有任何 `bind` 时，`attach` 仍会登记开窗会话并读取技能目录。既有测试 `follow frames without skills keep a catalog loaded by listSkills` 仍通过。
-- 【待验证】真机在开窗完成前点另一条会话，面板是否停在后者。
-- 【待验证】普通目录放在 `--` 后面之后，首次开窗仍打开该文件夹。
-- 【推断】空内容的 `assistant/message` 不接管临时节点，是为了留下已经流出来的文字。本轮未改。
-
-## 验证结果
-
-| 门禁 | 改前 | 改后 |
+| ID | 审计锚 → 现场符号 | 是否仍存在 |
 |---|---|---|
-| `npm run compile` | 上一轮 0 error | 0 error，4.5 min |
-| `verify:dsh-ide-ci` | 五项 PASS，node 416 | 五项 PASS，node 417，mocha 7，fail 0 |
-| 覆盖率 | 无命令 | 未跑 |
-| 全仓 ESLint | PENDING | PENDING |
-| 真机 GUI | PENDING | PENDING |
-| `verify:dsh-install-drift` | FAIL，预先存在 | 未打包，仍 FAIL |
+| BUG-008 | IPC `:171` → [`DshIdeChannel.open`](../src/vs/platform/dshClient/electron-main/dshIdeChannel.ts#L172)，[`DshIdeViewService.open`](../src/vs/platform/dshClient/electron-main/ide-view-service.ts#L74)，Host [`follow`](../src/vs/platform/dshClient/host/ide-view-host.js#L280)。 | 是；两个 owner 只建立了 A 的订阅。 |
+| BUG-009 | content ctor `:46` → [`DshChatSessionContent`](../src/vs/workbench/contrib/dsh/browser/dshChatSessionContent.ts#L46) / [`getOrCreateChatSession` 缓存命中](../src/vs/workbench/contrib/chat/browser/chatSessions/chatSessions.contribution.ts#L1317)。 | 是；以真实缓存方法验证。 |
+| BUG-010 | renderer `:544` → [`restorePending`](../src/vs/workbench/contrib/dsh/browser/dshChatSession.ts#L544)，传输 [`isFrame`](../src/vs/platform/dshClient/transport/dshIdeTransport.ts#L362)。 | 是；恢复已决议卡实测，其余终态验收保留。 |
+| BUG-011 | widget `:3872` → [`_acceptInput` DSH 分支](../src/vs/workbench/contrib/chat/browser/widget/chatWidget.ts#L3872)，原生 [`acceptInput`](../src/vs/workbench/contrib/chat/browser/widget/chatWidget.ts#L3930)。 | 是；用真实入口验证是否接纳。 |
+| BUG-012 | model `:394/:464` → [`acceptConversation`](../src/vs/workbench/contrib/dsh/browser/dshChatModel.ts#L394) / [`prependPage`](../src/vs/workbench/contrib/dsh/browser/dshChatModel.ts#L464)。 | 是；实时更新擦除已验证出现的较早记录。 |
+| BUG-013 | consumer `:73` → [`accept`](../src/vs/workbench/contrib/dsh/browser/dshIdeConsumer.ts#L73) / [`apply`](../src/vs/workbench/contrib/dsh/browser/dshIdeConsumer.ts#L134)，Host [`refreshSnapshot`](../src/vs/platform/dshClient/host/ide-view-host.js#L942)。 | 是；阶段与合并各一条红。 |
+| BUG-014 | factory `:224–257` → [`close`/`ensureImpl`](../src/vs/platform/dshClient/electron-main/dshIdeBackendFactory.ts#L224)，[`createLazyLaunchCaller`](../src/vs/code/electron-main/app.ts#L2022)。 | 是；不把一个后端的红当作两个 caller 全部验收。 |
+| BUG-015 | composer `:252` → [`DshComposerSource.selectModel`](../src/vs/workbench/contrib/dsh/browser/dshComposerSource.ts#L252)，[`setModel` schema](../src/vs/platform/dshClient/common/dshIdeProtocol.ts#L809)。 | 是；真实 validator 拒绝额外的 `provider` 字段。 |
+| SEC-003 | Host `:301` → [`IdeRemoteService.dispatch`](../src/vs/platform/dshClient/host/ide-service.js#L301)，[`DshIdeHostBridge.invoke`](../src/vs/platform/dshClient/host/ide-view-host.js#L497)，[`copyList`](../build/gulpfile.vscode.ts#L651)。 | 装配不对称仍在；不据此宣布远程越权。 |
+| SEC-005 | 扩展锁 `:1632` 等 → [根锁](../package-lock.json#L13111)、[构建锁](../build/package-lock.json#L4625)、[扩展编辑锁](../extensions/extension-editing/package-lock.json#L100)、[Markdown 扩展锁](../extensions/markdown-language-features/package-lock.json#L1632)。 | 四处均为 `14.3.2`。 |
+| DOC-001 | 手册 `:346` → [wireRevision 声明](../src/vs/platform/dshClient/common/dshIdeProtocol.ts#L22) / [合同门禁](../build/lib/dsh/verify/dshIdeVerify.mjs#L294)。 | 是；Host 配对证明未取得。 |
 
-安全：本轮没有放宽校验或鉴权。回退命令的切点仍只接受数字序号。
+复扫按归档原样的 P07/P23/P26/P32 与 P19/P31，对固定提交运行 `git grep -I -P -c`（命中行数，仓库 / DSH 两目录）：`66/47`、`13/11`、`916/194`、`46/32`、`3173/73`、`12/11`。P23 的 11 行是实际 Host 调用，另两行是文档，不是生产命中。P07/P26/P32 与 P19/P31 包含声明、测试和重叠调用，只按上述 ID 的实际链路裁定，其余未逐条分类，不伪报为误报或新缺陷。浏览器侧和 Host 的静态扫描不替代 ACL 或鉴权实测。
 
-## 风险与回滚
+## 批次施工记录
 
-| 风险 | 回滚 |
+| 批次 | 原子边界 | 现状 / 回滚点 |
+|---|---|---|
+| B00 | 既有命令的实测基线；两份测试；本报告。 | 11 条目标断言按预期失败；全量矩阵有基线 FAIL。测试提交 `34b0135c`；台账可独立回滚，不涉及生产行为。 |
+| B01 | D1 + D2、SEC-003 装配对称，两半与所有调用方一起迁移。 | PENDING；没有开始生产变更。先清点门禁环境并证实允许的主体和配对规则；不满足就整批保留在原行为。 |
+
+B00 红测范围是复现，不取代后续批次验收条件。文件后缀为 `.red.ts`，以独立命令显式运行；既有全量入口不改、旧用例不删、不跳过。后续对应测试变绿后随修复迁入常规执行清单。模型探测为 `glm-5.3-flash`（low/high/max）与 `hy4flash`（high）；目录未给上下文容量，按已知活跃上限 8 派发 6 个只读关注面，失败或无可核验回包的项由主控复核，不列作独立证据。
+
+## 瘦身报告与存疑保留
+
+没有删除或依赖变动：根依赖 `66 → 66`、开发依赖 `93 → 93`、scripts `79 → 79`、根锁条目 `1536 → 1536`。批前跟踪 blob 总和 `165,360,039 B` 是仓库口径，新增变动只有测试和本文，不是发布负载变化，未重打包。现存空文件、fixture、许可证、来源凭据、测试门面与被调用的裸帧入口不动。`agentsWindow` 有读路径；`dsh.hostBaseUrl` 的外部设置与迁移还未排除；旧列表 DI 与动态消费者仍待查。删除后旧名单可能再显示、收藏/置顶无星标，按已知限制保留，不另立问题。
+
+## 假设与 PENDING 台账
+
+| 未证事项 | 本批结论与补证条件 |
 |---|---|
-| 旧的不带 `sessionId` 的 `submit` 会被拒绝。IDE 与 Host 必须一起更新 | `git revert cbf54c1b` |
-| 旧的空 `interrupt` 调用会被拒绝。IDE 与 Host 必须一起更新 | `git revert 8915453f` |
-| 前一次收藏写入若一直不返回，同会话的下一次切换会等着 | `git revert 051dd6dd` |
-| 若开窗回包早于任何点击，行为与原来一样，仍登记该会话 | `git revert 51596740` |
-| 若用户在 `attach` 之前没有绑定，但 `generation` 已被别的路径增加，首屏不会登记。当前只有 `bind` 和 `dispose` 会增加 `generation` | 同上 |
+| 运行时配对与主体 | staging 将 Host 入口和应用载荷组装到同一包，不证明任一开发/安装启动都不混装。当前只读 Inspect `Config.listConfigs{name:"dsh-ide"}` 返回 `absent`；不据此否定已安装文件。B01 用部署矩阵与本地隔离的合法主体桩取证。 |
+| SEC-003 入口边界 | 静态红只证没有接好相同 validator；不运行权限绕过或攻击复现。B01 核官方版本对应 ABI 与主体授权，保留公开的最小防御性验证。 |
+| SEC-005 适用范围 | 两条公告的 14.x 修复都为 `14.3.3`。正常 Markdown 解析路径与 Notebook 的 HTML 开关是代码事实；实际 bundle 版本、普通文档行为及性能预算需在 B09 验证。 |
+| 全量回归与发布 | 当前 Node `24.18.0`，开发 Electron `43.7.7`；重现环境、缺失 native binding、工作区信任和 Electron 各失败族待分类。不可用真实 profile 或改生产设置来让基线变绿。缺配对、实测或产物的项都保持 PENDING。 |
 
-## 手册增补
+## 验证与不变量校验对比
 
-不新增第二套开窗绑定。首屏仍走 `openView` 然后 `attach`。用户已经 `bind` 时以 `bind` 为准。
+| 门禁 | 批前实测 | B00 落地后的结论 |
+|---|---|---|
+| `npm run compile` | PASS：串行重跑退出 0，耗时 135.2 s，`compile-src` 0 errors；先前并发尝试 `tsgo` 退出 2，原因未证。 | 生产无变化；新增原生测试随 `build-dsh-tests` 转译 PASS。 |
+| 源码无产物类型检查 | PASS：`node node_modules/@typescript/native/bin/tsc --project src/tsconfig.json --noEmit --pretty false`，退出 0（12.8 s）。 | PASS：原生红测追加并修正桩类型后同命令再次退出 0。 |
+| 全仓 ESLint | FAIL：8,631 个文件，106 errors + 1,028 warnings。 | 新增两份测试定向 ESLint PASS；既有失败不计通过，不改规则或抑制。 |
+| `npm run test-node` | FAIL：13,803 PASS / 136 pending / 2 FAIL。失败为 Kerberos 绑定不可用及 Workspace Trust 启用断言。 | 不属于红测；保留批前实测，不声称原生全量已通过。 |
+| 开发 Electron 单测 `scripts/test.bat --reporter dot` | FAIL：18,523 PASS / 144 pending / 66 FAIL；包括排序、Kerberos 解析与规范断言。运行的是隐藏单测窗口，不是真机验收。 | 隔离原生红测单跑：2 条目标断言失败；2 条正常对照及 runner 清洁态检查通过。 |
+| 构建脚本项目直接 `--noEmit`（附加诊断） | 不作发布门禁使用；直接调用不执行构建包的生成前置步骤。 | FAIL：165 条诊断，均不落在新增红测文件；此结果不替代源码项目类型门禁。 |
+| DSH 常规矩阵 `DSH_INSTALLED_VERSION=0.2.2-rc.3` | PASS：5 步；Mocha 7，Node 417，无失败。 | PASS：同命令实测复检仍为 5 步、Mocha 7、Node 417，无失败；红测不进入常规清单。仅证明代码矩阵，不证明发布。 |
+| B00 Node 红测 | 不适用：批前还未新增。 | 9 条均为预期断言失败，0 加载错误、0 取消、0 跳过；连同原生 2 条，覆盖本批 10 个问题 ID。不是修复 PASS。 |
+| 代码级不变量 | 精确比较提交，协议 `wireRevision = 4`、停止/发送参数、唯一通道注册、换绑及包 staging 均保持。 | 不增 validator；现有常规门禁核验单一真源、边界、投影与指纹；SEC-003 的 Host 接线仍未修。许可与 PROVENANCE 文件零差异。 |
 
-## 全局路线图
+覆盖率单列为 **既有 DSH Node 测试 417 项**，Node.js `24.18.0` V8 LCOV，只计报告内出现的被测文件，排除测试文件；不是全仓覆盖率，编译前后不混用分母。红测结果不混入覆盖率：
 
-1. 正确性：投影、列表、开窗、待决议继续用回归测试钉住。
-2. 安全：契约仍是唯一调用面。开窗 argv 已收口。行内补全不绕过校验。
-3. 体积：依赖不再增加。
-4. 验证：真机看开窗回包和被拒绝的批准。开发完成后打包再验漂移。
+| 范围 | 文件 | 行覆盖（已覆盖 / 总） | 分支覆盖（已覆盖 / 总） |
+|---|---:|---:|---:|
+| `src/vs/platform/dshClient` | 16 | 5,031 / 5,964（84.36%） | 1,049 / 1,457（72.00%） |
+| `out/vs/platform/dshClient` 与 `out/vs/workbench/contrib/dsh` | 19 | 2,887 / 4,903（58.88%） | 756 / 1,036（72.97%） |
 
-## 信息缺口
+关键路径绝对已覆盖行：`src` 的协议 1,796、Host 1,226、传输 385；`out` 的视图通道 172、视图宿主 173、会话 373、聊天模型 300、Consumer 100。数据来自 `dsh-coverage.lcov`，供后续逐文件、同输入比较，没被覆盖的鉴权工厂和原生 UI 不能由这些数字推定。原始日志目录：`%TEMP%\DSH-IDE-B00-matrix-20261118-170903`。
 
-没有覆盖率基线。没有本轮全仓 SAST/SCA。没有真机观察。
+从仓库根复跑（Windows，开发 Electron 已备好；两组红测预期退出 `1`，须核对具体断言）：
 
-## 状态对照
+```powershell
+npm run build-dsh-tests
+node --test --test-reporter=spec build/lib/test/redwall/b00.red.ts
+$env:VSCODE_SKIP_PRELAUNCH = '1'
+cmd.exe /d /c 'scripts\test.bat --run src/vs/workbench/contrib/chat/test/browser/widget/dshB00.red.ts'
+```
 
-已闭环：BUG-007、BUG-006、BUG-005、BUG-004、BUG-003、SEC-002、BUG-001、BUG-002、CLN-001、DEC-011。
+同口径覆盖率（使用已转译的 `out`）：
 
-仍存在：SEC-001、OPT-001、CLN-002、安装漂移、真机未验、收藏/置顶无星标、删除后旧名单可能把行画回来。`requireSession()` 仍有 11 处（`setModel`、`setEffort`、`setGoal`、`setTeamEnabled`、`setAgentPreset`、`runCommand`、`rewind`、`composerState`、`listCommands`、`listSkills`，以及 `loadOlder` 缺省回退）。方案与 DEC-011 相同：调用方带上点击时的 sessionId，Host 只在仍绑定时执行。一次改完，不留空参数回退。
+```powershell
+$script = (Get-Content -Raw -LiteralPath 'package.json' | ConvertFrom-Json).scripts.'test-dsh:all'
+$tests = @($script -split '\s+' | Where-Object { $_ -match '\.test\.(ts|mjs)$' })
+node --experimental-strip-types --test --test-force-exit --experimental-test-coverage '--test-coverage-include=src/vs/platform/dshClient/**/*.js' '--test-coverage-include=src/vs/platform/dshClient/**/*.ts' '--test-coverage-include=out/vs/platform/dshClient/**/*.js' '--test-coverage-include=out/vs/workbench/contrib/dsh/**/*.js' '--test-coverage-exclude=**/test/**' --test-reporter=lcov @tests
+```
 
-新引入：无。
+## 风险与回滚方式
 
-## 变更表
+B00 只有测试与台账边界，没有生产行为更改。用 `git revert` 撤掉 B00 相应提交即可回到 `44e0a348` 的跟踪文件状态；不重置用户修改或改已发布产物。B01 未满足的触发条件：证明支持入口可识别有效配对与请求主体，以及有可比较的全量门禁结果。优先用匹配环境逐项复测并区分环境、上游和本项目因素；若无法满足，留两半都不改，记录未达标项。不能以允许旧参数、修改 Workspace Trust、放宽规则或忽略 Lint 抹平失败。
 
-| 日期 | ID | 状态 | 提交 |
-|---|---|---|---|
-| 2026-11-18 | BUG-007、DEC-011 | 已闭环 | `cbf54c1b` |
-| 2026-11-18 | BUG-006、DEC-010 | 已闭环。取代「interrupt 不加字段」 | `8915453f` |
-| 2026-11-18 | BUG-005、DEC-009 | 已闭环 | `051dd6dd` |
-| 2026-11-18 | BUG-004、DEC-008 | 已闭环 | `51596740` |
-| 2026-11-18 | BUG-003、DEC-007 | 已闭环 | `c3bdf2ec` |
-| 2026-11-18 | SEC-002、DEC-006 | 已闭环 | `88b1b159` |
-| 2026-11-18 | BUG-001、DEC-001 | 已闭环 | `40de7e42` |
-| 2026-11-18 | DEC-002 | 已闭环 | `041d17ed` |
-| 2026-11-18 | DEC-004 | 已闭环 | `1d3f4cf2` |
-| 2026-11-18 | 名单通知、开头 steering | 已闭环 | `2126de72` |
+## 手册增补建议
+
+B00 的草案不覆盖手册冻结条件，README 与手册均未改。B01 只有在成对版本、请求身份与 Host 守卫生效时才同步 §5；B04 以 rc.3 声明核对 DEC-001；B10 对齐门禁分级与定位；B11 一次核对平台承诺和历史引用。历史 PROVENANCE 保留原文，新的澄清只写现行资料。
+
+## 路线图
+
+B00 已完成取证交付。下批从 B01 的身份、契约配对、可信主体和门禁前置取证开始，不写半套协议。随后按 B02 终态、B03 发送与选择、B04 历史、B05 世代、B06 鉴权、B07 开窗、B08 列表、B09 供应链、B10 门禁、B11 声明、B12 清理与性能推进。保持用户规定的依赖关系及批内原子性。
+
+## 待真机与发布验收清单
+
+**均为 PENDING**：多窗真实运行与审批、Windows ACL、宿主 ABI、实际发布物两半字节一致性、安装漂移、原生端到端和真实性能预算。B00 不安装、不打包、不启动 GUI 验收、不触发发布。此前安装漂移失败仅是历史记录，不能代替本轮状态。
+
+## 信息缺口与版本证据
+
+全仓行/分支覆盖、已安装插件两半身份、实际 ACL、原生失败族归因及后续公告逐包可达性未穷尽。取证源访问日期为 2026-11-18：[VS Code 1.143.1 标签](https://api.github.com/repos/microsoft/vscode/git/ref/tags/1.143.1)（`e6468682`，实际缓存行为以仓库与测试为准）、[DSH rc.3 事件和分页声明](https://github.com/deepseek-ai/deepseek-harness/blob/38a6a5c965aa99ab525161efb7cc5cf1fe62fced/packages/api/session-controller/src/types.ts)、本机同版桌面声明、[Node 24.18.0 子进程错误事件](https://nodejs.org/download/release/v24.18.0/docs/api/child_process.html#event-error)、[SemVer 2.0.0 §9–11](https://semver.org/spec/v2.0.0.html)、[SEC-005 参考解析公告](https://api.osv.dev/v1/vulns/GHSA-gfr2-rv44-r23c)及[HTML 解析公告](https://github.com/advisories/GHSA-vfgh-jcmw-g37q)。未运行同步脚本、未写参考仓库 refs。
+
+## 批次状态对照
+
+| 状态 | B00 结果 |
+|---|---|
+| 已闭环 | B00 重锚、实测基线和隔离红测；无产品问题从红转绿。 |
+| 仍存在 | BUG-008–015、SEC-003/005；DOC-001 及问题表内后续批次。全量 Node、Electron、ESLint 基线 FAIL。 |
+| 新引入 | 无已确认生产回归；明确单跑的 11 条红测为预期失败。 |
