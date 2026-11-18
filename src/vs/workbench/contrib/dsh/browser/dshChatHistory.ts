@@ -11,6 +11,8 @@
 // 原生 history 是「request / response」成对的行：用户消息开启一条 request，
 // 其后的助手 / 工具内容并进对应的 response；没有 turn 坐标的内容并入当前 response。
 
+import { isAbsolute } from '../../../../base/common/path.js';
+import { URI } from '../../../../base/common/uri.js';
 import type { DshChatNode, DshToolResultNode } from './dshChatModel.js';
 
 /**
@@ -24,7 +26,7 @@ export type DshHistoryPart =
 	| { readonly kind: 'thinking'; readonly value: string }
 	| { readonly kind: 'warning'; readonly content: { readonly value: string } }
 	| { readonly kind: 'info'; readonly content: { readonly value: string } }
-	| { readonly kind: 'reference'; readonly reference: string; readonly options?: { readonly status?: { readonly description: string; readonly kind: number } } }
+	| { readonly kind: 'reference'; readonly reference: string | URI; readonly options?: { readonly status?: { readonly description: string; readonly kind: number } } }
 	| { readonly kind: 'command'; readonly command: { readonly id: string; readonly title: string; readonly arguments?: readonly unknown[] } }
 	| DshProgressTaskPart
 	| DshToolInvocationPart;
@@ -352,7 +354,7 @@ function appendDeliverables(deliverables: readonly DshHistoryDeliverable[], hist
 		for (const file of delivery.files) {
 			parts.push({
 				kind: 'reference',
-				reference: file.path,
+				reference: deliverableReference(file.path),
 				...(file.description === undefined ? {} : { options: { status: { description: file.description, kind: 0 } } }),
 			});
 		}
@@ -369,6 +371,14 @@ function appendDeliverables(deliverables: readonly DshHistoryDeliverable[], hist
  * response 标记为 `isStale`（`chatModel.ts:1607`），陈旧 response 里的命令按钮会被
  * 禁用（`chatCommandContentPart.ts:31`）。待决议卡必须落在当前活跃的尾部响应上才可点。
  */
+/** 绝对路径才能交给原生打开器。相对路径留成字符串，避免编成残缺的 file URI。 */
+function deliverableReference(filePath: string): string | URI {
+	if (filePath === '' || !isAbsolute(filePath)) {
+		return filePath;
+	}
+	return URI.file(filePath);
+}
+
 function appendPending(pending: readonly DshHistoryPending[], history: DshHistoryItem[]): void {
 	if (pending.length === 0) {
 		return;

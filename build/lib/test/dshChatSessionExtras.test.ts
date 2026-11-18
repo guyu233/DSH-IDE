@@ -352,3 +352,48 @@ test('a late composerState cannot overwrite the session bound while it was in fl
 		session.dispose();
 	}
 });
+
+test('a late setModel cannot overwrite the model selected for the newer session', async () => {
+	const late = deferred<{ ok: true }>();
+	const session = new DshChatSession({
+		call: async (method: string) => {
+			if (method === 'setModel') {
+				return late.promise;
+			}
+			if (method === 'composerState') {
+				return { ok: true, value: { model: { current: { provider: 'unit', model: 'B' }, groups: [] } } };
+			}
+			return unavailable;
+		},
+		rebindView: async (sessionId: string) => readySnapshot(sessionId),
+	} as never);
+	try {
+		const pending = session.selectModel('unit', 'A');
+		assert.equal(await session.bind('B'), true);
+		assert.equal(session.currentModel()?.model, 'B');
+		late.resolve({ ok: true });
+		await pending;
+		assert.equal(session.currentModel()?.model, 'B');
+	} finally {
+		session.dispose();
+	}
+});
+
+test('a late failed submit does not clear running on the session bound meanwhile', async () => {
+	const late = deferred<typeof unavailable>();
+	const session = new DshChatSession({
+		call: async (method: string) => method === 'submit' ? late.promise : unavailable,
+		rebindView: async (sessionId: string) => readySnapshot(sessionId),
+	} as never);
+	try {
+		assert.equal(await session.bind('A'), true);
+		const pending = session.submit('hello');
+		assert.equal(await session.bind('B'), true);
+		session.acceptSessionStatus('B', true);
+		late.resolve(unavailable);
+		assert.equal(await pending, false);
+		assert.equal(session.running(), true, 'the failed submit belonged to A and must not stop B');
+	} finally {
+		session.dispose();
+	}
+});

@@ -27,7 +27,7 @@ import { ChatViewPane } from '../../chat/browser/widgetHosts/viewPane/chatViewPa
 import { IViewsService } from '../../../services/views/common/viewsService.js';
 import { getDshComposerSource } from './dshComposerRegistry.js';
 import { toPermissionItems } from './dshComposerProjection.js';
-import { archiveIdsFromResult, buildSessionTree, flattenTree, isCurrentRefresh, mapTreeItem, sameTreeItem } from './dshSessionTree.js';
+import { archiveIdsFromResult, buildSessionTree, flattenTree, isCurrentRefresh, mapTreeItem, sameTreeItem, sessionReadState } from './dshSessionTree.js';
 
 export const DSH_CHAT_SESSION_TYPE = 'dsh';
 
@@ -243,16 +243,15 @@ export class DshAgentSessionsController extends Disposable implements IChatSessi
 		}
 
 		// 子智能体会话按原生 children 树承接：只有 origin==='subagent' 且父在列表里才挂子项。
-		const roots = buildSessionTree(summaries, summary => toSessionItem(summary, this.liveRunning, this.archivedIds));
+		const oldAll = flattenTree(this._items);
+		const beforeByKey = new Map(oldAll.map(item => [item.resource.toString(), item]));
+		const roots = buildSessionTree(summaries, summary => toSessionItem(summary, this.liveRunning, this.archivedIds, beforeByKey.get(dshSessionResource(summary.sessionId).toString())));
 		const allItems = flattenTree(roots);
 		const seen = new Set(allItems.map(item => item.resource.toString()));
-
-		const oldAll = flattenTree(this._items);
 		const previous = new Set(oldAll.map(item => item.resource.toString()));
 		const removed = oldAll
 			.filter(item => !seen.has(item.resource.toString()))
 			.map(item => item.resource);
-		const beforeByKey = new Map(oldAll.map(item => [item.resource.toString(), item]));
 		const addedOrUpdated = allItems.filter(item => {
 			const before = beforeByKey.get(item.resource.toString());
 			return before === undefined || !sameTreeItem(before, item);
@@ -352,7 +351,7 @@ export class DshAgentSessionsController extends Disposable implements IChatSessi
 	}
 }
 
-function toSessionItem(summary: IDshIdeSessionSummary, liveRunning: ReadonlyMap<string, boolean>, archivedIds: ReadonlySet<string>): IChatSessionItem | undefined {
+function toSessionItem(summary: IDshIdeSessionSummary, liveRunning: ReadonlyMap<string, boolean>, archivedIds: ReadonlySet<string>, previous: IChatSessionItem | undefined): IChatSessionItem | undefined {
 	if (typeof summary?.sessionId !== 'string' || summary.sessionId === '') {
 		return undefined;
 	}
@@ -364,6 +363,7 @@ function toSessionItem(summary: IDshIdeSessionSummary, liveRunning: ReadonlyMap<
 		lastRequestEnded: running ? undefined : updatedAt,
 	};
 	const title = typeof summary.title === 'string' && summary.title !== '' ? summary.title : summary.sessionId;
+	const isRead = sessionReadState(updatedAt, previous);
 	return {
 		resource: dshSessionResource(summary.sessionId),
 		label: title,
@@ -372,6 +372,7 @@ function toSessionItem(summary: IDshIdeSessionSummary, liveRunning: ReadonlyMap<
 		timing,
 		iconPath: Codicon.comment,
 		...(archivedIds.has(summary.sessionId) ? { archived: true } : {}),
+		...(isRead === undefined ? {} : { isRead }),
 	};
 }
 

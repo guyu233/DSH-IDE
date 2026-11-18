@@ -150,6 +150,25 @@ test('deliverables render as clickable file references', () => {
 	}
 });
 
+test('an absolute deliverable path becomes a file URI and a relative path stays a string', () => {
+	const absolute = process.platform === 'win32' ? 'C:\\repo\\a.md' : '/repo/a.md';
+	const history = toHistory(session([]), [], {
+		deliverables: [{ turn: 1, callId: 'p1', files: [{ path: absolute }, { path: 'docs/b.md' }] }],
+	});
+	const last = history.at(-1);
+	assert.equal(last?.type, 'response');
+	if (last?.type === 'response') {
+		const refs = last.parts.filter(part => part.kind === 'reference') as { reference: string | { fsPath: string } }[];
+		assert.equal(typeof refs[0].reference, 'object');
+		const actual = refs[0].reference instanceof Object && 'fsPath' in refs[0].reference
+			? refs[0].reference.fsPath.replace(/\\/g, '/')
+			: '';
+		const expected = process.platform === 'win32' ? 'C:/repo/a.md' : '/repo/a.md';
+		assert.equal(actual.toLowerCase(), expected.toLowerCase());
+		assert.equal(refs[1].reference, 'docs/b.md');
+	}
+});
+
 test('quota notice is a response-level quota error and todos stay visible', () => {
 	const history = toHistory(session([]), [], {
 		quotaNotice: { code: 'ACCOUNT_QUOTA', seq: 5 },

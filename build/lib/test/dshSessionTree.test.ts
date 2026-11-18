@@ -13,7 +13,7 @@ import { test } from 'node:test';
 import { URI } from '../../../out/vs/base/common/uri.js';
 import { ChatSessionStatus, type IChatSessionItem } from '../../../out/vs/workbench/contrib/chat/common/chatSessionsService.js';
 import type { IDshIdeSessionSummary } from '../../../out/vs/platform/dshClient/common/dshIdeProtocol.js';
-import { archiveIdsFromResult, buildSessionTree, flattenTree, isCurrentRefresh, mapTreeItem, sameTreeItem } from '../../../out/vs/workbench/contrib/dsh/browser/dshSessionTree.js';
+import { archiveIdsFromResult, buildSessionTree, flattenTree, isCurrentRefresh, mapTreeItem, sameTreeItem, sessionReadState } from '../../../out/vs/workbench/contrib/dsh/browser/dshSessionTree.js';
 
 function summary(sessionId: string, extra: Partial<IDshIdeSessionSummary> = {}): IDshIdeSessionSummary {
 	return {
@@ -172,4 +172,11 @@ test('an archive result replaces the whole set and a bad payload does not wipe i
 	assert.deepEqual([...archiveIdsFromResult(['s', '', 1, 'other'], 's', true, previous)].sort(), ['other', 's']);
 	assert.deepEqual([...archiveIdsFromResult({ archivedSessionIds: ['s'] }, 's', true, previous)], ['keep', 's']);
 	assert.deepEqual([...archiveIdsFromResult(undefined, 'keep', false, previous)], []);
+});
+
+test('a newer timestamp marks a known session unread and a first sighting stays unset', () => {
+	assert.equal(sessionReadState(10, undefined), undefined);
+	assert.equal(sessionReadState(10, { timing: { created: 10 }, isRead: true }), true);
+	assert.equal(sessionReadState(11, { timing: { created: 10 }, isRead: true }), false);
+	assert.equal(sessionReadState(9, { timing: { created: 10 }, isRead: false }), false);
 });

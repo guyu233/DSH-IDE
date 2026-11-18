@@ -221,3 +221,20 @@ export function archiveIdsFromResult(value: unknown, sessionId: string, archived
 	}
 	return next;
 }
+
+/**
+ * 刷新后的已读状态。
+ *
+ * 第一次出现不写 `isRead`（原生把缺省当成已读）。时间戳变大才标未读。
+ * 时间戳没变则保留用户刚才点过的已读/未读，避免刷新把本地状态冲掉。
+ */
+export function sessionReadState(updatedAt: number | undefined, previous: { readonly timing: { readonly created: number }; readonly isRead?: boolean } | undefined): boolean | undefined {
+	if (previous === undefined) {
+		return undefined;
+	}
+	const nextStamp = updatedAt ?? 0;
+	if (nextStamp > previous.timing.created) {
+		return false;
+	}
+	return previous.isRead;
+}
