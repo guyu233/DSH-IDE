@@ -626,6 +626,20 @@ test('BUG-021: a queued toggle re-checks ownership before it runs', () => {
 	assert.match(pin, recheck, 'setSessionPinned must re-check ownership inside the queued task');
 });
 
+test('BUG-019: the remote image probe is bounded and always settles', () => {
+	// 只读结构核验：不联网，不触发真实下载。
+	const helper = source('extensions/emmet/src/imageSizeHelper.ts');
+	assert.match(helper, /const MAX_IMAGE_PROBE_BYTES = /, 'the probe must have a byte ceiling');
+	assert.match(helper, /const IMAGE_PROBE_TIMEOUT_MS = /, 'the probe must have a time limit');
+	assert.match(helper, /let settled = false;/, 'the probe must settle exactly once');
+	assert.match(helper, /if \(bufSize > MAX_IMAGE_PROBE_BYTES\)/, 'an oversized body must be abandoned');
+	assert.match(helper, /resp\.destroy\(\)/, 'the response must be torn down on every exit');
+	// 解析不出尺寸时必须结算为 undefined，而不是把错误吞掉让 Promise 悬空。
+	const finalBlock = helper.slice(helper.indexOf('if (final) {'), helper.indexOf('if (final) {') + 200);
+	assert.match(finalBlock, /resolve\(undefined\)/, 'an unrecognised body must resolve, not hang');
+	assert.doesNotMatch(finalBlock, /^\s*\/\/ might not have enough data, skip error\s*$/m, 'a final parse failure is not a silent skip');
+});
+
 test('SEC-003: Host dispatch shares the packaged protocol validator', () => {
 	// 只审查装配和单一校验器的接线；不发送非法 DTO，不调用真实 Host。
 	const host = source('src/vs/platform/dshClient/host/ide-view-host.js');

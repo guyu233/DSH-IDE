@@ -377,6 +377,7 @@ DshChatSession.acceptView / acceptConversation → DshChatModel（typed 节点�
 21. **投影必须消费官方位置语义**：`surfaceOp` 的 `replace`（`{ op, startSeq, endSeq }`，闭区间、按当前 surface 顺序）必须让被覆盖的旧节点消失，且不得删掉本事件自己；`append` 按追加处理。流式基线（snapshot 的 `assistantStream`）的 `revision` 取**外层** `assistantStream.revision`，不取内层 `activeAttempt.revision` 镜像——读内层会在形状变化时退化成 0，使后续 chunk 被误判为「不新」而丢弃。
 22. **开窗结果是三态**：`registered-ide` 才算真的把窗口开了（`opened: true`）；刚拉起进程只是**排队**（`opened: false, queued: true`），不得报成已开窗。`spawn` 只代表请求已提交，必须等 `spawn` 或 `error` 事件判定，并检查 `pid`；异步 `error` 不得漏掉，否则「根本没起来」会被报成成功。
 23. **写回按序号采纳，队列任务执行时复核**：归档/恢复回包是**完整集合**，只能整体采纳且只采纳序号最新的那一次；较旧回包描述的是旧意图，直接丢弃，不得覆盖较新结果。入队前检查归属不够——排队期间视图可能换绑，收藏/置顶等排队任务必须在**执行时**重新核对目标行仍可见。
+24. **外部资源探测必须有界且必结算**：读取远端图片尺寸时必须有字节上限与时限，超限或超时明确返回「读不到」，不得把整图读进内存、也不得永久挂起。解析失败只在「流已结束」时才是最终结论——那时必须结算，不允许把解析错误吞掉让 Promise 悬空。
 
 ### 5.4 层 3 冻结条件（renderer 状态层已完成，不再变）
 
