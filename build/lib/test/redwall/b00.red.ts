@@ -80,8 +80,14 @@ const source = (file: string) => readFileSync(new URL(file, root), 'utf8');
 const content = (text: string) => [{ type: 'text' as const, text }];
 const userNode = (seq: number, text: string): DshIdeConversationNode => ({ kind: 'user', seq, time: seq, content: content(text) });
 
-function readyFrame(version: number, view: DshIdeViewSnapshot): DshIdeSnapshot {
-	return { wireRevision: DSH_IDE_WIRE_REVISION, channelId: 'local-view', version, binding: { viewId: 'local-view', generation: version, sessionId: null }, state: { state: 'ready', view } };
+/**
+ * 同一绑定的 ready 帧。
+ *
+ * `generation` 只在换绑时递增（契约语义），不随 `version` 走：把它绑到 version 会让
+ * 每个内容帧都像一次换绑，合并窗口因此被误判为跨代而丢字段。
+ */
+function readyFrame(version: number, view: DshIdeViewSnapshot, generation = 1): DshIdeSnapshot {
+	return { wireRevision: DSH_IDE_WIRE_REVISION, channelId: 'local-view', version, binding: { viewId: 'local-view', generation, sessionId: null }, state: { state: 'ready', view } };
 }
 
 function createIdentityFixture(invoke: DshIdeBackend['invoke'] = async () => ({ accepted: true })) {
@@ -349,6 +355,57 @@ test('BUG-013: coalescing retains fields carried only by the opening baseline', 
 		t.mock.timers.tick(DSH_IDE_MERGE_WINDOW_MS);
 		assert.equal(consumer.state.version, 2);
 		assert.deepEqual(consumer.state.view?.plan, plan);
+	} finally {
+		consumer.dispose();
+	}
+});
+
+test('BUG-013: a generation change drops the previous view before the new one is ready', t => {
+	t.mock.timers.enable({ apis: ['setTimeout'] });
+	const consumer = new DshIdeConsumer();
+	try {
+		const previous = { frame: { type: 'snapshot' }, plan: { active: true, pending: false } };
+		assert.equal(consumer.accept(readyFrame(1, previous, 1)), true);
+		t.mock.timers.tick(DSH_IDE_MERGE_WINDOW_MS);
+		assert.ok(consumer.state.view, 'the first generation renders');
+		// 同一 channelId 上的新一代（重建）：旧视图必须立刻作废，不能被沿用。
+		assert.equal(consumer.accept({ wireRevision: DSH_IDE_WIRE_REVISION, channelId: 'local-view', version: 2, binding: { viewId: 'local-view', generation: 2, sessionId: null }, state: { state: 'rebuild' } }), true);
+		t.mock.timers.tick(DSH_IDE_MERGE_WINDOW_MS);
+		assert.deepEqual({ phase: consumer.state.phase, view: consumer.state.view }, { phase: 'rebuild', view: undefined });
+	} finally {
+		consumer.dispose();
+	}
+});
+
+test('BUG-013: an explicit empty list overrides the previous baseline', t => {
+	t.mock.timers.enable({ apis: ['setTimeout'] });
+	const consumer = new DshIdeConsumer();
+	try {
+		assert.equal(consumer.accept(readyFrame(1, { frame: { type: 'snapshot' }, todos: [{ content: 'Task', status: 'pending' }] })), true);
+		t.mock.timers.tick(DSH_IDE_MERGE_WINDOW_MS);
+		assert.equal((consumer.state.view?.todos ?? []).length, 1);
+		// 空数组是显式「已清空」，不是「本帧没带」：必须覆盖，不能被基线补回来。
+		assert.equal(consumer.accept(readyFrame(2, { frame: { type: 'snapshot' }, todos: [] })), true);
+		t.mock.timers.tick(DSH_IDE_MERGE_WINDOW_MS);
+		assert.deepEqual(consumer.state.view?.todos, []);
+	} finally {
+		consumer.dispose();
+	}
+});
+
+test('BUG-013: a non-ready frame never republishes the last ready view', t => {
+	t.mock.timers.enable({ apis: ['setTimeout'] });
+	const consumer = new DshIdeConsumer();
+	try {
+		assert.equal(consumer.accept(readyFrame(1, { frame: { type: 'snapshot' }, plan: { active: true, pending: false } })), true);
+		t.mock.timers.tick(DSH_IDE_MERGE_WINDOW_MS);
+		assert.equal(consumer.accept({ wireRevision: DSH_IDE_WIRE_REVISION, channelId: 'local-view', version: 2, binding: { viewId: 'local-view', generation: 1, sessionId: null }, state: { state: 'starting' } }), true);
+		t.mock.timers.tick(DSH_IDE_MERGE_WINDOW_MS);
+		assert.deepEqual({ phase: consumer.state.phase, view: consumer.state.view }, { phase: 'starting', view: undefined });
+		// 回到 ready 时不得把 starting 之前的内容当成「保留的基线」重新画出来。
+		assert.equal(consumer.accept(readyFrame(3, { frame: { type: 'snapshot' } })), true);
+		t.mock.timers.tick(DSH_IDE_MERGE_WINDOW_MS);
+		assert.deepEqual(consumer.state.view?.plan, undefined, 'a starting gap breaks the baseline');
 	} finally {
 		consumer.dispose();
 	}
