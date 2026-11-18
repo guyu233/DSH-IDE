@@ -121,7 +121,8 @@ export class IdeRemoteService extends Service {
       ...(sessionId === undefined ? {} : { sessionId }),
     };
     if (this.launchQueue.dispatch(spec)) {
-      return { ok: true, via: 'registered-ide' };
+      // 已报到的 IDE 会自己开窗：这是真正的「已交给窗口」。
+      return { ok: true, via: 'registered-ide', opened: true };
     }
 
     // 3) 还没有 IDE 报到：这是**首次点击**，由 Host 拉起 IDE 进程（插件载荷，不是独立应用）。
@@ -138,7 +139,9 @@ export class IdeRemoteService extends Service {
     }
     // 记住这个工作区请求：IDE 报到后会经 pollLaunch 取走它并开窗。
     this.launchQueue.enqueue(spec);
-    return { ok: true, via: 'spawned-ide' };
+    // 进程起来了，但窗口还没开：`opened` 必须是 false。
+    // 把「已排队」说成「已开窗」会让界面显示成功而用户看不到任何窗口。
+    return { ok: true, via: 'spawned-ide', opened: false, queued: true };
   }
 
   /**
@@ -201,6 +204,30 @@ export class IdeRemoteService extends Service {
       // DSH 退出后窗口仍留着。这里保持普通子进程，并把句柄登记到插件上下文，
       // 由 `ctx.effect` 在插件卸载 / Host 退出时显式 kill。
       const child = spawn(home.exe, args, { stdio: 'ignore', env, cwd: appPath });
+      // `spawn` 只代表「请求已提交」：真正的失败（找不到可执行文件、权限不足）
+      // 会以异步 `error` 事件到达，try/catch 覆盖不到。因此这里必须等一次判定，
+      // 否则会把「根本没起来」报成「已开窗」。
+      const failure = await new Promise(resolve => {
+        let settled = false;
+        const finish = value => {
+          if (settled) {
+            return;
+          }
+          settled = true;
+          resolve(value);
+        };
+        child.once('error', error => finish(error instanceof Error ? error.message : String(error)));
+        child.once('spawn', () => finish(undefined));
+        // 已经同步失败的情况：`pid` 缺失说明进程没建起来。
+        if (child.pid === undefined) {
+          finish('the IDE process did not start (no pid)');
+        }
+      });
+      if (failure !== undefined) {
+        this.ideChild = undefined;
+        this.spawnedAt = undefined;
+        return { ok: false, message: `failed to spawn IDE process: ${failure}` };
+      }
       this.ideChild = child;
       this.spawnedAt = now;
       // 子进程自己退出（用户关窗口）时释放句柄，避免防抖误判仍在运行。

@@ -586,6 +586,22 @@ test('BUG-022: the stream baseline reads revision from the outer assistantStream
 	);
 });
 
+test('BUG-018: a first-click open reports queued, not opened', () => {
+	// 只核对结果语义：拉起进程不等于窗口已经打开。
+	const service = source('src/vs/platform/dshClient/host/ide-service.js');
+	assert.match(service, /via: 'registered-ide', opened: true/, 'a registered IDE really opens the window');
+	assert.match(service, /via: 'spawned-ide', opened: false, queued: true/, 'a freshly spawned IDE is only queued');
+	assert.doesNotMatch(service, /via: 'spawned-ide' \};/, 'a spawned IDE must never be reported as opened');
+});
+
+test('BUG-018: the spawn result waits for the asynchronous error event', () => {
+	const service = source('src/vs/platform/dshClient/host/ide-service.js');
+	// `spawn` 只代表请求已提交；真正的失败以异步 `error` 到达，try/catch 覆盖不到。
+	assert.match(service, /child\.once\('error'/, 'the async error event must be observed');
+	assert.match(service, /child\.once\('spawn'/, 'success must be confirmed by the spawn event');
+	assert.match(service, /child\.pid === undefined/, 'a child without a pid did not start');
+});
+
 test('SEC-003: Host dispatch shares the packaged protocol validator', () => {
 	// 只审查装配和单一校验器的接线；不发送非法 DTO，不调用真实 Host。
 	const host = source('src/vs/platform/dshClient/host/ide-view-host.js');

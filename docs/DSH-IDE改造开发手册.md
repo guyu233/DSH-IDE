@@ -375,6 +375,7 @@ DshChatSession.acceptView / acceptConversation → DshChatModel（typed 节点�
 19. **原生选择必须写回内核**：原生模型选择器只改本地状态；由 content provider 驱动的会话（DSH）在**用户操作**时必须把选择写回 `setModel`，程序性同步（恢复、默认值、会话切换）不得当成一次选择写回。写回身份取 `identifier`（`<provider>/<model id>`）而**不是**显示名，且只按第一个斜杠切分——模型名本身可以含斜杠。内核拒绝时不改本地当前模型、不发「已切换」通知：选择器不把「显示成功」当成成功。
 20. **共享流对每位订阅者一致**：同一会话仍只开一条官方流，但每位订阅者都必须收到**同一份 opening 基线**；后来者不得只收到增量。上游正常结束与异常结束都显式广播 `follow-ended`，不允许静默删表让订阅者无限等待。释放按引用身份：旧句柄只结束自己那一份，不得删掉期间新建的流。待送帧有上限，超过时丢弃旧增量并插入 `follow-overflow` 让上层重读基线，不静默截断。
 21. **投影必须消费官方位置语义**：`surfaceOp` 的 `replace`（`{ op, startSeq, endSeq }`，闭区间、按当前 surface 顺序）必须让被覆盖的旧节点消失，且不得删掉本事件自己；`append` 按追加处理。流式基线（snapshot 的 `assistantStream`）的 `revision` 取**外层** `assistantStream.revision`，不取内层 `activeAttempt.revision` 镜像——读内层会在形状变化时退化成 0，使后续 chunk 被误判为「不新」而丢弃。
+22. **开窗结果是三态**：`registered-ide` 才算真的把窗口开了（`opened: true`）；刚拉起进程只是**排队**（`opened: false, queued: true`），不得报成已开窗。`spawn` 只代表请求已提交，必须等 `spawn` 或 `error` 事件判定，并检查 `pid`；异步 `error` 不得漏掉，否则「根本没起来」会被报成成功。
 
 ### 5.4 层 3 冻结条件（renderer 状态层已完成，不再变）
 
