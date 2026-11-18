@@ -31,6 +31,11 @@ export interface DshIdeConversationState {
 	readonly attempts: Map<string, DshIdeStreamAttempt>;
 	/** 已结算的 attempt：防止重放同一流。 */
 	readonly settledAttempts: Set<string>;
+	/**
+	 * 已经 end、但还没被同回合 `assistant/message` 接管的临时节点。
+	 * end 会先把 attempt 移出 `attempts`，正式消息若只扫进行中的 attempt，就清不掉这个节点。
+	 */
+	readonly endedStreamNodes: Map<number, Set<string>>;
 	/** 官方分页是否还有更早记录。 */
 	hasMore: boolean;
 	/** 官方 `deliverables/presented` 的累计结果，按事件顺序。 */
@@ -53,6 +58,7 @@ export function createDshIdeConversationState(): DshIdeConversationState {
 		nodes: new Map(),
 		attempts: new Map(),
 		settledAttempts: new Set(),
+		endedStreamNodes: new Map(),
 		hasMore: true,
 		deliverables: new Map(),
 	};
@@ -130,6 +136,7 @@ function applySnapshot(state: DshIdeConversationState, frame: Record<string, unk
 	state.nodes.clear();
 	state.attempts.clear();
 	state.settledAttempts.clear();
+	state.endedStreamNodes.clear();
 	state.deliverables.clear();
 	state.quotaNotice = undefined;
 	state.hasMore = typeof frame['hasMore'] === 'boolean' ? frame['hasMore'] : true;
@@ -241,14 +248,8 @@ function applyDurable(state: DshIdeConversationState, event: Record<string, unkn
 			...(providerMetadataOf(message['providerMetadata']) === undefined ? {} : { providerMetadata: providerMetadataOf(message['providerMetadata']) }),
 			...(data['interrupted'] === true || message['interrupted'] === true ? { interrupted: true as const } : {}),
 		});
-		// durable 消息接管同回合的流式临时节点。
-		for (const [attemptId, attempt] of [...state.attempts]) {
-			if (attempt.turn === turn) {
-				state.attempts.delete(attemptId);
-				state.settledAttempts.add(attemptId);
-				state.nodes.delete(attempt.id);
-			}
-		}
+		// durable 消息接管同回合的流式临时节点，包括已经 end、但节点还留着的那次。
+		retireTurnStreams(state, turn);
 		return;
 	}
 
@@ -466,8 +467,36 @@ function applyStream(state: DshIdeConversationState, frame: Record<string, unkno
 		if (outcome['kind'] === 'abandoned') {
 			// 没有落成可见消息：丢弃这次尝试留下的临时节点。
 			state.nodes.delete(attempt.id);
+			return;
 		}
+		// 正式消息可能晚于 end。先记住节点，等同回合 assistant/message 再删。
+		let ids = state.endedStreamNodes.get(attempt.turn);
+		if (ids === undefined) {
+			ids = new Set();
+			state.endedStreamNodes.set(attempt.turn, ids);
+		}
+		ids.add(attempt.id);
 	}
+}
+
+/** 同回合的流式临时节点交给 durable 消息后删除，避免和正式回复各画一条。 */
+function retireTurnStreams(state: DshIdeConversationState, turn: number): void {
+	for (const [attemptId, attempt] of [...state.attempts]) {
+		if (attempt.turn !== turn) {
+			continue;
+		}
+		state.attempts.delete(attemptId);
+		state.settledAttempts.add(attemptId);
+		state.nodes.delete(attempt.id);
+	}
+	const ended = state.endedStreamNodes.get(turn);
+	if (ended === undefined) {
+		return;
+	}
+	for (const id of ended) {
+		state.nodes.delete(id);
+	}
+	state.endedStreamNodes.delete(turn);
 }
 
 function streamNode(state: DshIdeConversationState, attempt: DshIdeStreamAttempt): DshIdeConversationNode {

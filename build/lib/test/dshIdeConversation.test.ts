@@ -237,6 +237,51 @@ test('attachments 从消息 content 收集图片引用并去重', () => {
 	});
 });
 
+test('assistant-stream end then assistant/message keeps one node for that turn', () => {
+	const state = createDshIdeConversationState();
+	project(state, { type: 'assistant-stream', frame: { type: 'start', attemptId: 'a1', revision: 1, turn: 1, step: 0 } });
+	const streaming = project(state, {
+		type: 'assistant-stream',
+		frame: { type: 'chunk', attemptId: 'a1', revision: 2, chunk: { type: 'text-delta', text: '临时' } },
+	});
+	assert.equal(streaming.nodes.filter(node => node.kind === 'assistant').length, 1);
+	const ended = project(state, {
+		type: 'assistant-stream',
+		frame: { type: 'end', attemptId: 'a1', revision: 3, outcome: { kind: 'completed' } },
+	});
+	assert.equal(ended.nodes.filter(node => node.kind === 'assistant').length, 1, 'text stays visible until the durable message arrives');
+	const done = project(state, {
+		type: 'event',
+		event: {
+			type: 'assistant/message',
+			seq: 5,
+			time: 5,
+			data: { turn: 1, step: 0, message: { content: [{ type: 'text', text: '正式回复' }] } },
+		},
+	});
+	const assistants = done.nodes.filter(node => node.kind === 'assistant');
+	assert.equal(assistants.length, 1);
+	const only = assistants[0];
+	assert.ok(only !== undefined && only.kind === 'assistant');
+	if (only !== undefined && only.kind === 'assistant') {
+		assert.deepEqual(only.blocks, [{ kind: 'text', text: '正式回复' }]);
+	}
+});
+
+test('an abandoned assistant-stream removes its temporary node', () => {
+	const state = createDshIdeConversationState();
+	project(state, { type: 'assistant-stream', frame: { type: 'start', attemptId: 'a2', revision: 1, turn: 2, step: 0 } });
+	project(state, {
+		type: 'assistant-stream',
+		frame: { type: 'chunk', attemptId: 'a2', revision: 2, chunk: { type: 'text-delta', text: '丢掉' } },
+	});
+	const view = project(state, {
+		type: 'assistant-stream',
+		frame: { type: 'end', attemptId: 'a2', revision: 3, outcome: { kind: 'abandoned' } },
+	});
+	assert.equal(view.nodes.length, 0);
+});
+
 test('assistant/message 带 text content 投影为 assistant 节点且 step 为数字', () => {
 	const state = createDshIdeConversationState();
 	const frame = {
