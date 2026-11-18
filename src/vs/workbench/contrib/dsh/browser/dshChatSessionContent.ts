@@ -232,7 +232,13 @@ export function registerDshAnswerCommands(client: IDshClientService): { dispose(
 		if (typeof eventId !== 'string' || typeof label !== 'string') {
 			return;
 		}
-		await dshChatSessionFor(client).answerQuestion(eventId, label);
+		const session = dshChatSessionFor(client);
+		await session.answerQuestion(eventId, label);
+		if (session.questionFellBackToDesktop(eventId)) {
+			// 原生面板只能显示一题：这份问卷需要多题或多选答案，必须由桌面入口完整回答。
+			// 明确告知，不让用户以为已经提交成功。
+			session.notifyQuestionNeedsDesktop(eventId);
+		}
 	}));
 	return disposables;
 }

@@ -360,6 +360,9 @@ DshChatSession.acceptView / acceptConversation → DshChatModel（typed 节点�
 4. **`fetchRowDetail` 不再返回 `null`**（或明确文档化为官方不可用并给禁用态）；`runCommand` 不再传恒空附件。
 5. **非官方插件过滤冻结**：白名单外的 event/projection 在 Host 丢弃，前端不会收到未知形状。
 6. `ide-view-service.receive` 把 typed 视图连同 `frame` 一起 publish；`frame` 只是兼容回退，前端稳定路径不依赖它。
+7. **终态唯一且必须投递**：`pending` 每帧下发完整清单（含空清单），空清单不得省略；取消帧只带 `eventId`，传输层不得要求它带 `event`。一次决议的终态必须广播给所有视图，已收到终态的 `eventId` 不再接受任何请求帧或恢复路径。
+8. **决议必须匹配请求种类**：批准不能结算问卷，反之亦然；种类不符返回 `INVALID_ARGUMENT` 且原请求继续等待。桥销毁时逐个结算本桥等待者（交还 `undefined` 给下一个 answerer），不允许清 Map 留悬空 Promise。
+9. **问卷不静默缩写**：原生面板只显示第一题，但待决议项保留全部题目。只有「单题、单选、有选项」由原生卡片提交；多题、多选、无选项一律不提交部分答案，明确交还桌面入口并提示用户（DEC-005 能力边界）。
 
 ### 5.4 层 3 冻结条件（renderer 状态层已完成，不再变）
 

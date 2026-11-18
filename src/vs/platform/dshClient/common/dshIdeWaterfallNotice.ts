@@ -29,6 +29,7 @@ export function projectDshIdeWaterfallNotice(raw: unknown): DshIdeWaterfallNotic
 	if (typeof eventId !== 'string' || eventId === '') {
 		return undefined;
 	}
+	// 终态只要求 eventId：`cancel` 是内核的「已结束」广播，本来就没有 `event`。
 	if (frame['kind'] === 'cancel') {
 		return { kind: 'cancel', eventId };
 	}

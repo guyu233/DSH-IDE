@@ -11,7 +11,7 @@
 import { Emitter, Event } from '../../../../base/common/event.js';
 import { Disposable } from '../../../../base/common/lifecycle.js';
 import { IDshClientService } from '../../../../platform/dshClient/common/dshClientService.js';
-import { validateDshIdeLoadOlderResult, type DshIdeDeliverableView, type DshIdeGoalView, type DshIdeImageAttachmentRef, type DshIdeLoadOlderResult, type DshIdePendingItem, type DshIdePlanView, type DshIdeQuotaNotice, type DshIdeSkillView, type DshIdeTodoView, type DshIdeViewSnapshot, type DshIdeWaterfallNotice } from '../../../../platform/dshClient/common/dshIdeProtocol.js';
+import { DSH_IDE_FEATURE_UNAVAILABLE, validateDshIdeLoadOlderResult, type DshIdeDeliverableView, type DshIdeGoalView, type DshIdeImageAttachmentRef, type DshIdeLoadOlderResult, type DshIdePendingItem, type DshIdePlanView, type DshIdeQuotaNotice, type DshIdeSkillView, type DshIdeTodoView, type DshIdeViewSnapshot, type DshIdeWaterfallNotice } from '../../../../platform/dshClient/common/dshIdeProtocol.js';
 import { DshChatModel, type DshChatNode, type DshHistoryStatus } from './dshChatModel.js';
 
 /** 下拉里的一个模型选项。 */
@@ -21,6 +21,21 @@ export interface DshChatModelOption {
 	readonly name: string;
 }
 
+/**
+ * 问卷里的一题。
+ *
+ * 为什么整题保留：官方问卷可以是多题、多选、无选项。只取第一题与单选会把用户
+ * 实际看到的业务问卷悄悄缩写，答案因此不完整。
+ */
+export interface DshChatQuestion {
+	readonly id: string;
+	readonly question?: string;
+	readonly detail?: string;
+	readonly header?: string;
+	readonly options: readonly { readonly label: string; readonly description?: string }[];
+	readonly multiSelect: boolean;
+}
+
 /** 正在等用户决定的批准 / 问卷。 */
 export interface DshChatPending {
 	readonly eventId: string;
@@ -28,6 +43,8 @@ export interface DshChatPending {
 	readonly title: string;
 	readonly options: readonly string[];
 	readonly questionId?: string;
+	/** 问卷的全部题目（批准为空）。原生面板只用第一题做摘要，提交时用完整清单。 */
+	readonly questions: readonly DshChatQuestion[];
 }
 
 /** 输入框目录里的一个模型（`projectDshIdeComposer` 的 `model.groups[].models[]`）。 */
@@ -80,6 +97,7 @@ export class DshChatSession extends Disposable implements IDshChatSession {
 	private readonly model = this._register(new DshChatModel());
 	private readonly _onDidChangeModelMenu = this._register(new Emitter<void>());
 	private readonly _onDidChangePending = this._register(new Emitter<readonly DshChatPending[]>());
+	private readonly _onDidNeedDesktopQuestion = this._register(new Emitter<string>());
 	/** typed extras（交付物 / 附件 / 额度）变化：内容没变也会 fire，渲染层自行判重。 */
 	private readonly _onDidChangeExtras = this._register(new Emitter<void>());
 	private readonly _onDidChangeRunning = this._register(new Emitter<boolean>());
@@ -119,6 +137,8 @@ export class DshChatSession extends Disposable implements IDshChatSession {
 
 	readonly onDidChangeModelMenu: Event<void> = this._onDidChangeModelMenu.event;
 	readonly onDidChangePending: Event<readonly DshChatPending[]> = this._onDidChangePending.event;
+	/** 问卷需要桌面入口才能完整回答。 */
+	readonly onDidNeedDesktopQuestion: Event<string> = this._onDidNeedDesktopQuestion.event;
 	readonly onDidChangeExtras: Event<void> = this._onDidChangeExtras.event;
 	readonly onDidChangeRunning: Event<boolean> = this._onDidChangeRunning.event;
 	readonly onDidChangeNodes: Event<readonly [readonly DshChatNode[], boolean]> = this._onDidChangeNodes.event;
@@ -199,6 +219,10 @@ export class DshChatSession extends Disposable implements IDshChatSession {
 		const beforeIds = [...this.pendingItems.keys()].join('\u0000');
 		this.pendingItems.clear();
 		for (const item of pending) {
+			// Host 已广播过终态的请求不再画卡：迟到清单或重放帧都不能让它复活。
+			if (this.settledPending.has(item.eventId)) {
+				continue;
+			}
 			if (item.event === 'approval/request' && 'toolName' in item.request) {
 				const reason = item.request.reason;
 				this.pendingItems.set(item.eventId, {
@@ -208,16 +232,10 @@ export class DshChatSession extends Disposable implements IDshChatSession {
 						? `DSH 请求运行 ${item.request.toolName}`
 						: `DSH 请求运行 ${item.request.toolName}：${reason}`,
 					options: [],
+					questions: [],
 				});
 			} else if (item.event === 'user-questions/request' && 'questions' in item.request) {
-				const question = item.request.questions[0];
-				this.pendingItems.set(item.eventId, {
-					eventId: item.eventId,
-					kind: 'question',
-					title: question?.question ?? 'DSH 提问',
-					options: (question?.options ?? []).map(option => option.label),
-					questionId: question?.id ?? '',
-				});
+				this.pendingItems.set(item.eventId, projectQuestionPending(item.eventId, item.request.questions));
 			}
 		}
 		// 每帧都下发 pending，但内容没变就不必让面板重画。
@@ -249,7 +267,10 @@ export class DshChatSession extends Disposable implements IDshChatSession {
 		const previous = this.boundSessionId;
 		this.boundSessionId = sessionId;
 		this.model.clear();
+		// 换绑时两个集合一起清：`acceptPending` 会重建 `pendingItems`，
+		// 但终态 id 属于上一个会话，留着会误压制新会话里同名事件。
 		this.pendingItems.clear();
+		this.settledPending.clear();
 		this._deliverables = [];
 		this._attachments = [];
 		this._quotaNotice = undefined;
@@ -331,6 +352,8 @@ export class DshChatSession extends Disposable implements IDshChatSession {
 		} else {
 			this.model.accept(view.frame);
 		}
+		// 待决议项以 Host 的完整清单为唯一真源：`pending` 现在每帧都在（含空清单），
+		// 所以缺省只可能出现在旧 Host 帧上——那种情况保留上一次，不误清。
 		if (view.pending !== undefined) {
 			this.acceptPending(view.pending);
 		}
@@ -388,9 +411,16 @@ export class DshChatSession extends Disposable implements IDshChatSession {
 	/** 批准 / 问卷帧：登记成本地面的卡片，不再走通知。 */
 	acceptWaterfall(notice: DshIdeWaterfallNotice): void {
 		if (notice.kind === 'cancel') {
+			// 终态可能在卡片已被提交隐藏之后到达：那时本表已经没有它，
+			// 仍要记下这条终态，避免随后任何路径把同一张卡再画回来。
+			this.settledPending.add(notice.eventId);
 			if (this.pendingItems.delete(notice.eventId)) {
 				this._onDidChangePending.fire(this.pending());
 			}
+			return;
+		}
+		// 已经收到终态的请求不得因为重放或迟到帧重新出现。
+		if (this.settledPending.has(notice.eventId)) {
 			return;
 		}
 		if (notice.event === 'approval/request' && 'toolName' in notice.request) {
@@ -402,16 +432,10 @@ export class DshChatSession extends Disposable implements IDshChatSession {
 					? `DSH 请求运行 ${notice.request.toolName}`
 					: `DSH 请求运行 ${notice.request.toolName}：${reason}`,
 				options: [],
+				questions: [],
 			});
 		} else if (notice.event === 'user-questions/request' && 'questions' in notice.request) {
-			const question = notice.request.questions[0];
-			this.pendingItems.set(notice.eventId, {
-				eventId: notice.eventId,
-				kind: 'question',
-				title: question?.question ?? 'DSH 提问',
-				options: (question?.options ?? []).map(option => option.label),
-				questionId: question?.id ?? '',
-			});
+			this.pendingItems.set(notice.eventId, projectQuestionPending(notice.eventId, notice.request.questions));
 		}
 		this._onDidChangePending.fire(this.pending());
 	}
@@ -522,20 +546,42 @@ export class DshChatSession extends Disposable implements IDshChatSession {
 		const item = this.pendingItems.get(eventId);
 		this.hidePending(eventId);
 		const result = await this.client.call('answerApproval', { requestId: eventId, decision });
-		this.restorePending(generation, sessionId, eventId, item, result.ok);
+		this.restorePending(generation, sessionId, eventId, item, result);
 	}
 
+	/**
+	 * 提交问卷答案。
+	 *
+	 * 原生面板一次只显示一题，所以 `label` 是用户点的那一项；其余题目从卡片里已投影的
+	 * 完整问卷取。若这份问卷无法完整承接（多题、多选、无选项），不提交半份答案冒充全部：
+	 * 明确拒绝，把决定交还桌面入口（DEC-005 的能力边界）。
+	 */
 	async answerQuestion(eventId: string, label: string): Promise<void> {
 		const generation = this.generation;
 		const sessionId = this.boundSessionId;
 		const item = this.pendingItems.get(eventId);
+		const answers = item === undefined ? undefined : dshQuestionAnswers(item, label);
+		if (answers === undefined) {
+			this.lastQuestionFallback = eventId;
+			return;
+		}
 		this.hidePending(eventId);
 		// 答案里的 id 是问卷题号（官方 `{ answers: [{ id, selected }] }`），不是 eventId。
 		const result = await this.client.call('answerQuestion', {
 			requestId: eventId,
-			answer: { answers: [{ id: item?.questionId ?? '', selected: [label] }] },
+			answer: { answers },
 		});
-		this.restorePending(generation, sessionId, eventId, item, result.ok);
+		this.restorePending(generation, sessionId, eventId, item, result);
+	}
+
+	/**
+	 * 这份问卷是否只能由桌面入口回答（原生面板承接不了它的形状）。
+	 * 命令入口据此给出明确提示，而不是假装已经提交。
+	 */
+	questionNeedsDesktop(eventId: string): boolean {
+		const item = this.pendingItems.get(eventId);
+		return item !== undefined && item.kind === 'question' && item.questions.length > 0
+			&& dshQuestionAnswers(item, item.options[0] ?? '') === undefined;
 	}
 
 	/** 先拿掉卡片，避免同一次批准被点两次。 */
@@ -546,11 +592,52 @@ export class DshChatSession extends Disposable implements IDshChatSession {
 		this._onDidChangePending.fire(this.pending());
 	}
 
+	/** 已收到终态的请求 id：防止迟到的请求帧把已结束的卡片重新画回来。 */
+	private readonly settledPending = new Set<string>();
+
+	/** 最近一次因形状不支持而交还桌面的问卷（命令入口据此提示）。 */
+	private lastQuestionFallback: string | undefined;
+
+	/** 这条问卷是否刚被交还桌面：命令入口据此给出明确提示，而不是静默什么都不做。 */
+	questionFellBackToDesktop(eventId: string): boolean {
+		return this.lastQuestionFallback === eventId;
+	}
+
 	/**
-	 * 通道拒绝时把卡片放回去。换了会话、或这张卡已经有新内容，就不再写。
+	 * 告知用户这份问卷需要桌面入口。
+	 *
+	 * 用通知而不是静默返回：原生卡片只显示一题，用户点了却什么都没发生会被读成故障。
+	 * @param {string} eventId
 	 */
-	private restorePending(generation: number, sessionId: string | undefined, eventId: string, item: DshChatPending | undefined, ok: boolean): void {
-		if (ok || item === undefined || generation !== this.generation || sessionId !== this.boundSessionId || this.pendingItems.has(eventId)) {
+	notifyQuestionNeedsDesktop(eventId: string): void {
+		this._onDidNeedDesktopQuestion.fire(eventId);
+	}
+
+	/**
+	 * 通道拒绝时把卡片放回去。
+	 *
+	 * 只有「请求仍在等待、且失败可能是瞬时的」才恢复：已经结算（`ALREADY_RESOLVED`）、
+	 * 目标不属于本视图（`SESSION_SWITCHED`）或请求种类不符（`INVALID_ARGUMENT`）都是终态，
+	 * 恢复卡片只会让用户对着一条已经结束的请求反复点击。
+	 */
+	private restorePending(
+		generation: number,
+		sessionId: string | undefined,
+		eventId: string,
+		item: DshChatPending | undefined,
+		result: { readonly ok: boolean; readonly error?: { readonly code: string } },
+	): void {
+		if (result.ok || item === undefined) {
+			return;
+		}
+		if (generation !== this.generation || sessionId !== this.boundSessionId || this.pendingItems.has(eventId)) {
+			return;
+		}
+		// 已经收到终态（桌面先答 / 取消）的请求不能再恢复：那已经不是「仍待决」的卡片。
+		if (this.settledPending.has(eventId)) {
+			return;
+		}
+		if (!isRetryableAnswerFailure(result.error?.code)) {
 			return;
 		}
 		this.pendingItems.set(eventId, item);
@@ -635,6 +722,86 @@ export function dshChatSessionFor(client: IDshClientService): DshChatSession {
 }
 
 /** 交付物是否与上一帧相同（用于避免无变化时重建 history）。 */
+/**
+ * 把官方问卷投影成一张待决议卡片。
+ *
+ * 标题与选项只用于原生面板的摘要（原生只能显示一题），但 `questions` 保留**全部**题目：
+ * 提交时按整份问卷作答，不做「只答第一题」的静默缩写。
+ * @param {string} eventId
+ */
+function projectQuestionPending(
+	eventId: string,
+	questions: readonly {
+		readonly id: string;
+		readonly question?: string;
+		readonly detail?: string;
+		readonly header?: string;
+		readonly options?: readonly { readonly label: string; readonly description?: string }[];
+		readonly multiSelect?: boolean;
+	}[],
+): DshChatPending {
+	const projected: readonly DshChatQuestion[] = questions.map(question => ({
+		id: question.id,
+		...(question.question === undefined ? {} : { question: question.question }),
+		...(question.detail === undefined ? {} : { detail: question.detail }),
+		...(question.header === undefined ? {} : { header: question.header }),
+		options: (question.options ?? []).map(option => ({
+			label: option.label,
+			...(option.description === undefined ? {} : { description: option.description }),
+		})),
+		multiSelect: question.multiSelect === true,
+	}));
+	const first = projected[0];
+	return {
+		eventId,
+		kind: 'question',
+		title: first?.question ?? 'DSH 提问',
+		options: (first?.options ?? []).map(option => option.label),
+		questionId: first?.id ?? '',
+		questions: projected,
+	};
+}
+
+/**
+ * 把一次点击展开成官方 `answers` 数组。
+ *
+ * 只有「单题、单选、有选项」才能由原生面板完整承接：那时用户点的就是该题唯一的答案。
+ * 其余形状（多题、多选、无选项）返回 undefined，调用方必须交还桌面入口，
+ * 不允许提交一份看起来成功、实际缺项的回答。
+ * @param {DshChatPending} item
+ * @param {string} label
+ * @returns {readonly { readonly id: string; readonly selected: readonly string[] }[] | undefined}
+ */
+function dshQuestionAnswers(item: DshChatPending, label: string): readonly { readonly id: string; readonly selected: readonly string[] }[] | undefined {
+	if (item.kind !== 'question' || item.questions.length !== 1) {
+		return undefined;
+	}
+	const question = item.questions[0];
+	if (question === undefined || question.multiSelect || question.options.length === 0) {
+		return undefined;
+	}
+	if (!question.options.some(option => option.label === label)) {
+		return undefined;
+	}
+	return [{ id: question.id, selected: [label] }];
+}
+
+/**
+ * 这条失败是否可能仍待决、值得把卡片放回去。
+ *
+ * 结算类与身份类错误是终态：请求已经结束，或本次调用不代表本视图。
+ * 传输/通道类错误才可能是瞬时失败，用户可以重试同一次决议。
+ * @param {string | undefined} code
+ */
+function isRetryableAnswerFailure(code: string | undefined): boolean {
+	// 只认「确认仍可重试」的两类：通道尚未接好（请求没送达）与传输层瞬时失败。
+	// 其余一律按终态处理——包括未知错误码：没被证明仍待决的失败，不该把卡片放回去。
+	if (code === undefined) {
+		return false;
+	}
+	return code === DSH_IDE_FEATURE_UNAVAILABLE || code.startsWith('dsh-ide/transport');
+}
+
 function sameDeliverables(
 	left: readonly DshIdeDeliverableView[],
 	right: readonly DshIdeDeliverableView[],

@@ -140,6 +140,42 @@ test('open reuses the channel id and binds the requested session', () => {
 	assert.equal(again.sessionId, 's-1', 'repeated open keeps the original binding');
 });
 
+test('a decision of the wrong kind does not settle the waiting request', async () => {
+	const { bridge } = bridgeWith();
+	bridge.open({ view: 'chat', params: { sessionId: 's-1' } });
+	// 登记一条问卷，再用批准去结算它：种类不符必须拒绝，且原请求仍在等待。
+	const handle = bridge.pending.register('question', 'req-kind');
+	assert.equal(bridge.pending.settle('req-kind', 'allowed-once', 'approval'), 'kind-mismatch');
+	assert.equal(bridge.pending.size(), 1, 'a mismatched decision must leave the request waiting');
+	assert.equal(bridge.pending.settle('req-kind', { answers: [] }, 'question'), true);
+	await handle.promise;
+	assert.equal(bridge.pending.size(), 0);
+});
+
+test('closing the bridge settles its waiting requests instead of stranding them', async () => {
+	const { bridge } = bridgeWith();
+	const first = bridge.pending.register('approval', 'req-a');
+	const second = bridge.pending.register('question', 'req-b');
+	assert.equal(bridge.pending.size(), 2);
+	bridge.close();
+	// 每个等待者都必须结算：直接清 Map 会让 waterfall 永远挂住。
+	assert.deepEqual(await Promise.all([first.promise, second.promise]), [undefined, undefined]);
+	assert.equal(bridge.pending.size(), 0);
+});
+
+test('an IDE-first decision broadcasts the terminal state to the other views', async () => {
+	const { bridge } = bridgeWith();
+	const seen = [];
+	bridge.follow({ viewId: 'v-1', generation: 1, sessionId: 's-1' }, frame => seen.push(frame));
+	bridge.follow({ viewId: 'v-2', generation: 1, sessionId: 's-1' }, frame => seen.push(frame));
+	const handle = bridge.pending.register('approval', 'req-ide');
+	assert.equal(bridge.pending.settle('req-ide', 'allowed-once', 'approval'), true);
+	bridge._fanout({ type: 'waterfall', kind: 'cancel', eventId: 'req-ide' });
+	await handle.promise;
+	// 两个视图各收到一次终态：否则别处的卡片会一直停在「待批准」。
+	assert.deepEqual(seen.filter(frame => frame.kind === 'cancel').map(frame => frame.eventId), ['req-ide', 'req-ide']);
+});
+
 test('capabilities method returns the dependency capability snapshot', async () => {
 	// 两个插件都没装：四项全 false（fail-closed）。
 	const bare = bridgeWith();

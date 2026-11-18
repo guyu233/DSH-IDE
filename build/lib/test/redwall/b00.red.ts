@@ -11,6 +11,7 @@ import { fileURLToPath } from 'node:url';
 import semver from 'semver';
 import {
 	DSH_IDE_ALREADY_RESOLVED,
+	DSH_IDE_FEATURE_UNAVAILABLE,
 	DSH_IDE_SESSION_SWITCHED,
 	DSH_IDE_WIRE_REVISION,
 	validateDshIdeInput,
@@ -160,6 +161,76 @@ test('BUG-008: closing the last local owner releases its follow without stopping
 		assert.deepEqual(released, ['A'], 'last-owner close must release the logical follow');
 	} finally {
 		channel.dispose();
+	}
+});
+
+test('BUG-010: a terminal cancel removes a card that was hidden while submitting', async () => {
+	const decision = Promise.withResolvers<{ ok: false; error: { code: string; message: string } }>();
+	const session = new DshChatSession({ call: () => decision.promise });
+	try {
+		session.acceptWaterfall({
+			kind: 'request', eventId: 'fixture-hide', event: 'approval/request', agentId: 'fixture-agent',
+			request: { toolName: 'preview' },
+		});
+		const sent = session.answerApproval('fixture-hide', 'approve');
+		assert.deepEqual(session.pending(), [], 'the card is hidden while the decision is in flight');
+		// 桌面先答：终态在卡片已隐藏之后到达，之后任何迟到请求帧都不得把它画回来。
+		session.acceptWaterfall({ kind: 'cancel', eventId: 'fixture-hide' });
+		decision.resolve({ ok: false, error: { code: DSH_IDE_FEATURE_UNAVAILABLE, message: 'channel not ready' } });
+		await sent;
+		session.acceptWaterfall({
+			kind: 'request', eventId: 'fixture-hide', event: 'approval/request', agentId: 'fixture-agent',
+			request: { toolName: 'preview' },
+		});
+		assert.deepEqual(session.pending(), [], 'a terminal request cannot reappear after a late request frame');
+	} finally {
+		session.dispose();
+	}
+});
+
+test('BUG-017: only a single-select single question is answered from the native card', async () => {
+	const calls: { method: string; args: Record<string, unknown> }[] = [];
+	const session = new DshChatSession({
+		call: async (method: string, args: Record<string, unknown>) => {
+			calls.push({ method, args });
+			return { ok: true, value: { accepted: true } };
+		},
+	});
+	try {
+		const question = (eventId: string, questions: readonly Record<string, unknown>[]) => session.acceptWaterfall({
+			kind: 'request', eventId, event: 'user-questions/request', agentId: 'fixture-agent',
+			request: { questions },
+		} as never);
+
+		// 单题单选：原生卡片能完整承接，提交的就是用户点的那一项。
+		question('q-single', [{ id: 'q1', question: 'Pick one', options: [{ label: 'A' }, { label: 'B' }] }]);
+		await session.answerQuestion('q-single', 'B');
+		assert.deepEqual(calls.at(-1)?.args.answer, { answers: [{ id: 'q1', selected: ['B'] }] });
+
+		// 多题：一份只含第一题的回答不是完整答案，必须交还桌面而不是提交半份。
+		question('q-multi', [
+			{ id: 'q1', question: 'First', options: [{ label: 'A' }] },
+			{ id: 'q2', question: 'Second', options: [{ label: 'B' }] },
+		]);
+		const before = calls.length;
+		await session.answerQuestion('q-multi', 'A');
+		assert.equal(calls.length, before, 'a partial answer must not be submitted');
+		assert.equal(session.questionFellBackToDesktop('q-multi'), true, 'the card must report the desktop handoff');
+		assert.deepEqual(session.pending().map(item => item.eventId), ['q-multi'], 'the card stays for the desktop入口');
+
+		// 多选：同样无法由「点一项」完整承接。
+		question('q-select-many', [{ id: 'q1', question: 'Choose', multiSelect: true, options: [{ label: 'A' }, { label: 'B' }] }]);
+		const afterMulti = calls.length;
+		await session.answerQuestion('q-select-many', 'A');
+		assert.equal(calls.length, afterMulti, 'a multi-select answer must not be reduced to one choice');
+
+		// 无选项：没有任何可提交的答案。
+		question('q-empty', [{ id: 'q1', question: 'Free form' }]);
+		const afterEmpty = calls.length;
+		await session.answerQuestion('q-empty', 'anything');
+		assert.equal(calls.length, afterEmpty, 'a question without options cannot be answered by a label');
+	} finally {
+		session.dispose();
 	}
 });
 

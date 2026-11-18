@@ -394,7 +394,10 @@ function isFrame(value: unknown): value is DshIdeStreamFrame {
 		return false;
 	}
 	if (value['type'] === 'waterfall') {
-		return typeof value['eventId'] === 'string' && typeof value['event'] === 'string';
+		// 终态帧（取消/已结算）只带 eventId；请求帧才带 event 与 request。
+		// 把终态也要求成请求形状，会让取消永远进不了界面，卡片停在「待批准」。
+		return typeof value['eventId'] === 'string'
+			&& (value['event'] === undefined || typeof value['event'] === 'string');
 	}
 	if (value['type'] === 'ready') {
 		return typeof value['clientId'] === 'string';

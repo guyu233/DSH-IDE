@@ -239,15 +239,43 @@ export class PendingRequests {
 		return { requestId, promise, entry };
 	}
 
-	/** 决议一条请求：返回 true 表示本次决议生效，false 表示重复或未知请求。 */
-	settle(requestId, value) {
+	/**
+	 * 决议一条请求。
+	 *
+	 * 种类必须一致：批准不能结算问卷，反之亦然。否则一次误投的决议会把另一种请求
+	 * 当成已答复，而真正等待它的界面再也收不到终态。
+	 * @param {string} requestId
+	 * @param {unknown} value
+	 * @param {'approval' | 'question'} [expectedKind]
+	 * @returns {true | false | 'kind-mismatch'} 重复/未知返回 false，种类不符返回 'kind-mismatch'
+	 */
+	settle(requestId, value, expectedKind) {
 		const entry = this.entries.get(requestId);
 		if (entry === undefined) {
 			return false;
 		}
+		if (expectedKind !== undefined && entry.kind !== expectedKind) {
+			return 'kind-mismatch';
+		}
 		this.entries.delete(requestId);
 		entry.resolve(value);
 		return true;
+	}
+
+	/**
+	 * 结算本表全部等待者并清空。
+	 *
+	 * 为什么必须逐个 resolve：等待中的 `_share` 只有在 Promise 结算后才会返回，
+	 * 直接清 Map 会让那条 waterfall 永远挂住，DSH 侧等不到任何答复。
+	 * @param {unknown} value 交还给下一个 answerer 的值
+	 */
+	settleAll(value) {
+		const pending = [...this.entries.entries()];
+		this.entries.clear();
+		for (const [, entry] of pending) {
+			entry.resolve(value);
+		}
+		return pending.length;
 	}
 
 	/** 界面未接管：撤销登记，交还给下一个 answerer（DSH 的 next() 语义）。 */
@@ -287,6 +315,8 @@ export class DshIdeHostBridge {
 		this._toggles = new Map();
 		/** 最近一次采纳的绑定代次；只允许前进。 */
 		this._generation = 0;
+		/** 每个视图各自已采纳的最大代次：代次只允许在该视图内前进。 */
+		this._views = new Map();
 		this._armWaterfalls();
 		this._armSessionStatus();
 	}
@@ -338,15 +368,15 @@ export class DshIdeHostBridge {
 	 * @param {{ viewId: string, generation: number, sessionId: string | null }} binding
 	 */
 	adoptBinding(binding) {
-		if (this.channelId === undefined) {
-			this.channelId = binding.viewId;
+		// 一个 Host 桥服务多个窗口：每个视图各自持有自己的代次与会话。
+		// 不能把桥钉在第一个窗口的视图上——那会让第二个窗口的所有调用都被拒绝。
+		const known = this._views.get(binding.viewId);
+		if (known !== undefined && binding.generation < known) {
+			throw coded(SESSION_SWITCHED, `DSH-IDE view ${binding.viewId} generation ${binding.generation} is older than ${known}`);
 		}
-		if (this.channelId !== binding.viewId) {
-			throw coded(SESSION_SWITCHED, `DSH-IDE view ${binding.viewId} is not served by this bridge (serving ${this.channelId})`);
-		}
-		if (binding.generation < this._generation) {
-			throw coded(SESSION_SWITCHED, `DSH-IDE view generation ${binding.generation} is older than ${this._generation}`);
-		}
+		this._views.set(binding.viewId, binding.generation);
+		// 本次调用代表哪个视图、哪条会话：处理器读的就是这份当次状态。
+		this.channelId = binding.viewId;
 		this._generation = binding.generation;
 		this.sessionId = binding.sessionId === null ? undefined : binding.sessionId;
 		return binding;
@@ -543,6 +573,7 @@ export class DshIdeHostBridge {
 			ide.then(value => ({ source: 'ide', value })),
 			desktop.then(value => ({ source: 'desktop', value })),
 		]);
+		// 不论哪一侧先答，都要把终态广播给其余视图：否则别处的卡片会一直停在「待批准」。
 		if (first.source === 'desktop') {
 			if (first.value !== undefined && !ideSettled) {
 				this.pending.entries.delete(requestId);
@@ -554,6 +585,8 @@ export class DshIdeHostBridge {
 		if (first.value === undefined) {
 			return desktop;
 		}
+		// IDE 先答：本表登记已在 settle 时移除，其余视图仍需收到同一条终态。
+		this._fanout({ type: 'waterfall', kind: 'cancel', eventId: requestId });
 		return first.value;
 	}
 
@@ -669,7 +702,8 @@ export class DshIdeHostBridge {
 		}
 		this._follows.clear();
 		this.disposeSubscriptions();
-		this.pending.entries.clear();
+		// 桥要消失了：本桥等待中的决议全部交还给下一个 answerer，不留悬空 Promise。
+		this.pending.settleAll(undefined);
 		this.channelId = undefined;
 		this.sessionId = undefined;
 		this._generation = 0;
@@ -866,21 +900,31 @@ function createMethodHandlers(bridge) {
 		},
 		async answerApproval(args) {
 			const outcome = approvalOutcome(args.decision);
-			if (!bridge.pending.settle(args.requestId, outcome)) {
+			const settled = bridge.pending.settle(args.requestId, outcome, 'approval');
+			if (settled === 'kind-mismatch') {
+				throw coded(INVALID_ARGUMENT, `request ${args.requestId} is not an approval request`);
+			}
+			if (settled !== true) {
 				throw coded(ALREADY_RESOLVED, `approval request ${args.requestId} is already resolved or unknown`);
 			}
 			return { accepted: true };
 		},
 		async answerQuestion(args) {
-			if (!bridge.pending.settle(args.requestId, args.answer)) {
+			const settled = bridge.pending.settle(args.requestId, args.answer, 'question');
+			if (settled === 'kind-mismatch') {
+				throw coded(INVALID_ARGUMENT, `request ${args.requestId} is not a question request`);
+			}
+			if (settled !== true) {
 				throw coded(ALREADY_RESOLVED, `question request ${args.requestId} is already resolved or unknown`);
 			}
 			return { accepted: true };
 		},
 		async cancelRequest(args) {
-			if (!bridge.pending.settle(args.requestId, 'cancelled')) {
+			if (bridge.pending.settle(args.requestId, 'cancelled') !== true) {
 				throw coded(ALREADY_RESOLVED, `request ${args.requestId} is already resolved or unknown`);
 			}
+			// 取消也是终态：其余视图必须一起收卡，否则旧窗会一直显示一条已经结束的请求。
+			bridge._fanout({ type: 'waterfall', kind: 'cancel', eventId: args.requestId });
 			return { accepted: true };
 		},
 		async setModel(args) {

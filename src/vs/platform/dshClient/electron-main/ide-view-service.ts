@@ -211,6 +211,9 @@ export class DshIdeViewService extends Disposable implements IdeViewHost {
 	 * @param error - 传输层给出的断开原因（只用于日志，不外泄凭据）。
 	 */
 	private publishDisconnected(generation: number, error: unknown): void {
+		// 连接重建后旧请求的 eventId 已不可答复：留着只会让用户对着死卡片点击。
+		// 只清本视图的本地投影，不取消任何 DSH 业务请求（DEC-003）。
+		this._pending.clear();
 		if (this.channelId === undefined || this.last === undefined || generation !== this.generation) {
 			return;
 		}
@@ -282,7 +285,8 @@ export class DshIdeViewService extends Disposable implements IdeViewHost {
 		const projections = (raw as Record<string, unknown>)['type'] === 'snapshot'
 			? projectDshIdeProjections((raw as Record<string, unknown>)['projections'])
 			: {};
-		// 待决议项是会话级状态：每帧都随快照下发当前清单。
+		// 待决议项是会话级状态：每帧都随快照下发**完整**清单（含空清单）。
+		// 空清单不能省略：省略会被界面读成「这帧没带」，于是已经结束的卡片永远留在屏幕上。
 		const pending = [...this._pending.values()];
 		// 已呈现的交付物同样随快照累计下发。
 		const deliverables = deliverablesOf(this.conversation);
@@ -292,7 +296,7 @@ export class DshIdeViewService extends Disposable implements IdeViewHost {
 			? {
 				frame: raw as Record<string, unknown>,
 				...projections,
-				...(pending.length === 0 ? {} : { pending }),
+				pending,
 				...(deliverables.length === 0 ? {} : { deliverables }),
 				...(quotaNotice === undefined ? {} : { quotaNotice }),
 				...(attachments.length === 0 ? {} : { attachments }),
@@ -301,7 +305,7 @@ export class DshIdeViewService extends Disposable implements IdeViewHost {
 				frame: raw as Record<string, unknown>,
 				conversation,
 				...projections,
-				...(pending.length === 0 ? {} : { pending }),
+				pending,
 				...(deliverables.length === 0 ? {} : { deliverables }),
 				...(quotaNotice === undefined ? {} : { quotaNotice }),
 				...(attachments.length === 0 ? {} : { attachments }),

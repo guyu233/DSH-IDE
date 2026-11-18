@@ -103,6 +103,13 @@ class DshClientContribution extends Disposable implements IWorkbenchContribution
 		}));
 		this._register(client.onDidSnapshot(snapshot => consumer.accept(snapshot)));
 		this._register(client.onDidWaterfall(notice => this._chat.acceptWaterfall(notice)));
+		// 原生面板一次只画一题：这份问卷需要多题/多选答案时，明确告诉用户去桌面入口完成。
+		this._register(this._chat.onDidNeedDesktopQuestion(() => {
+			this.notifications.info(localize(
+				'dsh.questionNeedsDesktop',
+				"这条问卷需要在 DSH 桌面端完整回答；IDE 面板只显示第一题，未提交任何部分答案。",
+			));
+		}));
 		// 回合结束只由 `api-session/status` 通知（`session-status`）：内容帧不带 running，
 		// 不消费它的话 `running()` 会永远停在 true，面板永远显示「生成中」。
 		this._register(client.onDidSessionNotice(notice => {

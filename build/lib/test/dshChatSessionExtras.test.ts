@@ -19,7 +19,7 @@ import { extrasOf, toHistory } from '../../../out/vs/workbench/contrib/dsh/brows
 /** 只实现 `DshChatSession` 用到的调用：这些单测不碰通道。 */
 function fakeClient() {
 	return {
-		call: async () => ({ ok: false, error: { code: 'FEATURE_UNAVAILABLE', message: 'test' } }),
+		call: async () => ({ ok: false, error: { code: 'dsh-ide/feature-unavailable', message: 'test' } }),
 		rebindView: async () => ({ ok: true }),
 	} as never;
 }
@@ -82,7 +82,7 @@ test('follow frames without skills keep a catalog loaded by listSkills', async (
 	const session = new DshChatSession({
 		call: async (method: string) => method === 'listSkills'
 			? { ok: true, value: skills }
-			: { ok: false, error: { code: 'FEATURE_UNAVAILABLE', message: 'test' } },
+			: { ok: false, error: { code: 'dsh-ide/feature-unavailable', message: 'test' } },
 		rebindView: async () => ({ ok: true }),
 	} as never);
 	try {
@@ -204,7 +204,7 @@ test('2-A: 内容帧不带 plan/goal/todos 时保留上一次的值（不被清�
 test('2-A: rebind 失败后同一 id 仍可重试（绑定回滚）', async () => {
 	let attempts = 0;
 	const session = new DshChatSession({
-		call: async () => ({ ok: false, error: { code: 'FEATURE_UNAVAILABLE', message: 'test' } }),
+		call: async () => ({ ok: false, error: { code: 'dsh-ide/feature-unavailable', message: 'test' } }),
 		rebindView: async () => {
 			attempts += 1;
 			return attempts === 1
@@ -226,7 +226,7 @@ test('2-A: A 已绑定 → bind(B) 失败 → 再 bind(A) 必须真正重绑（�
 	let rebindCalls: string[] = [];
 	let failB = true;
 	const session = new DshChatSession({
-		call: async () => ({ ok: false, error: { code: 'FEATURE_UNAVAILABLE', message: 'test' } }),
+		call: async () => ({ ok: false, error: { code: 'dsh-ide/feature-unavailable', message: 'test' } }),
 		rebindView: async (sessionId: string) => {
 			rebindCalls.push(sessionId);
 			if (sessionId === 'B' && failB) {
@@ -272,7 +272,7 @@ function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
 	return { promise, resolve };
 }
 
-const unavailable = { ok: false, error: { code: 'FEATURE_UNAVAILABLE', message: 'test' } };
+const unavailable = { ok: false, error: { code: 'dsh-ide/feature-unavailable', message: 'test' } };
 
 function readySnapshot(label: string) {
 	return {
