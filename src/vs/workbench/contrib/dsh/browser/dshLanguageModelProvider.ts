@@ -152,26 +152,30 @@ export function registerDshLanguageModelProvider(
 ): { provider: DshLanguageModelProvider; dispose(): void } {
 	// DSH 的每个供应商都要在模型表里登记一次，模型分组才能显示它们的名字。
 	// 先登记默认的一家；其余随目录变化补充（见 DshLanguageModelProvider.load）。
-	languageModels.deltaLanguageModelChatProviderDescriptors([{
-		vendor: DSH_MODEL_VENDOR,
-		displayName: 'DeepSeek',
-		configuration: undefined,
-		managementCommand: undefined,
-		when: undefined,
-	}], []);
+	const addedVendors: { vendor: string; displayName: string; configuration: undefined; managementCommand: undefined; when: undefined }[] = [];
+	const ensureVendor = (vendor: string, displayName: string): void => {
+		if (addedVendors.some(item => item.vendor === vendor)) {
+			return;
+		}
+		const descriptor = {
+			vendor,
+			displayName,
+			configuration: undefined,
+			managementCommand: undefined,
+			when: undefined,
+		};
+		languageModels.deltaLanguageModelChatProviderDescriptors([descriptor], []);
+		addedVendors.push(descriptor);
+	};
+	ensureVendor(DSH_MODEL_VENDOR, 'DeepSeek');
 	// 目录里的 provider id 也各登记一家，名字用它自己的 id，避免显示 "dsh" 把分组盖住。
+	// 同一次窗口里目录会反复刷新，已经登记过的 vendor 不能再 delta，否则每次都打 already registered。
 	const provider = new DshLanguageModelProvider(client, logService, {
 		ensureVendor: (vendor: string) => {
 			if (vendor === DSH_MODEL_VENDOR) {
 				return;
 			}
-			languageModels.deltaLanguageModelChatProviderDescriptors([{
-				vendor,
-				displayName: vendor,
-				configuration: undefined,
-				managementCommand: undefined,
-				when: undefined,
-			}], []);
+			ensureVendor(vendor, vendor);
 		},
 	});
 	const registration = languageModels.registerLanguageModelProvider(DSH_MODEL_VENDOR, provider);
@@ -182,6 +186,9 @@ export function registerDshLanguageModelProvider(
 		dispose: () => {
 			registration.dispose();
 			provider.dispose();
+			if (addedVendors.length > 0) {
+				languageModels.deltaLanguageModelChatProviderDescriptors([], addedVendors);
+			}
 		},
 	};
 }

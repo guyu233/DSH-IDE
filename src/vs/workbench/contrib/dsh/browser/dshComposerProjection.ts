@@ -60,7 +60,14 @@ export function toPermissionItems(state: DshComposerState): readonly IChatSessio
 	if (permission === null) {
 		return [];
 	}
-	return permission.options
+	const custom = permission.options.find(option => option.value === 'custom');
+	const items = permission.options
 		.filter(option => option.value !== 'custom')
 		.map(option => ({ id: option.value, name: option.name }));
+	// 当前值是 custom 时必须能被选中显示，但不能把它加进「可切换过去」的列表之外。
+	// 只在已经处于 custom 时插入；其它权限下仍然看不到这一项。
+	if (permission.current === 'custom') {
+		items.unshift({ id: 'custom', name: custom?.name && custom.name !== '' ? custom.name : '自定义' });
+	}
+	return items;
 }

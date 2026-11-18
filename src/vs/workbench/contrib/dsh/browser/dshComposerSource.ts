@@ -189,6 +189,9 @@ export class DshComposerSource extends Disposable implements IDshComposerSource 
 
 	private stateValue: DshComposerState = EMPTY;
 	private loading: Promise<void> | undefined;
+	/** 写成功后递增，用来丢掉写前已经发出的 composerState。 */
+	private loadGeneration = 0;
+	private loadingGeneration = 0;
 	private disposed = false;
 
 	constructor(
@@ -215,13 +218,20 @@ export class DshComposerSource extends Disposable implements IDshComposerSource 
 		if (this.loading !== undefined) {
 			return this.loading;
 		}
-		this.loading = this.load().finally(() => { this.loading = undefined; });
-		return this.loading;
+		const generation = ++this.loadGeneration;
+		const work = this.load(generation).finally(() => {
+			if (this.loadingGeneration === generation) {
+				this.loading = undefined;
+			}
+		});
+		this.loading = work;
+		this.loadingGeneration = generation;
+		return work;
 	}
 
-	private async load(): Promise<void> {
+	private async load(generation: number): Promise<void> {
 		const result = await this.client.call('composerState', {});
-		if (this.disposed) {
+		if (this.disposed || generation !== this.loadGeneration) {
 			return;
 		}
 		if (!result.ok) {
@@ -265,6 +275,9 @@ export class DshComposerSource extends Disposable implements IDshComposerSource 
 			this.logService.warn(`[dsh] ${method} 被拒绝`, result.error.code, result.error.message);
 			return;
 		}
+		// 写前的 composerState 还在飞时，refresh 会复用那次回包，把刚写上的选择盖回去。
+		this.loadGeneration++;
+		this.loading = undefined;
 		await this.refresh();
 	}
 

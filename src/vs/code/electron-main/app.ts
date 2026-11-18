@@ -1453,6 +1453,15 @@ export class CodeApplication extends Disposable {
 		const dshIdeViewHost = new DshIdeViewService(createDshIdeBackendFromEnv());
 		// P5 开窗（用户授权先于 K5 实施，见第 3 章 §1 第 3 条例外）：按钮 → 本通道 `launch` 命令
 		// → 主进程开/唤起 IDE 窗口。只开窗，不携带 token、不建第二条通道。
+		// 已有窗口时 userEnv 不会再生效。把会话资源交给渲染进程已有的 openChatSession，
+		// 由 DshChatSessionContentProvider.bind 切到这次点击的会话。
+		const openLaunchedSession = (window: { sendWhenReady(channel: string, token: CancellationToken, ...args: unknown[]): void } | undefined, sessionId: string | undefined): void => {
+			if (window === undefined || sessionId === undefined || sessionId === '') {
+				return;
+			}
+			const sessionResource = URI.from({ scheme: 'dsh', path: `/${encodeURIComponent(sessionId)}` }).toString();
+			window.sendWhenReady('vscode:openChatSession', CancellationToken.None, sessionResource);
+		};
 		const dshIdeLauncher: DshIdeLauncher = {
 			launch: async spec => {
 				try {
@@ -1478,9 +1487,11 @@ export class CodeApplication extends Disposable {
 					if (spec.workspace !== undefined) {
 						const folderUri = URI.file(spec.workspace);
 						// 已有同工作区窗口：只聚焦，不重复开窗（与官方 open-in-app 语义一致）。
+						// 聚焦不会把新的 sessionId 写进已存在窗口的 env，必须再让窗口打开该会话。
 						const existing = findWindowOnWorkspaceOrFolder(windowsMainService.getWindows(), folderUri);
 						if (existing !== undefined) {
 							existing.focus();
+							openLaunchedSession(existing, spec.sessionId);
 							return { ok: true };
 						}
 						// 只有空窗口时复用它加载工作区；已有工作区窗口时不覆盖用户当前工作区，另开新窗。
@@ -1501,7 +1512,9 @@ export class CodeApplication extends Disposable {
 					// 走 `open({ forceEmpty })` 而不是 `openEmptyWindow`：只有前者接受 `userEnv`，
 					// 才能把 DSH 给的 sessionId 交给新窗口（`openEmptyWindow` 会丢弃 userEnv）。
 					if (windowsMainService.getWindowCount() > 0) {
-						windowsMainService.getWindows()[0]?.focus();
+						const existing = windowsMainService.getWindows()[0];
+						existing?.focus();
+						openLaunchedSession(existing, spec.sessionId);
 						return { ok: true };
 					}
 					await windowsMainService.open({

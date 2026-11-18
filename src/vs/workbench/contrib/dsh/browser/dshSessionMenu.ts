@@ -13,13 +13,14 @@ import { ServicesAccessor } from '../../../../editor/browser/editorExtensions.js
 import { localize, localize2 } from '../../../../nls.js';
 import { Action2, MenuId, registerAction2 } from '../../../../platform/actions/common/actions.js';
 import { IClipboardService } from '../../../../platform/clipboard/common/clipboardService.js';
-import { ContextKeyExpr } from '../../../../platform/contextkey/common/contextkey.js';
+import { ContextKeyExpr, ContextKeyExpression } from '../../../../platform/contextkey/common/contextkey.js';
 import { IDialogService } from '../../../../platform/dialogs/common/dialogs.js';
 import { IInstantiationService } from '../../../../platform/instantiation/common/instantiation.js';
 import { KeybindingWeight } from '../../../../platform/keybinding/common/keybindingsRegistry.js';
 import { INotificationService } from '../../../../platform/notification/common/notification.js';
 import { IQuickInputService } from '../../../../platform/quickinput/common/quickInput.js';
 import { IDshClientService } from '../../../../platform/dshClient/common/dshClientService.js';
+import { IChatSessionsService } from '../../chat/common/chatSessionsService.js';
 import { ChatContextKeys } from '../../chat/common/actions/chatContextKeys.js';
 import { openSessionByResource } from '../../chat/browser/agentSessions/agentSessionsOpener.js';
 import { dshSessionIdFromResource, dshSessionResource } from './dshAgentSessionsController.js';
@@ -52,6 +53,7 @@ function registerSessionAction(options: {
 	readonly icon?: typeof Codicon.star;
 	readonly capability?: 'rewind' | 'sessionFavorite' | 'sessionMove' | 'sessionDelete';
 	readonly keybinding?: number;
+	readonly when?: ContextKeyExpression;
 	readonly run: (accessor: ServicesAccessor, sessionId: string) => Promise<void>;
 }): void {
 	registerAction2(class extends Action2 {
@@ -71,7 +73,7 @@ function registerSessionAction(options: {
 					id: MenuId.AgentSessionsContext,
 					group: options.group,
 					order: options.order,
-					when: ContextKeyExpr.and(DSH_SESSION, options.capability === undefined ? undefined : dshCapsContext(options.capability)),
+					when: ContextKeyExpr.and(DSH_SESSION, options.when, options.capability === undefined ? undefined : dshCapsContext(options.capability)),
 				},
 			});
 		}
@@ -211,11 +213,22 @@ export function registerDshSessionMenu(): void {
 		order: 1,
 		group: '4_dsh',
 		keybinding: KeyMod.CtrlCmd | KeyMod.Shift | KeyCode.KeyA,
+		when: ChatContextKeys.isArchivedAgentSession.negate(),
 		run: async (accessor, sessionId) => {
-			const result = await accessor.get(IDshClientService).call('archiveSession', { sessionId });
-			if (!result.ok) {
-				await fail(accessor.get(INotificationService), result.error, localize('dsh.session.archiveFailed', "归档会话失败"));
-			}
+			// 必须走会话控制器：直接 call 不会写入 archivedIds，刷新后归档标志丢失，
+			// 而且 DSH 右键菜单滤掉了原生 unarchive，这里不更新就再也无法恢复。
+			accessor.get(IChatSessionsService).setChatSessionItemArchived(dshSessionResource(sessionId), true);
+		},
+	});
+	registerSessionAction({
+		id: 'dsh.session.unarchive',
+		title: localize2('dsh.session.unarchive', "恢复会话"),
+		order: 2,
+		group: '4_dsh',
+		keybinding: KeyMod.CtrlCmd | KeyMod.Shift | KeyCode.KeyA,
+		when: ChatContextKeys.isArchivedAgentSession,
+		run: async (accessor, sessionId) => {
+			accessor.get(IChatSessionsService).setChatSessionItemArchived(dshSessionResource(sessionId), false);
 		},
 	});
 	registerSessionAction({

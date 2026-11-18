@@ -69,6 +69,28 @@ test('registers once, then polls and dispatches launch requests', async () => {
 	listener.dispose();
 });
 
+test('a launch request keeps sessionId and drops a blank one', async () => {
+	let polls = 0;
+	const caller = fakeCaller({
+		poll: () => {
+			polls += 1;
+			return polls === 1
+				? { ok: true, requests: [{ workspace: 'E:\\repo', sessionId: 's-9' }, { sessionId: '' }, { sessionId: 3 }] }
+				: { ok: true, requests: [] };
+		},
+	});
+	const launched: DshIdeLaunchRequest[] = [];
+	const listener = new DshIdeLaunchListener(caller, 'ide-1', request => launched.push(request));
+	listener.start();
+	await wait(DSH_IDE_LAUNCH_POLL_MS + 400);
+	assert.deepEqual(launched, [
+		{ workspace: 'E:\\repo', sessionId: 's-9' },
+		{},
+		{},
+	]);
+	listener.dispose();
+});
+
 test('a failing registration is retried instead of giving up', async () => {
 	let attempts = 0;
 	const caller = fakeCaller({

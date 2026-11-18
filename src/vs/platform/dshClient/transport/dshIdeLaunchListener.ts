@@ -29,6 +29,8 @@ export interface DshIdeLaunchHostCaller {
 /** 开窗请求（由 Host 转来）。 */
 export interface DshIdeLaunchRequest {
 	readonly workspace?: string;
+	/** 已在运行的 IDE 也要切到这次点击的会话；只传 workspace 会停在旧会话。 */
+	readonly sessionId?: string;
 }
 
 /**
@@ -137,9 +139,13 @@ export class DshIdeLaunchListener extends Disposable {
 				continue;
 			}
 			const workspace = (request as { workspace?: unknown }).workspace;
+			const sessionId = (request as { sessionId?: unknown }).sessionId;
 			// 开窗失败不能打断轮询循环：交给调用方处理，这里只保证不抛。
 			try {
-				this.onLaunch({ ...(typeof workspace === 'string' ? { workspace } : {}) });
+				this.onLaunch({
+					...(typeof workspace === 'string' ? { workspace } : {}),
+					...(typeof sessionId === 'string' && sessionId !== '' ? { sessionId } : {}),
+				});
 			} catch (error) {
 				this.lastError = error instanceof Error ? error.message : String(error);
 			}

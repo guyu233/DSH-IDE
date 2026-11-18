@@ -40,6 +40,32 @@ test('permission options drop the custom entry and keep ids', () => {
 	]);
 });
 
+test('a custom current permission stays visible but is not offered as a switch target otherwise', () => {
+	const items = toPermissionItems(state({
+		permission: {
+			current: 'custom',
+			options: [
+				{ value: 'workspace-write', name: '工作区写入' },
+				{ value: 'custom', name: '自定义' },
+			],
+		},
+	}));
+	assert.deepEqual(items, [
+		{ id: 'custom', name: '自定义' },
+		{ id: 'workspace-write', name: '工作区写入' },
+	]);
+	const plain = toPermissionItems(state({
+		permission: {
+			current: 'workspace-write',
+			options: [
+				{ value: 'workspace-write', name: '工作区写入' },
+				{ value: 'custom', name: '自定义' },
+			],
+		},
+	}));
+	assert.deepEqual(plain.map(item => item.id), ['workspace-write']);
+});
+
 test('no permission projection yields no options instead of inventing defaults', () => {
 	assert.deepEqual(toPermissionItems(state()), []);
 });
