@@ -12,10 +12,15 @@
  *   2) 传输/契约：connection / gateway / session-controller / llm / client-modules / typert 的关键契约文件。
  *
  * 用法（在仓库根执行）：
- *   node scripts/sync-upstream.mjs                       # 用默认源 clone，base=当前 vendored 版本，target=最新 dsh-v* tag
- *   node scripts/sync-upstream.mjs --fetch               # 先从官方 upstream 抓取最新 tags 再比对
- *   node scripts/sync-upstream.mjs --target dsh-v0.2.2-rc.1
- *   node scripts/sync-upstream.mjs --source E:/deepseek-harness-0.2.2-rc.1 --base dsh-v0.2.1-rc.5 --target dsh-v0.2.2-rc.1
+ *   node scripts/sync-upstream.mjs                    # 默认：经官方远程 API 比对（不需要本机 clone）
+ *   node scripts/sync-upstream.mjs --fetch            # 先从官方远程解析最新 tag（只读 ls-remote，不写任何仓库）
+ *   node scripts/sync-upstream.mjs --target dsh-v0.2.2-rc.3
+ *   node scripts/sync-upstream.mjs --source <本地只读 clone> --base dsh-v0.2.1-rc.5 --target dsh-v0.2.2-rc.3
+ *
+ * 与仓库约定的关系：AGENTS §3 禁止在本机下载或保留 DSH 整仓副本。因此本脚本
+ * **默认不 clone**，改用官方 compare API 读取精确 tag 之间的文件状态；`--source`
+ * 只用于已经存在的本地只读副本，脚本对它只做读取（不加 remote、不 fetch、不改 refs）。
+ * 网络不可用时不猜结论，明确输出 `STATUS: PENDING`。
  */
 import fs from 'node:fs'
 import path from 'node:path'
@@ -26,7 +31,8 @@ const here = path.dirname(fileURLToPath(import.meta.url))
 const ROOT = path.dirname(here)
 
 function parseArgs(argv) {
-	const a = { fetch: false, source: 'E:/deepseek-harness', remote: 'https://github.com/deepseek-ai/deepseek-harness.git', base: undefined, target: undefined, out: undefined }
+	// `source` 默认 undefined：没有显式指定就**不**假设本机有整仓副本（AGENTS §3 禁止保留）。
+	const a = { fetch: false, source: undefined, remote: 'https://github.com/deepseek-ai/deepseek-harness.git', base: undefined, target: undefined, out: undefined }
 	for (let i = 0; i < argv.length; i++) {
 		const k = argv[i]
 		if (k === '--fetch') a.fetch = true
@@ -42,8 +48,57 @@ function parseArgs(argv) {
 
 const args = parseArgs(process.argv.slice(2))
 
+/** 只读调用本地 clone：`-C <source>` 只读取，不写 refs。 */
 function git(...g) {
 	return execFileSync('git', ['-C', args.source, ...g], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, stdio: ['ignore', 'pipe', 'pipe'] }).trim()
+}
+
+/** 仓库根，用于相对路径与产物目录。 */
+const REPO_ROOT = ROOT
+
+/**
+ * 只读解析远端 tag 列表（`git ls-remote`，不需要 clone，也不写任何本地仓库）。
+ * @returns {Promise<string[]>} 形如 `dsh-v0.2.2-rc.3` 的 tag 名
+ */
+async function listRemoteTags() {
+	const out = execFileSync('git', ['ls-remote', '--tags', '--refs', args.remote], {
+		encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, stdio: ['ignore', 'pipe', 'pipe'],
+	})
+	return out
+		.split(/\r?\n/)
+		.map(line => line.split('\t')[1])
+		.filter(ref => typeof ref === 'string' && ref.startsWith('refs/tags/dsh-v'))
+		.map(ref => ref.slice('refs/tags/'.length))
+}
+
+/**
+ * 经官方 compare API 判断两个 tag 之间某文件的状态。
+ *
+ * 为什么不 clone：整仓副本被仓库约定禁止，且 clone 会把「网络 + 磁盘」两件事耦合进
+ * 一个只读比对。API 直接给两端 commit 与文件级差异，语义足够且不留本地副本。
+ * @returns {Promise<Record<string, string>>} 相对路径 → SAME / A / M / D / ERR
+ */
+async function statusOfViaApi(baseTag, targetTag, relPaths) {
+	const api = 'https://api.github.com/repos/deepseek-ai/deepseek-harness';
+	const headers = { accept: 'application/vnd.github+json', 'user-agent': 'dsh-ide-sync-upstream' };
+	const getJson = async url => {
+		const res = await fetch(url, { headers });
+		if (!res.ok) { throw new Error(`${res.status} ${res.statusText} for ${url}`); }
+		return res.json();
+	};
+	const baseSha = (await getJson(`${api}/git/ref/tags/${baseTag}`)).object.sha;
+	const targetSha = (await getJson(`${api}/git/ref/tags/${targetTag}`)).object.sha;
+	const compare = await getJson(`${api}/compare/${baseSha}...${targetSha}`);
+	const touched = new Map();
+	for (const file of compare.files ?? []) {
+		touched.set(file.filename, file.status);
+	}
+	const status = {};
+	for (const rel of relPaths) {
+		const hit = touched.get(rel);
+		status[rel] = hit === undefined ? 'SAME' : hit === 'added' ? 'A' : hit === 'modified' ? 'M' : hit === 'removed' ? 'D' : hit.toUpperCase();
+	}
+	return status;
 }
 
 // 复用面清单（相对 packages/client/ui-chat 的源路径）
@@ -83,51 +138,67 @@ function readVendoredVersion() {
 	return undefined
 }
 
-function main() {
-	if (!fs.existsSync(path.join(args.source, '.git'))) throw new Error(`--source 不是 git 仓库: ${args.source}`)
+async function main() {
+	// 两种数据来源：显式 `--source`（已存在的本地只读副本）或远端 API（默认）。
+	// 共同约束：**都不写任何仓库**——不加 remote、不 fetch、不改 refs。
+	let tags
+	let baseCommit
+	let targetCommit
+	let statusOf
 
-	if (args.fetch) {
-		try {
-			let hasUpstream = false
-			try { git('remote', 'get-url', 'upstream'); hasUpstream = true } catch { /* none */ }
-			if (!hasUpstream) { try { git('remote', 'add', 'upstream', args.remote) } catch { /* exists */ } }
-			git('fetch', 'upstream', '--tags', '--quiet')
-			console.log('[sync] fetched upstream tags')
-		} catch (e) {
-			console.warn('[sync] 警告：fetch 失败（离线？），改用现有 tags 对比：' + e.message)
+	if (args.source !== undefined) {
+		// 先判互斥再判路径：否则一个同时给了两者的调用会报「路径不存在」，
+		// 掩盖真正的问题（这个组合本身不被允许）。
+		if (args.fetch) {
+			throw new Error('--fetch 与 --source 互斥：本脚本不会对本地副本执行 fetch（那会改动它的 refs）。请去掉 --fetch 改用远端比对。')
 		}
+		if (!fs.existsSync(path.join(args.source, '.git'))) {
+			throw new Error(`--source 不是 git 仓库（只读副本）: ${args.source}`)
+		}
+		tags = git('tag', '--list', 'dsh-v*', '--sort=v:refname').split('\n').filter(Boolean)
+		if (tags.length === 0) { throw new Error('源副本无 dsh-v* tag') }
+		statusOf = (relPaths) => {
+			const out = {}
+			for (const rel of relPaths) {
+				try {
+					const r = git('diff', '--name-status', base, target, '--', rel).split('\n').filter(Boolean)
+					out[rel] = r.length === 0 ? 'SAME' : r[0].split('\t')[0]
+				} catch { out[rel] = 'ERR' }
+			}
+			return out
+		}
+	} else {
+		try {
+			tags = (await listRemoteTags()).sort()
+		} catch (error) {
+			// 网络不可用时不猜结论：明确 PENDING，让调用方知道「没比对」。
+			console.log(`STATUS: PENDING  [sync-upstream] 无法读取远端 tag（${error && error.message ? error.message : error}）`)
+			console.log('  离线或 API 不可用时本脚本不产出差异报告；请在网络可用后重跑。')
+			process.exit(0)
+		}
+		statusOf = (relPaths) => statusOfViaApi(base, target, relPaths)
 	}
-
-	const tags = git('tag', '--list', 'dsh-v*').split('\n').filter(Boolean)
-		if (tags.length === 0) throw new Error('源 clone 无 dsh-v* tag')
-	// 语义排序：取 `git tag --sort=v:refname`
-	const sorted = git('tag', '--list', 'dsh-v*', '--sort=v:refname').split('\n').filter(Boolean)
 
 	const vendored = readVendoredVersion()
 	let base = args.base || (vendored ? `dsh-v${vendored}` : undefined)
-	const target = args.target || sorted[sorted.length - 1]
-	if (!base) base = sorted[sorted.length - 1]
-	if (!tags.includes(base)) throw new Error(`base tag 不存在: ${base}（可选：${sorted.join(', ')}）`)
-	if (!tags.includes(target)) throw new Error(`target tag 不存在: ${target}（可选：${sorted.join(', ')}）`)
+	const target = args.target || tags[tags.length - 1]
+	if (!base) base = tags[tags.length - 1]
+	if (!tags.includes(base)) throw new Error(`base tag 不存在: ${base}（可选：${tags.join(', ')}）`)
+	if (!tags.includes(target)) throw new Error(`target tag 不存在: ${target}（可选：${tags.join(', ')}）`)
 
-	const baseCommit = git('rev-parse', '--short', `${base}^{commit}`)
-	const targetCommit = git('rev-parse', '--short', `${target}^{commit}`)
-
-	// 逐文件状态
-	function statusOf(relPaths) {
-		const out = {}
-		for (const rel of relPaths) {
-			try {
-				const r = git('diff', '--name-status', base, target, '--', rel).split('\n').filter(Boolean)
-				out[rel] = r.length === 0 ? 'SAME' : r[0].split('\t')[0] // A/M/D/...
-			} catch { out[rel] = 'ERR' }
-		}
-		return out
+	if (args.source !== undefined) {
+		baseCommit = git('rev-parse', '--short', `${base}^{commit}`)
+		targetCommit = git('rev-parse', '--short', `${target}^{commit}`)
+	} else {
+		baseCommit = base
+		targetCommit = target
 	}
-	const uiStatus = statusOf(UI_FILES.map(f => `${UI_DIR}/${f}`))
-	const cssStatus = statusOf(CSS_FILES.map(f => `${UI_DIR}/${f}`))
-	const assetStatus = statusOf(ASSET_FILES.map(f => `${UI_DIR}/${f}`))
-	const contractStatus = statusOf(CONTRACT_FILES)
+
+	// 逐文件状态（来源由上面的分支决定：远端 API 或本地只读副本）
+	const uiStatus = await statusOf(UI_FILES.map(f => `${UI_DIR}/${f}`))
+	const cssStatus = await statusOf(CSS_FILES.map(f => `${UI_DIR}/${f}`))
+	const assetStatus = await statusOf(ASSET_FILES.map(f => `${UI_DIR}/${f}`))
+	const contractStatus = await statusOf(CONTRACT_FILES)
 
 	const rel = (p) => p.replace(/^packages\/client\/ui-chat\/src\/client\//, '')
 	const changedUi = Object.entries(uiStatus).filter(([, s]) => s !== 'SAME')
@@ -208,4 +279,4 @@ function main() {
 	}
 }
 
-try { main() } catch (e) { console.error('[sync] 失败：' + (e && e.message ? e.message : e)); process.exit(1) }
+main().catch(e => { console.error('[sync] 失败：' + (e && e.message ? e.message : e)); process.exit(1) })

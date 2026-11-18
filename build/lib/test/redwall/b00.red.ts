@@ -788,6 +788,26 @@ test('DOC-006: historical provenance is corrected by errata, never rewritten', (
 	assert.match(chatRenderProvenance, /旁挂 sidecar esbuild 编译/, 'the preserved copy must keep its wording');
 });
 
+test('DOC-004: sync-upstream never writes to the reference repo', () => {
+	const script = source('scripts/sync-upstream.mjs');
+	// 默认不得假设本机有整仓副本（AGENTS §3 禁止保留）。
+	assert.doesNotMatch(script, /source: 'E:\/deepseek-harness'/, 'the default source must not point at a local full clone');
+	assert.match(script, /source: undefined/, 'the default must be "no local source"');
+	// 不得对参考仓库加 remote 或 fetch。
+	assert.doesNotMatch(script, /git\('remote', 'add'/, 'the script must not add a remote');
+	assert.doesNotMatch(script, /git\('fetch'/, 'the script must not fetch into the reference repo');
+	// --fetch 与 --source 互斥，且互斥先于路径判定。
+	assert.match(script, /--fetch 与 --source 互斥/, 'the combination must be rejected explicitly');
+	const mutual = script.indexOf('--fetch 与 --source 互斥');
+	const pathCheck = script.indexOf("path.join(args.source, '.git')");
+	assert.ok(mutual > 0 && mutual < pathCheck, 'mutual exclusion must be checked before the path');
+	// 离线不猜结论。
+	assert.match(script, /STATUS: PENDING  \[sync-upstream\] 无法读取远端 tag/, 'offline must report PENDING');
+	// 远端比对走只读 API，不需要 clone。
+	assert.match(script, /git', \['ls-remote'/, 'tag discovery must use ls-remote');
+	assert.match(script, /api\.github\.com\/repos\/deepseek-ai\/deepseek-harness/, 'comparison must use the read-only API');
+});
+
 test('SEC-003: Host dispatch shares the packaged protocol validator', () => {
 	// 只审查装配和单一校验器的接线；不发送非法 DTO，不调用真实 Host。
 	const host = source('src/vs/platform/dshClient/host/ide-view-host.js');

@@ -77,8 +77,10 @@ esolved/integrity 三行，未整体重写锁文件；实体包同步。1 条隔
 | DOC-005 | 已修（实测证据） | 版本比对口径统一为 SemVer 2.0.0 严格规则：运行时 `parseVersion` 不再用 `parseInt` 补零（`abc`→`0.0.0`、`1x`→`1` 的静默接受已消除），非法即返回 `undefined`；`compareVersion` 非法返回 `undefined`，`installedMeetsVersion` 对非法版本返回 `false`（无法证明满足即不算满足）；build metadata 按 §10 允许出现但不参与比较。门禁脚本改用同一套正则。实测 10 个用例（含预发布、build metadata、前导零、非法、空串）两套规则**全部 MATCH**；`rc.10 > rc.9` 成立。1 条隔离用例锁定。 |
 | DOC-007 | 已修（实测证据） | 三个门禁脚本统一用脚本自身位置推导仓库根（向上四级），不再用 `process.cwd()`。实测从 `C:\` 直接调用 `dshIdeCi.mjs` 与 `dshInstallDrift.mjs` 均正确定位仓库（前者前三步 PASS、`contract` 因未设 `DSH_INSTALLED_VERSION` 按设计 PENDING）。1 条隔离用例锁定三处口径。 |
 | DOC-002 | 已修（文档与实现对齐） | 公开支持声明改为与实现一致：明确「支持平台：Windows x64」，并说明 Linux x64 **不是**可运行平台（源码可编译，但首次拉窗复用宿主 Electron 的路径当前只实现 Windows，非 Windows 会明确返回 `Electron home materialization is Windows-only`）；删除原「Windows x64 / Linux x64（当前构建目标）」的并列暗示。同时分开写清「开发期 Electron 头文件版本」（`.npmrc` `target`，当前 `43.7.7`）与「运行宿主 ABI」（DSH 自带，`44.7.0`），并明确版本不同**不等于**已观察到 ABI 崩溃。AGENTS.md 同步更正该表述。2 条隔离用例锁定。**真机 Linux 矩阵 PENDING**（未实现，不宣称支持）。 |
-| DOC-006 | 已修（手册勘误） | 按审计要求**不改动保留原文的 PROVENANCE 与许可文件**，改在现行手册新增 §5.7「历史凭据勘误」：说明两份 PROVENANCE 中「旁挂 sidecar esbuild 编译（运行时唯一构建入口）」已与现行实现不符——当前聊天内容由 `dshChatSessionContent` 的 content provider 提供 history，打包期 `prepare-dsh-chat-render` 只写鲸鱼图标，`build/gulpfile.vscode.ts` 注释亦明确「不再有 sidecar 产物」；并固定处置方式为「只加勘误、不回写原文」。实测两份凭据原文仍保留旧表述（证明未被改写），工作区仅手册变更。1 条隔离用例锁定。 |`n| DOC-004、SEC-001 | 仍存在 | 上游同步脚本与本机留存约定冲突、行内补全声明需核对；均需外部证据或发布物。 |
-| DOC-004、SEC-001 | 仍存在 | 上游同步脚本与本机留存约定冲突、行内补全声明需核对；均需外部证据或发布物。 |
+| DOC-006 | 已修（手册勘误） | 按审计要求**不改动保留原文的 PROVENANCE 与许可文件**，改在现行手册新增 §5.7「历史凭据勘误」：说明两份 PROVENANCE 中「旁挂 sidecar esbuild 编译（运行时唯一构建入口）」已与现行实现不符——当前聊天内容由 `dshChatSessionContent` 的 content provider 提供 history，打包期 `prepare-dsh-chat-render` 只写鲸鱼图标，`build/gulpfile.vscode.ts` 注释亦明确「不再有 sidecar 产物」；并固定处置方式为「只加勘误、不回写原文」。实测两份凭据原文仍保留旧表述（证明未被改写），工作区仅手册变更。1 条隔离用例锁定。 |`n| DOC-004 | 已修（实测证据） | 上游同步脚本改为**只读**且不依赖本机整仓副本（AGENTS §3 禁止保留）：默认经 `git ls-remote` 取 tag、经官方 compare API 逐文件比对，不再 clone、不加 remote、不 fetch；`--source` 仅接受已存在的本地只读副本且与 `--fetch` 互斥（互斥判定先于路径判定）；网络不可用时输出 `STATUS: PENDING` 而非猜测结论。实测：默认路径成功比对 `rc.1 → rc.5`（12 个契约文件全 SAME）；用临时仓库实测 `--source` 前后 **refs 完全不变、remotes 未新增**；离线模拟输出 PENDING。1 条隔离用例锁定。**未运行 `--fetch` 对真实上游**（审计要求不得本轮运行该脚本改参考源）。 |`n`n| SEC-001 | 仍存在 | 行内补全声明需核对；需外部证据或发布物。 |
+| DOC-004 | 已修（实测证据） | 上游同步脚本改为**只读**且不依赖本机整仓副本（AGENTS §3 禁止保留）：默认经 `git ls-remote` 取 tag、经官方 compare API 逐文件比对，不再 clone、不加 remote、不 fetch；`--source` 仅接受已存在的本地只读副本且与 `--fetch` 互斥（互斥判定先于路径判定）；网络不可用时输出 `STATUS: PENDING` 而非猜测结论。实测：默认路径成功比对 `rc.1 → rc.5`（12 个契约文件全 SAME）；临时仓库实测 `--source` 前后 **refs 完全不变、remotes 未新增**；离线模拟输出 PENDING。1 条隔离用例锁定。**未对真实上游运行 `--fetch`**（审计要求不得本轮运行该脚本改参考源）。 |
+| SEC-001 | 仍存在 | 行内补全声明需核对；需外部证据或发布物。 |
+
 | BUG-019 | 已修（隔离证据） | 远端图片尺寸探测有界且必结算：2 MB 字节上限 + 5 s 时限，超限/超时明确返回「读不到」并销毁响应；解析失败只在流结束时才是最终结论，此时结算为 undefined，不再吞错悬空。本地桩实测四种情形（正常图 / 非图片 / 超大 / 不结束）均结算。真机 Emmet 命令 PENDING。 |
 | BUG-024 | 已修（隔离证据） | 模拟器工具名模式不匹配改为显式失败：四条协议路径（Responses API + 三处）都不再静默回退成请求里的第一个工具，避免把「执行了另一个工具」统计成原场景性能数据。1 条隔离用例锁定四条路径。真机性能基线与模拟运行 PENDING。 |
 | OPT-001 | 仍存在 | 需实测 P95 与内存斜率后才能决定是否优化；无实测不优化。 |
@@ -240,5 +242,5 @@ B01 先从新旧配对和可信主体的隔离测试进入原子迁移，不重�
 | 状态 | B01 实现结果 |
 |---|---|
 | 已闭环 | B00–B12 全批次已落地：P1 全部（BUG-008–015、SEC-003/005）、BUG-016/018/019/020/021/022/023/024、DOC-001、OPT-002 在隔离用例或实测证据上转绿；契约 revision 5，两半同时拒绝不匹配。 |
-| 仍存在 | 见上方问题表：SEC-004、SEC-006、DOC-004、DOC-002 的 Linux 真机矩阵、SEC-001、OPT-001 及 CLN-003/004/005（已核引用、维持现状）。全量 Node、Electron、ESLint 基线仍 FAIL；真机与发布验收 PENDING。 |
+| 仍存在 | 见上方问题表：SEC-004、SEC-006、DOC-002 的 Linux 真机矩阵、SEC-001、OPT-001 及 CLN-003/004/005（已核引用、维持现状）。全量 Node、Electron、ESLint 基线仍 FAIL；真机与发布验收 PENDING。 |
 | 新引入 | 契约 revision 5 使旧 Host 与旧 IDE 互相拒绝业务调用，这是有意的失配拒绝。 |
