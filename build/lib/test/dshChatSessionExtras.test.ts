@@ -265,3 +265,90 @@ test('2-A: 会话状态通知按 sessionId 过滤，且结束后能复位 runnin
 		session.dispose();
 	}
 });
+
+function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
+	let resolve: (value: T) => void = () => undefined;
+	const promise = new Promise<T>(done => { resolve = done; });
+	return { promise, resolve };
+}
+
+const unavailable = { ok: false, error: { code: 'FEATURE_UNAVAILABLE', message: 'test' } };
+
+function readySnapshot(label: string) {
+	return {
+		ok: true,
+		value: {
+			state: {
+				state: 'ready',
+				view: {
+					frame: { type: 'noop' },
+					conversation: { nodes: [], hasMore: false },
+					todos: [{ content: label, status: 'pending' }],
+				},
+			},
+		},
+	};
+}
+
+test('a late rebind cannot overwrite or roll back a newer bind', async () => {
+	const late = deferred<ReturnType<typeof readySnapshot> | typeof unavailable>();
+	const session = new DshChatSession({
+		call: async () => unavailable,
+		rebindView: async (sessionId: string) => sessionId === 'A' ? late.promise : readySnapshot(sessionId),
+	} as never);
+	try {
+		await session.bind('base');
+		const pending = session.bind('A');
+		assert.equal(await session.bind('B'), true);
+		assert.equal(session.todos()[0]?.content, 'B');
+		session.acceptSessionStatus('B', true);
+		late.resolve(readySnapshot('A'));
+		assert.equal(await pending, false, 'the superseded bind must not report success');
+		assert.equal(session.todos()[0]?.content, 'B', 'the late snapshot must not replace B');
+		session.acceptSessionStatus('B', false);
+		assert.equal(session.running(), false, 'the late failure path must not roll B back');
+	} finally {
+		session.dispose();
+	}
+});
+
+test('a second bind of the same id waits for the real result', async () => {
+	const pending = deferred<typeof unavailable>();
+	const session = new DshChatSession({
+		call: async () => unavailable,
+		rebindView: () => pending.promise,
+	} as never);
+	try {
+		const first = session.bind('A');
+		const second = session.bind('A');
+		pending.resolve(unavailable);
+		assert.deepEqual(await Promise.all([first, second]), [false, false]);
+	} finally {
+		session.dispose();
+	}
+});
+
+test('a late composerState cannot overwrite the session bound while it was in flight', async () => {
+	const late = deferred<{ ok: true; value: { model: { current: { provider: string; model: string }; groups: [] } } }>();
+	let reads = 0;
+	const session = new DshChatSession({
+		call: async (method: string) => {
+			if (method !== 'composerState') {
+				return unavailable;
+			}
+			reads += 1;
+			return reads === 1 ? late.promise : { ok: true, value: { model: { current: { provider: 'unit', model: 'B' }, groups: [] } } };
+		},
+		rebindView: async (sessionId: string) => readySnapshot(sessionId),
+	} as never);
+	try {
+		const oldRefresh = session.refreshComposer();
+		assert.equal(await session.bind('B'), true);
+		assert.equal(session.currentModel()?.model, 'B');
+		late.resolve({ ok: true, value: { model: { current: { provider: 'unit', model: 'A' }, groups: [] } } });
+		await oldRefresh;
+		assert.equal(session.currentModel()?.model, 'B');
+	} finally {
+		session.dispose();
+	}
+});

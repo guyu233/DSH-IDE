@@ -148,3 +148,23 @@ test('dispose stops the loop', async () => {
 	// dispose 会立刻向 Host 注销（避免死登记项等心跳超时）；除这次注销外不得再有轮询。
 	assert.deepEqual(after.map(call => call.method), ['unregisterIdeClient'], 'no polling may happen after dispose');
 });
+
+test('dispose during registration unregisters and does not dispatch a later poll', async () => {
+	let finishRegister: (value: { ok: true }) => void = () => undefined;
+	let finishPoll: (value: { ok: true; requests: { workspace: string }[] }) => void = () => undefined;
+	const caller = fakeCaller({
+		register: () => new Promise(resolve => { finishRegister = resolve; }),
+		poll: () => new Promise(resolve => { finishPoll = resolve; }),
+	});
+	const launched: DshIdeLaunchRequest[] = [];
+	const listener = new DshIdeLaunchListener(caller, 'ide-6', request => launched.push(request));
+	listener.start();
+	await wait(20);
+	listener.dispose();
+	finishRegister({ ok: true });
+	await wait(20);
+	assert.deepEqual(caller.calls.map(call => call.method), ['registerIdeClient', 'unregisterIdeClient']);
+	finishPoll({ ok: true, requests: [{ workspace: 'E:\\late' }] });
+	await wait(20);
+	assert.deepEqual(launched, [], 'a poll that resolves after dispose must not open a window');
+});

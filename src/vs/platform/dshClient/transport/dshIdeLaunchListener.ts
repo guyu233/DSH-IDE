@@ -102,10 +102,18 @@ export class DshIdeLaunchListener extends Disposable {
 		try {
 			if (!this.registered) {
 				await this.caller.call('ide', 'registerIdeClient', { clientId: this.clientId });
+				if (this.disposed) {
+					// 报到尚未记上就已关窗：dispose 看不到 registered，不会注销。这里补一次。
+					void this.caller.call('ide', 'unregisterIdeClient', { clientId: this.clientId }).catch(() => undefined);
+					return;
+				}
 				this.registered = true;
 				this.lastError = undefined;
 			}
 			const result = await this.caller.call('ide', 'pollLaunch', { clientId: this.clientId });
+			if (this.disposed) {
+				return;
+			}
 			this.dispatch(result);
 			this.lastError = undefined;
 		} catch (error) {

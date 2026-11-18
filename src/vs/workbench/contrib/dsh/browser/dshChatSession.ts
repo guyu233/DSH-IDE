@@ -85,8 +85,10 @@ export class DshChatSession extends Disposable implements IDshChatSession {
 	private readonly _onDidChangeRunning = this._register(new Emitter<boolean>());
 	private readonly _onDidChangeNodes = this._register(new Emitter<readonly [readonly DshChatNode[], boolean]>());
 	private readonly _onDidChangeHistory = this._register(new Emitter<void>());
-	/** bind 换会话时递增。过期的 loadOlder 结果不得写入新会话。 */
+	/** bind 换会话时递增。过期的 loadOlder / rebind / composer 结果不得写入新会话。 */
 	private generation = 0;
+	/** 正在进行的 bind 代次。同一目标在它完成前不能短路成成功。 */
+	private _bindInFlight: number | undefined;
 	private _disposed = false;
 	private readonly pendingItems = new Map<string, DshChatPending>();
 	private _models: readonly DshChatModelOption[] = [];
@@ -232,10 +234,13 @@ export class DshChatSession extends Disposable implements IDshChatSession {
 	 *          不能假装绑定成功继续打开视图。
 	 */
 	async bind(sessionId: string | undefined): Promise<boolean> {
-		if (sessionId === this.boundSessionId && !this._boundDirty) {
+		// 有绑定尚未完成时，不能因为 id 已经写上就返回成功：那次 rebind 仍可能失败。
+		if (sessionId === this.boundSessionId && !this._boundDirty && this._bindInFlight === undefined) {
 			return true;
 		}
 		this.generation++;
+		const generation = this.generation;
+		this._bindInFlight = generation;
 		const previous = this.boundSessionId;
 		this.boundSessionId = sessionId;
 		this.model.clear();
@@ -251,28 +256,44 @@ export class DshChatSession extends Disposable implements IDshChatSession {
 		// extras 也被清空：必须通知，否则复用同一个共享会话的 content 会一直显示旧交付物。
 		this._onDidChangeExtras.fire();
 		this.setRunning(false);
-		if (sessionId === undefined) {
+		try {
+			if (sessionId === undefined) {
+				return true;
+			}
+			const rebound = await this.client.rebindView(sessionId);
+			// 更新的 bind 已经接过这条会话。迟到的成功不能覆盖它，迟到的失败也不能把它回滚。
+			if (generation !== this.generation) {
+				return false;
+			}
+			if (!rebound.ok) {
+				// 失败必须回滚绑定：否则下一次 `bind(同一 id)` 会因「相等」直接返回 true，
+				// 永远不再重绑，面板停在空状态。但模型已经被 clear()，只回滚 id 不够——
+				// 同时置脏，让下一次同 id 的 bind 仍会真正重跑 rebind。
+				this.boundSessionId = previous;
+				this._boundDirty = true;
+				return false;
+			}
+			this._boundDirty = false;
+			// `rebind` 返回的快照就是这次绑定的首屏内容：不喂给 model，面板会一直是空的，
+			// 只能等后续流帧；已结束的会话根本不会再推帧。
+			const view = rebound.value?.state?.state === 'ready' ? rebound.value.state.view : undefined;
+			if (view !== undefined) {
+				this.acceptView(view);
+			}
+			await this.refreshComposer();
+			if (generation !== this.generation) {
+				return false;
+			}
+			await this.refreshSkills();
+			if (generation !== this.generation) {
+				return false;
+			}
 			return true;
+		} finally {
+			if (this._bindInFlight === generation) {
+				this._bindInFlight = undefined;
+			}
 		}
-		const rebound = await this.client.rebindView(sessionId);
-		if (!rebound.ok) {
-			// 失败必须回滚绑定：否则下一次 `bind(同一 id)` 会因「相等」直接返回 true，
-			// 永远不再重绑，面板停在空状态。但模型已经被 clear()，只回滚 id 不够——
-			// 同时置脏，让下一次同 id 的 bind 仍会真正重跑 rebind。
-			this.boundSessionId = previous;
-			this._boundDirty = true;
-			return false;
-		}
-		this._boundDirty = false;
-		// `rebind` 返回的快照就是这次绑定的首屏内容：不喂给 model，面板会一直是空的，
-		// 只能等后续流帧；已结束的会话根本不会再推帧。
-		const view = rebound.value?.state?.state === 'ready' ? rebound.value.state.view : undefined;
-		if (view !== undefined) {
-			this.acceptView(view);
-		}
-		await this.refreshComposer();
-		await this.refreshSkills();
-		return true;
 	}
 
 	/** 启动时连接已由 `openView` 按开窗参数建好：只登记绑定并补读目录，不重开流。 */
@@ -502,13 +523,16 @@ export class DshChatSession extends Disposable implements IDshChatSession {
 
 	/** 重读输入框目录：模型列表与当前选择（形状由 `projectDshIdeComposer` 决定）。 */
 	async refreshComposer(): Promise<void> {
+		const generation = this.generation;
+		const sessionId = this.boundSessionId;
 		const result = await this.client.call<{
 			readonly model?: {
 				readonly current?: { readonly provider?: string; readonly model?: string; readonly effort?: string } | null;
 				readonly groups?: readonly { readonly id?: string; readonly models?: readonly ComposerModelCatalog[] }[];
 			};
 		}>('composerState', {});
-		if (!result.ok) {
+		// 等待期间换了会话：这份目录属于旧绑定，不能写到新会话上。
+		if (generation !== this.generation || sessionId !== this.boundSessionId || !result.ok) {
 			return;
 		}
 		const options: DshChatModelOption[] = [];
