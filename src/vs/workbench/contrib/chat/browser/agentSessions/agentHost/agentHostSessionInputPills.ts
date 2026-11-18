@@ -12,6 +12,7 @@ import { raceTimeout } from '../../../../../../base/common/async.js';
 import { Codicon } from '../../../../../../base/common/codicons.js';
 import { structuralEquals } from '../../../../../../base/common/equals.js';
 import { toErrorMessage } from '../../../../../../base/common/errorMessage.js';
+import { onUnexpectedError } from '../../../../../../base/common/errors.js';
 import { Event } from '../../../../../../base/common/event.js';
 import { Disposable, DisposableStore, MutableDisposable, toDisposable } from '../../../../../../base/common/lifecycle.js';
 import { getMediaMime } from '../../../../../../base/common/mime.js';
@@ -1185,7 +1186,7 @@ export class AgentHostSessionInputPills extends Disposable {
 				enrich: !artifact.isArtifact,
 				onDidClickRepository: resource => this._openExternal(resource),
 				onDidClickReference: () => this._openExternal(link),
-				onDidClickBranch: branch => { void this._clipboardService.writeText(branch); },
+				onDidClickBranch: branch => { void this._clipboardService.writeText(branch).catch(onUnexpectedError); },
 			}) : undefined;
 			const gitHubPresentation = gitHubDetails
 				? gitHubDetails.presentation.read(reader)
@@ -1222,7 +1223,7 @@ export class AgentHostSessionInputPills extends Disposable {
 				icon,
 				ariaLabel: localize('agentHostSessionPills.copyCommit', "Copy Commit Hash for {0}", artifact.label),
 				tooltip: artifact.commitHash,
-				open: () => { void this._clipboardService.writeText(artifact.commitHash!); },
+				open: () => { void this._clipboardService.writeText(artifact.commitHash!).catch(onUnexpectedError); },
 			};
 		}
 		return undefined;
@@ -1343,7 +1344,7 @@ export class AgentHostSessionInputPills extends Disposable {
 			id: input.id,
 			label,
 			icon: Codicon.globe,
-			open: () => { void this._openBrowser(input, sessionResource); },
+			open: () => { void this._openBrowser(input, sessionResource).catch(onUnexpectedError); },
 		};
 	}
 
@@ -1369,16 +1370,16 @@ export class AgentHostSessionInputPills extends Disposable {
 	}
 
 	private _openExternal(resource: URI): void {
-		void this._openerService.open(resource, { openExternal: true, allowContributedOpeners: true, fromUserGesture: true });
+		void this._openerService.open(resource, { openExternal: true, allowContributedOpeners: true, fromUserGesture: true }).catch(onUnexpectedError);
 	}
 
 	private _openResource(resource: URI): void {
 		const kind = previewKind(resource);
 		if (kind) {
-			void openChatTurnFile({ uri: resource, kind, created: false }, this._openerService, this._configurationService);
+			void openChatTurnFile({ uri: resource, kind, created: false }, this._openerService, this._configurationService).catch(onUnexpectedError);
 			return;
 		}
-		void this._openerService.open(resource, { fromUserGesture: true });
+		void this._openerService.open(resource, { fromUserGesture: true }).catch(onUnexpectedError);
 	}
 
 	private _refreshBrowserListeners(): void {

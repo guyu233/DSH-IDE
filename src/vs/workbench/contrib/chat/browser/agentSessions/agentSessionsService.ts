@@ -3,6 +3,7 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
+import { onUnexpectedError } from '../../../../../base/common/errors.js';
 import { Emitter, Event } from '../../../../../base/common/event.js';
 import { Disposable } from '../../../../../base/common/lifecycle.js';
 import { URI } from '../../../../../base/common/uri.js';
@@ -32,7 +33,7 @@ export class AgentSessionsService extends Disposable implements IAgentSessionsSe
 			this._model = this._register(this.instantiationService.createInstance(AgentSessionsModel));
 			this._register(this._model.onDidChangeSessionArchivedState(session => {
 				if (session.isArchived()) {
-					void this.chatService.cancelCurrentRequestForSession(session.resource, 'archive');
+					void this.chatService.cancelCurrentRequestForSession(session.resource, 'archive').catch(onUnexpectedError);
 				}
 
 				this._onDidChangeSessionArchivedState.fire(session);
