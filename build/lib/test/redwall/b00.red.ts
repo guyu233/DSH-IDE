@@ -640,6 +640,21 @@ test('BUG-019: the remote image probe is bounded and always settles', () => {
 	assert.doesNotMatch(finalBlock, /^\s*\/\/ might not have enough data, skip error\s*$/m, 'a final parse failure is not a silent skip');
 });
 
+test('BUG-024: a scenario tool pattern mismatch fails instead of running another tool', () => {
+	// 只读结构核验：模拟器是测试工具链，不启动真实服务。
+	const server = source('scripts/chat-simulation/common/mock-llm-server.ts');
+	assert.doesNotMatch(server, /requestToolNames\[0\]/, 'no branch may silently substitute the first tool');
+	assert.match(server, /measurements are not comparable/, 'a mismatch must be reported as non-comparable');
+	// 四条协议路径都必须显式失败，而不是只有一条。
+	const throws = (server.match(/throw new Error\(/g) ?? []).length;
+	assert.ok(throws >= 1, 'a mismatch must throw');
+	assert.equal(
+		(server.match(/matched none of/g) ?? []).length,
+		4,
+		'all four protocol paths must reject a mismatch',
+	);
+});
+
 test('SEC-003: Host dispatch shares the packaged protocol validator', () => {
 	// 只审查装配和单一校验器的接线；不发送非法 DTO，不调用真实 Host。
 	const host = source('src/vs/platform/dshClient/host/ide-view-host.js');

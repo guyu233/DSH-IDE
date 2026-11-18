@@ -1221,13 +1221,16 @@ async function sendResponsesNonStreaming(
 
 		if (turn.kind === 'tool-calls') {
 			output = turn.toolCalls.map((call, i) => {
-				let toolName = requestToolNames.find(name => call.toolNamePattern.test(name));
+				const toolName = requestToolNames.find(name => call.toolNamePattern.test(name));
 				if (!toolName) {
-					// 不能把正则源码「反解」成工具名：`/read.*file/` 会变成 `readfile` 这种不存在的名字，
-					// 客户端会报 unknown tool 然后一直等到超时。取不到匹配就退回请求里的第一个真实工具名，
-					// 并明确记一条日志（scenario 没写对，但至少不会卡死）。
-					toolName = requestToolNames[0];
-					_log(`[mock-llm-server] scenario tool pattern ${call.toolNamePattern} matched none of ${requestToolNames.join(', ')}; falling back to ${toolName}`);
+					// 不匹配是 scenario 的配置错误，不是「换成别的工具继续跑」。
+					// 退回到请求里的第一个工具会让这次运行真的执行另一个工具，
+					// 结果却被统计成原场景的性能数据——那是有毒的比较基线。
+					// 这里明确失败：宁可让该场景报错，也不产出不可比的数字。
+					throw new Error(
+						`[mock-llm-server] scenario tool pattern ${call.toolNamePattern} matched none of ${requestToolNames.join(', ')}: ` +
+						`the scenario is misconfigured and its measurements are not comparable`,
+					);
 				}
 				const callId = `call_${scenarioId}_${i}_${Date.now()}`;
 				const argsJson = JSON.stringify(resolveScenarioToolCallArguments(call.arguments, input));
@@ -1393,11 +1396,14 @@ async function streamResponsesApiToolCalls(
 
 	for (let i = 0; i < toolCalls.length; i++) {
 		const call = toolCalls[i];
-		let toolName = requestToolNames.find(name => call.toolNamePattern.test(name));
+		const toolName = requestToolNames.find(name => call.toolNamePattern.test(name));
 		if (!toolName) {
-			// 反解正则源码会得到 `readfile` 这种不存在的工具名；退回请求里的第一个真实工具名。
-			toolName = requestToolNames[0];
-			_log(`[mock-llm]   No matching tool for pattern ${call.toolNamePattern}, using fallback: ${toolName}`);
+			// 不匹配是 scenario 配置错误：退回第一个工具会让这次运行真的执行另一个工具，
+			// 结果却被统计成原场景的性能数据。明确失败，不产出不可比的数字。
+			throw new Error(
+				`[mock-llm] scenario tool pattern ${call.toolNamePattern} matched none of ${requestToolNames.join(', ')}: ` +
+				`the scenario is misconfigured and its measurements are not comparable`,
+			);
 		}
 
 		const callId = `call_${scenarioId}_${i}_${Date.now()}`;
@@ -1826,11 +1832,14 @@ async function streamAnthropicToolCalls(
 
 	for (let i = 0; i < toolCalls.length; i++) {
 		const call = toolCalls[i];
-		let toolName = requestToolNames.find(name => call.toolNamePattern.test(name));
+		const toolName = requestToolNames.find(name => call.toolNamePattern.test(name));
 		if (!toolName) {
-			// 反解正则源码会得到 `readfile` 这种不存在的工具名；退回请求里的第一个真实工具名。
-			toolName = requestToolNames[0];
-			_log(`[mock-llm]   No matching tool for pattern ${call.toolNamePattern}, using fallback: ${toolName}`);
+			// 不匹配是 scenario 配置错误：退回第一个工具会让这次运行真的执行另一个工具，
+			// 结果却被统计成原场景的性能数据。明确失败，不产出不可比的数字。
+			throw new Error(
+				`[mock-llm] scenario tool pattern ${call.toolNamePattern} matched none of ${requestToolNames.join(', ')}: ` +
+				`the scenario is misconfigured and its measurements are not comparable`,
+			);
 		}
 
 		const callId = `toolu_${scenarioId}_${i}_${Date.now()}`;
@@ -1921,11 +1930,14 @@ async function streamToolCalls(
 		const callId = `call_perf_${scenarioId}_${i}_${Date.now()}`;
 
 		// Find the matching tool name from the request's tools array
-		let toolName = requestToolNames.find(name => call.toolNamePattern.test(name));
+		const toolName = requestToolNames.find(name => call.toolNamePattern.test(name));
 		if (!toolName) {
-			// 反解正则源码会得到 `readfile` 这种不存在的工具名；退回请求里的第一个真实工具名。
-			toolName = requestToolNames[0];
-			_log(`[mock-llm]   No matching tool for pattern ${call.toolNamePattern}, using fallback: ${toolName}`);
+			// 不匹配是 scenario 配置错误：退回第一个工具会让这次运行真的执行另一个工具，
+			// 结果却被统计成原场景的性能数据。明确失败，不产出不可比的数字。
+			throw new Error(
+				`[mock-llm] scenario tool pattern ${call.toolNamePattern} matched none of ${requestToolNames.join(', ')}: ` +
+				`the scenario is misconfigured and its measurements are not comparable`,
+			);
 		}
 
 		// Stream tool call: start chunk, then arguments in fragments
