@@ -40,12 +40,18 @@ function prompts(content: IChatSession): string[] {
 	return content.history.flatMap(item => item.type === 'request' ? [item.prompt] : []);
 }
 
-function receiveSubmission(sessionResource: URI, result: boolean) {
+function receiveSubmission(sessionResource: URI, result: boolean, options: { readonly contentFailure?: boolean; readonly images?: readonly { readonly kind: string; readonly _meta?: Record<string, unknown> }[] } = {}) {
 	let inputAccepted = 0;
 	let requestAccepted = 0;
+	const contentFailure = options.contentFailure === true;
 	const sent: string[] = [];
+	const sentAttachments: (readonly unknown[])[] = [];
+	const notices: string[] = [];
 	const normal: string[] = [];
 	const attachments = new ChatRequestVariableSet();
+	for (const entry of options.images ?? []) {
+		attachments.add(entry as never);
+	}
 	const model = {
 		hasActiveRequest: constObservable(false),
 		requestNeedsInput: constObservable(false),
@@ -78,18 +84,23 @@ function receiveSubmission(sessionResource: URI, result: boolean) {
 		logThinkingStyleUsage: { value: () => { } },
 		updateChatViewVisibility: { value: () => { } },
 		_maybeStartGoalSummary: { value: () => { } },
+		notificationService: { value: { error: (message: string) => notices.push(`error:${message}`), warn: (message: string) => notices.push(`warn:${message}`), info: () => { } } },
+		logService: { value: { warn: () => { }, trace: () => { }, info: () => { } } },
 		chatSessionsService: { value: {
 			getContentProviderSchemes: () => ['dsh'],
 			getOrCreateChatSession: async (actualResource: URI) => {
 				assert.strictEqual(actualResource, sessionResource);
-				return { submit: async (text: string) => { sent.push(text); return result; } };
+				if (contentFailure) {
+					throw new Error('content unavailable');
+				}
+				return { submit: async (text: string, attachments?: readonly unknown[]) => { sent.push(text); sentAttachments.push(attachments ?? []); return result; } };
 			},
 		} },
 		chatService: { value: { sendRequest: async (_resource: URI, text: string) => { normal.push(text); return { kind: 'rejected' }; } } },
 	});
 	return {
 		submit: () => widget._acceptInput({ query: 'Fixture prompt' }, { preserveInput: false, onRequestAccepted: () => { requestAccepted++; } }),
-		state: () => ({ inputAccepted, requestAccepted, sent, normal }),
+		state: () => ({ inputAccepted, requestAccepted, sent, normal, sentAttachments, notices }),
 	};
 }
 
@@ -149,18 +160,69 @@ suite('DSH B00 redwall', () => {
 	test('BUG-011: provider acceptance consumes the native draft once', async () => {
 		const fixture = receiveSubmission(URI.parse('dsh:/A'), true);
 		await fixture.submit();
-		assert.deepStrictEqual(fixture.state(), { inputAccepted: 1, requestAccepted: 1, sent: ['Fixture prompt'], normal: [] });
+		const state = fixture.state();
+		assert.deepStrictEqual(
+			{ inputAccepted: state.inputAccepted, requestAccepted: state.requestAccepted, sent: state.sent, normal: state.normal, notices: state.notices },
+			{ inputAccepted: 1, requestAccepted: 1, sent: ['Fixture prompt'], normal: [], notices: [] },
+		);
+	});
+
+	test('BUG-011: an unavailable DSH content object never falls through to the native path', async () => {
+		const fixture = receiveSubmission(URI.parse('dsh:/A'), true, { contentFailure: true });
+		await fixture.submit();
+		const state = fixture.state();
+		// 关键点：normal 必须为空。改走原生链路等于把这次发送交给另一个内核。
+		assert.deepStrictEqual(
+			{ sent: state.sent, normal: state.normal, inputAccepted: state.inputAccepted, requestAccepted: state.requestAccepted },
+			{ sent: [], normal: [], inputAccepted: 0, requestAccepted: 0 },
+			'an unavailable provider must keep the draft and report, not reroute',
+		);
+		assert.strictEqual(state.notices.length, 1, 'the user must be told the send did not happen');
+	});
+
+	test('BUG-011: an image without an ingested reference is refused instead of dropped', async () => {
+		const fixture = receiveSubmission(URI.parse('dsh:/A'), true, { images: [{ kind: 'image' }] });
+		await fixture.submit();
+		const state = fixture.state();
+		assert.deepStrictEqual(
+			{ sent: state.sent, inputAccepted: state.inputAccepted, requestAccepted: state.requestAccepted },
+			{ sent: [], inputAccepted: 0, requestAccepted: 0 },
+			'an unsupported image must block the send, not be silently dropped',
+		);
+		assert.strictEqual(state.notices.length, 1, 'the refusal must be visible to the user');
+	});
+
+	test('BUG-011: an ingested image reference is forwarded on the DSH contract', async () => {
+		const ref = { attachmentId: 'att-1', mediaType: 'image/png', bytes: 9, width: 3, height: 2, name: 'a.png' };
+		const fixture = receiveSubmission(URI.parse('dsh:/A'), true, { images: [{ kind: 'image', _meta: { dshImageAttachment: ref } }] });
+		await fixture.submit();
+		const state = fixture.state();
+		assert.deepStrictEqual(state.sentAttachments, [[ref]], 'the ingested reference must reach the provider unchanged');
+		assert.deepStrictEqual(
+			{ inputAccepted: state.inputAccepted, requestAccepted: state.requestAccepted },
+			{ inputAccepted: 1, requestAccepted: 1 },
+			'an accepted DSH send completes the native draft exactly once',
+		);
 	});
 
 	test('BUG-011 control: a rejected provider submission leaves the native draft intact', async () => {
 		const fixture = receiveSubmission(URI.parse('dsh:/A'), false);
 		await fixture.submit();
-		assert.deepStrictEqual(fixture.state(), { inputAccepted: 0, requestAccepted: 0, sent: ['Fixture prompt'], normal: [] });
+		const rejected = fixture.state();
+		assert.deepStrictEqual(
+			{ inputAccepted: rejected.inputAccepted, requestAccepted: rejected.requestAccepted, sent: rejected.sent, normal: rejected.normal, notices: rejected.notices },
+			{ inputAccepted: 0, requestAccepted: 0, sent: ['Fixture prompt'], normal: [], notices: [] },
+		);
 	});
 
 	test('BUG-011 control: the regular chat path still calls its own service', async () => {
 		const fixture = receiveSubmission(URI.parse('agent-host-copilot:/A'), false);
 		await fixture.submit();
-		assert.deepStrictEqual(fixture.state(), { inputAccepted: 0, requestAccepted: 0, sent: [], normal: ['Fixture prompt'] });
+		const regular = fixture.state();
+		assert.deepStrictEqual(
+			{ inputAccepted: regular.inputAccepted, requestAccepted: regular.requestAccepted, sent: regular.sent, normal: regular.normal, notices: regular.notices },
+			// 原生链路返回 rejected：没有接受，因此不得计一次输入完成。
+			{ inputAccepted: 0, requestAccepted: 0, sent: [], normal: ['Fixture prompt'], notices: [] },
+		);
 	});
 });

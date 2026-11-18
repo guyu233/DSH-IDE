@@ -24,6 +24,7 @@ import { IChatSession, IChatSessionContentProvider, IChatSessionHistoryItem, ICh
 import { DshChatSession, dshChatSessionFor } from './dshChatSession.js';
 import { toHistory, extrasOf } from './dshChatHistory.js';
 import { IDshClientService } from '../../../../platform/dshClient/common/dshClientService.js';
+import type { DshIdeImageAttachmentRef } from '../../../../platform/dshClient/common/dshIdeProtocol.js';
 import { dshSessionIdFromResource } from './dshAgentSessionsController.js';
 
 /**
@@ -107,12 +108,12 @@ export class DshChatSessionContent extends Disposable implements IChatSession {
 	 *
 	 * 返回 `true` 表示已交给内核；失败时原生面板保留输入并提示。
 	 */
-	async submit(text: string): Promise<boolean> {
+	async submit(text: string, attachments?: readonly DshIdeImageAttachmentRef[]): Promise<boolean> {
 		// 陈旧内容不得把文字发进当前绑定到的另一个会话。
 		if (!this.isActiveBinding()) {
 			return false;
 		}
-		return this._session.submit(text);
+		return this._session.submit(text, attachments);
 	}
 
 	/**

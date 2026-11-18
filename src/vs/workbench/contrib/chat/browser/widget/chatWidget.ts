@@ -120,6 +120,8 @@ import { getChatPetListPadding } from './chatPetWidget.js';
 import { IChatPetWidgetService } from './chatPetWidgetService.js';
 import { IChatPetService } from '../chatPetService.js';
 import { ChatPetAchievementIds, hasChatPetImageAttachment } from '../chatPetAchievements.js';
+import type { DshIdeImageAttachmentRef } from '../../../../../platform/dshClient/common/dshIdeProtocol.js';
+import { INotificationService } from '../../../../../platform/notification/common/notification.js';
 import { stopDictationForEditor } from '../speechToText/dictationSession.js';
 import { ChatUserInteraction } from '../chatUserInteractionTelemetry.js';
 import { ChatContentMarkdownRenderer } from './chatContentMarkdownRenderer.js';
@@ -205,6 +207,56 @@ export async function saveAllBeforeChatSend(configurationService: IConfiguration
  * potentially long before it runs — so {@link onRequestAccepted} fires before the queued request
  * settles. Resolves with the request once it has actually been sent, or `undefined` if it never was.
  */
+/** 这条会话的发送目标。三种结果互斥，见 `_dshSubmitTarget`。 */
+type DshSubmitTarget =
+	| { readonly kind: 'native' }
+	| { readonly kind: 'unavailable' }
+	| { readonly kind: 'provider'; readonly session: IDshSubmitSession };
+
+/** content provider 产出的会话对象里，本文件真正用到的那一个方法。 */
+interface IDshSubmitSession {
+	submit(text: string, attachments?: readonly DshIdeImageAttachmentRef[]): Promise<boolean>;
+}
+
+/**
+ * 把原生输入框里的图片条目分成「可交给 DSH 的」与「不能交的」。
+ *
+ * DSH 只承认已入库的图片（`ImageAttachmentRef`：attachmentId + 尺寸 + 字节数）。
+ * 原生条目只有 URI/字节，没有入库 id，因此**不能**在这里伪造一个 id：
+ * 那会把一张未入库的图当成已入库提交。只有条目自己带了完整 DSH 引用时才放行，
+ * 其余一律进 `rejected`，由调用方明确拒绝并保留草稿。
+ */
+function collectDshImageAttachments(entries: readonly { readonly kind: string; readonly _meta?: Record<string, unknown> }[]): {
+	readonly refs: readonly DshIdeImageAttachmentRef[];
+	readonly rejected: readonly { readonly kind: string }[];
+} {
+	const refs: DshIdeImageAttachmentRef[] = [];
+	const rejected: { readonly kind: string }[] = [];
+	for (const entry of entries) {
+		if (entry.kind !== 'image') {
+			continue;
+		}
+		const candidate = entry._meta?.['dshImageAttachment'];
+		if (isDshImageAttachmentRef(candidate)) {
+			refs.push(candidate);
+		} else {
+			rejected.push(entry);
+		}
+	}
+	return { refs, rejected };
+}
+
+function isDshImageAttachmentRef(value: unknown): value is DshIdeImageAttachmentRef {
+	if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+		return false;
+	}
+	const record = value as Record<string, unknown>;
+	const mediaType = record['mediaType'];
+	return typeof record['attachmentId'] === 'string' && record['attachmentId'] !== ''
+		&& typeof record['bytes'] === 'number' && typeof record['width'] === 'number' && typeof record['height'] === 'number'
+		&& (mediaType === 'image/png' || mediaType === 'image/jpeg' || mediaType === 'image/webp' || mediaType === 'image/gif');
+}
+
 export async function acceptAndAwaitSentRequest(result: ChatSendResult, onRequestAccepted?: () => void): Promise<ChatSendResultSent | undefined> {
 	if (ChatSendResult.isRejected(result)) {
 		return undefined;
@@ -631,6 +683,7 @@ export class ChatWidget extends Disposable implements IChatWidget {
 		@IChatDebugService private readonly chatDebugService: IChatDebugService,
 		@IAccessibilityService private readonly accessibilityService: IAccessibilityService,
 		@IChatGoalSummaryService private readonly chatGoalSummaryService: IChatGoalSummaryService,
+		@INotificationService private readonly notificationService: INotificationService,
 		@IChatSubmitRequestHandlerService private readonly chatSubmitRequestHandlerService: IChatSubmitRequestHandlerService,
 		@IChatPetService private readonly chatPetService: IChatPetService,
 		@IChatPetWidgetService private readonly chatPetWidgetService: IChatPetWidgetService,
@@ -3426,26 +3479,58 @@ export class ChatWidget extends Disposable implements IChatWidget {
 	}
 
 	/**
-	 * DSH 会话的发送目标：拿到 `dsh` content provider 产出的会话对象。
+	 * 这条会话的发送目标。
 	 *
-	 * 只有注册了 content provider 的 scheme 才会命中；普通原生会话返回 undefined，
-	 * 走原有 `chatService.sendRequest` 链路，互不影响。
+	 * 三种结果是互斥的，不能合并成 `undefined`：
+	 * - `native`：没有 content provider，走原有 `chatService.sendRequest`。
+	 * - `provider`：由 content provider 的会话对象发送（最终走 `DshChatSession.submit`）。
+	 * - `unavailable`：本该由 provider 发送，但拿不到它的会话对象。此时**不能**改走原生链路：
+	 *   那等于把一次发送交给另一个内核，用户会以为消息发到了当前会话。
 	 */
-	private async _dshSessionContentForSubmit(sessionResource: URI): Promise<{ submit(text: string): Promise<boolean> } | undefined> {
+	private async _dshSubmitTarget(sessionResource: URI): Promise<DshSubmitTarget> {
 		const sessionType = getChatSessionType(sessionResource);
 		if (!this.chatSessionsService.getContentProviderSchemes().includes(sessionType)) {
-			return undefined;
+			return { kind: 'native' };
 		}
+		let session: Awaited<ReturnType<IChatSessionsService['getOrCreateChatSession']>>;
 		try {
-			const session = await this.chatSessionsService.getOrCreateChatSession(sessionResource, CancellationToken.None);
-			const candidate = session as unknown as { submit?: unknown };
-			if (typeof candidate.submit !== 'function') {
-				return undefined;
-			}
-			return session as unknown as { submit(text: string): Promise<boolean> };
-		} catch {
-			// 拿不到 content 就退回原生链路，不把一次发送变成硬失败。
-			return undefined;
+			session = await this.chatSessionsService.getOrCreateChatSession(sessionResource, CancellationToken.None);
+		} catch (error) {
+			this.logService.warn('[chat] DSH session content is unavailable for this send', toErrorMessage(error));
+			return { kind: 'unavailable' };
+		}
+		const candidate = session as unknown as { submit?: unknown };
+		if (typeof candidate.submit !== 'function') {
+			this.logService.warn('[chat] DSH session content has no submit()');
+			return { kind: 'unavailable' };
+		}
+		return { kind: 'provider', session: session as unknown as IDshSubmitSession };
+	}
+
+	/**
+	 * DSH 会话被接受之后的收尾。
+	 *
+	 * 与原生成功路径保持一致：隐藏欢迎页、走一次 `acceptInput`（写入输入历史并清空草稿）、
+	 * 接受回调与目标摘要。DSH 没有原生 `ChatSendResult`，所以这里不产出 response，
+	 * 内容由 provider 的 history 推送。
+	 */
+	private _acceptDshSubmission(
+		requestInput: string,
+		isUserQuery: boolean,
+		submittedWithImage: boolean,
+		options: IChatAcceptInputOptions | undefined,
+	): void {
+		this.updateChatViewVisibility();
+		this.input.acceptInput(options?.storeToHistory ?? isUserQuery, options?.preserveFocus);
+		if (!options?.preserveInput) {
+			this._maybeStartGoalSummary(requestInput);
+		}
+		options?.onRequestAccepted?.();
+		if (isUserQuery) {
+			this.chatPetService.unlockAchievement(ChatPetAchievementIds.FirstChatMessage);
+		}
+		if (submittedWithImage) {
+			this.chatPetService.unlockAchievement(ChatPetAchievementIds.ImageRequest);
 		}
 	}
 
@@ -3871,15 +3956,39 @@ export class ChatWidget extends Disposable implements IChatWidget {
 		try {
 			// DSH 会话不走原生 chatService 的本地 agent 链路：它的内容由 `dsh` content provider
 			// 提供，发送必须交给该 provider 的会话对象（最终走 `DshChatSession.submit`）。
-			const dshSession = await this._dshSessionContentForSubmit(this.viewModel.sessionResource);
-			if (dshSession !== undefined) {
-				const accepted = await dshSession.submit(requestInputs.input);
+			const target = await this._dshSubmitTarget(this.viewModel.sessionResource);
+			if (target.kind === 'unavailable') {
+				// 本该由 provider 发送却拿不到会话对象：保留草稿，明确报错，绝不改走原生链路。
+				if (transcriptContext) {
+					this.setTranscriptContext(transcriptContext);
+				}
+				this.notificationService.error(localize('chat.dsh.sessionUnavailable', "无法发送：DSH 会话内容暂不可用，输入已保留。"));
+				return undefined;
+			}
+			if (target.kind === 'provider') {
+				const images = collectDshImageAttachments([
+					...requestInputs.attachedContext.asArray(),
+					...resolvedImageVariables,
+				]);
+				if (images.rejected.length > 0) {
+					// 静默丢附件会让用户以为图片已经发出去：明确拒绝并保留草稿。
+					if (transcriptContext) {
+						this.setTranscriptContext(transcriptContext);
+					}
+					this.notificationService.warn(localize(
+						'chat.dsh.unsupportedAttachments',
+						"这条会话只能发送已入库的图片附件；本次输入已保留，未发送任何内容。",
+					));
+					return undefined;
+				}
+				const accepted = await target.session.submit(requestInputs.input, images.refs);
 				if (!accepted) {
 					if (transcriptContext) {
 						this.setTranscriptContext(transcriptContext);
 					}
-					return;
+					return undefined;
 				}
+				this._acceptDshSubmission(requestInputs.input, isUserQuery, submittedWithImage, options);
 				// 内容由 provider 的 history 推送，这里不再产出原生 response。
 				return undefined;
 			}

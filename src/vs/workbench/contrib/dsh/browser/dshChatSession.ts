@@ -79,7 +79,7 @@ export interface IDshChatSession {
 	pending(): readonly DshChatPending[];
 	running(): boolean;
 	/** 发送一句话；成功即交给内核。 */
-	submit(text: string): Promise<boolean>;
+	submit(text: string, attachments?: readonly DshIdeImageAttachmentRef[]): Promise<boolean>;
 	/** 向更早的历史要一页。true 表示这次真的插入了新节点。 */
 	loadOlder(): Promise<boolean>;
 	hasMore(): boolean;
@@ -497,15 +497,22 @@ export class DshChatSession extends Disposable implements IDshChatSession {
 		}
 	}
 
-	/** 发送一句话。成功后交给内核，不做乐观插入。 */
-	async submit(text: string): Promise<boolean> {
+	/**
+	 * 发送一句话（可带已入库的图片）。
+	 *
+	 * 成功后交给内核，不做乐观插入。附件只接受已入库的 `ImageAttachmentRef`：
+	 * 契约里 `submit.attachments` 就是这个形状，未入库的图片没有可提交的身份。
+	 */
+	async submit(text: string, attachments?: readonly DshIdeImageAttachmentRef[]): Promise<boolean> {
 		const generation = this.generation;
 		const sessionId = this.boundSessionId;
 		if (sessionId === undefined) {
 			return false;
 		}
 		this.setRunning(true);
-		const result = await this.client.call('submit', { text, sessionId });
+		const result = await this.client.call('submit', attachments === undefined || attachments.length === 0
+			? { text, sessionId }
+			: { text, sessionId, attachments });
 		// 等待期间换了会话：失败不能把新会话的 running 清掉，成功也不该让调用方以为这条发送还属于当前会话。
 		if (generation !== this.generation || sessionId !== this.boundSessionId) {
 			return false;
