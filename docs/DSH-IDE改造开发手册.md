@@ -936,6 +936,8 @@ DshChatSession.acceptView / acceptConversation → DshChatModel（typed 节点�
 
 ### 9.11 消除 137 条类型错误 + 并行瘦身计划（已执行，2026-11-17）
 
+> 当前状态不在下面按轮次往下续。总结果在 `docs/DSH-IDE瘦身报告.md` 和 `docs/DSH-IDE瘦身问题清单.md`，两份都是摘要。
+>
 > 用户要求：一边做一边项目瘦身，用不到的都删掉；在不影响 DSH-IDE 功能前提下把全量 tsc 的 137 条错误清零。原则：**能删就删**（优先删瘦身残留死代码），其次做类型对齐；所有改动都不改变运行时行为。执行期间不碰 §9.10 的契约文件，避免与其冲突。
 >
 > **执行结果**：tsc 137 → **0**；`npm run compile` PASS；`test-dsh:all` 384/384 PASS；`verify:dsh-ide-ci` 五项全 PASS（`DSH_INSTALLED_VERSION=0.2.2-rc.1`）。变更 92 个文件（26 删除 / 64 修改 / 2 新增），+456 / -4,621 行；依赖 68→66（dependencies）、100→93（devDependencies）；锁文件条目 1,649→1,536（-113，零新增、零版本变更）。详细清单见 `docs/DSH-IDE瘦身报告.md`（第 1 轮），逐项证据见 `docs/DSH-IDE瘦身问题清单.md`（第 1 轮）。
