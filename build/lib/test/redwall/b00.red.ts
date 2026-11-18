@@ -889,6 +889,21 @@ test('B13: large files avoid the stdin temp-file path that fails on this host', 
 	assert.match(transpile, /esbuild\.transform\(source, \{/, 'small files keep the transform path');
 });
 
+test('D23: the native binding assertion follows the loader order, not one fixed path', () => {
+	const abi = source('build/lib/test/dshNativeModuleAbi.test.ts');
+	const utils = source('node_modules/node-pty/lib/utils.js');
+	// 加载器真实顺序：build/Release → build/Debug → prebuilds/<platform>-<arch>。
+	assert.match(utils, /\['build\/Release', 'build\/Debug'/, 'the loader order must be as expected');
+	assert.match(utils, /prebuilds\//, 'the loader falls back to prebuilds');
+	// 断言必须覆盖同一组候选，否则「用官方预编译」会被误判成「模块没装」。
+	assert.match(abi, /path\.join\(ptyRoot, 'build', 'Release'\)/, 'Release must be a candidate');
+	assert.match(abi, /path\.join\(ptyRoot, 'build', 'Debug'\)/, 'Debug must be a candidate');
+	assert.match(abi, /path\.join\(ptyRoot, 'prebuilds', `\$\{process\.platform\}-\$\{process\.arch\}`\)/, 'prebuilds must be a candidate');
+	// 仍必须显式失败：一处可用产物都没有时不能静默通过。
+	assert.match(abi, /assert\.ok\(release !== undefined,/, 'a missing binding must still fail loudly');
+	assert.doesNotMatch(abi, /if \(!fs\.existsSync\(release\)\) \{ return; \}/, 'the silent-skip must not come back');
+});
+
 test('SEC-003: Host dispatch shares the packaged protocol validator', () => {
 	// 只审查装配和单一校验器的接线；不发送非法 DTO，不调用真实 Host。
 	const host = source('src/vs/platform/dshClient/host/ide-view-host.js');

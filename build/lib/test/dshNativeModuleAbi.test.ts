@@ -83,14 +83,21 @@ test('D23 the five shipped native modules are NAPI builds, not ABI-only', () => 
 });
 
 test('D23 on win32 the node-pty binding is conpty (not pty)', () => {
-	const release = path.join(nodeModules, 'node-pty', 'build', 'Release');
+	// 不能只认 `build/Release`：node-pty 的 `lib/utils.js#loadNativeModule` 按
+	// `build/Release` → `build/Debug` → `prebuilds/<platform>-<arch>` 顺序查找，
+	// 官方预编译包只带 `prebuilds/`。写死 `build/Release` 会把「用官方预编译」
+	// 误判成「模块没装」——那是断言过严，不是真实缺陷。
+	const ptyRoot = path.join(nodeModules, 'node-pty');
+	const candidates = [
+		path.join(ptyRoot, 'build', 'Release'),
+		path.join(ptyRoot, 'build', 'Debug'),
+		path.join(ptyRoot, 'prebuilds', `${process.platform}-${process.arch}`),
+	];
+	const release = candidates.find(dir => fs.existsSync(dir) && fs.readdirSync(dir).some(name => name.endsWith('.node')));
 
-	// 第 64 轮修正：这里原先写 `if (!fs.existsSync(release)) { return; }`——模块缺失时
-	// **整个测试静默通过**，D23 的 conpty 断言形同虚设（与第 42 轮 D20 假守护同类：
-	// 「看起来有守护」但实际不会失败）。改为显式失败：`node_modules` 里没有 node-pty
-	// 的构建产物，本身就是 D23 / D56 要防的情况，必须报错而不是跳过。
-	assert.ok(fs.existsSync(release),
-		`node-pty build/Release must exist for the binding assertion: ${path.relative(repoRoot, release)}（先跑 npm ci / 安装原生模块）`);
+	// 仍然显式失败：一处可用产物都没有，本身就是 D23 / D56 要防的情况，必须报错而不是跳过。
+	assert.ok(release !== undefined,
+		`node-pty must ship a loadable binding in one of ${candidates.map(dir => path.relative(repoRoot, dir)).join(' / ')}（先跑 npm ci / 安装原生模块）`);
 
 	// 依据 node-pty 自身的加载分支：win32 用 conpty，非 win32 用 pty。
 	const index = fs.readFileSync(path.join(nodeModules, 'node-pty', 'lib', 'index.js'), 'utf8');
