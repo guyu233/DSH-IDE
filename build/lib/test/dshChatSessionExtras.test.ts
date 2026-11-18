@@ -397,3 +397,46 @@ test('a late failed submit does not clear running on the session bound meanwhile
 		session.dispose();
 	}
 });
+
+test('a rejected approval puts the card back', async () => {
+	const session = new DshChatSession({
+		call: async () => unavailable,
+		rebindView: async () => ({ ok: true }),
+	} as never);
+	try {
+		session.acceptWaterfall({
+			kind: 'request',
+			eventId: 'e1',
+			event: 'approval/request',
+			request: { toolName: 'bash' },
+		} as never);
+		await session.answerApproval('e1', 'approve');
+		assert.deepEqual(session.pending().map(item => item.eventId), ['e1']);
+	} finally {
+		session.dispose();
+	}
+});
+
+test('a rejected approval does not restore the card onto a session bound meanwhile', async () => {
+	const late = deferred<typeof unavailable>();
+	const session = new DshChatSession({
+		call: async (method: string) => method === 'answerApproval' ? late.promise : unavailable,
+		rebindView: async (sessionId: string) => readySnapshot(sessionId),
+	} as never);
+	try {
+		assert.equal(await session.bind('A'), true);
+		session.acceptWaterfall({
+			kind: 'request',
+			eventId: 'e1',
+			event: 'approval/request',
+			request: { toolName: 'bash' },
+		} as never);
+		const pending = session.answerApproval('e1', 'reject');
+		assert.equal(await session.bind('B'), true);
+		late.resolve(unavailable);
+		await pending;
+		assert.deepEqual(session.pending().map(item => item.eventId), []);
+	} finally {
+		session.dispose();
+	}
+});

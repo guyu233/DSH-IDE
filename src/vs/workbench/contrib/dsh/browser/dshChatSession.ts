@@ -493,20 +493,44 @@ export class DshChatSession extends Disposable implements IDshChatSession {
 	}
 
 	async answerApproval(eventId: string, decision: 'approve' | 'reject'): Promise<void> {
-		this.pendingItems.delete(eventId);
-		this._onDidChangePending.fire(this.pending());
-		await this.client.call('answerApproval', { requestId: eventId, decision });
+		const generation = this.generation;
+		const sessionId = this.boundSessionId;
+		const item = this.pendingItems.get(eventId);
+		this.hidePending(eventId);
+		const result = await this.client.call('answerApproval', { requestId: eventId, decision });
+		this.restorePending(generation, sessionId, eventId, item, result.ok);
 	}
 
 	async answerQuestion(eventId: string, label: string): Promise<void> {
+		const generation = this.generation;
+		const sessionId = this.boundSessionId;
 		const item = this.pendingItems.get(eventId);
-		this.pendingItems.delete(eventId);
-		this._onDidChangePending.fire(this.pending());
+		this.hidePending(eventId);
 		// 答案里的 id 是问卷题号（官方 `{ answers: [{ id, selected }] }`），不是 eventId。
-		await this.client.call('answerQuestion', {
+		const result = await this.client.call('answerQuestion', {
 			requestId: eventId,
 			answer: { answers: [{ id: item?.questionId ?? '', selected: [label] }] },
 		});
+		this.restorePending(generation, sessionId, eventId, item, result.ok);
+	}
+
+	/** 先拿掉卡片，避免同一次批准被点两次。 */
+	private hidePending(eventId: string): void {
+		if (!this.pendingItems.delete(eventId)) {
+			return;
+		}
+		this._onDidChangePending.fire(this.pending());
+	}
+
+	/**
+	 * 通道拒绝时把卡片放回去。换了会话、或这张卡已经有新内容，就不再写。
+	 */
+	private restorePending(generation: number, sessionId: string | undefined, eventId: string, item: DshChatPending | undefined, ok: boolean): void {
+		if (ok || item === undefined || generation !== this.generation || sessionId !== this.boundSessionId || this.pendingItems.has(eventId)) {
+			return;
+		}
+		this.pendingItems.set(eventId, item);
+		this._onDidChangePending.fire(this.pending());
 	}
 
 	/**
