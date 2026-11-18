@@ -1,6 +1,6 @@
 # DSH-IDE 瘦身与 Bug 问题清单（全轮次）
 
-> 本文件汇总第 1–10 轮每轮「改动前」的问题清单（位置 + 类型 + 判定依据 + 风险 + 推荐方案）。
+> 本文件汇总第 1–11 轮每轮「改动前」的问题清单（位置 + 类型 + 判定依据 + 风险 + 推荐方案）。
 > 按开发手册要求「每轮先扫描产出清单，确认后再改」；自第 4 轮起按用户约定「写出问题与推荐方法后按推荐方法继续，不提问」。
 > 各轮的「基线 / 统计 / 门禁值」是**当时**的快照，不代表当前状态；当前状态以 `docs/DSH-IDE瘦身报告.md` 末轮为准。
 > 原按轮拆分的 8 份清单已合并入本文件，不再单独保留。
@@ -815,4 +815,33 @@
 
 1. 成功回包的 `value` 是字符串数组时，它就是完整集合，可以替换本地集合。
 2. 代次只保证后完成的旧请求不写 UI。先发出的请求若在 Host 上后执行，仍可能改 Host 状态；本轮只修 IDE 侧显示。
+
+---
+
+## 第 11 轮：未读点、交付物路径、迟到的发送和换模型
+
+> 起点 `9aff69f9`。可用模型只有 `workbuddylocal/cli2api`，不能作 child 路由。默认路由派 `scan-r13-race` 与 `scan-r13-handbook`。本轮先补跑上一提交的 CI 和 compile，再按推荐方案改。
+
+### A. 本轮修复
+
+| # | 位置 | 类型 | 判定依据 | 风险 | 推荐 |
+|---|---|---|---|---|---|
+| A1 | `dshChatSession.ts` `submit` | 迟到失败清掉新会话的 running | 失败分支在 await 之后无条件 `setRunning(false)`。绑定 B 并标成运行中之后，A 的失败回包会把它清掉 | 中 | 记下代次和会话 id，变了就不再写 running |
+| A2 | 同文件 `selectModel` | 迟到成功覆盖新会话的模型 | await 之后直接写 `_current`。`refreshComposer` 的代次检查会被这次写回盖掉 | 中 | 同样先对代次和会话 id |
+| A3 | `toSessionItem` / `sessionReadState` | 刷新冲掉已读，更新也不标未读 | 手册 §9.5 2-C 说没有未读点。原生 `!isRead()` 就是实心圆点。`isRead === undefined` 在提供者拥有已读状态时被当成已读 | 低。第一次出现的历史会话不会全部变未读 | 时间戳变大才写 `isRead: false`；没变则保留上一行的已读 |
+| A4 | `dshChatHistory.ts` `appendDeliverables` | 绝对路径交付物点不开 | `reference` 可以是 URI。字符串只做标签，`getResourceForElement` 返回 null | 低 | 绝对路径用 `URI.file`。相对路径仍是字符串 |
+
+### B. 排除
+
+| # | 项 | 为什么不做 |
+|---|---|---|
+| B1 | `cancel` / `answerApproval` / `answerQuestion` | await 之后不写本地状态。批准和问卷的删除发生在 await 之前 |
+| B2 | `planReview` / `changesSummary` / `multiDiffData` | 计划只有 active/pending，交付物没有 diff。空 diff 会假装有变更 |
+| B3 | 给全部历史会话打未读 | 没有「上次看到的时间」。第一次出现继续不写 isRead |
+
+### C. 假设
+
+1. `timing.created` 存的就是 `updatedAt`。比较它等于比较会话更新时间。
+2. 时间戳变小或相等不标未读，避免时钟回拨把已读会话打成未读。
+3. Windows 上 `URI.file` 会把盘符收成小写。测试按不区分大小写比较。
 

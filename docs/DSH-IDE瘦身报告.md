@@ -1,6 +1,6 @@
 # DSH-IDE 瘦身与 Bug 修复报告（全轮次）
 
-> 本文件汇总第 1–10 轮每轮的瘦身报告：删除清单及理由、依赖前后对比、存疑保留项、风险与回滚方式。
+> 本文件汇总第 1–11 轮每轮的瘦身报告：删除清单及理由、依赖前后对比、存疑保留项、风险与回滚方式。
 > 各轮统计均为该轮实测快照；累计值见文末「累计」节。原按轮拆分的 8 份报告已合并入本文件，不再单独保留。
 > 配套：`docs/DSH-IDE瘦身问题清单.md`（每轮改动前清单）、手册 §9.11.1–§9.11.10（执行记录）。
 
@@ -1117,8 +1117,8 @@ STATUS: FAIL  [install-drift]
 |---|---|
 | 主工程 `tsc --noEmit` | **PASS**（0 error） |
 | `npm run test-dsh:all` | **PASS**（**397** / fail 0；395 + 2） |
-| `verify:dsh-ide-ci` | **PENDING**（本轮未复跑） |
-| `npm run compile` | **PENDING**（本轮未复跑） |
+| `verify:dsh-ide-ci` | **PASS**（第 11 轮补跑，五项，`DSH_INSTALLED_VERSION=0.2.2-rc.1`） |
+| `npm run compile` | **PASS**（第 11 轮补跑，0 errors） |
 | 全仓 ESLint | **PENDING** |
 | 真机 GUI | **PENDING** |
 | `verify:dsh-install-drift` | **FAIL（预先存在）**，本轮未打包 |
@@ -1150,12 +1150,56 @@ STATUS: FAIL  [install-drift]
 
 见问题清单第 10 轮。本轮没有跑覆盖率工具。
 
-## 累计（截至第 10 轮）
+## 第 11 轮
+
+> 起点 `9aff69f9`，终点 `c6b514dd`。没有删除。
+
+### 1. 门禁总览
+
+| 门禁 | 结果 |
+|---|---|
+| 主工程 `tsc --noEmit` | **PASS**（0 error） |
+| `npm run test-dsh:all` | **PASS**（**401** / fail 0；397 + 4） |
+| `npm run compile` | **PASS**（0 errors，44 s） |
+| `verify:dsh-ide-ci` | **PENDING**（本改动前对上一提交 PASS；本改动后未复跑） |
+| 全仓 ESLint | **PENDING** |
+| 真机 GUI | **PENDING** |
+| `verify:dsh-install-drift` | **FAIL（预先存在）**，本轮未打包 |
+
+### 2. 删除清单
+
+**无。**
+
+### 3. 修复
+
+迟到的 `submit` 失败不再清掉新会话的运行状态。迟到的 `selectModel` 不再覆盖新会话的模型。已知会话的 `updatedAt` 变大时标未读，没变则保留已读。绝对路径交付物变成 `URI.file`，相对路径不变。
+
+### 4. 依赖前后对比
+
+无变化。dependencies 66、devDependencies 93、scripts 79。
+
+### 5. 存疑保留
+
+`cancel`、批准和问卷不改。计划、变更摘要、多文件 diff 仍不做。第一次出现的会话不标未读。
+
+### 6. 风险与回滚
+
+| 风险 | 等级 | 回滚 |
+|---|---|---|
+| 被换走的 `submit` 现在对调用方返回 false，输入框可能提示失败 | 低。发送已经不属于当前会话 | `git revert c6b514dd` |
+| 绝对路径在另一台机器上打不开 | 低。相对路径行为不变 | 同上 |
+| 时间戳变大的当前打开会话会先标未读，原生模型会再标回已读 | 低 | 同上 |
+
+### 7. 假设
+
+见问题清单第 11 轮。本轮没有跑覆盖率工具。
+
+## 累计（截至第 11 轮）
 
 | 项 | 值 |
 |---|---|
 | tsc 错误 | 137 → **0** |
-| test-dsh:all | 384 → **397**（全 PASS；第 9 轮 +4，第 10 轮 +2。减少的 5 项来自更早删掉的死模块） |
+| test-dsh:all | 384 → **401**（全 PASS；第 9 轮 +4，第 10 轮 +2，第 11 轮 +4。减少的 5 项来自更早删掉的死模块） |
 | dependencies | 68 → **66** |
 | devDependencies | 100 → **93** |
 | scripts | 86 → **79** |

@@ -1110,5 +1110,11 @@ DshChatSession.acceptView / acceptConversation → DshChatModel（typed 节点�
 
 > **修复**：`DshAgentSessionsController.refresh` 用代次丢掉后返回的旧 `listSessions`。归档/恢复回包的完整 id 集合记下来，下一次名单刷新重新标 `archived`。回包不是数组时只改当前 id。不在名单里的归档 id 不补幽灵行。
 
-> **门禁**：tsc 0 error、`test-dsh:all` **397** PASS。`verify:dsh-ide-ci` 与 `npm run compile` 本轮 **PENDING**（未复跑）。详见 `docs/DSH-IDE瘦身报告.md`（第 10 轮）。
+> **门禁**：tsc 0 error、`test-dsh:all` **397** PASS。`verify:dsh-ide-ci` 与 `npm run compile` 在第 11 轮补跑为 **PASS**。详见 `docs/DSH-IDE瘦身报告.md`（第 10 轮）。
+
+#### 9.11.14 第 11 轮：未读点、交付物路径、迟到的发送和换模型（已执行，2026-11-18）
+
+> **修复**：`submit` 失败和 `selectModel` 成功都先对代次与会话 id。已知会话的 `updatedAt` 变大时写 `isRead: false`，没变则保留上一行的已读。绝对路径交付物用 `URI.file`，相对路径仍是字符串。`planReview` / `changesSummary` / `multiDiffData` 仍不做。
+
+> **门禁**：tsc 0 error、`test-dsh:all` **401** PASS、`npm run compile` PASS（0 errors，44 s）。`verify:dsh-ide-ci` 对本改动 **PENDING**（改动前的上一提交已 PASS）。详见 `docs/DSH-IDE瘦身报告.md`（第 11 轮）。
 
