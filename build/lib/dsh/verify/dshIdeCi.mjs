@@ -121,7 +121,10 @@ for (const step of STEPS) {
 	// 判据改为：`verify:` 开头的脚本才是门禁；其余看退出码。
 	const isGate = step.script.startsWith('verify:');
 	const status = isGate ? /^STATUS:\s*(\S+)/m.exec(out)?.[1] : undefined;
-	const passed = code === 0 && (status === undefined || status === 'PASS');
+	// 门禁类步骤**必须**打印 `STATUS:`。缺了它说明脚本没有给出判定（例如中途异常退出
+	// 却仍返回 0），这时不能当成通过——「没有结论」不是「结论为通过」。
+	// 非门禁步骤（测试类）不看 STATUS，只认退出码。
+	const passed = isGate ? (code === 0 && status === 'PASS') : code === 0;
 	results.push({ name: step.name, code, status, passed });
 	if (!passed) {
 		failures.push({ name: step.name, code, status });

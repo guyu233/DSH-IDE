@@ -39,14 +39,16 @@ if (!fs.existsSync(tgz)) {
 	console.error(`STATUS: FAIL  [install-drift] 未找到产物 ${path.relative(repoRoot, tgz)}（先跑 gulp dsh-ide-pack）`);
 	process.exit(1);
 }
+// 未设置 profile 就没有比对对象：这是「无法证明一致」，不是「已证明一致」。
+// 按审计要求缺证据统一 PENDING；发布聚合要求 PASS，因此发布流程不会把它当通过。
 if (!profileDir) {
-	console.log('STATUS: PASS  [install-drift] 未设置 DSH_PROFILE_DIR（非 profile 环境），跳过');
+	console.log('STATUS: PENDING  [install-drift] 未设置 DSH_PROFILE_DIR，无法比对已安装副本');
 	process.exit(0);
 }
 
 const installedRoot = path.join(profileDir, 'node_modules', PACKAGE_NAME);
 if (!fs.existsSync(installedRoot)) {
-	console.log(`STATUS: PASS  [install-drift] profile 内未安装 ${PACKAGE_NAME}，跳过`);
+	console.log(`STATUS: PENDING  [install-drift] profile 内未安装 ${PACKAGE_NAME}，无法比对`);
 	process.exit(0);
 }
 
@@ -64,6 +66,8 @@ const sha = buffer => crypto.createHash('sha256').update(buffer).digest('hex');
 
 const files = artifactEntries().filter(rel => !rel.endsWith('/'));
 const drift = [];
+/** 产物里读不出内容的成员：既不是「一致」也不是「漂移」，是未核验。 */
+const unverified = [];
 let checked = 0;
 
 for (const rel of files) {
@@ -73,7 +77,9 @@ for (const rel of files) {
 	try {
 		artifactBuffer = execFileSync('tar', ['-xzOf', tgz, `package/${rel}`], { cwd: repoRoot });
 	} catch {
-		continue; // 目录或不可读成员，跳过
+		// 读不出成员就是没有证据：记一条未核验，不能静默当成一致。
+		unverified.push(rel);
+		continue;
 	}
 	// 空文件同样要参与比对：`length > 0` 会把「产物是空文件」和「安装侧被截断成 0 字节」
 	// 一起跳过，漂移检测留盲区。
@@ -86,6 +92,11 @@ for (const rel of files) {
 console.log(`  产物插件层文件数        : ${files.length}`);
 console.log(`  逐字节比对文件数        : ${checked}`);
 console.log(`  漂移项                  : ${drift.length}`);
+console.log(`  未核验成员              : ${unverified.length}`);
+if (unverified.length > 0) {
+	for (const item of unverified.slice(0, 12)) { console.log(`  ? ${item}`); }
+	if (unverified.length > 12) { console.log(`  … 另有 ${unverified.length - 12} 项`); }
+}
 
 if (drift.length > 0) {
 	for (const item of drift.slice(0, 12)) { console.error(`  ✗ ${item}`); }
@@ -199,4 +210,9 @@ if (syntaxIssues.length > 0) {
 	process.exit(1);
 }
 
+// 有未核验成员时不能判 PASS：那部分文件我们没看到内容，一致与否未知。
+if (unverified.length > 0) {
+	console.log(`STATUS: PENDING  [install-drift] ${unverified.length} 个产物成员读不出内容，无法证明逐字节一致（已比对 ${checked} 个一致、漂移 0）`);
+	process.exit(0);
+}
 console.log('STATUS: PASS  [install-drift] 文件逐字节一致、装载配置链完整、入口语法与导出形状合规（注意：仍须重启 DSH 才算运行时加载）');

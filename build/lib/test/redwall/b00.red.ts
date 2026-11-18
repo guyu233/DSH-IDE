@@ -726,6 +726,30 @@ test('DOC-005: runtime and gate share one strict semver rule', async () => {
 	assert.match(gate, /\\\+\[0-9a-zA-Z-\]\+/, 'the gate must accept build metadata like the runtime does');
 });
 
+test('DOC-003: a gate step without STATUS is not a pass', () => {
+	const ci = source('build/lib/dsh/verify/dshIdeCi.mjs');
+	// 门禁类步骤必须打印 STATUS: PASS 才算通过；缺 STATUS 视为「没有结论」。
+	assert.match(ci, /isGate \? \(code === 0 && status === 'PASS'\) : code === 0/, 'a gate must require an explicit PASS');
+	const judge = (isGate: boolean, code: number, status: string | undefined) =>
+		isGate ? (code === 0 && status === 'PASS') : code === 0;
+	assert.equal(judge(true, 0, undefined), false, 'a gate with no STATUS must not pass');
+	assert.equal(judge(true, 0, 'PENDING'), false, 'a PENDING gate must not pass');
+	assert.equal(judge(true, 0, 'PASS'), true, 'an explicit PASS gate passes');
+	assert.equal(judge(false, 0, undefined), true, 'a test step passes on exit code alone');
+	assert.equal(judge(false, 1, undefined), false, 'a failing test step does not pass');
+});
+
+test('DOC-003: install-drift reports PENDING instead of PASS when it cannot compare', () => {
+	const drift = source('build/lib/dsh/verify/dshInstallDrift.mjs');
+	assert.doesNotMatch(drift, /STATUS: PASS  \[install-drift\] 未设置 DSH_PROFILE_DIR/, 'no profile is not a pass');
+	assert.doesNotMatch(drift, /STATUS: PASS  \[install-drift\] profile 内未安装/, 'not installed is not a pass');
+	assert.match(drift, /STATUS: PENDING  \[install-drift\] 未设置 DSH_PROFILE_DIR/, 'no profile must be PENDING');
+	assert.match(drift, /STATUS: PENDING  \[install-drift\] profile 内未安装/, 'not installed must be PENDING');
+	// 读不出内容的成员不能静默当成一致。
+	assert.match(drift, /unverified\.push\(rel\)/, 'an unreadable member must be recorded');
+	assert.match(drift, /if \(unverified\.length > 0\) \{/, 'unverified members must downgrade the verdict');
+});
+
 test('SEC-003: Host dispatch shares the packaged protocol validator', () => {
 	// 只审查装配和单一校验器的接线；不发送非法 DTO，不调用真实 Host。
 	const host = source('src/vs/platform/dshClient/host/ide-view-host.js');
