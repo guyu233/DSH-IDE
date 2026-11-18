@@ -22,7 +22,7 @@ import { isDefined } from '../../../../../../base/common/types.js';
 import { CancellationToken } from '../../../../../../base/common/cancellation.js';
 import { Codicon } from '../../../../../../base/common/codicons.js';
 import { Emitter, Event } from '../../../../../../base/common/event.js';
-import { onUnexpectedError } from '../../../../../../base/common/errors.js';
+import { getErrorMessage, onUnexpectedError } from '../../../../../../base/common/errors.js';
 import { Iterable } from '../../../../../../base/common/iterator.js';
 import { KeyCode } from '../../../../../../base/common/keyCodes.js';
 import { Lazy } from '../../../../../../base/common/lazy.js';
@@ -1990,6 +1990,11 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 
 	public setCurrentLanguageModel(model: ILanguageModelChatMetadataAndIdentifier, isUserAction = false, storeSelection: boolean = isUserAction) {
 		const persistSelection = isUserAction && storeSelection;
+		// 用户改选模型时，把这次选择写回当前会话的内核（DSH 走 `setModel`）。
+		// 只有真正的用户操作才算：程序性同步（恢复、默认值、会话切换）不得当成一次选择写回去。
+		if (isUserAction) {
+			void this._writeModelSelectionToSession(model);
+		}
 		this._modelSelectionDiagnostics.report('set-model', {
 			model: model.identifier,
 			isUserAction,
@@ -2006,6 +2011,44 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 		// Not in `apply`, which is skipped when the picker shows an equivalent in place of this model.
 		if (persistSelection) {
 			storeSelectedModel(this.storageService, this.location, this.getSelectedModelTarget(), model.identifier);
+		}
+	}
+
+	/**
+	 * 把用户选中的模型写回当前会话。
+	 *
+	 * 原生选择器只改本地状态；对由 content provider 驱动的会话（DSH）来说，内核那边
+	 * 仍是旧模型——不写回就会出现「界面显示 A、实际用 B」。写回失败不改 UI：
+	 * 由会话自己决定是否回滚，选择器不把「显示成功」当成成功。
+	 * @param model 选中的模型
+	 */
+	private async _writeModelSelectionToSession(model: ILanguageModelChatMetadataAndIdentifier): Promise<void> {
+		const resource = this._inputModelSessionResource;
+		if (resource === undefined) {
+			return;
+		}
+		const sessionType = getChatSessionType(resource);
+		if (!this.chatSessionsService.getContentProviderSchemes().includes(sessionType)) {
+			return;
+		}
+		try {
+			const session = await this.chatSessionsService.getOrCreateChatSession(resource, CancellationToken.None);
+			const candidate = session as unknown as {
+				selectModel?: (provider: string, model: string) => Promise<void>;
+			};
+			if (typeof candidate.selectModel !== 'function') {
+				return;
+			}
+			// 身份来自 identifier（`<provider>/<model id>`），不是显示名：
+			// 显示名可以重名，写回内核必须用真实路由。斜杠在模型名里也允许出现，
+			// 因此只按**第一个**斜杠切分。
+			const separator = model.identifier.indexOf('/');
+			if (separator <= 0 || separator === model.identifier.length - 1) {
+				return;
+			}
+			await candidate.selectModel(model.identifier.slice(0, separator), model.identifier.slice(separator + 1));
+		} catch (error) {
+			this.logService.warn('[chat] writing the selected model to the session failed', getErrorMessage(error));
 		}
 	}
 

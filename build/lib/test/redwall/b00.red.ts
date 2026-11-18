@@ -474,6 +474,56 @@ test('BUG-015: model selection with a slash-qualified model reaches the real DTO
 	}
 });
 
+test('BUG-015: the native picker writes the selection back to the bound session', () => {
+	// 只核对接线与身份切分：原生选择器必须把用户操作写回会话，且用真实路由而不是显示名。
+	const input = source('src/vs/workbench/contrib/chat/browser/widget/input/chatInputPart.ts');
+	assert.match(input, /if \(isUserAction\) \{\s*\n\s*void this\._writeModelSelectionToSession\(model\);/,
+		'a user model pick must trigger a write-back');
+	assert.match(input, /candidate\.selectModel\(/, 'the write-back must reach the session object');
+	assert.match(input, /model\.identifier\.indexOf\('\/'\)/, 'identity must come from the identifier, not the display name');
+	assert.match(input, /model\.identifier\.slice\(separator \+ 1\)/, 'the model id keeps every slash after the first');
+	assert.doesNotMatch(input, /model\.metadata\.name \?\? model\.identifier/, 'the display name must never be used as the model id');
+});
+
+test('BUG-015: a slash-qualified model keeps its provider and full model id', async () => {
+	const writes: { method: string; args: Record<string, unknown> }[] = [];
+	const session = new DshChatSession({
+		call: async (method: string, args: Record<string, unknown>) => {
+			writes.push({ method, args });
+			return { ok: true, value: { accepted: true } };
+		},
+		rebindView: async () => ({ ok: true }),
+	} as never);
+	try {
+		assert.equal(await session.bind('s-1'), true);
+		// 模型名本身含斜杠：只有第一个斜杠分隔 provider 与 model。
+		await session.selectModel('provider-a', 'family/model-a');
+		assert.deepEqual(writes.at(-1), { method: 'setModel', args: { sessionId: 's-1', model: 'provider-a/family/model-a' } });
+		assert.doesNotThrow(() => validateDshIdeInput('setModel', writes.at(-1)!.args));
+	} finally {
+		session.dispose();
+	}
+});
+
+test('BUG-015: a rejected write-back does not pretend the selection succeeded', async () => {
+	let changed = 0;
+	const session = new DshChatSession({
+		call: async () => ({ ok: false, error: { code: 'dsh-ide/invalid-argument', message: 'unknown model' } }),
+		rebindView: async () => ({ ok: true }),
+	} as never);
+	try {
+		session.onDidChangeModelMenu(() => changed++);
+		assert.equal(await session.bind('s-1'), true);
+		const before = changed;
+		await session.selectModel('provider-a', 'missing');
+		// 内核拒绝时不得改本地当前模型，也不得发出「已切换」通知。
+		assert.equal(changed, before, 'a rejected selection must not announce a change');
+		assert.deepEqual(session.currentModel(), undefined, 'a rejected selection must not become the current model');
+	} finally {
+		session.dispose();
+	}
+});
+
 test('SEC-003: Host dispatch shares the packaged protocol validator', () => {
 	// 只审查装配和单一校验器的接线；不发送非法 DTO，不调用真实 Host。
 	const host = source('src/vs/platform/dshClient/host/ide-view-host.js');
