@@ -25,6 +25,22 @@
 export const IDE_CLIENT_POLL_TIMEOUT_MS = 15000;
 
 /**
+ * 首次拉起 IDE 时传给 Electron 的位置参数。
+ *
+ * Electron 把以 `-` 开头的参数当成开关。工作区来自会话 cwd，必须放在 `--` 后面，
+ * 否则这段字符串会变成启动开关而不是要打开的目录。正常路径同样放在 `--` 后面，
+ * VS Code 的 argv 解析会把它收进位置参数。
+ * @param {string | undefined} workspace
+ * @returns {string[]}
+ */
+export function ideWorkspaceArgs(workspace) {
+	if (typeof workspace !== 'string' || workspace === '') {
+		return [];
+	}
+	return ['--', workspace];
+}
+
+/**
  * 已报到的 IDE 进程登记表 + 报到前的开窗暂存队列。
  *
  * 单个客户端的生命周期：`register` 建立回调 → `launch` 投递请求（有回调直接调用，

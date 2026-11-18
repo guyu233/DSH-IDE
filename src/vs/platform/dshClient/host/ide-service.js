@@ -19,7 +19,7 @@ import { dirname, join } from 'node:path';
 import { Service } from '@deepseek-ai/cordis';
 import { bindTypertRemote } from '@deepseek-ai/dsh-typert-protocol';
 import { materializeElectronHome } from './electron-home.js';
-import { IdeLaunchQueue } from './ide-launch-queue.js';
+import { IdeLaunchQueue, ideWorkspaceArgs } from './ide-launch-queue.js';
 
 const REMOTE_METHOD_DESCRIPTOR = '@deepseek-ai/dsh-typert-protocol/remote-methods';
 
@@ -161,7 +161,7 @@ export class IdeRemoteService extends Service {
       }
       // 不传载荷目录作为位置参数：主页的 `resources/app` 已经指向插件载荷。
       // 位置参数只承载「要打开的工作区」，与 VS Code CLI 语义一致（首次点击即打开当前工作区）。
-      const args = typeof workspace === 'string' && workspace !== '' ? [workspace] : [];
+      const args = ideWorkspaceArgs(workspace);
       // DSH-IDE 是 DSH 的插件，IDE 窗口必须随 DSH 进程一起结束。
       // 因此**不能**用 `detached: true` + `unref()`：那会把子进程从父进程的进程组里摘出去，
       // DSH 退出后窗口仍留着。这里保持普通子进程，并把句柄登记到插件上下文，

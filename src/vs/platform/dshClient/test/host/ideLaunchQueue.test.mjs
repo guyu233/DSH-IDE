@@ -11,7 +11,14 @@
 
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { IDE_CLIENT_POLL_TIMEOUT_MS, IdeLaunchQueue } from '../../host/ide-launch-queue.js';
+import { IDE_CLIENT_POLL_TIMEOUT_MS, IdeLaunchQueue, ideWorkspaceArgs } from '../../host/ide-launch-queue.js';
+
+test('ideWorkspaceArgs puts the workspace after -- so a leading dash is not a switch', () => {
+	assert.deepEqual(ideWorkspaceArgs(undefined), []);
+	assert.deepEqual(ideWorkspaceArgs(''), []);
+	assert.deepEqual(ideWorkspaceArgs('E:\\repo'), ['--', 'E:\\repo']);
+	assert.deepEqual(ideWorkspaceArgs('--inspect'), ['--', '--inspect']);
+});
 
 test('register 拒绝空 / 非字符串 clientId', () => {
 	const queue = new IdeLaunchQueue();
