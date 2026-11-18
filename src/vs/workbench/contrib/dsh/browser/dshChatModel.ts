@@ -318,9 +318,19 @@ export class DshChatModel extends Disposable {
 
 	/**
 	 * 开口 snapshot 之前未知，允许再要一页。
-	 * snapshot / prependPage 用官方 `hasMore` 覆盖；空页强制 false，避免死循环。
+	 *
+	 * 只在「确知没有更早记录」时置 false，并且**不再翻回 true**：已经读到头的会话
+	 * 不会因为后续实时帧自称还有更多而重新开始翻页。换绑（`clear`）才复位。
 	 */
 	private _hasMore = true;
+	/**
+	 * 已读到的最早 durable seq（含已被实时窗口替换掉的旧页）。
+	 *
+	 * 分页游标不能只看当前可见节点：实时窗口会把旧页挤出画面，若游标随之下移，
+	 * 下一次 `loadOlder` 会从更晚的位置重取，已读内容看起来「消失」了。
+	 * 这个边界只前进（变小），换绑时复位。
+	 */
+	private durableFloor: number | undefined;
 	/** 翻页请求的状态。模型不发请求，只记下会话层报来的状态。 */
 	private _historyStatus: DshHistoryStatus = 'idle';
 	private readonly _onDidChangeHistory = this._register(new Emitter<void>());
@@ -328,6 +338,13 @@ export class DshChatModel extends Disposable {
 
 	/** 按 identity 索引：durable 用 `seq:<n>`，流式用 `stream:<attemptId>`。 */
 	private readonly nodes = new Map<string, DshChatNode>();
+	/**
+	 * 由 `loadOlder` 读入的旧页。
+	 *
+	 * 与实时窗口分开存放：实时帧只替换「当前这一段」，翻页读到的更早记录不随之消失。
+	 * 两者在 `list` 里按 seq 合并，identity 冲突时实时窗口优先。
+	 */
+	private readonly olderNodes = new Map<string, DshChatNode>();
 
 	/**
 	 * 带 Turn/Step 坐标的节点列表。
@@ -347,9 +364,13 @@ export class DshChatModel extends Disposable {
 		});
 	}
 
-	/** 按 seq 升序（DSH 的会话日志顺序）。 */
+	/** 按 seq 升序（DSH 的会话日志顺序）。实时窗口与已读旧页合并，同 identity 以实时窗口为准。 */
 	get list(): readonly DshChatNode[] {
-		return [...this.nodes.values()].sort((a, b) => a.seq - b.seq);
+		const merged = new Map<string, DshChatNode>(this.olderNodes);
+		for (const [id, node] of this.nodes) {
+			merged.set(id, node);
+		}
+		return [...merged.values()].sort((a, b) => a.seq - b.seq);
 	}
 
 	/**
@@ -392,24 +413,51 @@ export class DshChatModel extends Disposable {
 	 * `DshChatNode` 的机械映射，不再解析裸帧、不再自己拼装。
 	 */
 	acceptConversation(conversation: DshIdeConversationView): readonly DshChatChange[] {
-		this.clear();
-		this._hasMore = conversation.hasMore;
-		const changes: DshChatChange[] = [];
+		// 实时窗口是「当前这一段」，不是整条日志：已读的更早页必须留下。
+		// 只有严格早于实时窗口最小 seq 的节点才保留；窗口内的旧版本一律被新帧替换。
+		const mappedLive: { identity: string; node: DshChatNode; usage?: DshIdeConversationNode & { readonly kind: 'assistant' } }[] = [];
+		let liveMin: number | undefined;
 		for (const node of conversation.nodes) {
 			const mapped = fromConversationNode(node);
 			if (mapped === undefined) {
 				continue;
 			}
-			this.nodes.set(identityOf(node), mapped);
-			// typed 路径从节点自带的 usage 累加 token 用量。
-			if (node.kind === 'assistant' && node.usage !== undefined) {
-				this.usageSeen = true;
-				this.usage.inputTokens += node.usage.inputTokens;
-				this.usage.outputTokens += node.usage.outputTokens;
-				this.usage.cacheReadTokens += node.usage.cacheReadTokens ?? 0;
-				this.usage.cacheWriteTokens += node.usage.cacheWriteTokens ?? 0;
+			mappedLive.push({
+				identity: identityOf(node),
+				node: mapped,
+				...(node.kind === 'assistant' ? { usage: node } : {}),
+			});
+			if (liveMin === undefined || mapped.seq < liveMin) {
+				liveMin = mapped.seq;
 			}
-			changes.push({ node: mapped, added: true });
+		}
+		// 实时窗口整体替换上一窗口；只有 `loadOlder` 读入的旧页跨帧保留。
+		// 两者分开存放正是为了区分「窗口内容」与「翻页历史」。
+		// 用量随实时窗口重算：旧页只影响画面，不参与这次累加。
+		this.usage.inputTokens = 0;
+		this.usage.outputTokens = 0;
+		this.usage.cacheReadTokens = 0;
+		this.usage.cacheWriteTokens = 0;
+		this.usageSeen = false;
+		this.nodes.clear();
+		// 已经读到日志开头就不再翻页：实时帧自称「还有更多」不能把它翻回 true。
+		this._hasMore = this._hasMore && conversation.hasMore;
+		// 分页边界只前进：实时窗口把旧页挤出画面时，游标仍停在已读到的最早 seq。
+		if (liveMin !== undefined && (this.durableFloor === undefined || liveMin < this.durableFloor)) {
+			this.durableFloor = liveMin;
+		}
+		const changes: DshChatChange[] = [];
+		for (const live of mappedLive) {
+			const replaced = this.nodes.has(live.identity);
+			this.nodes.set(live.identity, live.node);
+			if (live.usage !== undefined && live.usage.usage !== undefined) {
+				this.usageSeen = true;
+				this.usage.inputTokens += live.usage.usage.inputTokens;
+				this.usage.outputTokens += live.usage.usage.outputTokens;
+				this.usage.cacheReadTokens += live.usage.usage.cacheReadTokens ?? 0;
+				this.usage.cacheWriteTokens += live.usage.usage.cacheWriteTokens ?? 0;
+			}
+			changes.push({ node: live.node, added: !replaced });
 		}
 		if (changes.length > 0) {
 			this._onDidChange.fire(changes);
@@ -424,8 +472,12 @@ export class DshChatModel extends Disposable {
 	 */
 	firstSeq(): number | undefined {
 		let min: number | undefined;
+		// 流式临时节点的 seq 是合成值，不参与历史游标：按 identity 过滤。
+		const merged = new Map<string, DshChatNode>(this.olderNodes);
 		for (const [id, node] of this.nodes) {
-			// 流式临时节点的 seq 是合成值（`stream:` 前缀），不参与历史游标。
+			merged.set(id, node);
+		}
+		for (const [id, node] of merged) {
 			if (id.startsWith(STREAM_NODE_PREFIX)) {
 				continue;
 			}
@@ -434,6 +486,16 @@ export class DshChatModel extends Disposable {
 			}
 		}
 		return min;
+	}
+
+	/**
+	 * 下一次翻页要用的游标：已读到的最早 durable seq。
+	 *
+	 * 与 `firstSeq()` 的区别是本值不受实时窗口滑动影响——旧页被挤出画面后，
+	 * 从 `firstSeq()` 重新取会漏掉中间那段记录。
+	 */
+	pagingCursor(): number | undefined {
+		return this.durableFloor;
 	}
 
 	/** 官方分页是否还有更早的记录。 */
@@ -488,6 +550,13 @@ export class DshChatModel extends Disposable {
 			accepted.push(event);
 		}
 		accepted.sort((a, b) => (numberOf(a['seq']) ?? 0) - (numberOf(b['seq']) ?? 0));
+		// 边界随已并入的最早 seq 前进；空页不改边界（没有新证据）。
+		for (const event of accepted) {
+			const seq = numberOf(event['seq']);
+			if (seq !== undefined && (this.durableFloor === undefined || seq < this.durableFloor)) {
+				this.durableFloor = seq;
+			}
+		}
 		// 这一页交给 Host 同款投影器；投影结果是 typed 节点，直接并入节点树。
 		const changes: DshChatChange[] = [];
 		const pageState = createDshIdeConversationState();
@@ -500,8 +569,9 @@ export class DshChatModel extends Disposable {
 				continue;
 			}
 			const identity = identityOf(node);
-			if (!this.nodes.has(identity)) {
-				this.nodes.set(identity, mapped);
+			// 旧页只补画面：不覆盖实时窗口里同 identity 的节点。
+			if (!this.nodes.has(identity) && !this.olderNodes.has(identity)) {
+				this.olderNodes.set(identity, mapped);
 				changes.push({ node: mapped, added: true });
 			}
 		}
@@ -531,7 +601,9 @@ export class DshChatModel extends Disposable {
 		this.usage.cacheWriteTokens = 0;
 		this.usageSeen = false;
 		this.nodes.clear();
+		this.olderNodes.clear();
 		this._hasMore = true;
+		this.durableFloor = undefined;
 		this._historyStatus = 'idle';
 		this._onDidReset.fire();
 	}

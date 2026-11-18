@@ -448,6 +448,11 @@ export class DshChatSession extends Disposable implements IDshChatSession {
 		return this.model.firstSeq();
 	}
 
+	/** 下一次翻页的游标（durable 边界，不受实时窗口滑动影响）。 */
+	pagingCursor(): number | undefined {
+		return this.model.pagingCursor();
+	}
+
 	historyStatus(): DshHistoryStatus {
 		return this.model.historyStatus();
 	}
@@ -463,7 +468,9 @@ export class DshChatSession extends Disposable implements IDshChatSession {
 		if (this.model.historyStatus() === 'loading' || !this.model.hasMore()) {
 			return false;
 		}
-		const beforeSeq = this.model.firstSeq();
+		// 游标用 durable 边界，不用可见窗口的最小 seq：旧页被实时帧挤出画面后，
+		// 从可见窗口取会漏掉中间那段记录。
+		const beforeSeq = this.model.pagingCursor();
 		if (beforeSeq === undefined) {
 			return false;
 		}

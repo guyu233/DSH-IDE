@@ -271,6 +271,57 @@ test('BUG-012: the next live view preserves an already loaded older page', () =>
 	}
 });
 
+test('BUG-012: the paging cursor stays on durable history after the live window slides', () => {
+	const model = new DshChatModel();
+	try {
+		// 实时窗口先给 9，再读到更早的 2，然后窗口滑到 10：游标不能跟着窗口下移。
+		model.acceptConversation({ nodes: [userNode(9, 'Current')], hasMore: true });
+		assert.equal(model.pagingCursor(), 9, 'the cursor starts at the live window floor');
+		model.prependPage({
+			records: [{ type: 'event', event: { type: 'user/message', seq: 2, time: 2, data: { source: { kind: 'user' }, content: content('Earlier') } } }],
+			hasMore: true,
+		});
+		assert.equal(model.pagingCursor(), 2, 'a loaded page moves the cursor back');
+		model.acceptConversation({ nodes: [userNode(10, 'Next')], hasMore: true });
+		assert.equal(model.pagingCursor(), 2, 'the live window sliding forward must not move the cursor');
+		assert.deepEqual(model.list.map(node => node.seq), [2, 10], 'the loaded page stays visible after the window slides');
+	} finally {
+		model.dispose();
+	}
+});
+
+test('BUG-012: an empty projection page ends paging instead of looping', () => {
+	const model = new DshChatModel();
+	try {
+		model.acceptConversation({ nodes: [userNode(5, 'Only')], hasMore: true });
+		const cursor = model.pagingCursor();
+		const outcome = model.prependPage({ records: [], hasMore: true });
+		assert.deepEqual({ added: outcome.added, hasMore: model.hasMore(), cursor: model.pagingCursor() }, { added: 0, hasMore: false, cursor });
+		// 已读到头之后，实时帧自称「还有更多」不能把翻页重新打开。
+		model.acceptConversation({ nodes: [userNode(6, 'Later')], hasMore: true });
+		assert.equal(model.hasMore(), false, 'a finished history must not reopen paging');
+	} finally {
+		model.dispose();
+	}
+});
+
+test('BUG-012: rebinding is the only thing that drops loaded pages', () => {
+	const model = new DshChatModel();
+	try {
+		model.acceptConversation({ nodes: [userNode(9, 'Current')], hasMore: true });
+		model.prependPage({
+			records: [{ type: 'event', event: { type: 'user/message', seq: 1, time: 1, data: { source: { kind: 'user' }, content: content('Oldest') } } }],
+			hasMore: true,
+		});
+		assert.deepEqual(model.list.map(node => node.seq), [1, 9]);
+		model.clear();
+		assert.deepEqual(model.list.map(node => node.seq), [], 'clearing the binding drops the loaded pages');
+		assert.equal(model.pagingCursor(), undefined, 'the cursor resets with the binding');
+	} finally {
+		model.dispose();
+	}
+});
+
 test('BUG-013: starting a new binding never republishes the previous ready view', t => {
 	t.mock.timers.enable({ apis: ['setTimeout'] });
 	const consumer = new DshIdeConsumer();
