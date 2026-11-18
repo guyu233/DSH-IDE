@@ -301,12 +301,6 @@ export function isLocalAgentHostProviderDisabledByPolicy(provider: AgentProvider
 	return setting !== undefined && configurationService.inspect<boolean>(setting).policyValue === false;
 }
 
-export function getPolicyUnavailableLocalAgentHostProviders(configurationService: IConfigurationService, isSessionsWindow: boolean): readonly AgentProvider[] {
-	return [CLAUDE_AGENT_PROVIDER_ID, CODEX_AGENT_PROVIDER_ID].filter(provider =>
-		isLocalAgentHostProviderDisabledByPolicy(provider, configurationService)
-		&& (provider !== CODEX_AGENT_PROVIDER_ID || isSessionsWindow));
-}
-
 // -- Codex agent settings --------------------------------------------------------
 //
 // Codex is opt-in via `chat.agentHost.codexAgent.sdkRoot`. The setting points

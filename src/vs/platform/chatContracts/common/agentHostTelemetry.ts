@@ -180,15 +180,6 @@ export interface IAgentProviderTurnTelemetryContext {
 	readonly prewarmedSessionDiscardReason?: string;
 }
 
-export function createUnknownAgentHostClientTelemetryContext(clientType: AgentHostClientType): IAgentHostClientTelemetryContext {
-	return {
-		clientType,
-		connectionKind: AgentHostClientConnectionKind.Unknown,
-		transportKind: AgentHostTransportKind.Unknown,
-		hostLaunchKind: AgentHostLaunchKind.Unknown,
-	};
-}
-
 const CLIENT_CONNECTION_KIND_META_KEY = 'vscode.clientConnectionKind';
 const CLIENT_TELEMETRY_LEVEL_META_KEY = 'vscode.telemetryLevel';
 const CLIENT_MACHINE_ID_META_KEY = 'vscode.clientMachineId';

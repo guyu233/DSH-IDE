@@ -112,7 +112,6 @@ export default defineConfig(
 			'local/code-no-icons-in-localized-strings': 'warn',
 			'local/code-no-http-import': ['warn', { target: 'src/vs/**' }],
 			'local/code-no-deep-import-of-internal': ['error', { '.*Internal': true, 'searchExtTypesInternal': false }],
-			'local/code-no-private-agent-host-meta-import': 'error',
 			'local/code-layering': [
 				'warn',
 				{
@@ -1860,7 +1859,6 @@ export default defineConfig(
 						'vs/workbench/~',
 						'vs/workbench/services/*/~',
 						'vs/workbench/contrib/*/~',
-						'vs/sessions/~',
 						'vs/workbench/contrib/terminal/terminalContribChatExports*',
 						'vs/workbench/contrib/terminal/terminalContribExports*',
 						'vscode-notebook-renderer', // Type only import

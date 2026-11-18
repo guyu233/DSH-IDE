@@ -2002,9 +2002,6 @@ export const AH_META_HAS_WORKSPACE_TRANSITIONS_DB_KEY = 'agentHost.hasWorkspaceT
 /** Summary metadata mirror of {@link AH_META_HAS_WORKSPACE_TRANSITIONS_DB_KEY}. */
 export const SESSION_META_HAS_WORKSPACE_TRANSITIONS_KEY = 'hasWorkspaceTransitions';
 
-/** Blocks turns for a session whose provider could not be detached from an untrusted working directory. */
-export const AH_META_WORKSPACE_CONVERSION_QUARANTINED_DB_KEY = 'agentHost.workspaceConversionQuarantined';
-
 /**
  * Session-database metadata key recording whether a session is archived. Written by
  * the AH orchestrator (`AgentSideEffects` on `SessionIsArchivedChanged`) and read by

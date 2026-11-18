@@ -138,13 +138,6 @@ export const SESSION_ROW_OWNER_CHAT_METADATA_KEY = 'agentHost.rowOwnerChat';
  */
 export const SESSION_FOREIGN_TURN_IDS_METADATA_KEY = 'agentHost.foreignTurnIds';
 
-/**
- * Metadata key holding the JSON array of the repository roots (URI strings) in which the
- * chat whose rows a database holds created turn checkpoint refs, appended at capture.
- * Deleting the database deletes its rows' refs in exactly those repositories.
- */
-export const SESSION_CHECKPOINT_REPOSITORIES_METADATA_KEY = 'agentHost.checkpointRepositories';
-
 /** A `turns` row that carries a checkpoint ref. */
 export interface ITurnCheckpointRecord {
 	readonly turnId: string;
