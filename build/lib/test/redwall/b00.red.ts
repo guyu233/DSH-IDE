@@ -822,6 +822,29 @@ test('SEC-001: inline completion is registered as unavailable, not wired through
 	assert.match(readme, /行内补全 \| \*\*暂不可用\*\*/, 'the README must state it is unavailable');
 });
 
+test('SEC-006: the flagged supply-chain versions are at or above the fixed releases', () => {
+	const lock = JSON.parse(source('package-lock.json')) as { packages: Record<string, { version?: string }> };
+	const mlf = JSON.parse(source('extensions/markdown-language-features/package-lock.json')) as { packages: Record<string, { version?: string }> };
+	const mermaid = JSON.parse(source('extensions/mermaid-markdown-features/package-lock.json')) as { packages: Record<string, { version?: string }> };
+
+	// undici：GHSA-2m5v-pch6-74hx（TLS 校验绕过，HIGH）修复于 7.30.1。
+	const undici = lock.packages['node_modules/undici']?.version;
+	assert.ok(undici !== undefined, 'undici must be locked');
+	const [uMaj, uMin, uPat] = undici.split('.').map(Number);
+	assert.ok(uMaj > 7 || (uMaj === 7 && (uMin > 30 || (uMin === 30 && uPat >= 1))), `undici ${undici} must be >= 7.30.1`);
+
+	// dompurify：GHSA-39q2-94rc-95cp 修复于 3.4.0、GHSA-55q2-fjhq-7xh7 修复于 3.4.13。
+	for (const [name, lockfile] of [['markdown-language-features', mlf], ['mermaid-markdown-features', mermaid]] as const) {
+		const version = lockfile.packages['node_modules/dompurify']?.version;
+		assert.ok(version !== undefined, `${name} must lock dompurify`);
+		const [maj, min, pat] = version.split('.').map(Number);
+		assert.ok(maj > 3 || (maj === 3 && (min > 4 || (min === 4 && pat >= 13))), `${name} dompurify ${version} must be >= 3.4.13`);
+	}
+
+	// 不得用全仓 override 或跨大版本「顺手升级」掩盖：undici 仍是 7.x。
+	assert.ok(uMaj === 7, 'undici must stay on the 7.x line (no cross-major jump)');
+});
+
 test('SEC-003: Host dispatch shares the packaged protocol validator', () => {
 	// 只审查装配和单一校验器的接线；不发送非法 DTO，不调用真实 Host。
 	const host = source('src/vs/platform/dshClient/host/ide-view-host.js');
