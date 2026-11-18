@@ -234,8 +234,31 @@ export class DshIdeHostBridge {
 		this._follows = new Map();
 		/** 没有绑定会话的窗口也要收到状态变化，不能只塞进某一次 follow。 */
 		this._statusListeners = new Set();
+		/** 同一会话的收藏/置顶切换必须串行，否则两次读取会看到同一状态。 */
+		this._toggles = new Map();
 		this._armWaterfalls();
 		this._armSessionStatus();
+	}
+
+	/**
+	 * 把同一把钥匙上的切换排成队。前一次失败也放行下一次，避免队列卡死。
+	 * @param {string} key
+	 * @param {() => Promise<unknown>} task
+	 */
+	enqueueToggle(key, task) {
+		const previous = this._toggles.get(key) ?? Promise.resolve();
+		const run = previous.then(task, task);
+		this._toggles.set(key, run);
+		void run.then(() => {
+			if (this._toggles.get(key) === run) {
+				this._toggles.delete(key);
+			}
+		}, () => {
+			if (this._toggles.get(key) === run) {
+				this._toggles.delete(key);
+			}
+		});
+		return run;
 	}
 
 	open(spec) {
@@ -977,30 +1000,34 @@ function createMethodHandlers(bridge) {
 			notifySessionList();
 			return { accepted: true };
 		},
-		async setSessionFavorite(args) {
+		setSessionFavorite(args) {
 			bridge.assertOwnership(args.sessionId);
 			const registry = service(bridge.ctx, 'workspaceRegistry');
 			if (typeof registry.setSessionFavorite !== 'function' || typeof registry.favoriteSessions !== 'function') {
 				throw coded(FEATURE_UNAVAILABLE, 'session favorite is unavailable: install and enable @michengai/dsh-archive-manager', { capability: 'setSessionFavorite' });
 			}
-			const current = await registry.favoriteSessions();
-			const ids = current && Array.isArray(current.favoriteSessionIds) ? current.favoriteSessionIds : [];
-			await registry.setSessionFavorite({ sessionId: args.sessionId, favorite: !ids.includes(args.sessionId) });
-			notifySessionList();
-			return { accepted: true };
+			return bridge.enqueueToggle(`favorite:${args.sessionId}`, async () => {
+				const current = await registry.favoriteSessions();
+				const ids = current && Array.isArray(current.favoriteSessionIds) ? current.favoriteSessionIds : [];
+				await registry.setSessionFavorite({ sessionId: args.sessionId, favorite: !ids.includes(args.sessionId) });
+				notifySessionList();
+				return { accepted: true };
+			});
 		},
-		async setSessionPinned(args) {
+		setSessionPinned(args) {
 			bridge.assertOwnership(args.sessionId);
 			const workspaces = service(bridge.ctx, 'workspaceController');
-			const registry = optionalService(bridge.ctx, 'workspaceRegistry');
-			const pinned = registry && Array.isArray(registry.pinnedSessionIds) ? registry.pinnedSessionIds.includes(args.sessionId) : false;
-			const method = pinned ? 'unpinSession' : 'pinSession';
-			if (typeof workspaces[method] !== 'function') {
-				throw coded(FEATURE_UNAVAILABLE, `DSH workspaceController has no ${method}()`, { capability: 'setSessionPinned' });
-			}
-			await workspaces[method]({ sessionId: args.sessionId });
-			notifySessionList();
-			return { accepted: true };
+			return bridge.enqueueToggle(`pin:${args.sessionId}`, async () => {
+				const registry = optionalService(bridge.ctx, 'workspaceRegistry');
+				const pinned = registry && Array.isArray(registry.pinnedSessionIds) ? registry.pinnedSessionIds.includes(args.sessionId) : false;
+				const method = pinned ? 'unpinSession' : 'pinSession';
+				if (typeof workspaces[method] !== 'function') {
+					throw coded(FEATURE_UNAVAILABLE, `DSH workspaceController has no ${method}()`, { capability: 'setSessionPinned' });
+				}
+				await workspaces[method]({ sessionId: args.sessionId });
+				notifySessionList();
+				return { accepted: true };
+			});
 		},
 		async listWorkspaces() {
 			const registry = optionalService(bridge.ctx, 'workspaceRegistry');

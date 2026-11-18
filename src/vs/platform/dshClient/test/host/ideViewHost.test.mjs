@@ -90,6 +90,34 @@ function bridgeWith(services = {}) {
 	return { ctx, bridge, live };
 }
 
+test('two favorite toggles for one session apply in order', async () => {
+	let favorite = false;
+	const writes = [];
+	const { bridge } = bridgeWith({
+		workspaceRegistry: {
+			list: () => [{ id: 'w-1', sessionIds: ['s-1'] }],
+			async favoriteSessions() {
+				await new Promise(resolve => setImmediate(resolve));
+				return { favoriteSessionIds: favorite ? ['s-1'] : [] };
+			},
+			async setSessionFavorite(args) {
+				writes.push(args.favorite);
+				favorite = args.favorite;
+			},
+			moveSessionToWorkspace() { },
+			deleteSession() { },
+			resolveByPath() { return undefined; },
+		},
+	});
+	bridge.open({ view: 'chat', params: { sessionId: 's-1' } });
+	await Promise.all([
+		bridge.invoke('setSessionFavorite', { sessionId: 's-1' }),
+		bridge.invoke('setSessionFavorite', { sessionId: 's-1' }),
+	]);
+	assert.deepEqual(writes, [true, false]);
+	assert.equal(favorite, false);
+});
+
 test('required services are only the ones session following needs', () => {
 	// workspaceRegistry 只在归档 / 删除用得到；把它列成硬依赖会让整条桥接在本就
 	// 没有该服务的 profile 里永远不就绪，`ide/dispatch` 全量拒绝（真机实测）。
