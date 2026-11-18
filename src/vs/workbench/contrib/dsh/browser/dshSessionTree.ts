@@ -119,6 +119,42 @@ function withChildren<T extends IChatSessionItem>(item: T, children: readonly T[
 	return { ...item, children };
 }
 
+/**
+ * 从树里拿掉一行。子项升到被删行原来的位置，不把子会话一起丢掉。
+ * 未命中时返回原数组。
+ */
+export function dropSession<T extends DshSessionTreeNode>(items: readonly T[], resourceKey: string): readonly T[] {
+	let removed = false;
+	const walk = (list: readonly T[]): readonly T[] => {
+		const next: T[] = [];
+		let changed = false;
+		for (const item of list) {
+			if (item.resource.toString() === resourceKey) {
+				removed = true;
+				changed = true;
+				if (item.children !== undefined) {
+					next.push(...walk(item.children as readonly T[]));
+				}
+				continue;
+			}
+			if (item.children === undefined) {
+				next.push(item);
+				continue;
+			}
+			const children = walk(item.children as readonly T[]);
+			if (children !== item.children) {
+				changed = true;
+				next.push(children.length === 0 ? { ...item, children: undefined } : { ...item, children });
+			} else {
+				next.push(item);
+			}
+		}
+		return changed ? next : list;
+	};
+	const result = walk(items);
+	return removed ? result : items;
+}
+
 /** 递归收集整棵树里所有 item（含 root），便于状态更新与比较。 */
 export function flattenTree<T extends DshSessionTreeNode>(items: readonly T[]): T[] {
 	const out: T[] = [];

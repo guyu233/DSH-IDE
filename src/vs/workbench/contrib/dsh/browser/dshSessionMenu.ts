@@ -6,6 +6,7 @@
 // DSH 会话行的右键菜单，条目与桌面端会话菜单对齐。
 // 只对 `chatSessionType == dsh` 出现。原生「Open as Editor / Mark as Done」由调用方滤掉。
 
+import { CancellationToken } from '../../../../base/common/cancellation.js';
 import { Codicon } from '../../../../base/common/codicons.js';
 import { KeyCode, KeyMod } from '../../../../base/common/keyCodes.js';
 import { URI } from '../../../../base/common/uri.js';
@@ -245,9 +246,12 @@ export function registerDshSessionMenu(): void {
 			if (!confirmed.confirmed) {
 				return;
 			}
-			const result = await accessor.get(IDshClientService).call('deleteSession', { sessionId });
-			if (!result.ok) {
-				await fail(accessor.get(INotificationService), result.error, localize('dsh.session.deleteFailed', "删除会话失败"));
+			try {
+				// 走控制器：成功后本地拿掉这一行。不要在这里再 listSessions。
+				await accessor.get(IChatSessionsService).deleteChatSessionItem(dshSessionResource(sessionId), CancellationToken.None);
+			} catch (error) {
+				const message = error instanceof Error ? error.message : undefined;
+				await fail(accessor.get(INotificationService), message === undefined ? undefined : { message }, localize('dsh.session.deleteFailed', "删除会话失败"));
 			}
 		},
 	});

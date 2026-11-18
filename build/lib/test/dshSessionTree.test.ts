@@ -13,7 +13,7 @@ import { test } from 'node:test';
 import { URI } from '../../../out/vs/base/common/uri.js';
 import { ChatSessionStatus, type IChatSessionItem } from '../../../out/vs/workbench/contrib/chat/common/chatSessionsService.js';
 import type { IDshIdeSessionSummary } from '../../../out/vs/platform/dshClient/common/dshIdeProtocol.js';
-import { archiveIdsFromResult, buildSessionTree, flattenTree, isCurrentRefresh, mapTreeItem, sameTreeItem, sessionReadState } from '../../../out/vs/workbench/contrib/dsh/browser/dshSessionTree.js';
+import { archiveIdsFromResult, buildSessionTree, dropSession, flattenTree, isCurrentRefresh, mapTreeItem, sameTreeItem, sessionReadState } from '../../../out/vs/workbench/contrib/dsh/browser/dshSessionTree.js';
 
 function summary(sessionId: string, extra: Partial<IDshIdeSessionSummary> = {}): IDshIdeSessionSummary {
 	return {
@@ -172,6 +172,17 @@ test('an archive result replaces the whole set and a bad payload does not wipe i
 	assert.deepEqual([...archiveIdsFromResult(['s', '', 1, 'other'], 's', true, previous)].sort(), ['other', 's']);
 	assert.deepEqual([...archiveIdsFromResult({ archivedSessionIds: ['s'] }, 's', true, previous)], ['keep', 's']);
 	assert.deepEqual([...archiveIdsFromResult(undefined, 'keep', false, previous)], []);
+});
+
+test('dropSession removes a row and promotes its children', () => {
+	const tree = buildSessionTree(
+		[summary('parent'), summary('child', { origin: 'subagent', parentSessionId: 'parent' })],
+		toItem,
+	);
+	const parentKey = tree[0].resource.toString();
+	const next = dropSession(tree, parentKey);
+	assert.deepEqual(ids(next), ['child']);
+	assert.equal(dropSession(tree, 'dsh:/missing'), tree);
 });
 
 test('a newer timestamp marks a known session unread and a first sighting stays unset', () => {

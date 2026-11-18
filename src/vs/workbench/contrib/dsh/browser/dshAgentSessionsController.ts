@@ -27,7 +27,7 @@ import { ChatViewPane } from '../../chat/browser/widgetHosts/viewPane/chatViewPa
 import { IViewsService } from '../../../services/views/common/viewsService.js';
 import { getDshComposerSource } from './dshComposerRegistry.js';
 import { toPermissionItems } from './dshComposerProjection.js';
-import { archiveIdsFromResult, buildSessionTree, flattenTree, isCurrentRefresh, mapTreeItem, sameTreeItem, sessionReadState } from './dshSessionTree.js';
+import { archiveIdsFromResult, buildSessionTree, dropSession, flattenTree, isCurrentRefresh, mapTreeItem, sameTreeItem, sessionReadState } from './dshSessionTree.js';
 
 export const DSH_CHAT_SESSION_TYPE = 'dsh';
 
@@ -268,6 +268,32 @@ export class DshAgentSessionsController extends Disposable implements IChatSessi
 	 * 声明这个方法后，原生 agentSessions 的归档/恢复菜单才会把 DSH 会话交给这里；
 	 * 写回走官方 `archiveSession` / `unarchiveSession`，回读以 Host 的归档集合为准。
 	 */
+	/**
+	 * 原生删除入口。成功后只从当前树拿掉这一行，不立刻 listSessions。
+	 * 名单是最终一致的，刚删完就刷新会把还在旧名单里的行画回来。
+	 */
+	async deleteChatSessionItem(resource: URI, token: CancellationToken): Promise<void> {
+		if (token.isCancellationRequested) {
+			return;
+		}
+		const sessionId = dshSessionIdFromResource(resource);
+		if (sessionId === undefined) {
+			return;
+		}
+		const result = await this.client.call('deleteSession', { sessionId });
+		if (!result.ok) {
+			throw new Error(result.error.message);
+		}
+		// 删除已经在 Host 生效。即使调用方这时取消，行也要拿掉。
+		const key = dshSessionResource(sessionId).toString();
+		const next = dropSession(this._items, key);
+		if (next === this._items) {
+			return;
+		}
+		this._items = next;
+		this._onDidChangeChatSessionItems.fire({ removed: [resource] });
+	}
+
 	setChatSessionItemArchived(resource: URI, archived: boolean): void {
 		const sessionId = dshSessionIdFromResource(resource);
 		if (sessionId === undefined) {
