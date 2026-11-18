@@ -63,7 +63,7 @@
 | BUG-016 | 已修（隔离证据） | 共享流对每位订阅者一致：记录 opening 基线并重放给后来者；上游正常/异常结束都显式广播 ollow-ended（不再静默删表）；释放按引用身份，旧句柄不删新建流；待送帧上限 512，超出插 ollow-overflow 而非静默截断。3 条 Host 用例转绿。真机慢消费者与重连 PENDING。 |
 | BUG-014 | 已修（隔离证据） | 关闭世代拦截废弃调用：close() 递增世代，握手完成、端点重发现重试与跟随建立三处恢复点都比对世代，不符以 dsh-ide/cancelled 丢弃。1 条隔离用例转绿。真机快速开关窗 PENDING。 |
 | BUG-020 | 已修（隔离证据） | 重试分类边界：端点未变时业务失败原样抛出、不重放；已关闭窗口的调用以 cancelled 丢弃而非重试。1 条隔离用例锁定边界。完整分类矩阵与消费型轮询 PENDING。 |
-| SEC-004 | 仍存在 | 端点信任与 ACL 证据 PENDING。 |
+| SEC-004 | 已修（可代码验证部分） | 凭据交换前增加**归一化 origin 同源校验**：`authenticateHost` 先按 `URL` 解析双方并取 `origin` 比较，只接受 http/https；不一致或非法即抛 `dsh-ide/host-origin-mismatch`，**请求不发出**（token 不外发）。实测 8 种组合全对：同源（含不同 path/query）放行；不同端口/不同主机/https-vs-http/非 http scheme/非法 URL 全部拒绝且 `fetch=0`。错误文案只带脱敏 origin，不回显 launchUrl 或 token。1 条隔离用例锁定。**仍 PENDING**：端点文件 ACL/所有者检查（`chmod` 在 Windows 不改 ACL）、原子发布与卸载清理的共同取消、`DSH_IDE_*` 可信来源声明、凭据隔离于主进程的完整验证——均需真机与平台证据。 |
 | BUG-018 | 已修（隔离证据） | 开窗结果三态：
 egistered-ide 才 opened: true，刚拉起只 opened: false, queued: true；spawn 等 spawn/rror 事件判定并检查 pid，异步 rror 不再漏掉。2 条隔离用例转绿；队列与 electronHome 19/19 保持。真机首点开窗 PENDING。 |
 | BUG-021 | 已修（隔离证据） | 归档写回按序号采纳（archiveEpoch + isCurrentRefresh，旧回包整体丢弃）；收藏/置顶排队任务在执行时重新核对目标行可见。2 条隔离用例转绿。真机多行并发 PENDING。 |
@@ -244,5 +244,5 @@ B01 先从新旧配对和可信主体的隔离测试进入原子迁移，不重�
 | 状态 | B01 实现结果 |
 |---|---|
 | 已闭环 | B00–B12 全批次已落地：P1 全部（BUG-008–015、SEC-003/005）、BUG-016/018/019/020/021/022/023/024、DOC-001、OPT-002 在隔离用例或实测证据上转绿；契约 revision 5，两半同时拒绝不匹配。 |
-| 仍存在 | 见上方问题表：SEC-004、DOC-002 的 Linux 真机矩阵、OPT-001、SEC-006 的 Mermaid 间接配置与逐项调用图及 CLN-003/004/005（已核引用、维持现状）。全量 Node、Electron、ESLint 基线仍 FAIL；真机与发布验收 PENDING。 |
+| 仍存在 | 见上方问题表：SEC-004 的 ACL/原子发布/凭据隔离、DOC-002 的 Linux 真机矩阵、OPT-001、SEC-006 的 Mermaid 间接配置与逐项调用图及 CLN-003/004/005（已核引用、维持现状）。全量 Node、Electron、ESLint 基线仍 FAIL；真机与发布验收 PENDING。 |
 | 新引入 | 契约 revision 5 使旧 Host 与旧 IDE 互相拒绝业务调用，这是有意的失配拒绝。 |

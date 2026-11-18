@@ -85,8 +85,41 @@ interface RpcEnvelope {
 	readonly result: { readonly ok: true; readonly value: unknown } | { readonly ok: false; readonly error: { code: string; message: string; details?: unknown } };
 }
 
+/**
+ * 归一化 origin：只保留 `scheme://host:port`，丢弃 path/query/hash。
+ *
+ * 为什么必须归一化：`launchUrl` 带 token，比较整串会把「同源但路径不同」判成不同源；
+ * 而比较前若不去掉 query，攻击者只要在 query 里塞东西就能影响判定。这里统一按
+ * `URL` 解析后取 `origin`，非法 URL 返回 `undefined`（不猜）。
+ */
+function normalizedOrigin(value: string): string | undefined {
+	try {
+		const url = new URL(value);
+		// 只接受 http/https：其余 scheme（file:, data:, custom:）没有「同源」语义。
+		if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+			return undefined;
+		}
+		return url.origin;
+	} catch {
+		return undefined;
+	}
+}
+
 /** 官方 launch token 交换：`GET /?token=…` → `303` + `set-cookie`。 */
 export async function authenticateHost(origin: string, launchUrl: string, primitives?: DshIdeTransportPrimitives): Promise<string> {
+	// 先确认 launch URL 与声明的 origin **同源**，再发任何请求。
+	// 不做这一步时，一份被错误配置（或不可信）的 `DSH_IDE_LAUNCH_URL` 会把
+	// 凭据交换直接指向别的主机——token 就发出去了。归一化后比较，避免
+	// 「同源但路径/查询不同」被误判。
+	const expected = normalizedOrigin(origin);
+	const actual = normalizedOrigin(launchUrl);
+	if (expected === undefined || actual === undefined || expected !== actual) {
+		// 错误文案只带脱敏后的两侧 origin，绝不回显 launchUrl 或 token。
+		throw new DshIdeTransportError(
+			'dsh-ide/host-origin-mismatch',
+			`Host authentication refused: launch URL origin ${safeErrorText(actual ?? 'invalid')} does not match ${safeErrorText(expected ?? 'invalid')}`,
+		);
+	}
 	const doFetch = primitives?.fetch ?? ((input: string | URL, init: RequestInit) => fetch(input, init));
 	let status: number;
 	let cookie: string | null;

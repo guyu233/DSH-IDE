@@ -845,6 +845,37 @@ test('SEC-006: the flagged supply-chain versions are at or above the fixed relea
 	assert.ok(uMaj === 7, 'undici must stay on the 7.x line (no cross-major jump)');
 });
 
+test('SEC-004: a launch URL on a different origin never receives the token exchange', async () => {
+	const transport = await import(new URL('out/vs/platform/dshClient/transport/dshIdeTransport.js', root).href) as {
+		authenticateHost(origin: string, launchUrl: string, primitives?: { fetch: (i: string | URL, init: RequestInit) => Promise<unknown> }): Promise<string>;
+	};
+	let calls = 0;
+	const stub = {
+		fetch: async () => {
+			calls += 1;
+			return { status: 303, headers: new Map([['set-cookie', 'sid=abc; Path=/']]), body: { cancel: async () => undefined } };
+		},
+	};
+	// 同源（含不同 path/query）必须通过。
+	assert.equal(await transport.authenticateHost('http://127.0.0.1:5000', 'http://127.0.0.1:5000/deep?token=t', stub), 'sid=abc');
+	// 跨源一律拒绝，且**不得发出请求**——这是「token 不外发」的实际保证。
+	for (const launchUrl of [
+		'http://127.0.0.1:6000/?token=t',
+		'http://evil.example:5000/?token=t',
+		'https://127.0.0.1:5000/?token=t',
+		'file:///etc/passwd',
+		'not a url',
+	]) {
+		calls = 0;
+		await assert.rejects(
+			() => transport.authenticateHost('http://127.0.0.1:5000', launchUrl, stub),
+			(error: { code?: string }) => error.code === 'dsh-ide/host-origin-mismatch',
+			`${launchUrl} must be refused as a foreign origin`,
+		);
+		assert.equal(calls, 0, 'a refused origin must not perform the token exchange');
+	}
+});
+
 test('SEC-003: Host dispatch shares the packaged protocol validator', () => {
 	// 只审查装配和单一校验器的接线；不发送非法 DTO，不调用真实 Host。
 	const host = source('src/vs/platform/dshClient/host/ide-view-host.js');
