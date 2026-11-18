@@ -687,6 +687,20 @@ test('OPT-002: watch honours --out and --exclude-tests like one-shot transpile',
 	assert.doesNotMatch(index, /gulpWatch\('src\/\*\*'/, 'a relative glob would follow the process cwd');
 });
 
+test('DOC-007: every verifier derives the repo root from its own location', () => {
+	// 三个门禁脚本必须用同一套根目录约定：脚本位置，而不是 process.cwd()。
+	for (const file of [
+		'build/lib/dsh/verify/dshIdeCi.mjs',
+		'build/lib/dsh/verify/dshInstallDrift.mjs',
+		'build/lib/dsh/verify/dshArtifactContents.mjs',
+	]) {
+		const text = source(file);
+		assert.match(text, /fileURLToPath\(import\.meta\.url\)/, `${file} must locate itself`);
+		assert.match(text, /\.\.\/\.\.\/\.\.\/\.\./, `${file} must walk up to the repo root`);
+		assert.doesNotMatch(text, /const repoRoot = process\.cwd\(\)/, `${file} must not trust the caller's cwd`);
+	}
+});
+
 test('SEC-003: Host dispatch shares the packaged protocol validator', () => {
 	// 只审查装配和单一校验器的接线；不发送非法 DTO，不调用真实 Host。
 	const host = source('src/vs/platform/dshClient/host/ide-view-host.js');

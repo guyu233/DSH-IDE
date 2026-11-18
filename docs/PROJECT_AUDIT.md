@@ -73,7 +73,8 @@ efreshSessionsControlVisibility 在更新容器与 context 后同步 control。p
 | SEC-005 | 已修（锁文件证据） | 四处 markdown-it 统一升到 14.3.3（>=14.3.3 <15），只改 version/
 esolved/integrity 三行，未整体重写锁文件；实体包同步。1 条隔离用例转绿。真机 Markdown 渲染与发布物 PENDING。 |
 | SEC-006 | 存疑保留 | 按原审计逐公告核可达性，不能单凭锁宣告生产漏洞 / B09。 |
-| DOC-003、DOC-005、DOC-007 | 仍存在 | 发布、版本、cwd 验收 PENDING / B10。 |
+| DOC-003、DOC-005 | 仍存在 | 门禁覆盖声明与版本比对口径需统一；DOC-005 需按 SemVer 严格化并补预发布/build metadata 用例。 |
+| DOC-007 | 已修（实测证据） | 三个门禁脚本统一用脚本自身位置推导仓库根（向上四级），不再用 `process.cwd()`。实测从 `C:\` 直接调用 `dshIdeCi.mjs` 与 `dshInstallDrift.mjs` 均正确定位仓库（前者前三步 PASS、`contract` 因未设 `DSH_INSTALLED_VERSION` 按设计 PENDING）。1 条隔离用例锁定三处口径。 |
 | DOC-002、DOC-004、DOC-006、SEC-001 | 仍存在 | 平台支持、上游来源、历史凭据说明、行内补全声明 PENDING / B11。 |
 | BUG-019 | 已修（隔离证据） | 远端图片尺寸探测有界且必结算：2 MB 字节上限 + 5 s 时限，超限/超时明确返回「读不到」并销毁响应；解析失败只在流结束时才是最终结论，此时结算为 undefined，不再吞错悬空。本地桩实测四种情形（正常图 / 非图片 / 超大 / 不结束）均结算。真机 Emmet 命令 PENDING。 |
 | BUG-024 | 已修（隔离证据） | 模拟器工具名模式不匹配改为显式失败：四条协议路径（Responses API + 三处）都不再静默回退成请求里的第一个工具，避免把「执行了另一个工具」统计成原场景性能数据。1 条隔离用例锁定四条路径。真机性能基线与模拟运行 PENDING。 |

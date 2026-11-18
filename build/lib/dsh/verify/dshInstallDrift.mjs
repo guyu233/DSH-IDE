@@ -25,8 +25,12 @@ import { execFileSync } from 'node:child_process';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-const repoRoot = process.cwd();
+// 与 dshArtifactContents.mjs 一致：用脚本自身位置推导仓库根。
+// 用 `process.cwd()` 时从其它目录直接调用会去错误的目录找 `dist/`，
+// 于是把「在别的目录运行」误报成「产物缺失」。
+const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../..');
 const tgz = path.join(repoRoot, 'dist', 'dsh-ide-2.0.0.tgz');
 const profileDir = process.env['DSH_PROFILE_DIR'];
 const PACKAGE_NAME = 'dsh-ide';

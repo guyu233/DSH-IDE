@@ -23,8 +23,12 @@ import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
+import { fileURLToPath } from 'node:url';
 
-const repoRoot = process.cwd();
+// 用脚本自身位置推导仓库根，而不是 `process.cwd()`：本文件在 build/lib/dsh/verify/ 下，
+// 向上四级即仓库根。否则从其它目录直接 `node <本文件>` 会把 cwd 当成仓库根，
+// 于是「找不到 out/」被误报成「没构建」，与 dshArtifactContents.mjs 的口径也不一致。
+const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../..');
 
 // ---------------------------------------------------------------------------
 // 第 60 轮：前置构建检查（干净 CI 环境的真实缺口）。
