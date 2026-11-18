@@ -35,9 +35,16 @@ DSH 是一个本地 AI 内核，具备会话、模型、工具调用、审批与
 
 ## 系统要求
 
-- **DeepSeek Harness** `>= 0.2.2-rc.1`
-- 宿主 DSH 桌面端自带的 Electron（DSH-IDE 不自带 Electron）
-- Windows x64 / Linux x64（当前构建目标）
+- **DeepSeek Harness** `>= 0.2.2-rc.1`（版本按 SemVer 2.0.0 严格校验；预发布段逐段按数值比较）
+- 宿主 DSH 桌面端自带的 Electron（DSH-IDE 不自带 Electron，也不产出独立安装包）
+- **支持平台：Windows x64**。IDE 窗口是插件载荷，首次拉窗复用宿主 Electron 发行版，
+  而该复用路径当前只实现 Windows（`src/vs/platform/dshClient/host/electron-home.js`）。
+- Linux x64 目前**不是**可运行平台：源码与扩展可编译，但「从 DSH 一键开窗」不可用，
+  非 Windows 平台会明确返回 `Electron home materialization is Windows-only`。
+  若要让 Linux 可运行，需要按复用宿主路线一并实现并做真机矩阵，不能只靠构建目标宣称。
+- 开发期 Electron 头文件版本与运行宿主 ABI 是两件事：`.npmrc` 的 `target` 只决定
+  类型/头文件下载（当前 `43.7.7`），运行宿主由 DSH 自带（`44.7.0`）。两者不同**不等于**
+  已观察到 ABI 崩溃；原生模块须按运行宿主的 `NODE_MODULE_VERSION` 编译。
 
 ## 安装
 

@@ -27,7 +27,7 @@
 - 构建/打包一律使用 VS Code 上游官方脚本（`gulpfile.mjs`、`build/**`），不自造打包脚本。打包任务是 `gulp dsh-ide-pack`（普通）与 `gulp dsh-ide-pack-min`（minified + 去 map）。
 - Mermaid 与 Markdown 功能及其全部运行依赖完整保留；普通扩展宿主、扩展市场、扩展 API、扩展运行依赖、远程连接一律保留。
 - 本地听写只接 DSH 的实验语音识别服务（由 DSH 决定启停、provider 与就绪状态），不另建本地识别后端；未就绪时入口明确不可用。
-- native 模块（`node-pty`、`ripgrep`）按宿主 Electron 44.7.0 的 `NODE_MODULE_VERSION` 编译；VS Code 版本号 `1.143.1` 不是 ABI。
+- native 模块（`node-pty`、`ripgrep`）按**运行宿主**（DSH 自带的 Electron，当前 `44.7.0`）的 `NODE_MODULE_VERSION` 编译；VS Code 版本号 `1.143.1` 不是 ABI。`.npmrc` 的 `target`（当前 `43.7.7`）只决定开发期类型/头文件下载，**不是**运行 ABI。
 
 ## 5. 许可证凭据
 

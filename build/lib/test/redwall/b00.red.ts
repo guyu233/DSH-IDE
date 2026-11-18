@@ -750,6 +750,31 @@ test('DOC-003: install-drift reports PENDING instead of PASS when it cannot comp
 	assert.match(drift, /if \(unverified\.length > 0\) \{/, 'unverified members must downgrade the verdict');
 });
 
+test('DOC-002: the public support claim matches the implemented platform gate', () => {
+	const readme = source('README.md');
+	const host = source('src/vs/platform/dshClient/host/electron-home.js');
+	// 实现只支持 Windows 首次拉窗：声明必须与之一致。
+	assert.match(host, /platform !== 'win32'/, 'the platform gate must exist');
+	assert.match(host, /Windows-only/, 'the gate must say what it does');
+	assert.match(readme, /支持平台：Windows x64/, 'the README must state the supported platform plainly');
+	// 不能继续把 Linux 与 Windows 并列成「当前构建目标」而暗示可运行。
+	assert.doesNotMatch(readme, /Windows x64 \/ Linux x64（当前构建目标）/, 'Linux must not be listed as a runnable target');
+	assert.match(readme, /Linux x64 目前\*\*不是\*\*可运行平台/, 'the Linux limitation must be explicit');
+});
+
+test('DOC-002: dev header version and runtime ABI are documented as different things', () => {
+	const readme = source('README.md');
+	const agents = source('AGENTS.md');
+	const npmrc = source('.npmrc');
+	const devTarget = /^target="(.*)"$/m.exec(npmrc)?.[1];
+	assert.ok(devTarget !== undefined, '.npmrc must pin a dev target');
+	// 开发头文件版本出现在声明里，且明确不等于运行 ABI。
+	assert.ok(readme.includes(devTarget), 'the dev header version must be stated');
+	assert.match(readme, /运行宿主/, 'the runtime host must be named');
+	assert.match(readme, /不等于/, 'a version difference must not be presented as an observed ABI crash');
+	assert.match(agents, /不是\*\*运行 ABI/, 'AGENTS must distinguish the dev target from the runtime ABI');
+});
+
 test('SEC-003: Host dispatch shares the packaged protocol validator', () => {
 	// 只审查装配和单一校验器的接线；不发送非法 DTO，不调用真实 Host。
 	const host = source('src/vs/platform/dshClient/host/ide-view-host.js');
