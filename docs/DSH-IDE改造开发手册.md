@@ -899,11 +899,11 @@ DshChatSession.acceptView / acceptConversation → DshChatModel（typed 节点�
 
 ---
 
-### 9.10 依赖插件能力门控（rewind / 会话管理）：方案一实施计划（待执行）
+### 9.10 依赖插件能力门控（rewind / 会话管理）：方案一已落地
 
 > 用户决策（2026-11-17）：DSH-IDE 依赖 rewind 与会话管理两个插件；**缺插件时隐藏相关功能**，不报错、不假装可用。传输方式最终选 **方案一：IDE 启动时主动调一次 `capabilities` method + 监听 Host 状态变化时重查**，菜单用 context key 的 `when` 过滤。**不把 capabilities 塞进 follow 快照，不改 wireRevision。**
 >
-> 当前代码状态：仓库已提交一版方案二（`e4839d5a`）——capabilities 随快照下发、wireRevision 5。本节是把代码改回方案一的**书面计划**，本节编写时不动代码；执行时须按 §1.3 契约先行。
+> 当前代码状态（2026-11-18 复核）：方案一已经在代码里。`DSH_IDE_WIRE_REVISION` 是 4，`DshIdeViewSnapshot` 不含 `capabilities`，`validateCapabilities` 校验的是 method 返回值，Host `capabilities()` 调用 `probeDshIdeCapabilities`，渲染器用 `client.call('capabilities')` 并在连接后和 30 秒轮询时重查。下面的步骤表保留为当时的实施顺序，不再表示待执行。
 
 #### 9.10.1 两个插件提供什么 / 移除后哪些功能不可用
 
@@ -1103,4 +1103,12 @@ DshChatSession.acceptView / acceptConversation → DshChatModel（typed 节点�
 > **修复**：`DshChatSession.bind` 与 `refreshComposer` 丢掉过期回包，失败不再回滚更新的绑定，同一 id 在绑定完成前不能返回成功。`DshIdeLaunchListener` 在报到尚未完成就 dispose 时补注销，并且不再分发 dispose 之后才返回的 poll。修复前独立复现 4/4 FAIL，修复后 4/4 PASS。
 
 > **门禁**：tsc 0 error、`test-dsh:all` **395** PASS、`verify:dsh-ide-ci` 五项 PASS、`npm run compile` PASS（0 errors，1.58 min）。详见 `docs/DSH-IDE瘦身报告.md`（第 9 轮）与 `docs/DSH-IDE瘦身问题清单.md`（第 9 轮）。
+
+#### 9.11.13 第 10 轮：会话列表的归档集合与过期刷新（已执行，2026-11-18）
+
+> §9.10 复核后确认方案一已在代码中，手册标题从「待执行」改为「已落地」，没有再改契约。
+
+> **修复**：`DshAgentSessionsController.refresh` 用代次丢掉后返回的旧 `listSessions`。归档/恢复回包的完整 id 集合记下来，下一次名单刷新重新标 `archived`。回包不是数组时只改当前 id。不在名单里的归档 id 不补幽灵行。
+
+> **门禁**：tsc 0 error、`test-dsh:all` **397** PASS。`verify:dsh-ide-ci` 与 `npm run compile` 本轮 **PENDING**（未复跑）。详见 `docs/DSH-IDE瘦身报告.md`（第 10 轮）。
 
