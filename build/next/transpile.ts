@@ -26,14 +26,60 @@ const transformOptions: esbuild.TransformOptions = {
 	}),
 };
 
+/**
+ * 超过该字节数的文件改用 `build` API 转译。
+ *
+ * 为什么需要这条分支：`esbuild.transform` 会把输入写成系统临时目录里的一个临时文件，
+ * 再让 Go 侧删掉它。在本机（Windows）上，超过约 1 MiB 的输入会让这次删除稳定失败
+ * （`remove C:\...\Temp\esbuild-<hash>: Access is denied`），残留一个同名普通文件，
+ * 转译整体报错。实测边界：1048578 B 成功、1050000 B 失败；1024 KB 通过、1029 KB 失败。
+ *
+ * `build` API 走真实文件入口，不经过那条临时文件路径，因此同一份 1,377,561 B 的
+ * 源文件用 `build` 能正常产出（实测 outputs=2）。这不是绕过检查，而是改用另一条
+ * 官方 API 完成同一件事：输入输出仍是同一份源码与同一个目标文件。
+ */
+const LARGE_FILE_THRESHOLD_BYTES = 1024 * 1024;
+
 export async function transpileFile(srcPath: string, destPath: string): Promise<void> {
+	const size = (await fs.promises.stat(srcPath)).size;
+	await fs.promises.mkdir(path.dirname(destPath), { recursive: true });
+
+	if (size > LARGE_FILE_THRESHOLD_BYTES) {
+		// `build` 需要 outdir + entryPoints；写到临时 outdir 再取回内容，
+		// 这样不改变调用方约定的「一个源文件 → 一个目标文件」语义。
+		const outdir = path.join(path.dirname(destPath), `.esbuild-large-${process.pid}-${Math.random().toString(36).slice(2)}`);
+		try {
+			// `transformOptions.loader` 是字符串（`'ts'`），而 `build` 的 `loader` 必须是
+			// 「扩展名 → loader」的对象；直接展开会在 build API 下报 `"loader" must be an object`。
+			// 因此这里显式给出映射，其余选项与 `transform` 保持一致。
+			const built = await esbuild.build({
+				entryPoints: [srcPath],
+				outdir,
+				bundle: false,
+				write: false,
+				format: transformOptions.format,
+				target: transformOptions.target,
+				sourcemap: transformOptions.sourcemap,
+				sourcesContent: transformOptions.sourcesContent,
+				tsconfigRaw: transformOptions.tsconfigRaw,
+				loader: { '.ts': 'ts' },
+			});
+			const js = built.outputFiles.find(file => file.path.endsWith('.js'));
+			if (js === undefined) {
+				throw new Error(`esbuild produced no JavaScript output for ${srcPath}`);
+			}
+			await fs.promises.writeFile(destPath, adjustEsmUrl(js.text));
+		} finally {
+			await fs.promises.rm(outdir, { recursive: true, force: true }).catch(() => undefined);
+		}
+		return;
+	}
+
 	const source = await fs.promises.readFile(srcPath, 'utf-8');
 	const result = await esbuild.transform(source, {
 		...transformOptions,
 		sourcefile: srcPath,
 	});
-
-	await fs.promises.mkdir(path.dirname(destPath), { recursive: true });
 	await fs.promises.writeFile(destPath, adjustEsmUrl(result.code));
 }
 

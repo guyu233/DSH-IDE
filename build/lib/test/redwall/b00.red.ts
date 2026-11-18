@@ -876,6 +876,19 @@ test('SEC-004: a launch URL on a different origin never receives the token excha
 	}
 });
 
+test('B13: large files avoid the stdin temp-file path that fails on this host', () => {
+	const transpile = source('build/next/transpile.ts');
+	// 大文件必须走 build API（真实文件入口），不走 transform 的 stdin 临时文件。
+	assert.match(transpile, /const LARGE_FILE_THRESHOLD_BYTES = 1024 \* 1024;/, 'the threshold must be stated');
+	assert.match(transpile, /if \(size > LARGE_FILE_THRESHOLD_BYTES\)/, 'large files must take the other path');
+	assert.match(transpile, /esbuild\.build\(\{/, 'the large-file path must use the build API');
+	// build API 的 loader 必须是对象，不能直接展开 transform 的字符串 loader。
+	assert.match(transpile, /loader: \{ '\.ts': 'ts' \}/, 'the build API needs a loader map');
+	assert.doesNotMatch(transpile, /\.\.\.transformOptions,\s*\n\s*entryPoints/, 'spreading transformOptions into build breaks the loader');
+	// 小文件仍走 transform：不要在全部文件上换 API，避免改变既有行为。
+	assert.match(transpile, /esbuild\.transform\(source, \{/, 'small files keep the transform path');
+});
+
 test('SEC-003: Host dispatch shares the packaged protocol validator', () => {
 	// 只审查装配和单一校验器的接线；不发送非法 DTO，不调用真实 Host。
 	const host = source('src/vs/platform/dshClient/host/ide-view-host.js');
