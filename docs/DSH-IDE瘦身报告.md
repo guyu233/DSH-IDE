@@ -1,6 +1,6 @@
 # DSH-IDE 瘦身与 Bug 修复报告（全轮次）
 
-> 本文件汇总第 1–7 轮每轮的瘦身报告：删除清单及理由、依赖前后对比、存疑保留项、风险与回滚方式。
+> 本文件汇总第 1–8 轮每轮的瘦身报告：删除清单及理由、依赖前后对比、存疑保留项、风险与回滚方式。
 > 各轮统计均为该轮实测快照；累计值见文末「累计」节。原按轮拆分的 8 份报告已合并入本文件，不再单独保留。
 > 配套：`docs/DSH-IDE瘦身问题清单.md`（每轮改动前清单）、手册 §9.11.1–§9.11.10（执行记录）。
 
@@ -1004,7 +1004,61 @@ STATUS: FAIL  [install-drift]
 5. **假守护保留**：上游有意 skip，启用属功能变更且需真机，按 AGENTS §6/§7 不做。
 
 
-## 累计（截至第 7 轮）
+## 第 8 轮
+
+> 起点 `1bb666d7`，终点 `8e367bcb`。代码 **12 文件，+9 / -373**。两个提交：清理 `d6bd3f1f`、功能 `8e367bcb`。
+
+### 1. 门禁总览
+
+| 门禁 | 结果 |
+|---|---|
+| 主工程 `tsc --noEmit` | **PASS**（0 error；清理后、功能修复后各跑一次） |
+| `npm run test-dsh:all` | **PASS**（**391** / fail 0；两次） |
+| `node --test .eslint-plugin-local/tests/*.test.ts` | **PASS**（161 / fail 0，规则文件删除之后） |
+| `verify:dsh-ide-ci` | **PASS**（五项，`DSH_INSTALLED_VERSION=0.2.2-rc.1`） |
+| `npm run compile` | **PASS**（0 errors，1.12 min） |
+| `node --check` `eslint.config.js`、`test/unit/node/index.js` | **PASS** |
+| 真机 GUI / smoke | **PENDING**（AGENTS §6，由用户执行） |
+| 全仓 ESLint | **PENDING**（既有 `header/header` 基线，本轮不把它标成 PASS） |
+| `verify:dsh-install-drift` | **FAIL（预先存在）**：tarball `dist/dsh-ide-2.0.0.tgz` 时间是 2026-11-17 00:38，`host/ide-service.js` / `host/ide-view-host.js` 源码更晚。本轮未改这两个文件，也未打包 |
+
+### 2. 删除清单与理由
+
+| # | 位置 | 理由 |
+|---|---|---|
+| A1 | agent-host meta ESLint 规则 + 测试 + `eslint.config.js` 注册 | 守护目录已不存在。引用只有这三处；index 与测试脚本都是 glob |
+| A2 | `eslint.config.js` 的 `'vs/sessions/~'` | 没有任何 `from 'vs/sessions` |
+| A3 | `test/unit/node/index.js` 的 sessions web 测试排除 | 目标文件不存在 |
+| A4 | `product.ts` 两行 roadmap JSDoc | 文件不存在。只删这两行 |
+| A5–A9 | 5 个 chatContracts 导出 | 标识符 `git grep` 只有定义处；两个元数据字符串值也同样只有定义处。`isLocalAgentHostProviderDisabledByPolicy` 仍有 8 处调用，保留 |
+
+### 3. 真实 bug 修复（7 个调用点，同一类）
+
+归档取消、复制分支名、复制 commit hash、打开 browser pill、外链、预览文件、内部打开。全部是 `void` 一个返回 Promise 的调用且没有 catch。改为 `.catch(onUnexpectedError)`。
+
+### 4. 依赖前后对比
+
+**本轮无依赖变更。** dependencies 66、devDependencies 93、scripts 79。
+
+### 5. 存疑保留项
+
+`agentsWindow` 整套 proposal 与 setting override（`isSessionsWindow` 仍从 environment 读取）；邀请子系统；52 处注释 / `NOTICE.md` / `PROVENANCE.md`；starter contribution 里过时的 side-effect 注释；npm 的 `capabilities.agentsWindow`；把 Promise 交回 action runner 的 `run: () => writeText()`（没有证明 runner 会丢 rejection）。
+
+### 6. 风险与回滚
+
+| 风险 | 等级 | 回滚 |
+|---|---|---|
+| 删掉永不命中的 ESLint 规则后，若上游把 `agentHost/common/meta` 加回来，这条边界不再被 lint | 低 | `git revert d6bd3f1f` |
+| 删两个元数据常量：旧数据库里若已写入这些 key，现在本来也没有读者 | 低 | 同上 |
+| `.catch(onUnexpectedError)` 把原来的 unhandled rejection 变成日志 | 低 | `git revert 8e367bcb` |
+
+### 7. 假设
+
+1. 规则三件套删除后，glob 注册和测试收集都不需要改脚本。已用 161 项插件测试验证。
+2. 两个元数据字符串没有动态拼接读者。`git grep` 全字面量只有定义处。
+3. 不碰 `agentsWindow` proposal。删 d.ts 而不改 `extensionsApiProposals.ts` 会让 `check-api-proposal-names` 失败。
+
+## 累计（截至第 8 轮）
 
 | 项 | 值 |
 |---|---|
@@ -1014,6 +1068,7 @@ STATUS: FAIL  [install-drift]
 | devDependencies | 100 → **93** |
 | scripts | 86 → **79** |
 | 锁文件条目 | 1,649 → **1,536**（-113，零新增、零版本变更） |
-| 代码净变化 | 约 **-8,000 行**（各轮累计，去重后） |
+| `ce668543..HEAD` | **184 文件，+2,763 / -12,122**（53 个提交） |
 
-**已知未完成项**：`verify:dsh-install-drift` FAIL（预先存在：`host/ide-service.js` / `host/ide-view-host.js` 与 2026-11-17 旧产物不一致），需重新打包后再验；真机 GUI / smoke 套件按 AGENTS §6 由用户执行。
+**已知未完成项**：`verify:dsh-install-drift` FAIL（预先存在：`host/ide-service.js` / `host/ide-view-host.js` 与 2026-11-17 旧产物不一致），需重新打包后再验；真机 GUI / smoke 套件按 AGENTS §6 由用户执行；`agentsWindow` 配置集群仍保留。
+

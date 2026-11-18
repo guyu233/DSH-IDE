@@ -1,6 +1,6 @@
 # DSH-IDE 瘦身与 Bug 问题清单（全轮次）
 
-> 本文件汇总第 1–7 轮每轮「改动前」的问题清单（位置 + 类型 + 判定依据 + 风险 + 推荐方案）。
+> 本文件汇总第 1–8 轮每轮「改动前」的问题清单（位置 + 类型 + 判定依据 + 风险 + 推荐方案）。
 > 按开发手册要求「每轮先扫描产出清单，确认后再改」；自第 4 轮起按用户约定「写出问题与推荐方法后按推荐方法继续，不提问」。
 > 各轮的「基线 / 统计 / 门禁值」是**当时**的快照，不代表当前状态；当前状态以 `docs/DSH-IDE瘦身报告.md` 末轮为准。
 > 原按轮拆分的 8 份清单已合并入本文件，不再单独保留。
@@ -698,4 +698,62 @@
 3. **删 shard.ts 条目等价**：套件不存在 → 条目/`firstShardSuite` 永不命中，删除不改变任何实际分片结果。
 4. **C13 的仓库根推导**：`build/lib/compilation.ts` 在 `build/lib/` 下，向上两级即仓库根，与 `build/lib/util.ts:20` 一致。
 5. **假守护保留**：上游有意 skip，启用属功能变更且需真机，按 AGENTS §6/§7 不做。
+
+---
+
+## 第 8 轮：已删目录的剩余引用 + chatContracts 死导出
+
+> 编制时间：2026-11-18 10:20（Asia/Shanghai）。起点 `1bb666d7`。
+> 子智能体：`scan-agentswindow-config`、`scan-src-residue`、`scan-round8-extra`（默认路由；可用模型只有 `workbuddylocal/cli2api`，不能作 child 路由）。
+> 按约定写出问题与推荐方法后直接执行，不提问。
+
+### 0. 扫描结论
+
+| 区域 | 结论 |
+|---|---|
+| 六条已删路径 grep（`agentHost` / `sessions` / `copilot` / 已删 DSH 符号 / `vscode-1.143.1`） | 去重 52 处：**a=0**（没有 import / readFile / spawn 会真失败）/ b=37 注释或惰性配置 / c=15 测试夹具或反向断言 |
+| `extensions/*/package.json` 的 `enabledApiProposals` | 63 条 / 58 个名字，缺 d.ts = **0** |
+| `agentsWindow` 配置 | 代码层仍有效：`configurationExtensionPoint.ts` 仍校验 proposal，`configurationService` 在 `isSessionsWindow` 时读 override。不整组删除 |
+| chatContracts 抽查 | 5 个导出名全仓只出现在定义处，字符串值也同样只一处 |
+
+### A. 本轮删除（清理）
+
+| # | 位置 | 类型 | 判定依据 | 风险 | 推荐 |
+|---|---|---|---|---|---|
+| A1 | `.eslint-plugin-local/code-no-private-agent-host-meta-import.ts` + `tests/code-no-private-agent-host-meta-import.test.ts` + `eslint.config.js` 注册行 | 死规则 | 规则只匹配已不存在的 `src/vs/platform/agentHost/common/meta`。全仓引用只有这三处。index 与测试脚本都是目录 glob | 低。删掉一条永不命中的 import 边界 | 三件套一起删 |
+| A2 | `eslint.config.js` 的 `'vs/sessions/~'` | 冗余白名单 | `from 'vs/sessions` 全仓 0 命中 | 低。以后若有人再写这种 import，lint 会报错，这是对的 | 删这一行 |
+| A3 | `test/unit/node/index.js` 的 `**/vs/sessions/test/web.test.js` | 冗余排除 | 该测试文件不存在，排除项永不命中 | 低 | 删这一行 |
+| A4 | `product.ts` JSDoc 里的 `agentHost/node/claude/roadmap.md` 两行 | 过期注释 | `Test-Path` 为 false，且该目录 0 个 tracked 文件 | 低。只删这两行，不改写其余英文 | 删这两行 |
+| A5 | `AH_META_WORKSPACE_CONVERSION_QUARANTINED_DB_KEY` | 无引用符号 | 标识符与字符串值 `agentHost.workspaceConversionQuarantined` 都只在定义处 | 低。没有读者，删常量不改变运行时 | 删常量及注释 |
+| A6 | `SESSION_CHECKPOINT_REPOSITORIES_METADATA_KEY` | 无引用符号 | 标识符与 `agentHost.checkpointRepositories` 都只在定义处 | 低 | 删常量及注释 |
+| A7 | `supersedeTitleGenerationStrategyForLegacyUpdate` | 无引用符号 | 全仓 1 次。连带只被它使用的 `IRootConfigChangedAction` import | 低。相邻的 migrate / resolve 仍保留 | 删函数和多余 import |
+| A8 | `createUnknownAgentHostClientTelemetryContext` | 无引用符号 | 全仓 1 次。所用 enum / interface 在同文件仍被其它导出使用 | 低 | 只删函数 |
+| A9 | `getPolicyUnavailableLocalAgentHostProviders` | 无引用符号 | 全仓 1 次。`isLocalAgentHostProviderDisabledByPolicy` 仍被 8 个调用点使用，保留 | 低 | 只删这个函数 |
+
+### B. 本轮修复（功能，单独提交）
+
+| # | 位置 | 类型 | 判定依据 | 风险 | 推荐 |
+|---|---|---|---|---|---|
+| B1 | `agentSessionsService.ts` 归档回调 | 未捕获 Promise | `cancelCurrentRequestForSession` 在 `chatService.ts` 声明为 `Promise<void>`，实现是 async。`void` 调用没有 catch | 中。归档时取消失败会变成 unhandled rejection | `.catch(onUnexpectedError)` |
+| B2 | `agentHostSessionInputPills.ts` 复制分支名 / 复制 commit hash | 未捕获 Promise | `IClipboardService.writeText` 返回 `Promise<void>` | 低 | 同上 |
+| B3 | 同文件打开 browser pill | 未捕获 Promise | `_openBrowser` 是 async，内部 `await openEditor` | 中低 | 同上 |
+| B4 | 同文件外链 opener、预览文件、内部 opener | 未捕获 Promise | `IOpenerService.open` 返回 `Promise<boolean>`；`openChatTurnFile` 是 async | 低 | 同上 |
+
+### C. 存疑保留（本轮不改）
+
+| # | 位置 | 为什么不动 |
+|---|---|---|
+| C1 | `agentsWindow` proposal、`extensions/git/package.json` 的 9 处 override、`editorConfigurationSchema` 6 处、`workbench.contribution.ts` 21 处 | `isSessionsWindow` 仍从 environment 读取，配置服务仍消费 `schema.agentsWindow`。整组删除会让 tsc 失败，也改变仍可达的窗口模式。单独删 git 的 `enabledApiProposals` 会让 `configurationExtensionPoint.ts` 对 9 个属性报 `collector.error` |
+| C2 | `agentsWindowInvitation.ts` 及 native / editor 引用 | 不是孤岛，删文件会断 import。`claim/mark/release` 没有 UI 调用点，但要成组下线 |
+| C3 | 52 处已删路径里的注释、`NOTICE.md`、四份 `PROVENANCE.md` | AGENTS §5 禁止改凭据；§7 不改写上游英文注释。`dshBundleStaging.test.ts` 的 `assert.doesNotMatch` 是有意反向断言 |
+| C4 | `agentHostStarter.config.contribution.ts` 注释里列出的 main/server side-effect import | 实际只剩 `chat.shared.contribution.ts` 在 import。改注释属于改写上游英文；补回 main/server import 是功能变更，没有已证实的失败 |
+| C5 | `extensions/npm/package.json` 的 `capabilities.agentsWindow.supported` | 仍被 `extensionManifestPropertiesService` 和测试读取 |
+| C6 | pill 里 `run: () => this._clipboardService.writeText(...)`（把 Promise 交回 action runner，不是 `void`） | 扫描未证明 runner 会丢掉 rejection。不扩大到未证实的调用点 |
+
+### D. 假设
+
+1. **ESLint 规则三件套可原子删除**：index 用 `glob.sync(*.ts)`，`build/package.json` 的 test 用目录 glob，删文件后两者都不再收集。
+2. **两个元数据 key 没有动态读者**：标识符和字符串值的 `git grep` 都只有定义处。
+3. **`onUnexpectedError` 是正确的失败去向**：同目录 `agentSessionsControl.ts` / `localAgentSessionsController.ts` 已经这么用。
+4. **不删 `agentsWindow` 基础设施**：proposal d.ts 仍在，`checkApiProposalNames` 会对照 `extensionsApiProposals.ts`。删 d.ts 而不重写注册表会让 `core-ci` 失败。
 

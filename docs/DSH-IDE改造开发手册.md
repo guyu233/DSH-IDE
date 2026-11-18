@@ -1086,3 +1086,13 @@ DshChatSession.acceptView / acceptConversation → DshChatModel（typed 节点�
 
 > **门禁**：主 tsc 0 error；`test/smoke/tsconfig.json` 39 个错误与改动前基线完全一致（0 新增）；TypeScript parse 13 个改动 .ts 0 diagnostics；`test-dsh:all` 391 PASS；`verify:dsh-ide-ci` 五项 PASS；`npm run compile` PASS（54 s）。详见 `docs/DSH-IDE瘦身报告.md`（第 7 轮）。
 
+#### 9.11.11 第 8 轮：已删目录剩余引用与 chatContracts 死导出（已执行，2026-11-18）
+
+> 三个子智能体：`scan-agentswindow-config`、`scan-src-residue`、`scan-round8-extra`。已删路径去重 52 处里 **a=0**（没有会真失败的 import / 读文件 / spawn）。`enabledApiProposals` 58 个名字缺 d.ts = 0。`agentsWindow` 配置仍被 `isSessionsWindow` 与 configuration service 消费，整组保留。区间 `1bb666d7..8e367bcb`：**12 文件，+9 / -373**。清理 `d6bd3f1f`、功能 `8e367bcb` 分开提交。
+
+> **删除**：失效的 `code-no-private-agent-host-meta-import` 规则及测试、`eslint.config.js` 注册与 `'vs/sessions/~'`、`test/unit/node/index.js` 里永不命中的 sessions 排除、`product.ts` 两行指向已删 roadmap 的 JSDoc、chatContracts 5 个零引用导出（两个元数据 key 的字符串值也只有定义处）。
+
+> **修复**：归档取消与会话 pill 的 7 个 `void` Promise（剪贴板、browser、opener、预览文件）补 `.catch(onUnexpectedError)`。
+
+> **门禁**：tsc 0 error、`test-dsh:all` 391 PASS、eslint-plugin-local 测试 161 PASS、`verify:dsh-ide-ci` 五项 PASS、`npm run compile` PASS（1.12 min）。详见 `docs/DSH-IDE瘦身报告.md`（第 8 轮）与 `docs/DSH-IDE瘦身问题清单.md`（第 8 轮）。
+
