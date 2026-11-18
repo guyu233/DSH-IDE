@@ -1,6 +1,6 @@
 # DSH-IDE 瘦身与 Bug 修复报告（全轮次）
 
-> 本文件汇总第 1–8 轮每轮的瘦身报告：删除清单及理由、依赖前后对比、存疑保留项、风险与回滚方式。
+> 本文件汇总第 1–9 轮每轮的瘦身报告：删除清单及理由、依赖前后对比、存疑保留项、风险与回滚方式。
 > 各轮统计均为该轮实测快照；累计值见文末「累计」节。原按轮拆分的 8 份报告已合并入本文件，不再单独保留。
 > 配套：`docs/DSH-IDE瘦身问题清单.md`（每轮改动前清单）、手册 §9.11.1–§9.11.10（执行记录）。
 
@@ -1058,12 +1058,61 @@ STATUS: FAIL  [install-drift]
 2. 两个元数据字符串没有动态拼接读者。`git grep` 全字面量只有定义处。
 3. 不碰 `agentsWindow` proposal。删 d.ts 而不改 `extensionsApiProposals.ts` 会让 `check-api-proposal-names` 失败。
 
-## 累计（截至第 8 轮）
+## 第 9 轮
+
+> 起点 `69ff996c`，终点 `fd361a02`。没有删除。功能提交只改绑定竞态和关窗分发。
+
+### 1. 门禁总览
+
+| 门禁 | 结果 |
+|---|---|
+| 主工程 `tsc --noEmit` | **PASS**（0 error） |
+| `npm run test-dsh:all` | **PASS**（**395** / fail 0；391 + 4） |
+| 绑定竞态复现 | 修复前 **4/4 FAIL**，修复后 **4/4 PASS**（不连接 Host、不开窗口） |
+| `verify:dsh-ide-ci` | **PASS**（五项，`DSH_INSTALLED_VERSION=0.2.2-rc.1`） |
+| `npm run compile` | **PASS**（0 errors，1.58 min） |
+| 全仓 ESLint | **PENDING**（未复跑；既有 header 基线） |
+| 真机 GUI | **PENDING** |
+| `verify:dsh-install-drift` | **FAIL（预先存在）**，本轮未打包 |
+
+输出里的 `STATUS: FAIL [contract]` 来自负例「已安装版本 0.1.0 低于 0.2.2-rc.1」。套件随后仍是 pass 395 / fail 0，CI 汇总为 PASS。
+
+### 2. 删除清单
+
+**本轮无删除。** 复核过的候选要么仍被调用，要么只是调用处没有 `.catch` 但被调函数已经收口。
+
+### 3. 修复
+
+| # | 修复 |
+|---|---|
+| A1–A3 | `bind` 用代次丢掉过期回包，失败不再回滚更新的绑定；绑定尚未完成时，同一 id 不能短路成功。`refreshComposer` 同样丢掉过期目录 |
+| A4 | 报到过程中 dispose 会补注销；poll 在 dispose 之后返回时不再调用 `onLaunch` |
+
+### 4. 依赖前后对比
+
+无依赖变更。dependencies 66、devDependencies 93、scripts 79。
+
+### 5. 存疑保留
+
+`agentsWindow` 配置仍被 `isSessionsWindow` 读取。第 8 轮删掉的 meta 规则如果要继续生效，必须改指向 `chatContracts/common/meta`，那是新的 lint 行为，本轮不做。`NOTICE.md` 与 `PROVENANCE.md` 不动。
+
+### 6. 风险与回滚
+
+| 风险 | 等级 | 回滚 |
+|---|---|---|
+| 被后来的 bind 盖过的那次调用现在返回 false，而不再返回 true | 低。这是修复本身 | `git revert` 本轮功能提交 |
+| dispose 后多一次 unregister | 低。Host 对未知 client 会拒绝，注销失败已被吞掉 | 同上 |
+
+### 7. 假设
+
+测试数增加不代表覆盖率百分比已测量。本轮没有跑覆盖率工具。
+
+## 累计（截至第 9 轮）
 
 | 项 | 值 |
 |---|---|
 | tsc 错误 | 137 → **0** |
-| test-dsh:all | 384 → **391**（全 PASS；减少的 5 项来自已删死模块） |
+| test-dsh:all | 384 → **395**（全 PASS；第 9 轮 +4。减少的 5 项来自更早删掉的死模块） |
 | dependencies | 68 → **66** |
 | devDependencies | 100 → **93** |
 | scripts | 86 → **79** |

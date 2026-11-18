@@ -1096,3 +1096,11 @@ DshChatSession.acceptView / acceptConversation → DshChatModel（typed 节点�
 
 > **门禁**：tsc 0 error、`test-dsh:all` 391 PASS、eslint-plugin-local 测试 161 PASS、`verify:dsh-ide-ci` 五项 PASS、`npm run compile` PASS（1.12 min）。详见 `docs/DSH-IDE瘦身报告.md`（第 8 轮）与 `docs/DSH-IDE瘦身问题清单.md`（第 8 轮）。
 
+#### 9.11.12 第 9 轮：会话绑定竞态与关窗后的开窗分发（已执行，2026-11-18）
+
+> 没有新的删除。`client.call` / `openView` / 会话列表 `refresh` / `loadOlder` 已在内部收口，调用处缺少 `.catch` 不记为缺陷。`acceptToolConfirmationIfPresent` 仍被同文件调用，不删。
+
+> **修复**：`DshChatSession.bind` 与 `refreshComposer` 丢掉过期回包，失败不再回滚更新的绑定，同一 id 在绑定完成前不能返回成功。`DshIdeLaunchListener` 在报到尚未完成就 dispose 时补注销，并且不再分发 dispose 之后才返回的 poll。修复前独立复现 4/4 FAIL，修复后 4/4 PASS。
+
+> **门禁**：tsc 0 error、`test-dsh:all` **395** PASS、`verify:dsh-ide-ci` 五项 PASS、`npm run compile` PASS（0 errors，1.58 min）。详见 `docs/DSH-IDE瘦身报告.md`（第 9 轮）与 `docs/DSH-IDE瘦身问题清单.md`（第 9 轮）。
+

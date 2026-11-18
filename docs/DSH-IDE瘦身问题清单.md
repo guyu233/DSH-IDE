@@ -1,6 +1,6 @@
 # DSH-IDE 瘦身与 Bug 问题清单（全轮次）
 
-> 本文件汇总第 1–8 轮每轮「改动前」的问题清单（位置 + 类型 + 判定依据 + 风险 + 推荐方案）。
+> 本文件汇总第 1–9 轮每轮「改动前」的问题清单（位置 + 类型 + 判定依据 + 风险 + 推荐方案）。
 > 按开发手册要求「每轮先扫描产出清单，确认后再改」；自第 4 轮起按用户约定「写出问题与推荐方法后按推荐方法继续，不提问」。
 > 各轮的「基线 / 统计 / 门禁值」是**当时**的快照，不代表当前状态；当前状态以 `docs/DSH-IDE瘦身报告.md` 末轮为准。
 > 原按轮拆分的 8 份清单已合并入本文件，不再单独保留。
@@ -756,4 +756,37 @@
 2. **两个元数据 key 没有动态读者**：标识符和字符串值的 `git grep` 都只有定义处。
 3. **`onUnexpectedError` 是正确的失败去向**：同目录 `agentSessionsControl.ts` / `localAgentSessionsController.ts` 已经这么用。
 4. **不删 `agentsWindow` 基础设施**：proposal d.ts 仍在，`checkApiProposalNames` 会对照 `extensionsApiProposals.ts`。删 d.ts 而不重写注册表会让 `core-ci` 失败。
+
+---
+
+## 第 9 轮：会话绑定竞态与关窗后的开窗分发
+
+> 起点 `69ff996c`。默认子智能体路由复核；`workbuddylocal/cli2api` 不能作为本会话的 child 路由。
+> 先写清单再按推荐方案改。没有新的删除。
+
+### A. 本轮修复
+
+| # | 位置 | 类型 | 判定依据 | 风险 | 推荐 |
+|---|---|---|---|---|---|
+| A1 | `dshChatSession.ts` `bind` | 迟到回包覆盖新会话 | 独立复现：先 `bind('A')` 挂起，再 `bind('B')` 完成，A 的快照随后到达，待办从 B 变成 A。修复前 FAIL | 中。快速切换会话会串内容 | 记下代次；代次变了就丢弃回包，且失败不得回滚更新的绑定 |
+| A2 | 同函数，同一 id 并发 | 假成功 | 第一次 `bind('A')` 尚未返回时，第二次因为 id 已经写上就返回 true。rebind 实际失败时得到 `[false, true]` | 中。调用方以为绑定成功 | 有绑定在飞时禁止这条短路 |
+| A3 | `refreshComposer` | 迟到目录覆盖 | 先发起的 `composerState` 在 `bind('B')` 之后才返回，模型选择从 B 变回 A。修复前 FAIL | 中 | 等待前记下代次和会话 id，不一致就丢弃 |
+| A4 | `dshIdeLaunchListener.ts` `tick` | dispose 之后仍分发 | `register` 尚未完成时 dispose 看不到 `registered`，不会注销；随后的 poll 仍调用 `onLaunch` | 中。关窗后仍可能打开窗口 | dispose 后补注销，并且 poll 返回时若已 dispose 就不再分发 |
+
+### B. 复核后排除（不是本轮缺陷）
+
+| # | 位置 | 为什么排除 |
+|---|---|---|
+| B1 | `dsh.contribution.ts` 里多处 `void refreshCapabilities()` / `void openView().then` | `client.call` / `openView` 自己把通道拒绝收成 `{ ok: false }`。调用处没有 `.catch` 不等于会变成未处理拒绝 |
+| B2 | `dshIdeSessionsService.refresh` | `DshIdeSessionListModel.refresh` 内部已经 catch，失败只保留旧列表 |
+| B3 | `fillOlderHistory` | `loadOlder` 自己 catch 并返回 false |
+| B4 | `test/automation/src/chat.ts` 的 `acceptToolConfirmationIfPresent` | 同文件第 187 行仍在调用，不能删 |
+| B5 | 根 `package.json` 79 个 script | 所谓缺文件是把 `tsconfig.json` 截成了 `.js`。实际路径都在 |
+| B6 | 第 8 轮删除的 meta ESLint 规则 | 旧目录确实不存在。新目录 `src/vs/platform/chatContracts/common/meta` 仍有 `copilotd/` 与 `vscode/`，顶层适配仍在调用。把规则改指向新目录会改变 lint 行为，本轮不擅自加 |
+
+### C. 假设
+
+1. 代次是会话绑定的唯一作废条件。`loadOlder` 与 `refreshSkills` 已经这么做，`bind` 和 `refreshComposer` 补上同一规则。
+2. 同一目标的第二次 `bind` 不复用第一次的 Promise，而是让第一次过期。两边都得到真实结果，而不是提前成功。
+3. 测试数量从 391 增到 395 只说明新增了 4 条断言。本轮没有跑覆盖率工具，不能据此声称覆盖率百分比不变。
 
