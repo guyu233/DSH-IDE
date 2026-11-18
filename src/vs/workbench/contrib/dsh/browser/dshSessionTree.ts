@@ -192,3 +192,32 @@ function sameChildren(left: readonly DshSessionTreeNode[] | undefined, right: re
 	}
 	return true;
 }
+
+/** 后发起的 refresh 递增代次后，先发起的回包不再是当前代次。 */
+export function isCurrentRefresh(epoch: number, latest: number): boolean {
+	return epoch === latest;
+}
+
+/**
+ * 归档/恢复回包是完整 id 集合。不是数组时只改这一条，避免一次坏回包把已知集合清掉。
+ */
+export function archiveIdsFromResult(value: unknown, sessionId: string, archived: boolean, previous: ReadonlySet<string>): Set<string> {
+	const next = new Set<string>();
+	if (Array.isArray(value)) {
+		for (const id of value) {
+			if (typeof id === 'string' && id !== '') {
+				next.add(id);
+			}
+		}
+		return next;
+	}
+	for (const id of previous) {
+		next.add(id);
+	}
+	if (archived) {
+		next.add(sessionId);
+	} else {
+		next.delete(sessionId);
+	}
+	return next;
+}

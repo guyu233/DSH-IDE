@@ -27,7 +27,7 @@ import { ChatViewPane } from '../../chat/browser/widgetHosts/viewPane/chatViewPa
 import { IViewsService } from '../../../services/views/common/viewsService.js';
 import { getDshComposerSource } from './dshComposerRegistry.js';
 import { toPermissionItems } from './dshComposerProjection.js';
-import { buildSessionTree, flattenTree, mapTreeItem, sameTreeItem } from './dshSessionTree.js';
+import { archiveIdsFromResult, buildSessionTree, flattenTree, isCurrentRefresh, mapTreeItem, sameTreeItem } from './dshSessionTree.js';
 
 export const DSH_CHAT_SESSION_TYPE = 'dsh';
 
@@ -68,6 +68,10 @@ export class DshAgentSessionsController extends Disposable implements IChatSessi
 	}, 50));
 	/** api-session/status 比名单里的 running 新。后台子任务不会把父会话标成还在跑。 */
 	private readonly liveRunning = new Map<string, boolean>();
+	/** 最近一次归档/恢复回包里的完整集合。listSessions 摘要没有 archived 字段。 */
+	private readonly archivedIds = new Set<string>();
+	/** 后发起的 refresh 作废先发起的回包。 */
+	private refreshEpoch = 0;
 
 	get items(): readonly IChatSessionItem[] {
 		return this._items;
@@ -201,20 +205,30 @@ export class DshAgentSessionsController extends Disposable implements IChatSessi
 		if (token.isCancellationRequested) {
 			return;
 		}
+		const epoch = ++this.refreshEpoch;
 		const folders = this.workspace.getWorkspace().folders.map(folder => folder.uri.fsPath);
 		const queries = folders.length === 0 ? [undefined] : folders;
 		const summaries: IDshIdeSessionSummary[] = [];
 		for (const folder of queries) {
-			if (token.isCancellationRequested) {
+			if (token.isCancellationRequested || !isCurrentRefresh(epoch, this.refreshEpoch)) {
 				return;
 			}
 			let result = await this.client.call<readonly IDshIdeSessionSummary[]>('listSessions', folder === undefined ? {} : { workspace: folder });
+			if (token.isCancellationRequested || !isCurrentRefresh(epoch, this.refreshEpoch)) {
+				return;
+			}
 			if (!result.ok && result.error.message.includes('is not open')) {
 				const opened = await this.client.openView({ view: 'chat', params: {} });
+				if (token.isCancellationRequested || !isCurrentRefresh(epoch, this.refreshEpoch)) {
+					return;
+				}
 				if (!opened.ok) {
 					throw Object.assign(new Error(opened.error.message), { code: opened.error.code });
 				}
 				result = await this.client.call<readonly IDshIdeSessionSummary[]>('listSessions', folder === undefined ? {} : { workspace: folder });
+				if (token.isCancellationRequested || !isCurrentRefresh(epoch, this.refreshEpoch)) {
+					return;
+				}
 			}
 			if (!result.ok) {
 				throw Object.assign(new Error(result.error.message), { code: result.error.code });
@@ -224,9 +238,12 @@ export class DshAgentSessionsController extends Disposable implements IChatSessi
 			}
 			summaries.push(...result.value);
 		}
+		if (token.isCancellationRequested || !isCurrentRefresh(epoch, this.refreshEpoch)) {
+			return;
+		}
 
 		// 子智能体会话按原生 children 树承接：只有 origin==='subagent' 且父在列表里才挂子项。
-		const roots = buildSessionTree(summaries, summary => toSessionItem(summary, this.liveRunning));
+		const roots = buildSessionTree(summaries, summary => toSessionItem(summary, this.liveRunning, this.archivedIds));
 		const allItems = flattenTree(roots);
 		const seen = new Set(allItems.map(item => item.resource.toString()));
 
@@ -287,8 +304,15 @@ export class DshAgentSessionsController extends Disposable implements IChatSessi
 			this._notifications.warn(localize('dsh.sessions.archiveFailed', "DSH 会话归档失败：{0}", result.error.message));
 			return;
 		}
+		// 回包是完整归档集合。不能只改这一行：下一次 listSessions 没有 archived 字段，刷新会把标志清掉。
+		const nextIds = archiveIdsFromResult(result.value, sessionId, archived, this.archivedIds);
+		this.archivedIds.clear();
+		for (const id of nextIds) {
+			this.archivedIds.add(id);
+		}
 		const key = dshSessionResource(sessionId).toString();
-		const next = mapTreeItem(this._items, key, item => item.archived === archived ? undefined : { ...item, archived });
+		const archivedNow = this.archivedIds.has(sessionId);
+		const next = mapTreeItem(this._items, key, item => item.archived === archivedNow ? undefined : { ...item, archived: archivedNow || undefined });
 		if (next === this._items) {
 			return;
 		}
@@ -328,7 +352,7 @@ export class DshAgentSessionsController extends Disposable implements IChatSessi
 	}
 }
 
-function toSessionItem(summary: IDshIdeSessionSummary, liveRunning: ReadonlyMap<string, boolean>): IChatSessionItem | undefined {
+function toSessionItem(summary: IDshIdeSessionSummary, liveRunning: ReadonlyMap<string, boolean>, archivedIds: ReadonlySet<string>): IChatSessionItem | undefined {
 	if (typeof summary?.sessionId !== 'string' || summary.sessionId === '') {
 		return undefined;
 	}
@@ -347,6 +371,7 @@ function toSessionItem(summary: IDshIdeSessionSummary, liveRunning: ReadonlyMap<
 		status: running ? ChatSessionStatus.InProgress : ChatSessionStatus.Completed,
 		timing,
 		iconPath: Codicon.comment,
+		...(archivedIds.has(summary.sessionId) ? { archived: true } : {}),
 	};
 }
 

@@ -13,7 +13,7 @@ import { test } from 'node:test';
 import { URI } from '../../../out/vs/base/common/uri.js';
 import { ChatSessionStatus, type IChatSessionItem } from '../../../out/vs/workbench/contrib/chat/common/chatSessionsService.js';
 import type { IDshIdeSessionSummary } from '../../../out/vs/platform/dshClient/common/dshIdeProtocol.js';
-import { buildSessionTree, flattenTree, mapTreeItem, sameTreeItem } from '../../../out/vs/workbench/contrib/dsh/browser/dshSessionTree.js';
+import { archiveIdsFromResult, buildSessionTree, flattenTree, isCurrentRefresh, mapTreeItem, sameTreeItem } from '../../../out/vs/workbench/contrib/dsh/browser/dshSessionTree.js';
 
 function summary(sessionId: string, extra: Partial<IDshIdeSessionSummary> = {}): IDshIdeSessionSummary {
 	return {
@@ -160,4 +160,16 @@ test('sameTreeItem detects child status changes', () => {
 	const b = make(ChatSessionStatus.InProgress);
 	assert.equal(sameTreeItem(a[0], b[0]), false);
 	assert.equal(sameTreeItem(a[0], a[0]), true);
+});
+
+test('a newer refresh epoch retires the previous read', () => {
+	assert.equal(isCurrentRefresh(1, 1), true);
+	assert.equal(isCurrentRefresh(1, 2), false);
+});
+
+test('an archive result replaces the whole set and a bad payload does not wipe it', () => {
+	const previous = new Set(['keep']);
+	assert.deepEqual([...archiveIdsFromResult(['s', '', 1, 'other'], 's', true, previous)].sort(), ['other', 's']);
+	assert.deepEqual([...archiveIdsFromResult({ archivedSessionIds: ['s'] }, 's', true, previous)], ['keep', 's']);
+	assert.deepEqual([...archiveIdsFromResult(undefined, 'keep', false, previous)], []);
 });
