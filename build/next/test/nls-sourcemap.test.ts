@@ -42,66 +42,71 @@ async function bundleWithNLS(
 	opts?: { postProcess?: boolean; minify?: boolean }
 ): Promise<BundleResult> {
 	const tmpDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'nls-sm-test-'));
-	const srcDir = path.join(tmpDir, 'src');
-	const outDir = path.join(tmpDir, 'out');
-	await fs.promises.mkdir(srcDir, { recursive: true });
-	await fs.promises.mkdir(outDir, { recursive: true });
+	const cleanup = () => { fs.rmSync(tmpDir, { recursive: true, force: true }); };
+	// 后续任何一步抛错（esbuild 语法/插件错误、断言失败）都必须回收 tmpdir，
+	// 否则 cleanup 永远返回不到调用方，临时目录永久残留。
+	try {
+		const srcDir = path.join(tmpDir, 'src');
+		const outDir = path.join(tmpDir, 'out');
+		await fs.promises.mkdir(srcDir, { recursive: true });
+		await fs.promises.mkdir(outDir, { recursive: true });
 
-	// Write source files (always include the NLS stub at vs/nls.ts)
-	const allFiles = { 'vs/nls.ts': NLS_STUB, ...files };
-	for (const [name, content] of Object.entries(allFiles)) {
-		const filePath = path.join(srcDir, name);
-		await fs.promises.mkdir(path.dirname(filePath), { recursive: true });
-		await fs.promises.writeFile(filePath, content);
-	}
-
-	const collector = createNLSCollector();
-
-	const result = await esbuild.build({
-		...getBundleOptions(opts?.minify ?? false, 'neutral'),
-		entryPoints: [path.join(srcDir, entryPoint)],
-		outfile: path.join(outDir, entryPoint.replace(/\.ts$/, '.js')),
-		plugins: [
-			nlsPlugin({ baseDir: srcDir, collector }),
-		],
-	});
-
-	let jsContent = '';
-	let mapContent = '';
-
-	for (const file of result.outputFiles!) {
-		if (file.path.endsWith('.js')) {
-			jsContent = file.text;
-		} else if (file.path.endsWith('.map')) {
-			mapContent = file.text;
+		// Write source files (always include the NLS stub at vs/nls.ts)
+		const allFiles = { 'vs/nls.ts': NLS_STUB, ...files };
+		for (const [name, content] of Object.entries(allFiles)) {
+			const filePath = path.join(srcDir, name);
+			await fs.promises.mkdir(path.dirname(filePath), { recursive: true });
+			await fs.promises.writeFile(filePath, content);
 		}
-	}
 
-	// Optionally apply NLS post-processing (replaces placeholders with indices)
-	if (opts?.postProcess) {
-		const nlsResult = await finalizeNLS(collector, outDir);
-		const preNLSCode = jsContent;
-		const nlsProcessed = postProcessNLS(jsContent, nlsResult.indexMap, false);
-		jsContent = nlsProcessed.code;
+		const collector = createNLSCollector();
 
-		// Adjust source map for NLS edits
-		if (nlsProcessed.edits.length > 0) {
-			const mapJson = JSON.parse(mapContent);
-			const adjusted = adjustSourceMap(mapJson, preNLSCode, nlsProcessed.edits);
-			mapContent = JSON.stringify(adjusted);
+		const result = await esbuild.build({
+			...getBundleOptions(opts?.minify ?? false, 'neutral'),
+			entryPoints: [path.join(srcDir, entryPoint)],
+			outfile: path.join(outDir, entryPoint.replace(/\.ts$/, '.js')),
+			plugins: [
+				nlsPlugin({ baseDir: srcDir, collector }),
+			],
+		});
+
+		let jsContent = '';
+		let mapContent = '';
+
+		for (const file of result.outputFiles!) {
+			if (file.path.endsWith('.js')) {
+				jsContent = file.text;
+			} else if (file.path.endsWith('.map')) {
+				mapContent = file.text;
+			}
 		}
+
+		// Optionally apply NLS post-processing (replaces placeholders with indices)
+		if (opts?.postProcess) {
+			const nlsResult = await finalizeNLS(collector, outDir);
+			const preNLSCode = jsContent;
+			const nlsProcessed = postProcessNLS(jsContent, nlsResult.indexMap, false);
+			jsContent = nlsProcessed.code;
+
+			// Adjust source map for NLS edits
+			if (nlsProcessed.edits.length > 0) {
+				const mapJson = JSON.parse(mapContent);
+				const adjusted = adjustSourceMap(mapJson, preNLSCode, nlsProcessed.edits);
+				mapContent = JSON.stringify(adjusted);
+			}
+		}
+
+		assert.ok(jsContent, 'Expected JS output');
+		assert.ok(mapContent, 'Expected source map output');
+
+		const mapJson = JSON.parse(mapContent);
+		const map = new SourceMapConsumer(mapJson);
+
+		return { js: jsContent, mapJson, map, cleanup };
+	} catch (error) {
+		cleanup();
+		throw error;
 	}
-
-	assert.ok(jsContent, 'Expected JS output');
-	assert.ok(mapContent, 'Expected source map output');
-
-	const mapJson = JSON.parse(mapContent);
-	const map = new SourceMapConsumer(mapJson);
-	const cleanup = () => {
-		fs.rmSync(tmpDir, { recursive: true, force: true });
-	};
-
-	return { js: jsContent, mapJson, map, cleanup };
 }
 
 /**

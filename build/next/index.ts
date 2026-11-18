@@ -617,7 +617,12 @@ async function bundle(outDir: string, doMinify: boolean, doNls: boolean, doMangl
 		const nls = nlsEdits.get(jsPath);
 
 		if (mangle || nls) {
-			let mapJson = JSON.parse(mapFile.text);
+			let mapJson;
+			try {
+				mapJson = JSON.parse(mapFile.text);
+			} catch (error) {
+				throw new Error(`无法解析 source map ${mapFile.path}：${error instanceof Error ? error.message : String(error)}`);
+			}
 			if (mangle) {
 				mapJson = adjustSourceMap(mapJson, mangle.preMangleCode, mangle.edits);
 			}

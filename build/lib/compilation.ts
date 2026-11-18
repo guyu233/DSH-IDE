@@ -294,7 +294,9 @@ function createApiProposalNamesGenerator() {
 const apiProposalNamesReporter = createReporter('api-proposal-names');
 
 export const checkApiProposalNamesTask = task.define('check-api-proposal-names', async () => {
-	checkApiProposalNames(process.cwd());
+	// 用脚本自身位置推导仓库根，不用 process.cwd()：从子目录启动 gulp 时 cwd 不是仓库根，
+	// 会让 apiProposalNames.ts 里的 `src/vscode-dts` 与 glob cwd 全部错位。
+	checkApiProposalNames(path.dirname(path.dirname(import.meta.dirname)));
 });
 
 export const compileApiProposalNamesTask = task.define('compile-api-proposal-names', () => {

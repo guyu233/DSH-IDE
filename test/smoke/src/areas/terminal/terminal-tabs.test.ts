@@ -58,9 +58,13 @@ export function setup(options?: { skipSuite: boolean }) {
 		it('should create a split terminal when single tab is alt clicked', async () => {
 			await terminal.createTerminal();
 			const page = await terminal.getPage();
-			page.keyboard.down('Alt');
-			await terminal.clickSingleTab();
-			page.keyboard.up('Alt');
+			// 同 terminal-splitCwd：await Alt 按下/抬起，try/finally 保证释放。
+			await page.keyboard.down('Alt');
+			try {
+				await terminal.clickSingleTab();
+			} finally {
+				await page.keyboard.up('Alt');
+			}
 			await terminal.assertTerminalGroups([[{}, {}]]);
 		});
 

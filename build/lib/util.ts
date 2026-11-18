@@ -231,7 +231,13 @@ export function loadSourcemaps(): NodeJS.ReadWriteStream {
 			fs.readFile(path.join(path.dirname(f.path), lastMatch[1]), 'utf8', (err, contents) => {
 				if (err) { return cb(err); }
 
-				f.sourceMap = JSON.parse(contents);
+				// .map 可能被截断 / 返回 HTML：裸 JSON.parse 会让同步异常逃出异步回调，
+				// cb 永不调用 → 流挂起。解析失败必须通过 cb 传出去。
+				try {
+					f.sourceMap = JSON.parse(contents);
+				} catch (error) {
+					return cb(error);
+				}
 				cb(undefined, f);
 			});
 		}));

@@ -200,7 +200,10 @@ export async function preseedChatExtensionEnablement(userDataDir: string | undef
 	fs.mkdirSync(globalStorageDir, { recursive: true });
 	const dbPath = join(globalStorageDir, 'state.vscdb');
 	const database = await new Promise<sqlite3.Database>((resolve, reject) => {
-		const instance = new sqlite3.Database(dbPath, error => error ? reject(error) : resolve(instance));
+		// 回调可能同步触发：若写成 `const instance = new sqlite3.Database(..., () => resolve(instance))`，
+		// 打开失败时 resolve 里的 instance 还处在 TDZ，会抛 ReferenceError 掩盖真实的 ENOENT/EPERM。
+		let instance: sqlite3.Database;
+		instance = new sqlite3.Database(dbPath, error => error ? reject(error) : resolve(instance));
 	});
 	try {
 		await new Promise<void>((resolve, reject) => database.exec([

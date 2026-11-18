@@ -90,8 +90,9 @@ export function runInTerminalScenario(reply: string): unknown {
  * metacharacters.
  */
 export function shellEchoResponseMatcher(reply: string): RegExp {
-	// The rendered JSON block collapses `\n` in the string value into a real
-	// newline in `textContent`, but the assistant output can also contain
-	// literal escaped `\n` when the JSON is displayed verbatim; match either.
-	return new RegExp(`(?:"|\\n|\\\\n)${reply}`);
+	// 渲染后的 JSON 块会把字符串值里的 `\n` 折成真实换行（textContent），但 verbatim
+	// 显示时也可能是转义的 `\n`；两种都要匹配。
+	// reply 是运行时文本，必须转义正则元字符，否则含 `.`/`(`/`[` 时会静默不匹配。
+	const escaped = reply.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+	return new RegExp(`(?:"|\\n|\\\\n)${escaped}`);
 }

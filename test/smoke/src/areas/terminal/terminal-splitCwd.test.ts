@@ -30,9 +30,14 @@ export function setup(options?: { skipSuite: boolean }) {
 			await terminal.runCommandInTerminal(`mkdir ${cwd}`);
 			await terminal.runCommandInTerminal(`cd ${cwd}`);
 			const page = await terminal.getPage();
-			page.keyboard.down('Alt');
-			await terminal.clickSingleTab();
-			page.keyboard.up('Alt');
+			// Alt 必须 await 按下/抬起，并用 try/finally 保证异常时也释放，
+			// 否则 Alt 卡住会污染后续所有用例的键盘状态。
+			await page.keyboard.down('Alt');
+			try {
+				await terminal.clickSingleTab();
+			} finally {
+				await page.keyboard.up('Alt');
+			}
 			await terminal.assertTerminalGroups([[{ description: cwd }, { description: cwd }]]);
 		});
 	});

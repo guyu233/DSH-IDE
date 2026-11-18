@@ -13,11 +13,15 @@ export function setup(logger: Logger) {
 		// Shared before/after handling
 		installAllHandlers(logger);
 
-		after(function () {
+		after(async function () {
 			const app = this.app as Application;
 
-			retry(async () => cp.execSync('git checkout . --quiet', { cwd: app.workspacePathOrFolder }), 0, 5);
-			retry(async () => cp.execSync('git reset --hard HEAD --quiet', { cwd: app.workspacePathOrFolder }), 0, 5);
+			// 两次清理必须 await：不 await / 不 return 会让 git checkout/reset 与后续套件并发，
+			// 失败还会变成 unhandledRejection（假绿）。
+			await Promise.all([
+				retry(async () => cp.execSync('git checkout . --quiet', { cwd: app.workspacePathOrFolder }), 0, 5),
+				retry(async () => cp.execSync('git reset --hard HEAD --quiet', { cwd: app.workspacePathOrFolder }), 0, 5),
+			]);
 		});
 
 		it('verifies the sidebar moves to the right', async function () {

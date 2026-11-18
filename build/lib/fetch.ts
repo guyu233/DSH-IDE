@@ -152,39 +152,41 @@ export function fetchGithub(repo: string, options: IGitHubAssetOptions): Stream 
 		verbose: options.verbose,
 		nodeFetchOptions: { headers: ghApiHeaders }
 	}).pipe(through2.obj(async function (file, _enc, callback) {
-		const json = JSON.parse(file.contents.toString());
-		const assetFilter = typeof options.name === 'string' ? (name: string) => name === options.name : options.name;
-		let release: IGitHubRelease | undefined;
-		let asset: { name: string; url: string } | undefined;
-		if (options.latest) {
-			// Pick the most recently published non-draft release that actually contains the
-			// requested asset. Sort by `published_at` (when the release was made public) rather than
-			// `created_at` (when the draft was first created); treat a missing/unparseable timestamp
-			// as 0 so it sorts to the end deterministically. Skipping releases without the asset makes
-			// this resilient to releases that ship other artifacts (e.g. tarballs) but no matching VSIX.
-			const publishedTime = (r: IGitHubRelease) => {
-				const time = Date.parse(r.published_at ?? '');
-				return isNaN(time) ? 0 : time;
-			};
-			const releases = (json as IGitHubRelease[])
-				.filter(r => !r.draft)
-				.sort((a, b) => publishedTime(b) - publishedTime(a));
-			for (const candidate of releases) {
-				const candidateAsset = candidate.assets.find(a => assetFilter(a.name));
-				if (candidateAsset) {
-					release = candidate;
-					asset = candidateAsset;
-					break;
-				}
-			}
-		} else {
-			release = json as IGitHubRelease;
-			asset = release.assets.find(a => assetFilter(a.name));
-		}
-		if (!asset) {
-			return callback(new Error(`Could not find asset in release of ${repo} @ ${options.latest ? 'latest' : options.version}`));
-		}
+		// 整个回调体必须兜底：GitHub API 可能返回 403 HTML / 代理错误页 / 空 body，
+		// 裸 JSON.parse 会在 async 回调里抛错，callback 永不调用 → 流挂起 + unhandledRejection。
 		try {
+			const json = JSON.parse(file.contents.toString());
+			const assetFilter = typeof options.name === 'string' ? (name: string) => name === options.name : options.name;
+			let release: IGitHubRelease | undefined;
+			let asset: { name: string; url: string } | undefined;
+			if (options.latest) {
+				// Pick the most recently published non-draft release that actually contains the
+				// requested asset. Sort by `published_at` (when the release was made public) rather than
+				// `created_at` (when the draft was first created); treat a missing/unparseable timestamp
+				// as 0 so it sorts to the end deterministically. Skipping releases without the asset makes
+				// this resilient to releases that ship other artifacts (e.g. tarballs) but no matching VSIX.
+				const publishedTime = (r: IGitHubRelease) => {
+					const time = Date.parse(r.published_at ?? '');
+					return isNaN(time) ? 0 : time;
+				};
+				const releases = (json as IGitHubRelease[])
+					.filter(r => !r.draft)
+					.sort((a, b) => publishedTime(b) - publishedTime(a));
+				for (const candidate of releases) {
+					const candidateAsset = candidate.assets.find(a => assetFilter(a.name));
+					if (candidateAsset) {
+						release = candidate;
+						asset = candidateAsset;
+						break;
+					}
+				}
+			} else {
+				release = json as IGitHubRelease;
+				asset = release.assets.find(a => assetFilter(a.name));
+			}
+			if (!asset) {
+				return callback(new Error(`Could not find asset in release of ${repo} @ ${options.latest ? 'latest' : options.version}`));
+			}
 			callback(null, await fetchUrl(asset.url, {
 				nodeFetchOptions: { headers: ghDownloadHeaders },
 				verbose: options.verbose,

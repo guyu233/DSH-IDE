@@ -100,7 +100,8 @@ export function setup(logger: Logger): void {
 
 		after(async () => {
 			await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
-			await mockServer.close();
+			// before 若在赋值前失败，mockServer 仍是 undefined：可选链避免用 TypeError 掩盖原始错误。
+			await mockServer?.close();
 		});
 
 		it('opens an HTML file in a locked browser editor', async function () {
@@ -540,7 +541,10 @@ function browserClickScenario(result: 'SUCCESS' | 'ERROR' | 'RESHARED', getPageI
 }
 
 function findBrowserPageId(request: readonly unknown[], title: string): string {
-	const match = JSON.stringify(request).match(new RegExp(`\\[([0-9a-f-]{36})\\]\\s+${title}`, 'i'));
+	// title 是运行时文本：必须转义正则元字符，否则含 `.`/`(`/`[` 时会被当成通配/分组，
+	// 静默匹配不到（或匹配错页面）。不加 `\b`：标题可能以标点结尾，词边界并不可靠。
+	const escaped = title.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+	const match = JSON.stringify(request).match(new RegExp(`\\[([0-9a-f-]{36})\\]\\s+${escaped}`, 'i'));
 	if (!match) {
 		throw new Error(`Could not find the page ID for ${title} in the model request`);
 	}

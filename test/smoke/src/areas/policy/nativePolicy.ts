@@ -38,7 +38,13 @@ export function nativePolicyFixture(options: ApplicationOptions): NativePolicyFi
 		win32RegValueName?: string;
 		darwinBundleIdentifier?: string;
 		parentPolicyConfig?: { win32RegValueName?: string; darwinBundleIdentifier?: string };
-	} = JSON.parse(fs.readFileSync(productPath, 'utf8'));
+	} = (() => {
+		try {
+			return JSON.parse(fs.readFileSync(productPath, 'utf8'));
+		} catch (error) {
+			throw new Error(`无法解析 ${productPath}：${error instanceof Error ? error.message : String(error)}`);
+		}
+	})();
 
 	if (process.platform === 'win32') {
 		const productName = product.parentPolicyConfig?.win32RegValueName ?? product.win32RegValueName;
