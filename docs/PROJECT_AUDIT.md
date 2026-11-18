@@ -2,11 +2,11 @@
 
 唯一生效的审计结论在本文。其它文档只保留链接。
 
-当前基线：`c3bdf2ec`。访问日期 2026-11-18。
+当前基线：`51596740`。访问日期 2026-11-18。
 
 ## 当前总摘要
 
-健康度：`npm run compile` 0 error；`verify:dsh-ide-ci` 五项 PASS（`DSH_INSTALLED_VERSION=0.2.2-rc.3`）；node 测试 413、mocha 7、fail 0。覆盖率没有命令。全仓 ESLint 未作为通过项。真机界面未验。`verify:dsh-install-drift` 仍对 2026-11-17 的旧 Host 产物失败，开发期不打包。
+健康度：`npm run compile` 0 error（1.83 min）；`verify:dsh-ide-ci` 五项 PASS（`DSH_INSTALLED_VERSION=0.2.2-rc.3`）；node 测试 414、mocha 7、fail 0。覆盖率没有命令。全仓 ESLint 未作为通过项。真机界面未验。`verify:dsh-install-drift` 仍对 2026-11-17 的旧 Host 产物失败，开发期不打包。
 
 最危险的 3 件事：
 
@@ -16,7 +16,7 @@
 
 下一步 3 件事：
 
-1. 真机点一次开窗，并点一次被拒绝的批准，确认卡片回来。
+1. 真机在开窗完成前点另一条会话，确认不会被开窗回包拉回去。
 2. 开发完成后重新打包，再跑 `verify:dsh-install-drift`。
 3. 收藏/置顶没有原生行字段。找不到就保持现状，不另画标记。
 
@@ -24,6 +24,7 @@
 
 | ID | 主题 | 结论 | 依据 | 范围 | 状态 | 回滚 |
 |---|---|---|---|---|---|---|
+| DEC-008 | 开窗回包绑定 | `attach` 只在 `generation` 仍为 0、且没有绑定、也没有正在进行的 `bind` 时登记开窗会话。用户已经换过会话就返回 | `dshChatSession.ts` `attach`。`generation` 只在 `bind` 和 `dispose` 时增加 | 聊天会话 | 生效 | `git revert 51596740` |
 | DEC-007 | 批准/问卷失败 | 先拿掉卡片，避免连点。通道返回失败才放回原卡。换会话，或该 eventId 已有新卡，不写回 | `dshChatSession.ts` `restorePending` | 聊天待决议 | 生效 | `git revert c3bdf2ec` |
 | DEC-006 | 开窗参数 | 首次 `spawn` 的位置参数是 `['--', workspace]`。空路径不传参数。已打开的窗口仍用 `URI.file` | `ide-service.js` 只一处 `spawn(home.exe)` | Host 拉起 IDE | 生效 | `git revert 88b1b159` |
 | DEC-001 | 流式临时节点 | 正常 end 后节点先留着；同回合 `assistant/message` 写入后删掉。`abandoned` 立刻删。空内容的正式消息不接管 | `dshIdeConversation.ts` `retireTurnStreams` | 会话投影 | 生效 | `git revert 40de7e42` |
@@ -32,13 +33,14 @@
 | DEC-004 | 删除后不立刻拉名单 | 只从当前树摘行，子会话升到原位 | `deleteChatSessionItem` | 会话列表 | 生效 | `git revert 1d3f4cf2` |
 | DEC-005 | 不做的原生部件 | 不做 planReview、changesSummary、multiDiffData、confirmation、questionCarousel、working、附件 chip | 原生回传或 history 类型接不住 | 聊天历史 | 生效 | 不单开这些部件 |
 
-冲突检测：DEC-007 不改 Host 的批准协议，也不在 `rebind` 时取消请求（DEC-003）。失败放回只发生在同一代次、同一会话、且该 eventId 还空着。
+冲突检测：DEC-008 不改 `openView` 契约，也不取消正在跑的 `rebind`（DEC-003）。还没绑定过的首屏仍由 `attach` 登记，避免对同一条会话再 `rebind` 一次。
 
 ## 问题总表
 
 | ID | 状态 | 位置 | 类型 | 证据 | 处理 |
 |---|---|---|---|---|---|
-| BUG-003 | 已闭环 | `dshChatSession.ts` `answerApproval` / `answerQuestion` | 状态不一致 | 卡片在 `await` 之前删除，通道失败后不再出现。检索这两个方法名，渲染层各 1 处定义，已改 | 失败且仍是当前会话时放回原卡。测试 `a rejected approval puts the card back` |
+| BUG-004 | 已闭环 | `dshChatSession.ts` `attach` | 竞态 | `openView` 的回包无条件写 `boundSessionId`。用户已 `bind` 别的会话时，绑定被改回开窗会话。检索 `.attach(`，DSH 渲染层只有贡献点这一处调用 | 已有绑定或 `generation !== 0` 时直接返回。测试 `attach does not replace a session the user already bound` |
+| BUG-003 | 已闭环 | `dshChatSession.ts` `answerApproval` / `answerQuestion` | 状态不一致 | 卡片在 `await` 之前删除，通道失败后不再出现 | `c3bdf2ec` |
 | SEC-002 | 已闭环 | `ide-service.js` `spawn(home.exe, args)` | 启动参数 | 以 `-` 开头的 cwd 会被当成开关。`spawn(home.exe` 命中 1 处 | `88b1b159` |
 | BUG-001 | 已闭环 | `dshIdeConversation.ts` 流式 end | 内容重复 | end 移走 attempt 后正式消息清不掉临时节点 | `40de7e42` |
 | BUG-002 | 已闭环 | 绑定、发送、换模型、归档、未读、开窗 sessionId、composer、custom、vendor、名单通知、steering、删除摘行 | 竞态 / 状态 | `1d3f4cf2`、`2126de72`、`245a025b`、`c6b514dd` | 保持测试 |
@@ -58,7 +60,7 @@
 | scripts | 86 | 79 |
 | 锁文件条目 | 1649 | 1536 |
 | tsc 错误 | 137 | 0 |
-| node 测试 | 384 | 413 |
+| node 测试 | 384 | 414 |
 | mocha | 7 | 7 |
 
 ## 存疑保留
@@ -71,9 +73,9 @@
 
 ## 假设与待验证
 
-- 【事实】通道返回 `ok: false` 时，批准卡回到原来的 eventId。
-- 【事实】等待期间换了会话，失败回包不会把旧卡写到新会话。
-- 【待验证】真机上 Host 拒绝批准后，卡片是否重新可点。
+- 【事实】用户先 `bind` 再 `attach` 时，第二次 `bind` 同一 id 不会再 `rebind`。测试断言了 `rebind` 只发生一次。
+- 【事实】还没有任何 `bind` 时，`attach` 仍会登记开窗会话并读取技能目录。既有测试 `follow frames without skills keep a catalog loaded by listSkills` 仍通过。
+- 【待验证】真机在开窗完成前点另一条会话，面板是否停在后者。
 - 【待验证】普通目录放在 `--` 后面之后，首次开窗仍打开该文件夹。
 - 【推断】空内容的 `assistant/message` 不接管临时节点，是为了留下已经流出来的文字。本轮未改。
 
@@ -81,32 +83,32 @@
 
 | 门禁 | 改前 | 改后 |
 |---|---|---|
-| `npm run compile` | 0 error | 0 error |
-| `verify:dsh-ide-ci` | 五项 PASS，node 411 | 五项 PASS，node 413，mocha 7，fail 0 |
+| `npm run compile` | 0 error | 0 error，1.83 min |
+| `verify:dsh-ide-ci` | 五项 PASS，node 413 | 五项 PASS，node 414，mocha 7，fail 0 |
 | 覆盖率 | 无命令 | 未跑 |
 | 全仓 ESLint | PENDING | PENDING |
 | 真机 GUI | PENDING | PENDING |
 | `verify:dsh-install-drift` | FAIL，预先存在 | 未打包，仍 FAIL |
 
-安全：本轮没有放宽校验或鉴权。
+安全：本轮没有放宽校验或鉴权。回退命令的切点仍只接受数字序号。
 
 ## 风险与回滚
 
 | 风险 | 回滚 |
 |---|---|
-| 失败放回的卡片若和 Host 稍后推来的新卡交错，可能闪一下 | `git revert c3bdf2ec` |
-| 成功的批准仍会拿掉卡片，这条没变 | 同上 |
+| 若开窗回包早于任何点击，行为与原来一样，仍登记该会话 | `git revert 51596740` |
+| 若用户在 `attach` 之前没有绑定，但 `generation` 已被别的路径增加，首屏不会登记。当前只有 `bind` 和 `dispose` 会增加 `generation` | 同上 |
 
 ## 手册增补
 
-不新增第二套批准路径。按钮仍走 `dsh.answerApproval` / `dsh.answerQuestion`。失败恢复只在会话状态层。
+不新增第二套开窗绑定。首屏仍走 `openView` 然后 `attach`。用户已经 `bind` 时以 `bind` 为准。
 
 ## 全局路线图
 
 1. 正确性：投影、列表、开窗、待决议继续用回归测试钉住。
 2. 安全：契约仍是唯一调用面。开窗 argv 已收口。行内补全不绕过校验。
 3. 体积：依赖不再增加。
-4. 验证：真机看开窗和被拒绝的批准。开发完成后打包再验漂移。
+4. 验证：真机看开窗回包和被拒绝的批准。开发完成后打包再验漂移。
 
 ## 信息缺口
 
@@ -114,7 +116,7 @@
 
 ## 状态对照
 
-已闭环：BUG-003、SEC-002、BUG-001、BUG-002、CLN-001、DEC-007。
+已闭环：BUG-004、BUG-003、SEC-002、BUG-001、BUG-002、CLN-001、DEC-008。
 
 仍存在：SEC-001、OPT-001、CLN-002、安装漂移、真机未验、收藏/置顶无星标、删除后旧名单可能把行画回来。
 
@@ -124,6 +126,7 @@
 
 | 日期 | ID | 状态 | 提交 |
 |---|---|---|---|
+| 2026-11-18 | BUG-004、DEC-008 | 已闭环 | `51596740` |
 | 2026-11-18 | BUG-003、DEC-007 | 已闭环 | `c3bdf2ec` |
 | 2026-11-18 | SEC-002、DEC-006 | 已闭环 | `88b1b159` |
 | 2026-11-18 | BUG-001、DEC-001 | 已闭环 | `40de7e42` |
