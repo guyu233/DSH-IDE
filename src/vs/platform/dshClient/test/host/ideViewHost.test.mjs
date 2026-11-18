@@ -353,7 +353,7 @@ test('submit and interrupt use the verified sessionController shapes', async () 
 	const { bridge } = bridgeWith({ sessionController: controller });
 	bridge.open({ view: 'chat', params: { sessionId: 's-1' } });
 	const image = { attachmentId: 'img-1', mediaType: 'image/png', bytes: 3, width: 1, height: 1 };
-	await bridge.invoke('submit', { text: 'hi', attachments: [image] });
+	await bridge.invoke('submit', { text: 'hi', sessionId: 's-1', attachments: [image] });
 	await bridge.invoke('interrupt', { sessionId: 's-1' });
 	const prompt = controller.calls.find(call => call.name === 'prompt');
 	assert.equal(prompt.request.sessionId, 's-1');
@@ -369,6 +369,11 @@ test('submit and interrupt use the verified sessionController shapes', async () 
 		error => error.code === SESSION_SWITCHED,
 	);
 	assert.equal(controller.calls.filter(call => call.name === 'cancel').length, 1);
+	await assert.rejects(
+		() => bridge.invoke('submit', { text: 'late', sessionId: 's-1' }),
+		error => error.code === SESSION_SWITCHED,
+	);
+	assert.equal(controller.calls.filter(call => call.name === 'prompt').length, 1);
 });
 
 test('readAttachment projects only image bytes through the official attachment service', async () => {

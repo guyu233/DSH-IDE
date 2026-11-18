@@ -608,10 +608,18 @@ function createMethodHandlers(bridge) {
 
 	return {
 		async submit(args) {
+			if (typeof args.sessionId !== 'string' || args.sessionId === '') {
+				throw coded(INVALID_ARGUMENT, 'submit.sessionId must be a non-empty string');
+			}
+			if (bridge.sessionId === undefined) {
+				throw coded(INVALID_ARGUMENT, 'DSH-IDE view has no bound session');
+			}
+			// 视图已经换到别的会话时，不能把这句话写进新会话。
+			bridge.assertOwnership(args.sessionId);
 			const attachments = Array.isArray(args.attachments) ? args.attachments : [];
 			await controller().prompt({
 				requestId: randomUUID(),
-				sessionId: requireSession(),
+				sessionId: args.sessionId,
 				mode: 'queue',
 				content: [
 					{ type: 'text', text: args.text },

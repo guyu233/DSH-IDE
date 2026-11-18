@@ -35,7 +35,7 @@ import {
 // ---------------------------------------------------------------------------
 
 const VALID_ARGS: Record<DshIdeMethod, unknown> = {
-	submit: { text: 'hello' },
+	submit: { text: 'hello', sessionId: 's1' },
 	interrupt: { sessionId: 's1' },
 	resume: { sessionId: 's1' },
 	newSession: { workspace: 'w1', options: { theme: 'dark' } },
@@ -105,7 +105,7 @@ test('validateDshIdeInput rejects unknown fields for every method', () => {
 });
 
 test('validateDshIdeInput allows only x- prefixed extension fields', () => {
-	assert.doesNotThrow(() => validateDshIdeInput('submit', { text: 'hi', 'x-trace': 't1' }));
+	assert.doesNotThrow(() => validateDshIdeInput('submit', { text: 'hi', sessionId: 's1', 'x-trace': 't1' }));
 });
 
 test('validateDshIdeInput rejects explicit undefined for every method', () => {

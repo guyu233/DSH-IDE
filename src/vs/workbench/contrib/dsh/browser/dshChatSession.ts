@@ -472,8 +472,11 @@ export class DshChatSession extends Disposable implements IDshChatSession {
 	async submit(text: string): Promise<boolean> {
 		const generation = this.generation;
 		const sessionId = this.boundSessionId;
+		if (sessionId === undefined) {
+			return false;
+		}
 		this.setRunning(true);
-		const result = await this.client.call('submit', { text });
+		const result = await this.client.call('submit', { text, sessionId });
 		// 等待期间换了会话：失败不能把新会话的 running 清掉，成功也不该让调用方以为这条发送还属于当前会话。
 		if (generation !== this.generation || sessionId !== this.boundSessionId) {
 			return false;

@@ -398,6 +398,24 @@ test('a late failed submit does not clear running on the session bound meanwhile
 	}
 });
 
+test('submit sends the session that was bound when the text was sent', async () => {
+	const calls: { method: string; args: unknown }[] = [];
+	const session = new DshChatSession({
+		call: async (method: string, args: unknown) => {
+			calls.push({ method, args });
+			return { ok: true, value: { accepted: true } };
+		},
+		rebindView: async (sessionId: string) => readySnapshot(sessionId),
+	} as never);
+	try {
+		assert.equal(await session.bind('A'), true);
+		assert.equal(await session.submit('hello'), true);
+		assert.deepEqual(calls.filter(call => call.method === 'submit'), [{ method: 'submit', args: { text: 'hello', sessionId: 'A' } }]);
+	} finally {
+		session.dispose();
+	}
+});
+
 test('cancel sends the session that was bound when stop was clicked', async () => {
 	const calls: { method: string; args: unknown }[] = [];
 	const session = new DshChatSession({

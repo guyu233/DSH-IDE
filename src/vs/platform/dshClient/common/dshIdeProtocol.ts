@@ -370,8 +370,8 @@ export interface DshIdeQuestionAnswer {
  * 运行侧用 `DSH_IDE_METHOD_KEYS` 同一份 key 列表做 exactRecord。
  */
 export interface DshIdeMethodArgs {
-	/** 提交一条用户消息。图片附件跟在正文后面，形状是官方 `ImageAttachmentRef`。 */
-	submit: { text: string; attachments?: readonly DshIdeImageAttachmentRef[] };
+	/** 提交一条用户消息。sessionId 是点击时绑定的会话，不跟随之后换上的会话。 */
+	submit: { text: string; sessionId: string; attachments?: readonly DshIdeImageAttachmentRef[] };
 	/** 中断点击时绑定的那条会话，不跟随之后换上的会话。 */
 	interrupt: { sessionId: string };
 	/** 恢复一个会话（可选指定）。 */
@@ -561,7 +561,7 @@ export type DshIdeMethod = keyof DshIdeMethodArgs;
 
 /** 每个 method 的 exactRecord 允许字段（与 DshIdeMethodArgs 同步；空数组=无字段）。 */
 const DSH_IDE_METHOD_KEYS: Record<DshIdeMethod, readonly string[]> = {
-	submit: ['text', 'attachments'],
+	submit: ['text', 'sessionId', 'attachments'],
 	interrupt: ['sessionId'],
 	resume: ['sessionId'],
 	newSession: ['workspace', 'options'],
@@ -759,6 +759,7 @@ export function validateDshIdeInput<K extends DshIdeMethod>(command: K, args: un
 	switch (command) {
 		case 'submit':
 			nonEmptyString(record['text'], 'DshIdeInput.submit.text');
+			nonEmptyString(record['sessionId'], 'DshIdeInput.submit.sessionId');
 			if (record['attachments'] !== undefined) {
 				if (!Array.isArray(record['attachments'])) {
 					throw new TypeError('DshIdeInput.submit.attachments must be an array');

@@ -330,14 +330,14 @@ const OK = (url: string, body: unknown) => ({
 test('backend sends every operation to ide/dispatch with the method and payload', async () => {
 	const { backend, transport, requests } = backendWithHost(OK);
 
-	await backend.invoke('submit', { text: 'hi' });
+	await backend.invoke('submit', { text: 'hi', sessionId: 's-1' });
 	await backend.invoke('interrupt', { sessionId: 's-1' });
 	await backend.invoke('setModel', { model: 'deepseek/deepseek-chat' });
 
 	assert.deepEqual(requests.map(request => request.url.split('/api/')[1]), ['ide/dispatch', 'ide/dispatch', 'ide/dispatch']);
 	const first = requests[0].body as { payload: { args: { method: string; payload: Record<string, unknown> } } };
 	assert.equal(first.payload.args.method, 'submit');
-	assert.deepEqual(first.payload.args.payload, { text: 'hi' });
+	assert.deepEqual(first.payload.args.payload, { text: 'hi', sessionId: 's-1' });
 	const second = requests[1].body as { payload: { args: { method: string; payload: Record<string, unknown> } } };
 	assert.equal(second.payload.args.method, 'interrupt');
 	assert.deepEqual(second.payload.args.payload, { sessionId: 's-1' });

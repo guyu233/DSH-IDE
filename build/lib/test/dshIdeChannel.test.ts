@@ -199,7 +199,7 @@ test('unavailable backend never fabricates snapshots or events', () => {
 // ---------------------------------------------------------------------------
 
 const VALID: Record<DshIdeMethod, unknown> = {
-	submit: { text: 'hello' },
+	submit: { text: 'hello', sessionId: 's-1' },
 	interrupt: { sessionId: 's-1' },
 	resume: { sessionId: 's-1' },
 	newSession: { workspace: 'w1', options: { preset: 'standard' } },
@@ -264,8 +264,8 @@ test('channel dispatches all 43 DTO methods through validateDshIdeInput', async 
 test('channel rejects unknown method and malformed args with defined codes', async () => {
 	const { channel } = await openedChannel();
 	await assert.rejects(() => channel.call('ctx-a', '__bogus', {}), (error: { code?: string }) => error.code === DSH_IDE_FEATURE_UNAVAILABLE);
-	await assert.rejects(() => channel.call('ctx-a', 'submit', { text: 'x', __extra: 1 }), (error: { code?: string }) => error.code === DSH_IDE_INVALID_ARGUMENT);
-	await assert.rejects(() => channel.call('ctx-a', 'submit', { text: '' }), (error: { code?: string }) => error.code === DSH_IDE_INVALID_ARGUMENT);
+	await assert.rejects(() => channel.call('ctx-a', 'submit', { text: 'x', sessionId: 's-1', __extra: 1 }), (error: { code?: string }) => error.code === DSH_IDE_INVALID_ARGUMENT);
+	await assert.rejects(() => channel.call('ctx-a', 'submit', { text: '', sessionId: 's-1' }), (error: { code?: string }) => error.code === DSH_IDE_INVALID_ARGUMENT);
 });
 
 test('channel requires an open connection for DTO calls', async () => {
