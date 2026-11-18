@@ -535,6 +535,10 @@ function describeRequest(kind, request) {
  */
 function createMethodHandlers(bridge) {
 	const controller = () => service(bridge.ctx, 'sessionController');
+	// 重命名、移动、新建、收藏、置顶不一定发出 api-session/added|removed。
+	// 不发这帧的话，面板要等到下次连接或工作区变化才看得到结果。
+	// 删除不发：名单是最终一致的，刚删完就刷新会把还在名单里的旧行又画出来。
+	const notifySessionList = () => bridge._fanout({ type: 'session-list' });
 	// 账号域是独立服务：官方服务名是 `deepseekAccount`（`accountController` 只是 Remote 包装类，
 	// 不是注册进 ctx 的服务名；用错会把调用打到一个不存在的服务上）。
 	const account = () => service(bridge.ctx, 'deepseekAccount');
@@ -619,6 +623,7 @@ function createMethodHandlers(bridge) {
 			if (typeof sessionId === 'string') {
 				bridge.sessionId = sessionId;
 			}
+			notifySessionList();
 			return { accepted: true, ...(typeof sessionId === 'string' ? { sessionId } : {}) };
 		},
 		async fork(args) {
@@ -631,6 +636,7 @@ function createMethodHandlers(bridge) {
 			if (typeof sessionId === 'string') {
 				bridge.sessionId = sessionId;
 			}
+			notifySessionList();
 			return { accepted: true, ...(typeof sessionId === 'string' ? { sessionId } : {}) };
 		},
 		async rewind(args) {
@@ -968,6 +974,7 @@ function createMethodHandlers(bridge) {
 		async renameSession(args) {
 			bridge.assertOwnership(args.sessionId);
 			await controller().rename({ sessionId: args.sessionId, title: args.title });
+			notifySessionList();
 			return { accepted: true };
 		},
 		async setSessionFavorite(args) {
@@ -979,6 +986,7 @@ function createMethodHandlers(bridge) {
 			const current = await registry.favoriteSessions();
 			const ids = current && Array.isArray(current.favoriteSessionIds) ? current.favoriteSessionIds : [];
 			await registry.setSessionFavorite({ sessionId: args.sessionId, favorite: !ids.includes(args.sessionId) });
+			notifySessionList();
 			return { accepted: true };
 		},
 		async setSessionPinned(args) {
@@ -991,6 +999,7 @@ function createMethodHandlers(bridge) {
 				throw coded(FEATURE_UNAVAILABLE, `DSH workspaceController has no ${method}()`, { capability: 'setSessionPinned' });
 			}
 			await workspaces[method]({ sessionId: args.sessionId });
+			notifySessionList();
 			return { accepted: true };
 		},
 		async listWorkspaces() {
@@ -1016,6 +1025,7 @@ function createMethodHandlers(bridge) {
 				throw coded(FEATURE_UNAVAILABLE, 'moving a session is unavailable: install and enable @michengai/dsh-archive-manager', { capability: 'moveSession' });
 			}
 			await registry.moveSessionToWorkspace({ sessionId: args.sessionId, targetWorkspaceId: args.workspaceId });
+			notifySessionList();
 			return { accepted: true };
 		},
 		async openSessionPath(args) {

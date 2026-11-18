@@ -29,6 +29,17 @@ function lastResponse(history: readonly { type: string }[]) {
 	return last as { type: 'response'; parts: readonly { kind: string; [key: string]: unknown }[]; errorDetails?: { message: string; code?: string; isQuotaExceeded?: boolean } };
 }
 
+test('a steering or subagent notice before any user message is kept', () => {
+	const history = toHistory(session([
+		{ kind: 'steering', seq: 1, time: 1, content: [{ type: 'text', text: '改口' }] },
+		{ kind: 'subagent-notice', seq: 2, time: 2, content: [{ type: 'text', text: '子任务完成' }] },
+	]));
+	const response = lastResponse(history);
+	const text = response.parts.map(part => part.kind === 'markdownContent' ? (part.content as { value?: string }).value : '').join('\n');
+	assert.ok(text.includes('改口'));
+	assert.ok(text.includes('子任务完成'));
+});
+
 test('B1: a finished tool result becomes a serialized tool invocation with input/output', () => {
 	const history = toHistory(session([
 		{ kind: 'user', seq: 1, time: 1, content: [{ type: 'text', text: 'run' }] },

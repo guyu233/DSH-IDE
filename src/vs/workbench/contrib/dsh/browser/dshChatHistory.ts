@@ -205,13 +205,15 @@ export function toHistory(
 			pending = { prompt: textOf(node.content), participant: 'dsh', timestamp: node.time };
 			continue;
 		}
-		if (node.kind === 'steering') {
-			// 运行中插入的人类消息：并进当前 response 的引用文本。
-			parts.push({ kind: 'markdownContent', content: { value: `**Steering:** ${textOf(node.content)}` } });
-			continue;
-		}
-		if (node.kind === 'subagent-notice') {
-			parts.push({ kind: 'markdownContent', content: { value: `> 子智能体：${textOf(node.content)}` } });
+		if (node.kind === 'steering' || node.kind === 'subagent-notice') {
+			// 还没有用户消息时也要开一条 response。否则末尾 flush 因 pending 为空直接返回，这段文字被丢掉。
+			if (pending === undefined) {
+				pending = { prompt: '', participant: 'dsh' };
+			}
+			const value = node.kind === 'steering'
+				? `**Steering:** ${textOf(node.content)}`
+				: `> 子智能体：${textOf(node.content)}`;
+			parts.push({ kind: 'markdownContent', content: { value } });
 			continue;
 		}
 		if (node.kind === 'turn-error') {

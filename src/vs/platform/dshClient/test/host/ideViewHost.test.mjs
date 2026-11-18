@@ -1199,6 +1199,37 @@ test('searchSessions calls sessionController.search and returns the neutral proj
 	assert.deepEqual(calls[0], { query: 'found' });
 });
 
+test('renameSession tells open views to refresh the session list', async () => {
+	const frames = [];
+	const { bridge } = bridgeWith({
+		sessionController: {
+			...sessionControllerStub(),
+			rename: async () => ({ accepted: true }),
+			follow() { return (async function* () { await new Promise(() => undefined); })(); },
+		},
+	});
+	bridge.open({ view: 'chat', params: { sessionId: 's-1' } });
+	const handle = bridge.follow('s-1', frame => frames.push(frame));
+	await bridge.invoke('renameSession', { sessionId: 's-1', title: '新标题' });
+	assert.ok(frames.some(frame => frame.type === 'session-list'), 'rename must fan out session-list');
+	handle.dispose();
+});
+
+test('a failed rename does not fan out a session-list refresh', async () => {
+	const frames = [];
+	const { bridge } = bridgeWith({
+		sessionController: {
+			...sessionControllerStub(),
+			rename: async () => { throw new Error('rename failed'); },
+		},
+	});
+	bridge.open({ view: 'chat', params: { sessionId: 's-1' } });
+	const handle = bridge.follow('s-1', frame => frames.push(frame));
+	await assert.rejects(() => bridge.invoke('renameSession', { sessionId: 's-1', title: '新标题' }));
+	assert.equal(frames.some(frame => frame.type === 'session-list'), false);
+	handle.dispose();
+});
+
 test('searchSessions propagates the official unavailable-provider failure', async () => {
 	const { bridge } = bridgeWith({
 		sessionController: { ...sessionControllerStub(), search: async () => {
