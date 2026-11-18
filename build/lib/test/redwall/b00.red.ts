@@ -676,6 +676,17 @@ test('BUG-023: the sessions control follows the list visibility, not just the pa
 	);
 });
 
+test('OPT-002: watch honours --out and --exclude-tests like one-shot transpile', () => {
+	const index = source('build/next/index.ts');
+	// watch 必须接收并使用与一次性 transpile 相同的两个参数。
+	assert.match(index, /async function watch\(outDir: string, excludeTests: boolean\)/, 'watch must take the same parameters');
+	assert.match(index, /await watch\(options\.out \?\? OUT_DIR, options\.excludeTests\)/, 'the CLI must pass both through');
+	assert.doesNotMatch(index, /const outDir = OUT_DIR;/, 'watch must not pin the output directory');
+	// 监听器必须用绝对路径与绝对 cwd：相对 glob 会按进程 cwd 解析。
+	assert.match(index, /gulpWatch\(path\.join\(srcDir, '\*\*'\), \{ base: srcDir, cwd: srcDir \}\)/, 'the watcher must use absolute glob and cwd');
+	assert.doesNotMatch(index, /gulpWatch\('src\/\*\*'/, 'a relative glob would follow the process cwd');
+});
+
 test('SEC-003: Host dispatch shares the packaged protocol validator', () => {
 	// 只审查装配和单一校验器的接线；不发送非法 DTO，不调用真实 Host。
 	const host = source('src/vs/platform/dshClient/host/ide-view-host.js');

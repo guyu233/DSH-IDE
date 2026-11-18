@@ -687,20 +687,27 @@ async function bundle(outDir: string, doMinify: boolean, doNls: boolean, doMangl
 // Watch Mode
 // ============================================================================
 
-async function watch(): Promise<void> {
+/**
+ * 监听源码并增量重建。
+ *
+ * 与一次性 `transpile` 保持同一套参数语义：`--out` 与 `--exclude-tests` 在 watch 模式下
+ * 同样生效。原来固定用 `OUT_DIR` 并忽略这两个参数，导致「文档说的输出目录」和
+ * 「实际写入的目录」不一致——用 `--out` 指定临时目录时会悄悄写进 `out/`。
+ * @param outDir 输出目录（相对仓库根）
+ * @param excludeTests 是否排除测试文件
+ */
+async function watch(outDir: string, excludeTests: boolean): Promise<void> {
 	console.log('Starting transpilation...');
-
-	const outDir = OUT_DIR;
 
 	// Initial setup
 	await cleanDir(outDir);
-	console.log(`[transpile] ${SRC_DIR} → ${outDir}`);
+	console.log(`[transpile] ${SRC_DIR} → ${outDir}${excludeTests ? ' (excluding tests)' : ''}`);
 
 	// Initial full build
 	const t1 = Date.now();
 	try {
-		await transpile(outDir, false);
-		await copyAllNonTsFiles(outDir, false);
+		await transpile(outDir, excludeTests);
+		await copyAllNonTsFiles(outDir, excludeTests);
 		console.log(`Finished transpilation with 0 errors after ${Date.now() - t1} ms`);
 	} catch (err) {
 		console.error('[watch] Initial build failed:', err);
@@ -761,7 +768,10 @@ async function watch(): Promise<void> {
 	// Watch src directory using existing gulp-watch based watcher
 	let debounceTimer: ReturnType<typeof setTimeout> | undefined;
 	const srcDir = path.join(REPO_ROOT, SRC_DIR);
-	const watchStream = gulpWatch('src/**', { base: srcDir, readDelay: 200 });
+	// glob 用绝对路径 + 绝对 cwd/base：相对 glob 会按**进程 cwd** 解析，
+	// 从仓库外的目录启动时就会盯错地方（或什么都盯不到）。
+	// 只传底层 watcher 真正支持的选项（`cwd` / `base` / `dot`）。
+	const watchStream = gulpWatch(path.join(srcDir, '**'), { base: srcDir, cwd: srcDir });
 
 	watchStream.on('data', (file: { path: string }) => {
 		if (file.path.endsWith('.ts') && !file.path.endsWith('.d.ts')) {
@@ -841,7 +851,7 @@ async function main(): Promise<void> {
 				break;
 			case 'transpile':
 				if (options.watch) {
-					await watch();
+					await watch(options.out ?? OUT_DIR, options.excludeTests);
 				} else {
 					const outDir = options.out ?? OUT_DIR;
 					await cleanDir(outDir);
