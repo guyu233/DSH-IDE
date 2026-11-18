@@ -1074,3 +1074,15 @@ DshChatSession.acceptView / acceptConversation → DshChatModel（typed 节点�
 
 > **门禁**：tsc 0 error、`test-dsh:all` **391** PASS、`verify:dsh-ide-ci` 五项 PASS、`npm run compile` PASS（31 s）、`node --check` 4 个 JS PASS、TypeScript parse 3 个 .ts 0 diagnostics、`stripJsoncComments` 4/4、`loadConfig` 实跑正常。详见 `docs/DSH-IDE瘦身与Bug修复报告-第6轮.md`。
 
+#### 9.11.10 第 7 轮：build/lib + test/smoke + build/next 的清理与 Bug 修复（已执行，2026-11-18）
+
+> 三个子智能体并行（其中 build/lib 首次失败后重派收窄版），覆盖此前未逐行扫过的 `test/smoke/src/**`、`build/next/**`、`build/lib/**` 顶层 48 文件。区间 `6547a250..5451edcd`：**代码改动 20 文件，+154 / -1,316 行**，2 个代码提交（清理 / 功能分开）。
+
+> **删除（A 批）**：`build/lib/screenshotBlocksCi.ts` + `screenshotDiffReport.ts`（零 import / 零 script / `.github` 已删 / screenshotComment.test.ts 只依赖保留的 screenshotComment.ts）；`test/smoke/src/networkProxy/{pacServer,negotiateAuthHelper}.ts` + `run-agents-window-network-proxy.sh` + 2 个 `.pac`（整条 agentsWindow 孤链）；`utils.ts` 3 个零引用导出 + 连带 `mocha` import；`shard.ts` 6 条已不存在套件权重 + 失效的 `firstShardSuite` + 恒真的预分配循环。删前均查了 import / script / workflow / 字符串路径 / 动态 path.join 五种引用。
+
+> **真实 bug（B 批，13 处）**：`search.test.ts` 的 `after()` 浮空 Promise（高）、`utils.ts` sqlite3 回调 TDZ、两处 Alt 键未 await、`shellScenarios.ts` 与 `browserView.test.ts` 的正则元字符注入、`browserView` 的 mockServer 空引用、`build/next/index.ts` 与 `nativePolicy.ts` 的裸 JSON.parse、`nls-sourcemap.test.ts` 的 mkdtemp 泄漏、`build/lib/fetch.ts` 与 `util.ts` 异步回调内裸 JSON.parse（流挂起）、`compilation.ts` 把 cwd 当仓库根。
+
+> **存疑保留**：`build/next/index.ts:759` 的 watch glob cwd 错位（改需长驻验证）、`copilotCli.test.ts` 死测试（唯一用例 skip、命令已删，删除牵连 main.ts 注册属测试裁剪）、11 处上游有意 skip 的假守护（启用属功能变更 + 需真机，按 AGENTS §6/§7 不做）。
+
+> **门禁**：主 tsc 0 error；`test/smoke/tsconfig.json` 39 个错误与改动前基线完全一致（0 新增）；TypeScript parse 13 个改动 .ts 0 diagnostics；`test-dsh:all` 391 PASS；`verify:dsh-ide-ci` 五项 PASS；`npm run compile` PASS（54 s）。详见 `docs/DSH-IDE瘦身与Bug修复报告-第7轮.md`。
+
