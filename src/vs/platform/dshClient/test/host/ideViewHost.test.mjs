@@ -140,6 +140,63 @@ test('open reuses the channel id and binds the requested session', () => {
 	assert.equal(again.sessionId, 's-1', 'repeated open keeps the original binding');
 });
 
+test('BUG-016: a later subscriber receives the same opening baseline', () => {
+	let release;
+	const frames = (async function* () {
+		yield { type: 'snapshot', seq: 1 };
+		await new Promise(resolve => { release = resolve; });
+		yield { type: 'event', seq: 2 };
+	})();
+	const { bridge } = bridgeWith({
+		sessionController: { ...sessionControllerStub(), follow: () => frames },
+	});
+	const first = [];
+	const second = [];
+	bridge.follow({ viewId: 'v-1', generation: 1, sessionId: 's-1' }, frame => first.push(frame));
+	// 第一位订阅者先拿到 opening；第二位是后来者，必须同样拿到它，否则没有基线。
+	return (async () => {
+		await new Promise(resolve => setImmediate(resolve));
+		bridge.follow({ viewId: 'v-1', generation: 1, sessionId: 's-1' }, frame => second.push(frame));
+		assert.deepEqual(second.map(frame => frame.type), ['snapshot'], 'the later subscriber must receive the opening baseline');
+		assert.deepEqual(first.map(frame => frame.type), ['snapshot'], 'the first subscriber is not re-sent the baseline');
+		release();
+		await new Promise(resolve => setImmediate(resolve));
+	})();
+});
+
+test('BUG-016: ending the source tells every subscriber instead of going silent', async () => {
+	const { bridge } = bridgeWith({
+		sessionController: {
+			...sessionControllerStub(),
+			follow: () => (async function* () { yield { type: 'snapshot', seq: 1 }; })(),
+		},
+	});
+	const seen = [];
+	bridge.follow({ viewId: 'v-1', generation: 1, sessionId: 's-1' }, frame => seen.push(frame.type));
+	await new Promise(resolve => setImmediate(resolve));
+	await new Promise(resolve => setImmediate(resolve));
+	assert.deepEqual(seen, ['snapshot', 'follow-ended'], 'a finished stream must announce its end');
+});
+
+test('BUG-016: releasing an old handle never deletes a newer subscription', async () => {
+	let opened = 0;
+	const { bridge } = bridgeWith({
+		sessionController: {
+			...sessionControllerStub(),
+			follow: () => { opened += 1; return (async function* () { await new Promise(() => undefined); })(); },
+		},
+	});
+	const first = bridge.follow({ viewId: 'v-1', generation: 1, sessionId: 's-1' }, () => undefined);
+	assert.equal(opened, 1);
+	first.dispose();
+	// 新订阅建立后再释放旧句柄：不能把新的那条删掉。
+	const second = bridge.follow({ viewId: 'v-1', generation: 1, sessionId: 's-1' }, () => undefined);
+	first.dispose();
+	assert.equal(bridge._follows.has('s-1'), true, 'a stale handle must not delete the live follow');
+	second.dispose();
+	assert.equal(bridge._follows.has('s-1'), false, 'the last owner releases the shared follow');
+});
+
 test('a decision of the wrong kind does not settle the waiting request', async () => {
 	const { bridge } = bridgeWith();
 	bridge.open({ view: 'chat', params: { sessionId: 's-1' } });

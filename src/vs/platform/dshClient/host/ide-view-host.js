@@ -209,6 +209,14 @@ async function optionalCallAsync(ctx, name, method) {
 	}
 }
 
+/**
+ * 单条流的待送帧上限。
+ *
+ * 慢消费者（窗口卡顿、渲染阻塞）会让队列无限增长；到上限时丢弃旧增量并插入
+ * 一条 `follow-overflow` 控制帧，让上层重读基线，而不是把内存耗光或静默错位。
+ */
+const DSH_IDE_FOLLOW_BUFFER_LIMIT = 512;
+
 /** 审批结果映射：DTO 的两个字面量 → DSH 的 ApprovalOutcome。 */
 export function approvalOutcome(decision) {
 	if (decision === 'approve') {
@@ -404,19 +412,40 @@ export class DshIdeHostBridge {
 		return this._attachFollow(sessionId, onEvent);
 	}
 
-	/** 已确定会话 id 时挂上共享跟随。 */
+	/**
+	 * 已确定会话 id 时挂上共享跟随。
+	 *
+	 * 同一会话仍只开一条官方流，但每位订阅者都必须拿到**一致的首帧**：
+	 * 后来者若只收到之后的增量，它就没有基线，画面会缺掉开头那段。
+	 * 因此先重放已记录的 opening 帧，再加入实时分发。
+	 * @param {string} sessionId
+	 * @param {(frame: unknown) => void} onEvent
+	 */
 	_attachFollow(sessionId, onEvent) {
 		const shared = this._ensureFollow(sessionId);
 		shared.listeners.add(onEvent);
 		shared.ref += 1;
+		// 基线重放：只给新订阅者，不影响已经收到过它的老订阅者。
+		for (const frame of shared.opening) {
+			try {
+				onEvent(frame);
+			} catch {
+				// 单个订阅者抛错不影响其它订阅者。
+			}
+		}
 		return {
 			dispose: () => {
 				if (!shared.listeners.delete(onEvent)) {
 					return;
 				}
 				shared.ref -= 1;
-				if (shared.ref <= 0) {
-					shared.abort.abort();
+				if (shared.ref > 0) {
+					return;
+				}
+				// 最后一个订阅者释放：结束共享流。
+				// 只删「自己这一份」——期间若已换成新的一条，不能把新的删掉。
+				shared.abort.abort();
+				if (this._follows.get(sessionId) === shared) {
 					this._follows.delete(sessionId);
 				}
 			},
@@ -439,8 +468,18 @@ export class DshIdeHostBridge {
 		const queue = [];
 		let wake = () => undefined;
 		let closed = false;
+		let ended = false;
 		const handle = this.follow(adopted, frame => {
+			// 慢消费者不得无界增长：超过上限时丢掉最旧的增量帧，并明确告知
+			// 「你落后了、需要重读基线」，而不是静默截断成一条错误的会话。
+			if (queue.length >= DSH_IDE_FOLLOW_BUFFER_LIMIT) {
+				queue.length = 0;
+				queue.push({ type: 'follow-overflow' });
+			}
 			queue.push(frame);
+			if (frame !== null && typeof frame === 'object' && frame.type === 'follow-ended') {
+				ended = true;
+			}
 			const notify = wake;
 			wake = () => undefined;
 			notify();
@@ -466,6 +505,10 @@ export class DshIdeHostBridge {
 		try {
 			while (!closed && (signal === undefined || signal.aborted !== true)) {
 				if (queue.length === 0) {
+					if (ended) {
+						// 源已经结束且没有待送帧：正常收尾，不再等待。
+						return;
+					}
 					await new Promise(resolve => { wake = resolve; });
 					continue;
 				}
@@ -478,13 +521,33 @@ export class DshIdeHostBridge {
 		}
 	}
 
+	/**
+	 * 通知这条共享流的订阅者：源已结束。
+	 *
+	 * 用一条显式的控制帧而不是静默删表：删表只影响「下一次订阅」，
+	 * 已经在等的订阅者收不到任何信号，表现为聊天永久停在最后一帧。
+	 * @param {{ listeners: Set<(frame: unknown) => void> }} shared
+	 */
+	_notifyFollowEnded(shared) {
+		const frame = { type: 'follow-ended' };
+		for (const listener of [...shared.listeners]) {
+			try {
+				listener(frame);
+			} catch {
+				// 单个订阅者抛错不影响其它订阅者。
+			}
+		}
+	}
+
 	_ensureFollow(sessionId) {
 		const existing = this._follows.get(sessionId);
 		if (existing !== undefined) {
 			return existing;
 		}
 		const abort = new AbortController();
-		const shared = { abort, listeners: new Set(), ref: 0 };
+		// `opening` 记下第一条 snapshot（基线）；`ended` 让后来者知道源已经结束，
+		// 而不是无限等待一条永远不会再来的流。
+		const shared = { abort, listeners: new Set(), ref: 0, opening: [], ended: false };
 		this._follows.set(sessionId, shared);
 		const controller = service(this.ctx, 'sessionController');
 		const pump = async () => {
@@ -494,6 +557,11 @@ export class DshIdeHostBridge {
 					assistantStream: true,
 				}, abort.signal);
 				for await (const frame of frames) {
+					// 基线只记第一条 snapshot：后来订阅者靠它得到一致的首帧。
+					if (shared.opening.length === 0 && frame !== null && typeof frame === 'object'
+						&& (frame.type === 'snapshot' || frame.type === 'snapshot-required')) {
+						shared.opening.push(frame);
+					}
 					for (const listener of [...shared.listeners]) {
 						try {
 							listener(frame);
@@ -503,14 +571,27 @@ export class DshIdeHostBridge {
 					}
 				}			} catch (error) {
 				if (abort.signal.aborted) {
+					// 主动释放：这是预期结束，不当作故障上报。
+					shared.ended = true;
+					this._notifyFollowEnded(shared);
 					return;
 				}
 				const message = error && error.message ? error.message : String(error);
 				console.warn(`[dsh-ide] session follow ended: ${message}`);
+				// 异常结束同样要通知：订阅者必须知道这条流不会再来了，
+				// 不能让它一直停在等待上。
+				shared.ended = true;
+				this._notifyFollowEnded(shared);
 			} finally {
-				// 官方流结束（或被传输层断掉）后必须摘掉缓存条目：否则后续窗口
-				// `_ensureFollow` 会拿到这条已经死掉的流，加监听收不到任何帧，
-				// 表现为「连上了 Host、会话列表也在，但聊天永远空白且不报错」。
+				// 正常结束（生成器自然返回）与异常结束都走这里：先通知订阅者，
+				// 再摘掉缓存条目。只通知一次，避免 catch 与 finally 重复广播。
+				if (!shared.ended) {
+					shared.ended = true;
+					this._notifyFollowEnded(shared);
+				}
+				// 官方流结束后必须摘掉缓存条目：否则后续窗口 `_ensureFollow` 会拿到
+				// 这条已经死掉的流，加监听收不到任何帧，表现为「连上了 Host、
+				// 会话列表也在，但聊天永远空白且不报错」。
 				if (this._follows.get(sessionId) === shared) {
 					this._follows.delete(sessionId);
 				}
