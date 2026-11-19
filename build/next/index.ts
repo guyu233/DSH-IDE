@@ -4,6 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import * as esbuild from 'esbuild';
+import { spawnSync } from 'node:child_process';
 import * as fs from 'fs';
 import * as path from 'path';
 import { promisify } from 'util';
@@ -638,22 +639,32 @@ async function bundle(outDir: string, doMinify: boolean, doNls: boolean, doMangl
 	// Syntax-check JS files that were post-processed (mangle-privates, NLS).
 	// These steps do raw string surgery on bundled JS so a bug could silently
 	// produce syntactically broken output. Catch it here at build time.
-	// Uses esbuild.transform() as a parser since the bundles are ESM.
 	const postProcessedFiles = new Set([...mangleEdits.keys(), ...nlsEdits.keys()]);
 	if (postProcessedFiles.size > 0) {
-		const errors = (await Promise.all([...postProcessedFiles].map(async jsPath => {
+		// Node 从标准输入严格解析 ESM，不使用 esbuild 的大文件临时通道；读失败也不能当作通过。
+		const errors: { rel: string; message: string }[] = [];
+		for (const jsPath of postProcessedFiles) {
 			try {
-				const src = await fs.promises.readFile(jsPath, 'utf-8');
-				await esbuild.transform(src, { loader: 'js', format: 'esm' });
-				return undefined;
-			} catch (e: unknown) {
+				const result = spawnSync(process.execPath, ['--check', '--input-type=module'], {
+					input: await fs.promises.readFile(jsPath),
+					encoding: 'utf8',
+					windowsHide: true,
+				});
+				if (result.error) {
+					throw result.error;
+				}
+				if (result.status !== 0) {
+					throw new Error(result.stderr.trim() || `Node syntax checker exited with ${result.signal ?? result.status}`);
+				}
+			} catch (error) {
 				const rel = path.relative(path.join(REPO_ROOT, outDir), jsPath);
-				const message = e instanceof Error ? e.message : String(e);
-				return { rel, message };
+				const message = error instanceof Error ? error.message : String(error);
+				errors.push({ rel, message });
 			}
-		}))).filter(error => error !== undefined).sort((a, b) => a.rel.localeCompare(b.rel));
+		}
+		errors.sort((a, b) => a.rel.localeCompare(b.rel));
 		if (errors.length > 0) {
-			throw new Error(`[bundle] Syntax errors in post-processed JS files:\n${errors.map(e => `${e.rel}: ${e.message}`).join('\n')}`);
+			throw new Error(`[bundle] Could not validate post-processed JS files:\n${errors.map(e => `${e.rel}: ${e.message}`).join('\n')}`);
 		}
 		console.log(`[bundle] Syntax check passed for ${postProcessedFiles.size} post-processed JS files`);
 	}

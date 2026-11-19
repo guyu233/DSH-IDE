@@ -9,12 +9,7 @@ import { ISandboxConfiguration } from '../../../base/parts/sandbox/common/sandbo
 
 interface IPackageConfiguration {
 	readonly version: string;
-	readonly copilotRuntimeVersion?: string;
 	readonly dependencies?: Readonly<Record<string, string>>;
-}
-
-function getDependencyVersion(packageConfiguration: IPackageConfiguration, packageName: string): string | undefined {
-	return packageConfiguration.dependencies?.[packageName]?.replace(/^[~^]/, '');
 }
 
 /**
@@ -59,12 +54,6 @@ else if (globalThis._VSCODE_PRODUCT_JSON && globalThis._VSCODE_PACKAGE_JSON) {
 		});
 	}
 
-	if (!product.copilotVersions) {
-		const sdk = getDependencyVersion(packageConfiguration, '@github/copilot-sdk');
-		if (packageConfiguration.copilotRuntimeVersion && sdk) {
-			Object.assign(product, { copilotVersions: { runtime: packageConfiguration.copilotRuntimeVersion, sdk } });
-		}
-	}
 }
 
 // Web environment or unknown

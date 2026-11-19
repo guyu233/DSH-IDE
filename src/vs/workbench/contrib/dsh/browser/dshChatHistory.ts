@@ -115,6 +115,9 @@ export interface DshHistoryExtras {
 	};
 	readonly todos?: readonly { readonly content: string; readonly status: string }[];
 	readonly skills?: readonly { readonly name: string; readonly description: string }[];
+	/** 共享任务板；`enabled` 为 false 时只显示开关状态，不展示任务。 */
+	readonly worktrees?: readonly { readonly path: string; readonly branch: string; readonly created: boolean }[];
+	readonly team?: { readonly enabled: boolean; readonly tasks: readonly { readonly id: string; readonly subject: string; readonly status: string; readonly ready: boolean; readonly ownerName?: string }[]; readonly failure?: string };
 	readonly quotaNotice?: { readonly code: string; readonly seq: number };
 	readonly attachments?: readonly { readonly attachmentId: string; readonly name?: string; readonly mediaType: string }[];
 	readonly deliverables?: readonly DshHistoryDeliverable[];
@@ -129,6 +132,8 @@ export interface DshHistoryExtrasSource {
 	goal(): DshHistoryExtras['goal'];
 	todos(): readonly { readonly content: string; readonly status: string }[];
 	skills(): readonly { readonly name: string; readonly description: string }[];
+	team(): DshHistoryExtras['team'];
+	worktrees(): DshHistoryExtras['worktrees'];
 }
 
 /**
@@ -147,6 +152,8 @@ export function extrasOf(source: DshHistoryExtrasSource): DshHistoryExtras {
 		goal: source.goal(),
 		todos: source.todos(),
 		skills: source.skills(),
+		team: source.team(),
+		worktrees: source.worktrees(),
 	};
 }
 
@@ -332,6 +339,20 @@ function appendExtras(extras: DshHistoryExtras, history: DshHistoryItem[]): void
 	}
 	if (extras.skills !== undefined && extras.skills.length > 0) {
 		push({ kind: 'info', content: { value: `可用技能：${extras.skills.map(skill => skill.name).join('、')}` } });
+	}
+	if (extras.worktrees !== undefined && extras.worktrees.length > 0) {
+		push({ kind: 'info', content: { value: `工作树 ${extras.worktrees.length} 个：${extras.worktrees.map(worktree => `${worktree.branch}${worktree.created ? '' : '（继承）'}`).join('、')}` } });
+	}
+	if (extras.team !== undefined && extras.team.tasks.length > 0) {
+		const done = extras.team.tasks.filter(task => task.status === 'completed').length;
+		push({
+			kind: 'progressTaskSerialized',
+			content: { value: `共享任务 ${done}/${extras.team.tasks.length}` },
+			progress: extras.team.tasks.map(task => ({
+				kind: 'warning' as const,
+				content: { value: `[${task.status}] ${task.subject}${task.ownerName === undefined ? '' : `（${task.ownerName}）`}` },
+			})),
+		});
 	}
 	if (extras.attachments !== undefined && extras.attachments.length > 0) {
 		push({ kind: 'info', content: { value: `会话附件 ${extras.attachments.length} 个` } });

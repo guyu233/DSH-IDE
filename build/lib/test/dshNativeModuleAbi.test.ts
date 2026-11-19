@@ -31,7 +31,6 @@ const nodeModules = path.join(repoRoot, 'node_modules');
 const NATIVE_MODULES = [
 	{ pkg: 'node-pty', expect: ['conpty', 'conpty_console_list'] },
 	{ pkg: '@vscode/spdlog', expect: ['spdlog'] },
-	{ pkg: '@vscode/sqlite3', expect: ['vscode-sqlite3'] },
 	{ pkg: '@vscode/windows-process-tree', expect: ['windows_process_tree'] },
 	{ pkg: '@parcel/watcher', expect: ['watcher'] },
 ];
@@ -151,10 +150,12 @@ test('D56 NAPI modules register via napi_register_module_v1 and carry no NODE_MO
 // 发现的真实缺陷：`node-pty` 原先声明在 `devDependencies`，而打包用
 // `npm ls --all --omit=dev` 收集生产依赖 → 它被排除，产物里缺 node-pty，
 // 终端在打包版里无法启动。其余 4 个模块一直在 `dependencies`。
-// 本测试把「5 个模块都在 dependencies、且都不在 devDependencies」钉死。
+// 本测试把「清单内模块都在 dependencies、且都不在 devDependencies」钉死。
+// DSH-IDE：`@vscode/sqlite3` 已由内置 `node:sqlite` 取代（`base/parts/storage/node/sqliteDriver.ts`），
+// 不再随包分发原生绑定，因此从本清单移除。
 // ---------------------------------------------------------------------------
 
-test('the five native modules are declared as production dependencies', () => {
+test('the remaining native modules are declared as production dependencies', () => {
 	const pkg = JSON.parse(fs.readFileSync(path.join(repoRoot, 'package.json'), 'utf8')) as {
 		dependencies?: Record<string, string>;
 		devDependencies?: Record<string, string>;

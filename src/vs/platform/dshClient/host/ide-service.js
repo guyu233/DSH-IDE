@@ -4,7 +4,6 @@
 // v2 / Q5：agent 的读写/终端/LSP 已由官方 tool-fs/tool-bash/tool-lsp 在 Host 内提供；
 // 本服务只补「Host 侧能算、VS Code 需要」的极薄能力：
 //   - ping()            连通自检
-//   - inlineComplete(prefix, suffix, languageId, filePath)  行内补全（后端 ctx.llm.stream 真实现）
 //
 // 说明（已核验 app.asar 源码）：
 //   - Typert Gateway 的 SRC 模式会从 Service 的 `typertRemote` 绑定 + 原型上的 @Remote marker 描述符
@@ -19,6 +18,7 @@ import { dirname, join } from 'node:path';
 import { Service } from '@deepseek-ai/cordis';
 import { bindTypertRemote } from '@deepseek-ai/dsh-typert-protocol';
 import { materializeElectronHome } from './electron-home.js';
+import { DSH_IDE_HOST_PTY_PATH, DSH_IDE_HOST_RG_PATH, resolveHostNodePty, resolveHostRipgrep } from './host-ripgrep.js';
 import { IdeLaunchQueue, ideWorkspaceArgs } from './ide-launch-queue.js';
 // Host 与 IDE 共用同一份契约真源：字段白名单、方法校验与修订号只有一处定义。
 import {
@@ -172,10 +172,15 @@ export class IdeRemoteService extends Service {
       return { ok: false, message: home.message };
     }
     try {
+      // 只把宿主搜索工具路径交给 IDE；不创建链接、不复制文件，避免任何清理动作影响宿主安装。
+      const hostRipgrep = await resolveHostRipgrep();
+      const hostNodePty = await resolveHostNodePty();
       // `process.execPath` 所属目录就是 DSH 自带的 Electron 发行版；`home.exe` 是它的硬链接副本，
       // **位于我们自己的 `resources/app` 旁边**，因此它会加载我们的载荷（实测窗口标题 = DSH IDE）。
       const env = { ...process.env };
       delete env.ELECTRON_RUN_AS_NODE;
+      env[DSH_IDE_HOST_RG_PATH] = hostRipgrep;
+      env[DSH_IDE_HOST_PTY_PATH] = hostNodePty;
       env.DSH_IDE_ENDPOINT = endpoint.origin;
       env.DSH_IDE_LAUNCH_URL = endpoint.launchUrl;
       // 端点文件路径（本插件的 runtime 目录）：IDE 失联后据此重新发现新的 origin。
@@ -401,59 +406,16 @@ export class IdeRemoteService extends Service {
     return undefined;
   }
 
-  /**
-   * 行内补全：用官方 llm.stream 生成一段补全文本（后端 DSH）。
-   * @returns {{ text: string }}；任何失败都返回空串（客户端优雅降级，不抛）。
-   */
-  async inlineComplete(prefix, suffix, languageId, filePath) {
-    try {
-      const llm = this.ctx.get && this.ctx.get('llm');
-      if (!llm || typeof llm.stream !== 'function') { return { text: '' }; }
-      const dm = this.ctx.get && this.ctx.get('agentDefaultModel');
-      const sel = (dm && typeof dm.currentSelection === 'function') ? dm.currentSelection() : undefined;
-      if (!sel || !sel.provider || !sel.model) { return { text: '' }; }
-      const prompt = [
-        'You are an inline code completion engine. Continue the code at the cursor.',
-        'Return ONLY the exact text to insert at the cursor. No prose, no backticks, no explanation.',
-        `Language: ${languageId || 'text'}`,
-        filePath ? `File: ${filePath}` : '',
-        '<prefix>',
-        String(prefix || ''),
-        '</prefix>',
-        '<suffix>',
-        String(suffix || ''),
-        '</suffix>',
-      ].filter(Boolean).join('\n');
-      const request = {
-        provider: sel.provider,
-        model: sel.model,
-        messages: [{ role: 'user', content: [{ type: 'text', text: prompt }] }],
-        maxTokens: 192,
-        ...(sel.reasoningEffort === undefined ? {} : { reasoningEffort: sel.reasoningEffort }),
-      };
-      const stream = llm.stream(request);
-      let text = '';
-      for await (const chunk of stream) {
-        if (!chunk || typeof chunk !== 'object') { continue; }
-        if (chunk.type === 'text-delta' && typeof chunk.text === 'string') { text += chunk.text; }
-        else if (chunk.type === 'finish') { break; }
-      }
-      return { text: text.trim() };
-    } catch {
-      return { text: '' };
-    }
-  }
 
 }
 
-// 原型 @Remote marker 描述符（等价 @Remote('ping'|'inlineComplete') 的生成物，SRC 源模式发现用）。
+// 原型 @Remote marker 描述符（等价 @Remote('ping') 的生成物，SRC 源模式发现用）。
 Object.defineProperty(IdeRemoteService.prototype, REMOTE_METHOD_DESCRIPTOR, {
   configurable: true,
   value: {
     version: 1,
     methods: [
       { method: 'ping', invocation: { kind: 'direct' } },
-      { method: 'inlineComplete', invocation: { kind: 'direct' } },
       { method: 'launch', invocation: { kind: 'direct' } },
       { method: 'registerIdeClient', invocation: { kind: 'direct' } },
       { method: 'unregisterIdeClient', invocation: { kind: 'direct' } },

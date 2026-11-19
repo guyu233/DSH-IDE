@@ -19,7 +19,8 @@ import { FlowControlConstants, IShellLaunchConfig, ITerminalChildProcess, ITermi
 import { ChildProcessMonitor } from './childProcessMonitor.js';
 import { getShellIntegrationInjection, IShellIntegrationConfigInjection, sanitizeEnvForLogging } from './terminalEnvironment.js';
 import { WindowsShellHelper } from './windowsShellHelper.js';
-import { IPty, IPtyForkOptions, IWindowsPtyForkOptions, spawn } from 'node-pty';
+import type { IPty, IPtyForkOptions, IWindowsPtyForkOptions } from 'node-pty';
+import { loadNodePty } from './nodePtyLoader.js';
 import { isNumber } from '../../../base/common/types.js';
 import { getWindowsBuildNumberSync } from '../../../base/node/windowsVersion.js';
 
@@ -317,7 +318,8 @@ export class TerminalProcess extends Disposable implements ITerminalChildProcess
 		}
 		const sanitizedOptions = { ...options, env: sanitizeEnvForLogging(options.env as IProcessEnvironment | undefined) };
 		this._logService.trace('node-pty.IPty#spawn', shellLaunchConfig.executable, args, sanitizedOptions);
-		const ptyProcess = spawn(shellLaunchConfig.executable!, args, options);
+		const { spawn } = await loadNodePty();
+const ptyProcess = spawn(shellLaunchConfig.executable!, args, options);
 		this._ptyProcess = ptyProcess;
 		this._childProcessMonitor = this._register(new ChildProcessMonitor(ptyProcess.pid, this._logService));
 		this._register(this._childProcessMonitor.onDidChangeHasChildProcesses(value => this._onDidChangeProperty.fire({ type: ProcessPropertyType.HasChildProcesses, value })));

@@ -26,9 +26,8 @@ import { createAsar } from './lib/asar.ts';
 import minimist from 'minimist';
 import { compileNonNativeExtensionsBuildTask, compileNativeExtensionsBuildTask, compileAllExtensionsBuildTask, compileExtensionMediaBuildTask, cleanExtensionsBuildTask } from './gulpfile.extensions.ts';
 import { checkApiProposalNamesTask, copyCodiconsTask } from './lib/compilation.ts';
-import { getRipgrepExcludeFilter } from './lib/ripgrep.ts';
+import { getDshNodePtyPayloadFilter, getDshRipgrepPayloadFilter, getRipgrepExcludeFilter } from './lib/ripgrep.ts';
 import { ensureOSProxyResolverPlatformPackage, getOSProxyResolverExcludeFilter, getOSProxyResolverPlatformFiles } from './lib/osProxyResolver.ts';
-import { readDictationRuntimeResults } from './dictation-runtime/common.ts';
 import { promisify } from 'util';
 import globCallback from 'glob';
 import rceditCallback from 'rcedit';
@@ -36,6 +35,7 @@ import { spawnTsgo } from './lib/tsgo.ts';
 import { runEsbuildTranspile, runEsbuildBundle, getBootstrapEntryPointsForTarget } from './lib/esbuild.ts';
 import { generateNodeCompileCache, shouldGenerateNodeCompileCache } from './lib/nodeCompileCache.ts';
 import { captureDshBuildProvenance, type DshBuildProvenance } from './lib/dshBuildProvenance.ts';
+import { dedupeExtensionOutputs } from './lib/dsh/dedupeExtensionOutputs.ts';
 
 const glob = promisify(globCallback);
 const rcedit = promisify(rceditCallback);
@@ -100,16 +100,6 @@ function computeChecksum(filename: string): string {
 		.replace(/=+$/, '');
 
 	return hash;
-}
-
-// foundry-local-sdk (on-device chat dictation) loads its N-API addons and shared
-// libraries from the per-user runtime cache. Exclude the package's native files,
-// which may require a newer glibc than VS Code's supported maximum.
-function getFoundryLocalExcludeFilter(): string[] {
-	return [
-		'**',
-		'!**/foundry-local-sdk/prebuilds/**',
-	];
 }
 
 function packageTask(platform: string, arch: string, sourceFolderName: string, destinationFolderName: string, _opts?: { stats?: boolean; appOnly?: boolean }) {
@@ -182,13 +172,6 @@ function packageTask(platform: string, arch: string, sourceFolderName: string, d
 				json.date = readISODate(out);
 				json.checksums = checksums;
 				json.version = version;
-				// Stamp dictationRuntime from the per-platform results file
-				// produced by `build/dictation-runtime/produce.ts`. Local dev /
-				// unsupported target: file absent → undefined → not stamped.
-				const dictationRuntime = readDictationRuntimeResults();
-				if (!_opts?.appOnly && dictationRuntime) {
-					json.dictationRuntime = dictationRuntime;
-				}
 				return json;
 			}))
 			.pipe(es.through(function (file) {
@@ -222,7 +205,6 @@ function packageTask(platform: string, arch: string, sourceFolderName: string, d
 		const deps = es.merge(cleanedDeps, osProxyResolverPlatformPackage)
 			.pipe(filter(['**', '!**/node_modules/@github/copilot/**', '!**/node_modules/@github/copilot-*/**', '!**/node_modules/@github/copilot-sdk/**', '!**/node_modules/@github/copilot-sdk-*/**']))
 			.pipe(filter(getRipgrepExcludeFilter(platform, arch)))
-			.pipe(filter(_opts?.appOnly ? ['**', '!**/foundry-local-sdk/**'] : getFoundryLocalExcludeFilter()))
 			.pipe(filter(getOSProxyResolverExcludeFilter(platform, arch)))
 			.pipe(jsFilter)
 			.pipe(util.rewriteSourceMappingURL(sourceMappingURLBase))
@@ -230,9 +212,6 @@ function packageTask(platform: string, arch: string, sourceFolderName: string, d
 			.pipe(createAsar(path.join(process.cwd(), 'node_modules'), [
 				'**/*.node',
 				'**/@vscode/ripgrep-universal/bin/**',
-				// The Dev Container CLI is spawned as an external Node process,
-				// so its bundled entrypoint must be available outside the ASAR.
-				'**/@devcontainers/cli/**',
 				'**/*.wasm',
 				'**/@vscode/vsce-sign/bin/*',
 			], [
@@ -248,6 +227,13 @@ function packageTask(platform: string, arch: string, sourceFolderName: string, d
 				'node_modules/zod/**'
 			], 'node_modules.asar'));
 
+		// 只裁 DSH Windows 插件的物理副本；扩展仍能通过原 ASAR 索引找到由 Host 物化的文件。
+		const shippedDeps = _opts?.appOnly && platform === 'win32'
+			? deps
+				.pipe(filter(getDshRipgrepPayloadFilter(arch), { dot: true }))
+				.pipe(filter(getDshNodePtyPayloadFilter(arch), { dot: true }))
+			: deps;
+
 		const mergeStreams = [
 			packageJsonStream,
 			productJsonStream,
@@ -255,17 +241,20 @@ function packageTask(platform: string, arch: string, sourceFolderName: string, d
 			api,
 			telemetry,
 			sources,
-			deps
+			shippedDeps
 		];
 		let all = es.merge(...mergeStreams);
 
 		// DSH ships the exact upstream app stream, before platform launchers or Electron wrapping.
 		// Electron is supplied by the host at launch time; no executable is copied here.
 		if (_opts?.appOnly) {
+			// DSH-IDE：不要任何音频。音频都在 `out/` 下，`.moduleignore` 只管 `node_modules`，
+			// 因此必须在这里过滤。两类都不影响功能：无障碍提示音由 `playSound()` 的 catch 兜底，
+			// 语音试听（agentsVoice 引导页）在音频缺失时同样只是播不出声。
 			return inlineMeta(all
 				.pipe(util.skipDirectories())
 				.pipe(util.fixWin32DirectoryPermissions())
-				.pipe(filter(['**', '!**/.github/**'], { dot: true })), {
+				.pipe(filter(['**', '!**/.github/**', '!**/*.mp3'], { dot: true })), {
 				targetPaths: getBootstrapEntryPointsForTarget('desktop').map(entry => `${entry}.js`),
 				packageJsonFn: () => packageJsonContents,
 				productJsonFn: () => productJsonContents
@@ -608,7 +597,9 @@ BUILD_TARGETS.forEach(buildTarget => {
 				minified && useCdnSourceMapsForPackagingTasks ? `${sourceMappingURLBase}/core` : undefined
 			)
 		);
-		const appStagingRoot = path.join('dist', '.dsh-ide-staging', `${platform}-${arch}`);
+		// 暂存根可由 `DSH_IDE_STAGING_ROOT` 覆盖：Windows 上 Defender 实时保护会长时间占用
+		// `node_modules.asar`，导致 rimraf 失败；指向别处即可绕开，默认仍是仓库内 `dist`。
+		const appStagingRoot = path.join(process.env['DSH_IDE_STAGING_ROOT'] ?? 'dist', '.dsh-ide-staging', `${platform}-${arch}`);
 		const appDestination = path.join(appStagingRoot, 'runtime', 'app');
 		const packageAppTask = task.series(
 			compileNativeExtensionsBuildTask,
@@ -636,9 +627,11 @@ BUILD_TARGETS.forEach(buildTarget => {
 			() => verifyDshBuildProvenance(appStagingRoot)
 		));
 		task.task(appTask);
-		// 非 minified 注册 dsh-ide-pack；minified 注册 dsh-ide-pack-min。两条都走同一套 staging（D29）。
-		if (process.platform === platform && process.arch === arch) {
-			const dshIdePackTask = task.define(minified ? 'dsh-ide-pack-min' : 'dsh-ide-pack', task.series(appTask, async () => {
+		// 只产出 minified 载荷：标准构建（保留 *.js.map）已移除——source map 占安装后体积的 41%，
+		// 对插件分发没有收益。`dsh-ide-pack` 与 `dsh-ide-pack-min` 都指向同一套 minified staging，
+		// 保留旧名字只为不打断既有脚本与文档引用。
+		if (process.platform === platform && process.arch === arch && minified) {
+			const dshIdePackTask = task.define('dsh-ide-pack', task.series(appTask, async () => {
 				const stagingRoot = path.join(buildRoot, appStagingRoot);
 				// bundle 根清单由官方构建生成（§3.7：不再手维护 dsh-ide/ 目录）：
 				//   manifest 模板 + patch  ← build/lib/dsh/
@@ -683,6 +676,12 @@ BUILD_TARGETS.forEach(buildTarget => {
 				] as const) {
 					await fs.promises.copyFile(path.join(root, from), path.join(stagingRoot, to));
 				}
+				// 扩展产物去重：mermaid 为 Markdown 预览与 Notebook 各打一次包，
+				// 两个输出目录除入口外字节完全相同；保留一份、改写入口相对引用。
+				const dedupe = dedupeExtensionOutputs(path.join(stagingRoot, 'runtime', 'app', 'extensions'));
+				if (dedupe.removed > 0) {
+					console.log(`[dsh-ide-pack] dedupe: removed ${dedupe.removed} duplicate extension files, freed ${(dedupe.freedBytes / 1048576).toFixed(2)} MiB`);
+				}
 				// D55：运行期才写入的端点文件（内含一次性 query token）绝不能随包分发。
 				// 若构建机上残留了旧文件，直接删掉并记入 staging 清单校验之前。
 				await fs.promises.rm(path.join(stagingRoot, 'runtime', 'host-endpoint.json'), { force: true });
@@ -720,6 +719,8 @@ BUILD_TARGETS.forEach(buildTarget => {
 				}
 			}));
 			task.task(dshIdePackTask);
+			// 旧名字保留为别名，既有脚本与文档无需改动。
+			task.task(task.define('dsh-ide-pack-min', task.series(dshIdePackTask)));
 		}
 		if (process.platform === platform && process.arch === arch) {
 			task.task(task.define(`dsh-ide-app${dashed(minified)}`, task.series(appTask)));

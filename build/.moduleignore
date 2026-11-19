@@ -32,7 +32,9 @@ fsevents/test/**
 @vscode/fs-copyfile/build/**
 @vscode/fs-copyfile/src/**
 !@vscode/fs-copyfile/build/Release/*.node
-
+# DSH-IDE 不再使用 @vscode/sqlite3 的原生绑定（改走内置 node:sqlite），
+# 但它的源码与依赖压缩包绝不能进包：这些是构建期文件，体积约 3.2 MB。
+# 依赖本身已从 package.json 移除；此处规则用于挡住历史 node_modules 残留。
 @vscode/sqlite3/binding.gyp
 @vscode/sqlite3/benchmark/**
 @vscode/sqlite3/cloudformation/**
@@ -40,7 +42,7 @@ fsevents/test/**
 @vscode/sqlite3/test/**
 @vscode/sqlite3/build/**
 @vscode/sqlite3/src/**
-!@vscode/sqlite3/build/Release/*.node
+
 
 @vscode/windows-mutex/binding.gyp
 @vscode/windows-mutex/build/**
@@ -295,3 +297,21 @@ koffi/**
 # in websocket's browser.js inside a try/catch with a globalThis fallback,
 # so it is unnecessary in the browsers/runtimes VS Code supports.
 es5-ext/**
+# DSH-IDE：终端原生绑定改由 DSH Host 提供（`DSH_IDE_HOST_PTY_PATH` 指向宿主 node-pty），
+# 因此载荷里不需要任何平台的 prebuilds。node-pty 的 JS（lib/**）必须保留——绑定是延迟加载的，
+# 删掉 prebuilds 后 `import('node-pty')` 仍能成功，只有 spawn 时才解析二进制。
+# 6 个平台的 prebuilds 共约 23 MiB，是 asar 内最大的单项。
+node-pty/prebuilds/**
+# DSH-IDE：这两个包的运行入口都在 `dist/`（codicons 走 index.js + dist/codicon.css，
+# katex 走 dist/katex.js），`src/` 只是构建期源码，源码里没有任何引用。
+# 排除后可省约 5 MiB（codicons/src 3 MiB 的 SVG 源 + katex/src 2 MiB 的 LaTeX 源码）。
+@vscode/codicons/src/**
+@vscode/codicons/scripts/**
+@vscode/codicons/preview.png
+katex/src/**
+# DSH-IDE：只保留 TypeScript 语言服务，不需要命令行编译器。
+# `_tsc.js` 是 `tsc` 命令的入口，`tsserver.js`（语言服务）与 `typescript.js`（扩展 API）
+# 都不引用它（grep 计数为 0），删掉不影响补全/跳转/诊断。省约 6 MB。
+typescript/lib/_tsc.js
+typescript/lib/tsc.js
+

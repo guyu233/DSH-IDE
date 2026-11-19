@@ -90,7 +90,10 @@ test('DSH bundle: dsh-ide-pack stages host entries from out/ and manifest/icon f
 	const literals = dshPackLiterals();
 	assert.ok(literals.length > 0, 'dsh-ide-pack task body not found');
 	const gulpSource = fs.readFileSync(path.join(vscodeRoot, 'build/gulpfile.vscode.ts'), 'utf8');
-	assert.match(gulpSource, /minified \? 'dsh-ide-pack-min' : 'dsh-ide-pack'/, 'minified pack must be a sibling task, not a replacement');
+	// 只发布 minified 载荷：source map 占安装后体积 41%，对插件分发没有收益。
+	// `dsh-ide-pack` 指向 minified staging，`dsh-ide-pack-min` 保留为别名。
+	assert.match(gulpSource, /task\.define\('dsh-ide-pack', task\.series\(appTask/, 'dsh-ide-pack must build the minified payload');
+	assert.match(gulpSource, /task\.define\('dsh-ide-pack-min', task\.series\(dshIdePackTask\)\)/, 'dsh-ide-pack-min must remain as an alias');
 	for (const needle of ['index.js', 'client.js', 'host', 'common', 'package.json', 'cordis.patch.yml', 'icon.svg', 'locale', 'PROVENANCE.md', 'LICENSE-DSH']) {
 		assert.ok(literals.includes(needle), `dsh-ide-pack must stage ${needle}`);
 	}

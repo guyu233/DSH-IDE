@@ -9,7 +9,10 @@
 // 这里用命令 + quick pick 承接，写回仍走既有 `setTeamEnabled`（`DshComposerSource.setTeam`），不另造接口。
 
 import { DisposableStore } from '../../../../base/common/lifecycle.js';
-import { CommandsRegistry } from '../../../../platform/commands/common/commands.js';
+import { Action2, MenuId, registerAction2 } from '../../../../platform/actions/common/actions.js';
+import { CommandsRegistry, ICommandService } from '../../../../platform/commands/common/commands.js';
+import { ServicesAccessor } from '../../../../platform/instantiation/common/instantiation.js';
+import { localize2 } from '../../../../nls.js';
 import { IQuickInputService } from '../../../../platform/quickinput/common/quickInput.js';
 import { INotificationService } from '../../../../platform/notification/common/notification.js';
 import { localize } from '../../../../nls.js';
@@ -61,4 +64,20 @@ export function registerDshTeamCommands(
 		}
 	}));
 	return disposables;
+}
+/** 命令面板入口：`dsh.toggleTeam`。 */
+export function registerDshTeamAction(): { dispose(): void } {
+	const action = registerAction2(class extends Action2 {
+		constructor() {
+			super({
+				id: 'dsh.toggleTeam.palette',
+				title: localize2('dsh.team.title', "切换 DSH 团队模式"),
+				menu: { id: MenuId.CommandPalette },
+			});
+		}
+		async run(accessor: ServicesAccessor): Promise<void> {
+			await accessor.get(ICommandService).executeCommand('dsh.toggleTeam');
+		}
+	});
+	return { dispose: () => action.dispose() };
 }

@@ -67,7 +67,7 @@ export async function transcribeDshSpeech(client: Pick<IDshClientService, 'call'
 		providerId: catalog.selection.providerId,
 		language: catalog.selection.language,
 	};
-	const result = await client.call<{ readonly text: string }>('speech/transcribe', { request });
+	const result = await client.call<{ readonly text: string }>('speechTranscribe', { request });
 	if (!result.ok) {
 		throw new Error(result.error.message);
 	}

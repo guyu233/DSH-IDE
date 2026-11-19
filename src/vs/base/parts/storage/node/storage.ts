@@ -10,10 +10,10 @@ import { mapToString, setToString } from '../../../common/map.js';
 import { basename } from '../../../common/path.js';
 import { Promises } from '../../../node/pfs.js';
 import { IStorageDatabase, IStorageItemsChangeEvent, IUpdateRequest } from '../common/storage.js';
-import type { Database, Statement } from '@vscode/sqlite3';
+import { openDatabase, type IHostDatabase, type IHostStatement } from './sqliteDriver.js';
 
 interface IDatabaseConnection {
-	readonly db: Database;
+	readonly db: IHostDatabase;
 	readonly isInMemory: boolean;
 
 	isErroneous?: boolean;
@@ -327,17 +327,9 @@ export class SQLiteStorageDatabase implements IStorageDatabase {
 
 	private doConnect(path: string): Promise<IDatabaseConnection> {
 		return new Promise((resolve, reject) => {
-			import('@vscode/sqlite3').then(sqlite3 => {
-				const ctor = (this.logger.isTracing ? sqlite3.default.verbose().Database : sqlite3.default.Database);
+			try {
 				const connection: IDatabaseConnection = {
-					db: new ctor(path, (error: (Error & { code?: string }) | null) => {
-						if (error) {
-							return (connection.db && error.code !== 'SQLITE_CANTOPEN' /* https://github.com/TryGhost/node-sqlite3/issues/1617 */) ? connection.db.close(() => reject(error)) : reject(error);
-						}
-
-						// The following exec() statement serves two purposes:
-						// - create the DB if it does not exist yet
-						// - validate that the DB is not corrupt (the open() call does not throw otherwise)
+					db: openDatabase(path, db => {
 						const pragmas: string[] = [
 							'PRAGMA user_version = 1;',
 							'CREATE TABLE IF NOT EXISTS ItemTable (key TEXT UNIQUE ON CONFLICT REPLACE, value BLOB);'
@@ -348,23 +340,14 @@ export class SQLiteStorageDatabase implements IStorageDatabase {
 						if (this.busyTimeout) {
 							pragmas.push(`PRAGMA busy_timeout=${this.busyTimeout};`);
 						}
-						return this.exec(connection, pragmas.join('')).then(() => {
-							return resolve(connection);
-						}, error => {
-							return connection.db.close(() => reject(error));
-						});
+						db.exec(pragmas.join(''));
 					}),
 					isInMemory: path === SQLiteStorageDatabase.IN_MEMORY_PATH
 				};
-
-				// Errors
-				connection.db.on('error', error => this.handleSQLiteError(connection, `[storage ${this.name}] Error (event): ${error}`));
-
-				// Tracing
-				if (this.logger.isTracing) {
-					connection.db.on('trace', sql => this.logger.trace(`[storage ${this.name}] Trace (event): ${sql}`));
-				}
-			}, reject);
+				return resolve(connection);
+			} catch (error) {
+				return reject(error);
+			}
 		});
 	}
 
@@ -382,7 +365,7 @@ export class SQLiteStorageDatabase implements IStorageDatabase {
 		});
 	}
 
-	private get(connection: IDatabaseConnection, sql: string): Promise<object> {
+	private get(connection: IDatabaseConnection, sql: string): Promise<object | undefined> {
 		return new Promise((resolve, reject) => {
 			connection.db.get(sql, (error, row) => {
 				if (error) {
@@ -391,7 +374,7 @@ export class SQLiteStorageDatabase implements IStorageDatabase {
 					return reject(error);
 				}
 
-				return resolve(row);
+				return resolve(row as object | undefined);
 			});
 		});
 	}
@@ -405,7 +388,7 @@ export class SQLiteStorageDatabase implements IStorageDatabase {
 					return reject(error);
 				}
 
-				return resolve(rows);
+				return resolve(rows as { key: string; value: string }[]);
 			});
 		});
 	}
@@ -430,24 +413,17 @@ export class SQLiteStorageDatabase implements IStorageDatabase {
 		});
 	}
 
-	private prepare(connection: IDatabaseConnection, sql: string, runCallback: (stmt: Statement) => void, errorDetails: () => string): void {
+	private prepare(connection: IDatabaseConnection, sql: string, runCallback: (stmt: IHostStatement) => void, errorDetails: () => string): void {
 		const stmt = connection.db.prepare(sql);
 
-		const statementErrorListener = (error: Error) => {
+		try {
+			runCallback(stmt);
+		} catch (error) {
 			this.handleSQLiteError(connection, `[storage ${this.name}] prepare(): ${error} (${sql}). Details: ${errorDetails()}`);
-		};
-
-		stmt.on('error', statementErrorListener);
-
-		runCallback(stmt);
-
-		stmt.finalize(error => {
-			if (error) {
-				statementErrorListener(error);
-			}
-
-			stmt.removeListener('error', statementErrorListener);
-		});
+			throw error;
+		} finally {
+			stmt.finalize();
+		}
 	}
 }
 

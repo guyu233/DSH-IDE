@@ -65,13 +65,19 @@ const VALID_ARGS: Record<DshIdeMethod, unknown> = {
 	setAgentPreset: { sessionId: 's1', preset: 'create' },
 	accountGetState: { client: { version: '2.0.0', locale: 'zh-CN', timezoneOffsetSeconds: 28800 } },
 	accountGetProfile: { client: { version: '2.0.0', locale: 'zh-CN', timezoneOffsetSeconds: 28800 } },
-	addAttachment: { attachment: { attachmentId: 'img-1', mediaType: 'image/png', bytes: 3, width: 1, height: 1 } },
-	removeAttachment: { attachmentId: 'img-1' },
+	accountStartSignIn: { client: { version: '2.0.0', locale: 'zh-CN', timezoneOffsetSeconds: 28800 }, callbackOrigin: 'http://127.0.0.1:1', loginSource: 'desktop' },
+	accountCancelSignIn: { attemptId: 'attempt-1' },
 	setGoal: { sessionId: 's1', action: 'create', objective: 'ship the chat baseline' },
 	listSkills: { sessionId: 's1' },
-	openInApp: { target: 'file:///workspace/readme.md' },
-	dismissQuotaNotice: { seq: 1 },
 	capabilities: {},
+	speechCatalog: {},
+	speechTranscribe: { request: { audioBase64: 'AAAA' } },
+	inlineComplete: { prefix: 'const a = 1;' },
+	saveImageAttachment: { mediaType: 'image/png', data: 'AAAA' },
+	mcpListServers: {},
+	mcpRestartServer: { name: 'server-1' },
+	jobList: { sessionId: 's1' },
+	jobKill: { sessionId: 's1', jobId: 'job-1' },
 	renameSession: { sessionId: 's1', title: '新标题' },
 	setSessionFavorite: { sessionId: 's1' },
 	setSessionPinned: { sessionId: 's1' },
@@ -82,9 +88,21 @@ const VALID_ARGS: Record<DshIdeMethod, unknown> = {
 
 const ALL_METHODS = Object.keys(VALID_ARGS) as DshIdeMethod[];
 
-test('method whitelist has all 43 methods', () => {
-	assert.equal(ALL_METHODS.length, 43);
-	assert.equal(new Set(ALL_METHODS).size, ALL_METHODS.length);
+/** 契约自报的 method 名单：从 DSH_IDE_METHOD_KEYS 的键派生，测试不再维护第二份数字。 */
+function contractMethods(): string[] {
+	const src = readFileSync(new URL('../../../src/vs/platform/dshClient/common/dshIdeProtocol.ts', import.meta.url), 'utf8');
+	const block = /const DSH_IDE_METHOD_KEYS[\s\S]*?\n\};/.exec(src);
+	assert.ok(block !== null, 'DSH_IDE_METHOD_KEYS must exist');
+	return [...block[0].matchAll(/^\s*([a-zA-Z]+):/gm)].map(m => m[1]);
+}
+
+test('fixture covers exactly the contract method set', () => {
+	// 断言的是「夹具与契约一致」，不是「等于某个数字」：新增或删除 method 时，
+	// 只要夹具同步就通过；漏同步会明确报出多/少哪个 method。
+	const contract = contractMethods().sort();
+	const fixture = [...ALL_METHODS].sort();
+	assert.deepEqual(fixture, contract, 'VALID_ARGS must cover exactly the contract methods');
+	assert.equal(new Set(ALL_METHODS).size, ALL_METHODS.length, 'no duplicates');
 });
 
 test('validateDshIdeInput accepts every method positive case', () => {
@@ -429,4 +447,66 @@ test('setPermissionPreset contract: preset uses the same token constraint', () =
 		assert.throws(() => validateDshIdeInput('setPermissionPreset', { sessionId: 's1', preset: bad }), /slash-command token/,
 			`preset ${JSON.stringify(bad)} must be rejected`);
 	}
+});
+// ---------------------------------------------------------------------------
+// 新增通道方法的入参校验（语音 / 补全 / 附件入库 / 账号 / MCP / 作业）
+// ---------------------------------------------------------------------------
+
+test('speechTranscribe validates the request shape', () => {
+	assert.doesNotThrow(() => validateDshIdeInput('speechTranscribe', { request: { audioBase64: 'AAAA' } }));
+	assert.doesNotThrow(() => validateDshIdeInput('speechTranscribe', { request: { audioBase64: 'AAAA', providerId: 'p1', language: 'zh' } }));
+	assert.throws(() => validateDshIdeInput('speechTranscribe', {}), /must be an object/);
+	assert.throws(() => validateDshIdeInput('speechTranscribe', { request: { audioBase64: '' } }), /non-empty string/);
+	assert.throws(() => validateDshIdeInput('speechTranscribe', { request: { audioBase64: 'AAAA', unknown: 1 } }), /unknown field/);
+});
+
+test('inlineComplete enforces bounded prefix and optional suffix', () => {
+	assert.doesNotThrow(() => validateDshIdeInput('inlineComplete', { prefix: 'const a = 1;' }));
+	assert.doesNotThrow(() => validateDshIdeInput('inlineComplete', { prefix: 'x', suffix: 'y', languageId: 'ts', path: '/a.ts' }));
+	assert.throws(() => validateDshIdeInput('inlineComplete', {}), /must be a string/);
+	assert.throws(() => validateDshIdeInput('inlineComplete', { prefix: 'x'.repeat(4001) }), /exceeds 4000 characters/);
+	assert.throws(() => validateDshIdeInput('inlineComplete', { prefix: 'x', suffix: 'y'.repeat(2001) }), /exceeds 2000 characters/);
+});
+
+test('saveImageAttachment accepts only supported image media types', () => {
+	for (const mediaType of ['image/png', 'image/jpeg', 'image/webp', 'image/gif']) {
+		assert.doesNotThrow(() => validateDshIdeInput('saveImageAttachment', { mediaType, data: 'AAAA' }));
+	}
+	assert.throws(() => validateDshIdeInput('saveImageAttachment', { mediaType: 'image/svg+xml', data: 'AAAA' }), /supported image media type/);
+	assert.throws(() => validateDshIdeInput('saveImageAttachment', { mediaType: 'image/png', data: '' }), /non-empty string/);
+});
+
+test('account sign-in methods require identity and an allowed login source', () => {
+	const client = { version: '2.0.0', locale: 'zh-CN', timezoneOffsetSeconds: 28800 };
+	assert.doesNotThrow(() => validateDshIdeInput('accountStartSignIn', { client, callbackOrigin: 'http://127.0.0.1:1', loginSource: 'desktop' }));
+	assert.throws(() => validateDshIdeInput('accountStartSignIn', { client, callbackOrigin: '', loginSource: 'desktop' }), /non-empty string/);
+	assert.throws(() => validateDshIdeInput('accountStartSignIn', { client, callbackOrigin: 'http://x', loginSource: 'mobile' }), /web or desktop/);
+	assert.throws(() => validateDshIdeInput('accountCancelSignIn', {}), /non-empty string/);
+});
+
+test('MCP and job methods validate their identifiers', () => {
+	assert.doesNotThrow(() => validateDshIdeInput('mcpListServers', {}));
+	assert.doesNotThrow(() => validateDshIdeInput('mcpRestartServer', { name: 'server-1' }));
+	assert.throws(() => validateDshIdeInput('mcpRestartServer', {}), /non-empty string/);
+	assert.doesNotThrow(() => validateDshIdeInput('jobList', { sessionId: 's1' }));
+	assert.doesNotThrow(() => validateDshIdeInput('jobKill', { sessionId: 's1', jobId: 'job-1' }));
+	assert.throws(() => validateDshIdeInput('jobKill', { sessionId: 's1' }), /non-empty string/);
+});
+
+test('team and worktrees typed fields are validated and unknown shapes rejected', () => {
+	const team = {
+		enabled: true,
+		tasks: [{ id: 't-1', revision: 1, subject: 'x', description: 'y', status: 'completed', ready: true }],
+	};
+	assert.doesNotThrow(() => validateDshIdeSnapshot(snapshot({ state: { state: 'ready', view: { frame: { type: 'snapshot' }, team } } })));
+	assert.throws(
+		() => validateDshIdeSnapshot(snapshot({ state: { state: 'ready', view: { frame: { type: 'snapshot' }, team: { enabled: 'yes', tasks: [] } } } })),
+		/must be a boolean/,
+	);
+	const worktrees = [{ path: '/w', branch: 'b', baseCommit: 'c', repositoryRoot: '/r', created: true }];
+	assert.doesNotThrow(() => validateDshIdeSnapshot(snapshot({ state: { state: 'ready', view: { frame: { type: 'snapshot' }, worktrees } } })));
+	assert.throws(
+		() => validateDshIdeSnapshot(snapshot({ state: { state: 'ready', view: { frame: { type: 'snapshot' }, worktrees: [{ path: '' }] } } })),
+		/non-empty string/,
+	);
 });

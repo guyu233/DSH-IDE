@@ -27,7 +27,6 @@ import { OffsetRange } from '../../../../../editor/common/core/ranges/offsetRang
 import { localize } from '../../../../../nls.js';
 import { IConfigurationService } from '../../../../../platform/configuration/common/configuration.js';
 import { ICommandService } from '../../../../../platform/commands/common/commands.js';
-import { CommandsRegistry } from '../../../../../platform/commands/common/commands.js';
 import { IInstantiationService } from '../../../../../platform/instantiation/common/instantiation.js';
 import { ILogService } from '../../../../../platform/log/common/log.js';
 import { Progress } from '../../../../../platform/progress/common/progress.js';
@@ -330,7 +329,6 @@ export class ChatService extends Disposable implements IChatService {
 		@IChatOpenDiagnosticsService private readonly chatOpenDiagnosticsService: IChatOpenDiagnosticsService,
 	) {
 		super();
-		this.registerDshCommands();
 		this.managedPolicy = observableFromEvent(this, Event.any(			managedSettingsService.onDidChangeManagedSettings,
 			Event.filter(configurationService.onDidChangeConfiguration, event => event.affectsConfiguration(ChatConfiguration.TemporaryDefaultToLocalHarness)),
 		), () => requiresCopilotAgentHost(managedSettingsService, configurationService));
@@ -402,14 +400,6 @@ export class ChatService extends Disposable implements IChatService {
 			const models = this._sessionModels.observable.read(reader).values();
 			return Iterable.some(models, model => model.requestInProgress.read(reader));
 		});
-	}
-
-	private registerDshCommands(): void {
-		// DSH 会话列表：新建会话并切换为当前工作区活动会话（Sessions 面板的 New Session 按钮调用）。
-		const createNew = CommandsRegistry.registerCommand('dsh.newSession', async () => {
-			await this.commandService.executeCommand('workbench.action.chat.open', { isPartialQuery: true });
-		});
-		this._register(createNew);
 	}
 
 	public get editingSessions() {

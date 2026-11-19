@@ -10,7 +10,10 @@
 // → 选中即打开对应 `dsh:/<id>` 原生聊天视图。
 
 import { DisposableStore } from '../../../../base/common/lifecycle.js';
-import { CommandsRegistry } from '../../../../platform/commands/common/commands.js';
+import { Action2, MenuId, registerAction2 } from '../../../../platform/actions/common/actions.js';
+import { CommandsRegistry, ICommandService } from '../../../../platform/commands/common/commands.js';
+import { ServicesAccessor } from '../../../../platform/instantiation/common/instantiation.js';
+import { localize2 } from '../../../../nls.js';
 import { IQuickInputService, IQuickPickItem } from '../../../../platform/quickinput/common/quickInput.js';
 import { INotificationService } from '../../../../platform/notification/common/notification.js';
 import { IInstantiationService } from '../../../../platform/instantiation/common/instantiation.js';
@@ -79,4 +82,20 @@ export function registerDshSessionSearchCommands(
 		await instantiationService.invokeFunction(openSessionByResource, dshSessionResource(picked.sessionId));
 	}));
 	return disposables;
+}
+/** 命令面板入口：`dsh.searchSessions`。 */
+export function registerDshSessionSearchAction(): { dispose(): void } {
+	const action = registerAction2(class extends Action2 {
+		constructor() {
+			super({
+				id: 'dsh.searchSessions.palette',
+				title: localize2('dsh.search.title', "搜索 DSH 会话"),
+				menu: { id: MenuId.CommandPalette },
+			});
+		}
+		async run(accessor: ServicesAccessor): Promise<void> {
+			await accessor.get(ICommandService).executeCommand('dsh.searchSessions');
+		}
+	});
+	return { dispose: () => action.dispose() };
 }

@@ -3,7 +3,6 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import type { TelemetryConfig } from '@github/copilot-sdk';
 import type { URI } from '../../../../base/common/uri.js';
 import { createDecorator } from '../../../instantiation/common/instantiation.js';
 import { IAgentSessionComparisonMetadata } from '../state/sessionState.js';
@@ -43,6 +42,21 @@ export interface IAgentHostTraceContext {
 	readonly tracestate?: string;
 }
 
+/**
+ * Telemetry configuration handed to a provider SDK.
+ *
+ * 上游此前从 `@github/copilot-sdk` 导入同名类型；DSH-IDE 不随包携带该 SDK，
+ * 这里按使用到的形状在本地声明，避免对已移除依赖的类型引用。
+ */
+export interface IAgentHostSdkTelemetryConfig {
+	readonly exporterType?: string;
+	readonly otlpEndpoint?: string;
+	readonly otlpProtocol?: string;
+	readonly filePath?: string;
+	readonly sourceName?: string;
+	readonly captureContent?: boolean;
+}
+
 export interface IAgentHostNativeOTelConfig {
 	/** Signal-specific trace destination. In DB mode this is the Agent Host HTTP/JSON loopback. */
 	readonly traces?: { readonly endpoint: string; readonly protocol: 'http/json' | 'http/protobuf' | 'grpc' };
@@ -73,7 +87,7 @@ export interface IAgentHostOTelService {
 	 * starting the loopback receiver + store on first call when in DB mode.
 	 * Resolves to `undefined` when telemetry is disabled.
 	 */
-	getSdkTelemetryConfig(): Promise<TelemetryConfig | undefined>;
+	getSdkTelemetryConfig(): Promise<IAgentHostSdkTelemetryConfig | undefined>;
 
 	/** Resolve provider-neutral native SDK destinations. Logs and metrics always
 	 * use {@link IAgentHostNativeOTelConfig.external}; only traces use the DB loopback. */

@@ -30,7 +30,10 @@ async function createSpdLogLogger(name: string, logfilePath: string, filesize: n
 		}
 		return logger;
 	} catch (e) {
-		console.error(e);
+		// DSH-IDE：`@vscode/spdlog` 的原生绑定 `spdlog.node` 若未编译，日志会静默不落盘——
+		// 用户排查问题时看到的是「日志目录为空」而不是「日志后端不可用」。
+		// 这里保留原有不崩溃语义，但把原因明确写出来，并说明后果。
+		console.error('[dsh-ide] file logging is unavailable because @vscode/spdlog could not be loaded; log entries will be buffered in memory and never written to disk.', e);
 	}
 	return null;
 }

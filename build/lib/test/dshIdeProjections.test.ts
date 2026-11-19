@@ -174,3 +174,45 @@ test('skills 与 pending 的形状能过协议校验', () => {
 test('goal 为 null（未创建）时不产出字段', () => {
 	assert.deepEqual(projectDshIdeProjections(baseline({ goal: null })), {});
 });
+test('agentTeam 投影读出任务板并过协议校验', () => {
+	const fields = projectDshIdeProjections(baseline({
+		agentTeam: {
+			enabled: true,
+			tasks: [
+				{ id: 't-1', revision: 1, subject: '接入 Host', description: '把服务接上', status: 'completed', ready: true, ownerName: 'lead' },
+				{ id: 't-2', revision: 2, subject: '删旧实现', description: '清理残留', status: 'in_progress', ready: false },
+			],
+		},
+	}));
+	assert.equal(fields.team?.enabled, true);
+	assert.equal(fields.team?.tasks.length, 2);
+	assert.deepEqual(fields.team?.tasks[0], {
+		id: 't-1', revision: 1, subject: '接入 Host', description: '把服务接上', status: 'completed', ready: true, ownerName: 'lead',
+	});
+	assert.equal(fields.team?.tasks[1].ownerName, undefined);
+	assertValidView(fields);
+});
+
+test('agentTeam 形状不合时整条丢弃', () => {
+	assert.equal(projectDshIdeProjections(baseline({ agentTeam: { enabled: 'yes', tasks: [] } })).team, undefined);
+	assert.equal(projectDshIdeProjections(baseline({ agentTeam: { enabled: true, tasks: [{ id: '' }] } })).team, undefined);
+});
+
+test('worktree 投影读出创建与继承记录并过协议校验', () => {
+	const fields = projectDshIdeProjections(baseline({
+		worktree: [
+			{ worktree: { path: '/w/one', branch: 'feat-a', baseCommit: 'abc', repositoryRoot: '/repo' }, created: true },
+			{ worktree: { path: '/w/two', branch: 'feat-b', baseCommit: 'def', repositoryRoot: '/repo' }, created: false },
+		],
+	}));
+	assert.deepEqual(fields.worktrees, [
+		{ path: '/w/one', branch: 'feat-a', baseCommit: 'abc', repositoryRoot: '/repo', created: true },
+		{ path: '/w/two', branch: 'feat-b', baseCommit: 'def', repositoryRoot: '/repo', created: false },
+	]);
+	assertValidView(fields);
+});
+
+test('worktree 形状不合时整条丢弃', () => {
+	assert.equal(projectDshIdeProjections(baseline({ worktree: [{ worktree: { path: '', branch: 'b', baseCommit: 'c', repositoryRoot: 'r' } }] })).worktrees, undefined);
+	assert.equal(projectDshIdeProjections(baseline({ worktree: 'not-an-array' })).worktrees, undefined);
+});

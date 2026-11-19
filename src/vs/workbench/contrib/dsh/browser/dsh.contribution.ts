@@ -30,15 +30,19 @@ import { ILogService } from '../../../../platform/log/common/log.js';
 import { Disposable } from '../../../../base/common/lifecycle.js';
 import { registerDshChatSessionContent, registerDshAnswerCommands } from './dshChatSessionContent.js';
 import { IDshIdeSessionsService, DshIdeSessionsService } from './dshIdeSessionsService.js';
-import { registerDshSessionSearchCommands } from './dshSessionSearchCommands.js';
+import { registerDshSessionSearchAction, registerDshSessionSearchCommands } from './dshSessionSearchCommands.js';
 import { registerDshSessionMenu } from './dshSessionMenu.js';
 import { applyDshCapabilities } from './dshCapabilities.js';
 import { validateCapabilities, type DshIdeCapabilities } from '../../../../platform/dshClient/common/dshIdeProtocol.js';
-import { registerDshTeamCommands } from './dshTeamCommands.js';
+import { registerDshTeamAction, registerDshTeamCommands } from './dshTeamCommands.js';
+import { registerDshGoalAction, registerDshGoalCommand } from './dshGoalCommands.js';
+import { registerDshMcpAction, registerDshMcpCommand } from './dshMcpCommands.js';
+import { registerDshJobsAction, registerDshJobsCommand } from './dshJobsCommands.js';
 import { registerDshIconReplacement } from './dshIconReplacement.js';
 import { IQuickInputService } from '../../../../platform/quickinput/common/quickInput.js';
 import { openSessionByResource } from '../../chat/browser/agentSessions/agentSessionsOpener.js';
 import { dshSessionResource } from './dshAgentSessionsController.js';
+import { ILanguageFeaturesService } from '../../../../editor/common/services/languageFeatures.js';
 import { IInstantiationService } from '../../../../platform/instantiation/common/instantiation.js';
 import { CommandsRegistry } from '../../../../platform/commands/common/commands.js';
 import './dshAgentSessionsController.js';
@@ -60,6 +64,7 @@ class DshClientContribution extends Disposable implements IWorkbenchContribution
 		@IInstantiationService private readonly instantiationService: IInstantiationService,
 		@IContextKeyService contextKeyService: IContextKeyService,
 		@ILogService logService: ILogService,
+		@ILanguageFeaturesService languageFeatures: ILanguageFeaturesService,
 	) {
 		super();
 		// 把 DSH 模型目录注册成 Chat 的模型提供方。
@@ -72,8 +77,19 @@ class DshClientContribution extends Disposable implements IWorkbenchContribution
 		registerDshSessionMenu();
 		// 会话搜索：服务层早就实现，这里补上 quick pick 入口。
 		this._register(registerDshSessionSearchCommands(client, this._sessions, this.quickInputService, this.instantiationService, this.notifications));
+		this._register(registerDshSessionSearchAction());
 		// DSH 团队开关：原生模型选择器没有对应控件，用命令承接。
 		this._register(registerDshTeamCommands(this.quickInputService, this.notifications));
+		this._register(registerDshTeamAction());
+		// DSH 目标：Host 的 setGoal 已实现，这里补窗口入口。
+		this._register(registerDshGoalCommand(client, this.quickInputService, this.notifications));
+		this._register(registerDshGoalAction());
+		// DSH 自己的 MCP 管理；IDE 原有 MCP 扩展栈保持不动。
+		this._register(registerDshMcpCommand(client, this.quickInputService, this.notifications));
+		this._register(registerDshMcpAction());
+		// DSH 后台作业；IDE 自己的 TaskService 保持不动。
+		this._register(registerDshJobsCommand(client, this.quickInputService, this.notifications));
+		this._register(registerDshJobsAction());
 		// DSH 图标：把语义对得上的 codicon 换成官方产品图形（混合状态，未命中保留 codicon）。
 		this._register(registerDshIconReplacement());
 		const preset = readComposerPreset();
@@ -84,10 +100,8 @@ class DshClientContribution extends Disposable implements IWorkbenchContribution
 		if (preset === undefined) {
 			void composer.refresh();
 		}
-		// 行内补全**不注册**：`ide/inlineComplete` 不在唯一通道白名单里，注册后永远拿不到结果。
-		// 恢复条件见 `inlineCompletion.ts` 的说明；在此之前不假装可用，也不另开旁路。
-		// 因此本贡献点也不再注入 `ILanguageFeaturesService`——留着只为传一个不用的参数是噪音。
-		void registerDshInlineCompletions;
+		// 行内补全走唯一通道 inlineComplete。未连接或 Host 没有默认模型时提供方返回空结果。
+		this._register(registerDshInlineCompletions(languageFeatures, client));
 		const consumer = this._register(new DshIdeConsumer());
 		this._register(consumer.onDidFail((error: { readonly code: string }) => {
 			this.notifications.warn(localize(

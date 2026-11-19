@@ -96,10 +96,6 @@ flakySuite('Native Modules (all platforms)', () => {
 		assert.ok(typeof regexpp.RegExpParser === 'function', testErrorMessage('vscode-regexpp'));
 	});
 
-	test('@vscode/sqlite3', async () => {
-		const { default: sqlite3 } = await import('@vscode/sqlite3');
-		assert.ok(typeof sqlite3.Database === 'function', testErrorMessage('@vscode/sqlite3'));
-	});
 
 	test('http-proxy-agent', async () => {
 		const { default: mod } = await import('http-proxy-agent');

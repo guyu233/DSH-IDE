@@ -180,14 +180,14 @@ suite('DSH B00 redwall', () => {
 		assert.strictEqual(state.notices.length, 1, 'the user must be told the send did not happen');
 	});
 
-	test('BUG-011: an image without an ingested reference is refused instead of dropped', async () => {
+	test('BUG-011: an image without an ingested reference is not sent with a forged id', async () => {
 		const fixture = receiveSubmission(URI.parse('dsh:/A'), true, { images: [{ kind: 'image' }] });
 		await fixture.submit();
 		const state = fixture.state();
 		assert.deepStrictEqual(
 			{ sent: state.sent, inputAccepted: state.inputAccepted, requestAccepted: state.requestAccepted },
 			{ sent: [], inputAccepted: 0, requestAccepted: 0 },
-			'an unsupported image must block the send, not be silently dropped',
+			'an image without bytes must block the send, not be silently dropped',
 		);
 		assert.strictEqual(state.notices.length, 1, 'the refusal must be visible to the user');
 	});

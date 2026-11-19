@@ -81,7 +81,8 @@ export class DictationDownloadRing extends Disposable {
  */
 export function getDictationDownloadHoverMarkdown(service: Pick<IChatSpeechToTextService, 'currentBackend'>): IMarkdownString {
 	const markdown = new MarkdownString('', { supportThemeIcons: true });
-	if (service.currentBackend === 'mai') {
+	// 只有本地模型后端会下载；DSH 与云端都只是连接，不能显示成下载。
+	if (service.currentBackend !== 'nemo') {
 		markdown.appendMarkdown(localize('chatStt.hover.connectingTitle', "**Connecting to dictation service**"));
 		markdown.appendMarkdown('\n\n');
 		markdown.appendMarkdown(localize('chatStt.hover.connecting', "Establishing a connection. This happens each time you start cloud dictation. Click to cancel."));
@@ -109,9 +110,8 @@ export function getDictationDownloadHoverContent(service: Pick<IChatSpeechToText
  * message (indeterminate download or loading into memory).
  */
 export function getDictationPreparingLabel(service: IChatSpeechToTextService): string {
-	// The cloud backend connects rather than downloading a model, so describe it
-	// as connecting; there is no percentage to report.
-	if (service.currentBackend === 'mai') {
+	// 只有本地模型后端会下载；DSH 与云端都只是连接，没有百分比可报。
+	if (service.currentBackend !== 'nemo') {
 		return localize('chatStt.preparing.connecting', "Connecting to dictation service…");
 	}
 	const progress = service.modelDownloadProgress;

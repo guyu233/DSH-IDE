@@ -126,6 +126,10 @@ export interface DshIdeViewSnapshot {
 	readonly goal?: DshIdeGoalView;
 	readonly todos?: readonly DshIdeTodoView[];
 	readonly skills?: readonly DshIdeSkillView[];
+	/** 共享任务板（官方 `agentTeam` 投影）；缺席表示本帧没带。 */
+	readonly team?: DshIdeTeamView;
+	/** 本会话记录的工作树（官方 `worktree` 投影）；缺席表示本帧没带。 */
+	readonly worktrees?: readonly DshIdeWorktreeView[];
 	readonly tokenUsageDelta?: DshIdeTokenUsageDelta;
 	readonly quotaNotice?: DshIdeQuotaNotice;
 	readonly composer?: DshIdeComposerView;
@@ -322,6 +326,34 @@ export interface DshIdeGoalView {
 	readonly activation?: 'armed' | 'disarmed';
 }
 
+/** 官方 `WorktreeCreation` 的一行：这个会话创建或继承的工作树。 */
+export interface DshIdeWorktreeView {
+	readonly path: string;
+	readonly branch: string;
+	readonly baseCommit: string;
+	readonly repositoryRoot: string;
+	/** false 表示它来自 fork 继承的前缀，不是本会话创建的。 */
+	readonly created: boolean;
+}
+
+/** 官方 `TeamTaskView`（共享任务板的一行）。 */
+export interface DshIdeTeamTaskView {
+	readonly id: string;
+	readonly revision: number;
+	readonly subject: string;
+	readonly description: string;
+	readonly status: string;
+	readonly ready: boolean;
+	readonly ownerName?: string;
+}
+
+/** 官方 `agentTeam` 投影：是否启用与当前任务板。 */
+export interface DshIdeTeamView {
+	readonly enabled: boolean;
+	readonly tasks: readonly DshIdeTeamTaskView[];
+	readonly failure?: string;
+}
+
 /** 官方 `TodoItem`。 */
 export interface DshIdeTodoView {
 	readonly content: string;
@@ -498,14 +530,10 @@ export interface DshIdeMethodArgs {
 	accountGetState: { client: IDshAccountClientMetadataArgs };
 	/** 读取账号资料（显示名 / 联系方式 / 头像 URL）；仅在 `accountGetState` 为已登录时调用。 */
 	accountGetProfile: { client: IDshAccountClientMetadataArgs };
-	/**
-	 * 把一张已入库的图片放进待发送附件。
-	 * 官方没有独立的 addAttachment remote（附件随 `session/prompt` 的 content 提交），
-	 * 在落点核对完成前 Host 以 FEATURE_UNAVAILABLE 拒绝。
-	 */
-	addAttachment: { attachment: DshIdeImageAttachmentRef };
-	/** 从待发送附件里拿掉一张图片。落点未核对前同样 fail-closed。 */
-	removeAttachment: { attachmentId: string };
+	/** 开始官方浏览器授权登录；返回包含 `attempt.authorizeUrl` 的账号视图。 */
+	accountStartSignIn: { client: IDshAccountClientMetadataArgs; callbackOrigin: string; loginSource: 'web' | 'desktop' };
+	/** 取消一次进行中的登录尝试。 */
+	accountCancelSignIn: { attemptId: string };
 	/**
 	 * 官方 goal 服务的写操作（`goal/create|edit|pause|resume|complete|clear`）。
 	 * `create` 只带 objective；其余动作带 `id` + `revision`（官方 GoalRef）。
@@ -521,13 +549,6 @@ export interface DshIdeMethodArgs {
 	};
 	/** 列出当前会话可见的技能摘要。落点未核对前 fail-closed。 */
 	listSkills: { sessionId: string };
-	/**
-	 * 在 DSH 里打开一个目标。官方没有已核对的 open remote，Host fail-closed。
-	 * IDE 自己用编辑器 / `IOpenerService` 打开文件和外链，不走这个 method。
-	 */
-	openInApp: { target: string };
-	/** 关掉一条额度通知。官方 dismiss 是网页客户端本地状态，Host 在有 remote 之前 fail-closed。 */
-	dismissQuotaNotice: { seq: number };
 	/** 官方 `session/rename`。 */
 	renameSession: { sessionId: string; title: string };
 	/** 归档管理器 `setSessionFavorite`。只传会话，Host 按当前收藏状态切换。 */
@@ -542,6 +563,31 @@ export interface DshIdeMethodArgs {
 	openSessionPath: { sessionId: string };
 	/** 依赖插件能力探测：Host 读官方服务/命令的实际装载状态后返回四项布尔。 */
 	capabilities: Record<string, never>;
+	/** 读取官方 `speech/catalog`：provider、当前选择和录音上限。不选择后备识别器。 */
+	speechCatalog: Record<string, never>;
+	/**
+	 * 把一段 WAV 交给官方 `speech/transcribe`。
+	 * `request` 对齐官方 `TranscriptionRequest`，不带 Agent，也不提交会话。
+	 */
+	speechTranscribe: { request: { audioBase64: string; providerId?: string; language?: string } };
+	/**
+	 * 行内补全。只传光标前有限前缀和当前行后缀，由 Host 用已选模型生成插入文本。
+	 * 没有模型或服务未挂载时返回空文本，不另开通道。
+	 */
+	inlineComplete: { prefix: string; suffix?: string; languageId?: string; path?: string };
+	/**
+	 * 把一张尚未入库的图片交给官方 `attachments.saveImages` 入库，返回可提交的引用。
+	 * 只接受受支持的图片媒体类型；调用方不得自行伪造 attachmentId。
+	 */
+	saveImageAttachment: { mediaType: 'image/png' | 'image/jpeg' | 'image/webp' | 'image/gif'; data: string; name?: string };
+	/** 列出 DSH 自己管理的 MCP 服务器（官方 `mcpManager.list()`）；不触碰 IDE 的 MCP 扩展栈。 */
+	mcpListServers: Record<string, never>;
+	/** 重启一个 DSH 管理的 MCP 服务器（官方 `mcpManager.restart(name)`）。 */
+	mcpRestartServer: { name: string };
+	/** 列出某个会话的后台作业（官方 `jobController.list({ sessionId })` 的第一帧）。 */
+	jobList: { sessionId: string };
+	/** 终止一个后台作业（官方 `jobController.kill({ sessionId, jobId })`）。 */
+	jobKill: { sessionId: string; jobId: string };
 }
 
 /**
@@ -625,12 +671,10 @@ const DSH_IDE_METHOD_KEYS: Record<DshIdeMethod, readonly string[]> = {
 	refreshSnapshot: [],
 	accountGetState: ['client'],
 	accountGetProfile: ['client'],
-	addAttachment: ['attachment'],
-	removeAttachment: ['attachmentId'],
+	accountStartSignIn: ['client', 'callbackOrigin', 'loginSource'],
+	accountCancelSignIn: ['attemptId'],
 	setGoal: ['sessionId', 'action', 'objective', 'maxGoalRounds', 'id', 'revision'],
 	listSkills: ['sessionId'],
-	openInApp: ['target'],
-	dismissQuotaNotice: ['seq'],
 	renameSession: ['sessionId', 'title'],
 	setSessionFavorite: ['sessionId'],
 	setSessionPinned: ['sessionId'],
@@ -638,6 +682,14 @@ const DSH_IDE_METHOD_KEYS: Record<DshIdeMethod, readonly string[]> = {
 	moveSession: ['sessionId', 'workspaceId'],
 	openSessionPath: ['sessionId'],
 	capabilities: [],
+	speechCatalog: [],
+	speechTranscribe: ['request'],
+	inlineComplete: ['prefix', 'suffix', 'languageId', 'path'],
+	saveImageAttachment: ['mediaType', 'data', 'name'],
+	mcpListServers: [],
+	mcpRestartServer: ['name'],
+	jobList: ['sessionId'],
+	jobKill: ['sessionId', 'jobId'],
 };
 
 // ---------------------------------------------------------------------------
@@ -725,6 +777,19 @@ function nonEmptyString(value: unknown, label: string): string {
 function optionalString(value: unknown, label: string): void {
 	if (value !== undefined) {
 		nonEmptyString(value, label);
+	}
+}
+
+/** 有长度上限的字符串。optional 为真时允许缺省，但仍拒绝非字符串。 */
+function boundedString(value: unknown, label: string, max: number, optional = false): void {
+	if (value === undefined && optional) {
+		return;
+	}
+	if (typeof value !== 'string') {
+		throw new TypeError(`${label} must be a string`);
+	}
+	if (value.length > max) {
+		throw new TypeError(`${label} exceeds ${max} characters`);
 	}
 }
 
@@ -887,20 +952,8 @@ export function validateDshIdeInput<K extends DshIdeMethod>(command: K, args: un
 			// 逐字段对齐 DSH ImageAttachmentRef；拒绝路径/URL 形状的混入。
 			imageAttachmentRef(record['attachment'], 'DshIdeInput.readAttachment.attachment');
 			break;
-		case 'addAttachment':
-			imageAttachmentRef(record['attachment'], 'DshIdeInput.addAttachment.attachment');
-			break;
-		case 'removeAttachment':
-			nonEmptyString(record['attachmentId'], 'DshIdeInput.removeAttachment.attachmentId');
-			break;
 		case 'setGoal':
 			validateSetGoal(record);
-			break;
-		case 'openInApp':
-			nonEmptyString(record['target'], 'DshIdeInput.openInApp.target');
-			break;
-		case 'dismissQuotaNotice':
-			nonNegativeInteger(record['seq'], 'DshIdeInput.dismissQuotaNotice.seq');
 			break;
 		case 'renameSession':
 			nonEmptyString(record['sessionId'], 'DshIdeInput.renameSession.sessionId');
@@ -918,6 +971,52 @@ export function validateDshIdeInput<K extends DshIdeMethod>(command: K, args: un
 			nonEmptyString(record['sessionId'], 'DshIdeInput.openSessionPath.sessionId');
 			break;
 		case 'capabilities':
+		case 'speechCatalog':
+			break;
+		case 'speechTranscribe': {
+			const request = exactRecord(record['request'], ['audioBase64', 'providerId', 'language'], 'DshIdeInput.speechTranscribe.request');
+			nonEmptyString(request['audioBase64'], 'DshIdeInput.speechTranscribe.request.audioBase64');
+			optionalString(request['providerId'], 'DshIdeInput.speechTranscribe.request.providerId');
+			optionalString(request['language'], 'DshIdeInput.speechTranscribe.request.language');
+			break;
+		}
+		case 'inlineComplete': {
+			boundedString(record['prefix'], 'DshIdeInput.inlineComplete.prefix', 4000);
+			boundedString(record['suffix'], 'DshIdeInput.inlineComplete.suffix', 2000, true);
+			boundedString(record['languageId'], 'DshIdeInput.inlineComplete.languageId', 64, true);
+			boundedString(record['path'], 'DshIdeInput.inlineComplete.path', 1024, true);
+			break;
+		}
+		case 'mcpListServers':
+			break;
+		case 'mcpRestartServer':
+			nonEmptyString(record['name'], 'DshIdeInput.mcpRestartServer.name');
+			break;
+		case 'jobList':
+			nonEmptyString(record['sessionId'], 'DshIdeInput.jobList.sessionId');
+			break;
+		case 'jobKill':
+			nonEmptyString(record['sessionId'], 'DshIdeInput.jobKill.sessionId');
+			nonEmptyString(record['jobId'], 'DshIdeInput.jobKill.jobId');
+			break;
+		case 'saveImageAttachment': {
+			const mediaType = record['mediaType'];
+			if (mediaType !== 'image/png' && mediaType !== 'image/jpeg' && mediaType !== 'image/webp' && mediaType !== 'image/gif') {
+				throw new TypeError('DshIdeInput.saveImageAttachment.mediaType must be a supported image media type');
+			}
+			nonEmptyString(record['data'], 'DshIdeInput.saveImageAttachment.data');
+			optionalString(record['name'], 'DshIdeInput.saveImageAttachment.name');
+			break;
+		}
+		case 'accountStartSignIn':
+			accountClientMetadata(record['client'], 'DshIdeInput.accountStartSignIn.client');
+			nonEmptyString(record['callbackOrigin'], 'DshIdeInput.accountStartSignIn.callbackOrigin');
+			if (record['loginSource'] !== 'web' && record['loginSource'] !== 'desktop') {
+				throw new TypeError('DshIdeInput.accountStartSignIn.loginSource must be web or desktop');
+			}
+			break;
+		case 'accountCancelSignIn':
+			nonEmptyString(record['attemptId'], 'DshIdeInput.accountCancelSignIn.attemptId');
 			break;
 		case 'accountGetState':
 		case 'accountGetProfile':
@@ -1227,7 +1326,7 @@ export function validateDshIdeSnapshot(value: unknown): DshIdeSnapshot {
 }
 
 const DSH_IDE_VIEW_KEYS = [
-	'frame', 'conversation', 'deliverables', 'attachments', 'plan', 'goal', 'todos', 'skills',
+	'frame', 'conversation', 'deliverables', 'attachments', 'plan', 'goal', 'todos', 'skills', 'team', 'worktrees',
 	'tokenUsageDelta', 'quotaNotice', 'composer', 'pending',
 ] as const;
 
@@ -1262,6 +1361,12 @@ function validateDshIdeView(value: unknown): asserts value is DshIdeViewSnapshot
 	if (view['skills'] !== undefined) {
 		validateSkills(view['skills']);
 	}
+	if (view['team'] !== undefined) {
+		validateTeam(view['team']);
+	}
+	if (view['worktrees'] !== undefined) {
+		validateWorktrees(view['worktrees']);
+	}
 	if (view['tokenUsageDelta'] !== undefined) {
 		validateTokenUsage(view['tokenUsageDelta'], 'DshIdeSnapshot.state.view.tokenUsageDelta');
 	}
@@ -1274,6 +1379,49 @@ function validateDshIdeView(value: unknown): asserts value is DshIdeViewSnapshot
 	if (view['pending'] !== undefined) {
 		validatePending(view['pending']);
 	}
+}
+
+/** 工作树列表校验：路径、分支与仓库根必须非空。 */
+function validateWorktrees(value: unknown): void {
+	if (!Array.isArray(value)) {
+		throw new TypeError('DshIdeSnapshot.state.view.worktrees must be an array');
+	}
+	value.forEach((item, index) => {
+		const label = `DshIdeSnapshot.state.view.worktrees[${index}]`;
+		const worktree = exactRecord(item, ['path', 'branch', 'baseCommit', 'repositoryRoot', 'created'], label);
+		for (const key of ['path', 'branch', 'baseCommit', 'repositoryRoot'] as const) {
+			nonEmptyString(worktree[key], label + '.' + key);
+		}
+		if (typeof worktree['created'] !== 'boolean') {
+			throw new TypeError(label + '.created must be a boolean');
+		}
+	});
+}
+
+/** 共享任务板校验；未知 status 允许（官方是开放状态集），但 id/revision/subject 必须合法。 */
+function validateTeam(value: unknown): void {
+	const team = exactRecord(value, ['enabled', 'tasks', 'failure'], 'DshIdeSnapshot.state.view.team');
+	if (typeof team['enabled'] !== 'boolean') {
+		throw new TypeError('DshIdeSnapshot.state.view.team.enabled must be a boolean');
+	}
+	optionalString(team['failure'], 'DshIdeSnapshot.state.view.team.failure');
+	if (!Array.isArray(team['tasks'])) {
+		throw new TypeError('DshIdeSnapshot.state.view.team.tasks must be an array');
+	}
+	team['tasks'].forEach((item, index) => {
+		const label = `DshIdeSnapshot.state.view.team.tasks[${index}]`;
+		const task = exactRecord(item, ['id', 'revision', 'subject', 'description', 'status', 'ready', 'ownerName'], label);
+		nonEmptyString(task['id'], label + '.id');
+		positiveInteger(task['revision'], label + '.revision');
+		if (typeof task['subject'] !== 'string' || typeof task['description'] !== 'string') {
+			throw new TypeError(label + '.subject/description must be strings');
+		}
+		nonEmptyString(task['status'], label + '.status');
+		if (typeof task['ready'] !== 'boolean') {
+			throw new TypeError(label + '.ready must be a boolean');
+		}
+		optionalString(task['ownerName'], label + '.ownerName');
+	});
 }
 
 /** 能力快照校验（`capabilities` method 的返回值）：四项必填布尔，exactRecord 拒绝未知字段与显式 undefined。 */

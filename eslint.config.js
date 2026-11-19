@@ -1585,10 +1585,7 @@ export default defineConfig(
 					// - electron-main
 					'when': 'hasNode',
 					'allow': [
-						'@github/copilot-sdk',
 						'zod',
-						'@microsoft/dev-tunnels-contracts',
-						'@microsoft/dev-tunnels-management',
 						'@parcel/watcher',
 						'@vscode/sqlite3',
 						'@vscode/vscode-languagedetection',
@@ -1623,7 +1620,6 @@ export default defineConfig(
 						// 'path', NOT allowed: use src/vs/base/common/path.ts instead
 						'perf_hooks',
 						'readline',
-						'ssh2',
 						'stream',
 						'string_decoder',
 						'tar',

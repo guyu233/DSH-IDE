@@ -31,11 +31,11 @@ DSH 是一个本地 AI 内核，具备会话、模型、工具调用、审批与
 | 智能体预设 | 新会话创建前选择 DSH 智能体预设 |
 | 账号入口 | 左下角显示 DSH 登录态的真实头像与昵称 |
 | 流式回答 | 支持增量渲染，回答逐字输出 |
-| 行内补全 | **暂不可用**：`ide/inlineComplete` 尚未纳入唯一通道方法白名单，注册也拿不到结果 |
+| 行内补全 | **已接入**：经唯一通道 `inlineComplete` 调用 Host 已选模型；未连接或没有默认模型时不产生补全 |
 
 ## 系统要求
 
-- **DeepSeek Harness** `>= 0.2.2-rc.1`（版本按 SemVer 2.0.0 严格校验；预发布段逐段按数值比较）
+- **DeepSeek Harness 桌面端** `>=0.2.2-rc.2 <0.3.0-0`。插件启动时复用宿主的 ripgrep；此版本要求独立于会话协议的 `0.2.2-rc.1` 校验基线。
 - 宿主 DSH 桌面端自带的 Electron（DSH-IDE 不自带 Electron，也不产出独立安装包）
 - **支持平台：Windows x64**。IDE 窗口是插件载荷，首次拉窗复用宿主 Electron 发行版，
   而该复用路径当前只实现 Windows（`src/vs/platform/dshClient/host/electron-home.js`）。
@@ -53,7 +53,7 @@ DSH-IDE 以 **DSH bundle 插件**形式交付，不提供独立的 IDE 安装包
 ```bash
 # 1. 构建（仓库根执行）
 npm install
-npx gulp dsh-ide-pack        # 产出 dist/dsh-ide-2.0.0.tgz
+npx gulp dsh-ide-pack        # 产出 dist/dsh-ide-2.0.0.tgz（minified）
 
 # 2. 在 DSH 中安装该插件包，然后重启 DSH
 ```
@@ -64,8 +64,8 @@ npx gulp dsh-ide-pack        # 产出 dist/dsh-ide-2.0.0.tgz
 
 | 命令 | 产物 | 说明 |
 | --- | --- | --- |
-| `npx gulp dsh-ide-pack` | `dist/dsh-ide-2.0.0.tgz` | 标准构建，保留源码映射 |
-| `CI=1 npx gulp dsh-ide-pack-min` | `dist/dsh-ide-2.0.0.tgz` | minified，剔除 `*.js.map`，体积约 71.6 MiB |
+| `npx gulp dsh-ide-pack` | `dist/dsh-ide-2.0.0.tgz` | **唯一发布构建**：minified，剔除 `*.js.map`；约 78.5 MB，安装后 283 MiB |
+| `npx gulp dsh-ide-pack-min` | 同上 | `dsh-ide-pack` 的别名，行为完全一致 |
 
 ## 架构
 
@@ -109,7 +109,7 @@ node --max-old-space-size=8192 node_modules/typescript/bin/tsc --noEmit -p src/t
 npm run test-dsh:all
 
 # 打包
-CI=1 npx gulp dsh-ide-pack-min
+npx gulp dsh-ide-pack
 ```
 
 > **首次构建提示**：`src/tsconfig.base.json` 把 `electron` 类型映射到 `.build/typings/electron.d.ts`。该文件是构建产物，由 `node --experimental-strip-types build/npm/electronTypes.ts` 从官方下载并按 `build/checksums/electron.txt` 校验。DSH-IDE 不自带 Electron 运行时，只借用宿主提供的类型。

@@ -89,7 +89,7 @@ function mergeSnapshot(previous: DshIdeSnapshot, next: DshIdeSnapshot): DshIdeSn
 
 /** `DshIdeViewSnapshot` 里「缺席表示保留上一次」的可选投影字段。 */
 const DSH_IDE_VIEW_OPTIONAL_KEYS = [
-	'conversation', 'deliverables', 'attachments', 'plan', 'goal', 'todos', 'skills',
+	'conversation', 'deliverables', 'attachments', 'plan', 'goal', 'todos', 'skills', 'team', 'worktrees',
 	'tokenUsageDelta', 'quotaNotice', 'composer', 'pending',
 ] as const;
 

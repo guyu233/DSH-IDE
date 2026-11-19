@@ -92,15 +92,8 @@
 		"verify:dsh-install-drift": "node build/lib/dsh/verify/dshInstallDrift.mjs"
 	},
 	"dependencies": {
-		"@devcontainers/cli": "0.88.0",
-		"@github/copilot-sdk": "1.0.23-preview.5",
 		"@microsoft/1ds-core-js": "^3.2.13",
 		"@microsoft/1ds-post-js": "^3.2.13",
-		"@microsoft/dev-tunnels-connections": "^1.3.61",
-		"@microsoft/dev-tunnels-contracts": "^1.3.61",
-		"@microsoft/dev-tunnels-management": "^1.3.61",
-		"@microsoft/dev-tunnels-ssh": "^3.12.22",
-		"@microsoft/dev-tunnels-ssh-tcp": "^3.12.22",
 		"@parcel/watcher": "^2.5.6",
 		"@types/semver": "^7.5.8",
 		"@vscode/codicons": "^0.0.46-46",
@@ -115,7 +108,6 @@
 		"@vscode/ripgrep-universal": "^1.18.0",
 		"@vscode/sandbox-runtime": "0.0.1",
 		"@vscode/spdlog": "^0.15.8",
-		"@vscode/sqlite3": "5.1.12-vscode",
 		"@vscode/sudo-prompt": "9.3.2",
 		"@vscode/tree-sitter-wasm": "^0.3.1",
 		"@vscode/vscode-languagedetection": "1.0.23",
@@ -134,7 +126,6 @@
 		"@xterm/xterm": "^6.1.0-beta.304",
 		"chrome-remote-interface": "^0.33.0",
 		"detect-libc": "^2.1.2",
-		"foundry-local-sdk": "2.0.1",
 		"http-proxy-agent": "^7.0.0",
 		"https-proxy-agent": "^7.0.2",
 		"jschardet": "3.1.4",
@@ -147,7 +138,6 @@
 		"node-pty": "^1.2.0-beta.15",
 		"open": "^10.1.2",
 		"playwright-core": "1.61.0-alpha-2026-06-04",
-		"ssh2": "^1.16.0",
 		"tar": "^7.5.20",
 		"tas-client": "0.4.6",
 		"undici": "^7.28.0",
@@ -176,7 +166,6 @@
 		"@types/sinon": "^10.0.2",
 		"@types/sinon-test": "^2.4.2",
 		"@types/source-map-support": "^0.5.10",
-		"@types/ssh2": "^1.15.4",
 		"@types/trusted-types": "^2.0.7",
 		"@types/vscode-notebook-renderer": "^1.72.0",
 		"@types/wicg-file-system-access": "^2023.10.7",
@@ -260,7 +249,6 @@
 		"kerberos@2.1.1": {
 			"node-addon-api": "7.1.0"
 		},
-		"koffi": "3.2.1",
 		"serialize-javascript": "^7.0.3",
 		"yauzl": "^3.3.1"
 	},
@@ -276,10 +264,7 @@
 	},
 	"allowScripts": {
 		"bufferutil@4.1.0": true,
-		"cpu-features": false,
-		"foundry-local-sdk@2.0.1": true,
 		"kerberos@2.1.1": true,
-		"koffi@3.2.1": false,
 		"native-keymap@3.3.9": true,
 		"protobufjs@7.6.5": false,
 		"native-is-elevated@0.9.0": true,
@@ -294,16 +279,13 @@
 		"@vscode/deviceid@0.1.5": true,
 		"@vscode/policy-watcher@1.6.0": true,
 		"@vscode/spdlog@0.15.8": true,
-		"@vscode/sqlite3@5.1.12-vscode": true,
 		"@vscode/windows-registry@1.3.0": true,
 		"@vscode/windows-mutex@0.5.3": true,
-		"ssh2": false,
 		"fsevents@2.3.2": true,
 		"fsevents@1.2.13": true,
 		"es5-ext": false,
 		"husky": false,
 		"@vscode/windows-ca-certs@0.3.4": true,
 		"@vscode/windows-process-tree@0.8.0": true
-	},
-	"copilotRuntimeVersion": "1.0.100-1"
+	}
 }

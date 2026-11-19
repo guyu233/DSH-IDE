@@ -10,8 +10,9 @@
 
 import { Emitter, Event } from '../../../../base/common/event.js';
 import { Disposable } from '../../../../base/common/lifecycle.js';
+import { VSBuffer, encodeBase64 } from '../../../../base/common/buffer.js';
 import { IDshClientService } from '../../../../platform/dshClient/common/dshClientService.js';
-import { DSH_IDE_FEATURE_UNAVAILABLE, validateDshIdeLoadOlderResult, type DshIdeDeliverableView, type DshIdeGoalView, type DshIdeImageAttachmentRef, type DshIdeLoadOlderResult, type DshIdePendingItem, type DshIdePlanView, type DshIdeQuotaNotice, type DshIdeSkillView, type DshIdeTodoView, type DshIdeViewSnapshot, type DshIdeWaterfallNotice } from '../../../../platform/dshClient/common/dshIdeProtocol.js';
+import { DSH_IDE_FEATURE_UNAVAILABLE, validateDshIdeLoadOlderResult, type DshIdeDeliverableView, type DshIdeGoalView, type DshIdeImageAttachmentRef, type DshIdeLoadOlderResult, type DshIdePendingItem, type DshIdePlanView, type DshIdeQuotaNotice, type DshIdeSkillView, type DshIdeTeamView, type DshIdeTodoView, type DshIdeWorktreeView, type DshIdeViewSnapshot, type DshIdeWaterfallNotice } from '../../../../platform/dshClient/common/dshIdeProtocol.js';
 import { DshChatModel, type DshChatNode, type DshHistoryStatus } from './dshChatModel.js';
 
 /** 下拉里的一个模型选项。 */
@@ -78,6 +79,12 @@ export interface IDshChatSession {
 	currentModel(): { readonly provider: string; readonly model: string } | undefined;
 	pending(): readonly DshChatPending[];
 	running(): boolean;
+	/** 当前目标；`undefined` 表示未创建目标（不伪造空目标）。 */
+	goal(): DshIdeGoalView | undefined;
+	/** 共享任务板；`undefined` 表示本帧没带该投影。 */
+	team(): DshIdeTeamView | undefined;
+	/** 当前绑定的会话 id；未绑定时为 undefined。 */
+	readonly activeSessionId: string | undefined;
 	/** 发送一句话；成功即交给内核。 */
 	submit(text: string, attachments?: readonly DshIdeImageAttachmentRef[]): Promise<boolean>;
 	/** 向更早的历史要一页。true 表示这次真的插入了新节点。 */
@@ -132,6 +139,8 @@ export class DshChatSession extends Disposable implements IDshChatSession {
 	/** typed 视图里的计划 / 目标 / Todo / 技能（单一真源，面板只读）。 */
 	private _plan: DshIdePlanView | undefined;
 	private _goal: DshIdeGoalView | undefined;
+	private _team: DshIdeTeamView | undefined;
+	private _worktrees: readonly DshIdeWorktreeView[] = [];
 	private _todos: readonly DshIdeTodoView[] = [];
 	private _skills: readonly DshIdeSkillView[] = [];
 
@@ -199,6 +208,16 @@ export class DshChatSession extends Disposable implements IDshChatSession {
 	/** 当前目标；`undefined` 表示未创建目标（不伪造空目标）。 */
 	goal(): DshIdeGoalView | undefined {
 		return this._goal;
+	}
+
+	/** 共享任务板；`undefined` 表示本帧没带该投影。 */
+	team(): DshIdeTeamView | undefined {
+		return this._team;
+	}
+
+	/** 本会话记录的工作树；空表示没有或本帧没带。 */
+	worktrees(): readonly DshIdeWorktreeView[] {
+		return this._worktrees;
 	}
 
 	todos(): readonly DshIdeTodoView[] {
@@ -278,6 +297,8 @@ export class DshChatSession extends Disposable implements IDshChatSession {
 		this._goal = undefined;
 		this._todos = [];
 		this._skills = [];
+		this._team = undefined;
+		this._worktrees = [];
 		this._onDidChangePending.fire([]);
 		// extras 也被清空：必须通知，否则复用同一个共享会话的 content 会一直显示旧交付物。
 		this._onDidChangeExtras.fire();
@@ -367,13 +388,17 @@ export class DshChatSession extends Disposable implements IDshChatSession {
 		// follow 快照没有 skills 字段（技能走 `listSkills`）。缺省表示「这帧没带」，
 		// 不能当成空目录，否则每一次内容帧都会把刚读到的技能清掉。
 		const nextSkills = view.skills !== undefined ? view.skills : this._skills;
+		const nextTeam = view.team !== undefined ? view.team : this._team;
+		const nextWorktrees = view.worktrees !== undefined ? view.worktrees : this._worktrees;
 		const extrasChanged = !sameDeliverables(this._deliverables, nextDeliverables)
 			|| !sameAttachments(this._attachments, nextAttachments)
 			|| !sameQuota(this._quotaNotice, nextQuota)
 			|| !samePlan(this._plan, nextPlan)
 			|| !sameGoal(this._goal, nextGoal)
 			|| !sameTodos(this._todos, nextTodos)
-			|| !sameSkills(this._skills, nextSkills);
+			|| !sameSkills(this._skills, nextSkills)
+			|| !sameTeam(this._team, nextTeam)
+			|| !sameWorktrees(this._worktrees, nextWorktrees);
 		this._deliverables = nextDeliverables;
 		this._attachments = nextAttachments;
 		this._quotaNotice = nextQuota;
@@ -381,6 +406,8 @@ export class DshChatSession extends Disposable implements IDshChatSession {
 		this._goal = nextGoal;
 		this._todos = nextTodos;
 		this._skills = nextSkills;
+		this._team = nextTeam;
+		this._worktrees = nextWorktrees;
 		if (extrasChanged) {
 			this._onDidChangeExtras.fire();
 		}
@@ -510,6 +537,25 @@ export class DshChatSession extends Disposable implements IDshChatSession {
 	 * 成功后交给内核，不做乐观插入。附件只接受已入库的 `ImageAttachmentRef`：
 	 * 契约里 `submit.attachments` 就是这个形状，未入库的图片没有可提交的身份。
 	 */
+	/**
+	 * 把一张尚未入库的图片交给 Host 入库，返回可提交的引用。
+	 *
+	 * 剪贴板/拖入的图片只有字节，没有 attachmentId；Host 用官方 saveImages
+	 * 完成入库后返回值就是 `submit.attachments` 需要的形状。失败返回 undefined，
+	 * 由调用方保留草稿并明确告知，不伪造引用。
+	 */
+	async saveImage(data: Uint8Array, mediaType: string, name?: string): Promise<DshIdeImageAttachmentRef | undefined> {
+		if (mediaType !== 'image/png' && mediaType !== 'image/jpeg' && mediaType !== 'image/webp' && mediaType !== 'image/gif') {
+			return undefined;
+		}
+		const result = await this.client.call<DshIdeImageAttachmentRef>('saveImageAttachment', {
+			mediaType,
+			data: encodeBase64(VSBuffer.wrap(data)),
+			...(name === undefined || name === '' ? {} : { name }),
+		});
+		return result.ok ? result.value : undefined;
+	}
+
 	async submit(text: string, attachments?: readonly DshIdeImageAttachmentRef[]): Promise<boolean> {
 		const generation = this.generation;
 		const sessionId = this.boundSessionId;
@@ -869,6 +915,39 @@ function samePlan(left: DshIdePlanView | undefined, right: DshIdePlanView | unde
 }
 
 /** 目标是否与上一帧相同（逐字段比较，避免目标进度变化被静默吞掉）。 */
+/** 任务板比较：启用位、失败原因与逐项 (id, revision, status, ready) 相同即视为未变。 */
+/** 工作树比较：逐项比路径与分支，顺序也参与判定。 */
+function sameWorktrees(left: readonly DshIdeWorktreeView[], right: readonly DshIdeWorktreeView[]): boolean {
+	if (left === right) {
+		return true;
+	}
+	if (left.length !== right.length) {
+		return false;
+	}
+	return left.every((worktree, index) => {
+		const other = right[index];
+		return other !== undefined && worktree.path === other.path && worktree.branch === other.branch && worktree.created === other.created;
+	});
+}
+
+function sameTeam(left: DshIdeTeamView | undefined, right: DshIdeTeamView | undefined): boolean {
+	if (left === right) {
+		return true;
+	}
+	if (left === undefined || right === undefined) {
+		return false;
+	}
+	if (left.enabled !== right.enabled || left.failure !== right.failure || left.tasks.length !== right.tasks.length) {
+		return false;
+	}
+	return left.tasks.every((task, index) => {
+		const other = right.tasks[index];
+		return other !== undefined && task.id === other.id && task.revision === other.revision
+			&& task.status === other.status && task.ready === other.ready && task.ownerName === other.ownerName
+			&& task.subject === other.subject;
+	});
+}
+
 function sameGoal(left: DshIdeGoalView | undefined, right: DshIdeGoalView | undefined): boolean {
 	if (left === undefined || right === undefined) {
 		return left === right;

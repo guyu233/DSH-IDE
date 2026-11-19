@@ -83,7 +83,7 @@ export interface IAgentSdkProductConfig {
 /**
  * Configuration for downloading the on-device dictation native runtime (the
  * Foundry Local addon + core libraries) on demand. Produced per platform build
- * and stamped by `build/dictation-runtime/produce.ts`; consumed by
+ * and stamped by the build pipeline; consumed by
  * `foundryLocalRuntime.ts`, which substitutes `{target}` in `urlTemplate`
  * against the host's `<platform>-<arch>` key. Absent in local dev builds, in
  * which case the runtime falls back to the SDK's own `node_modules` payload.

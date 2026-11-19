@@ -15,6 +15,9 @@
 import type {
 	DshIdeGoalView,
 	DshIdePlanView,
+	DshIdeTeamTaskView,
+	DshIdeTeamView,
+	DshIdeWorktreeView,
 	DshIdeTodoView,
 	DshIdeViewSnapshot,
 } from './dshIdeProtocol.js';
@@ -22,7 +25,7 @@ import type {
 /** `projectDshIdeProjections` 的返回值：只含本次真的读到的字段。 */
 export type DshIdeProjectionFields = Pick<
 	DshIdeViewSnapshot,
-	'plan' | 'goal' | 'todos' | 'tokenUsageDelta' | 'skills' | 'deliverables' | 'attachments' | 'quotaNotice' | 'composer' | 'pending'
+	'plan' | 'goal' | 'todos' | 'team' | 'worktrees' | 'tokenUsageDelta' | 'skills' | 'deliverables' | 'attachments' | 'quotaNotice' | 'composer' | 'pending'
 >;
 
 /**
@@ -46,11 +49,15 @@ export function projectDshIdeProjections(baseline: unknown): DshIdeProjectionFie
 	const plan = planOf(values['plan']);
 	const goal = goalOf(values['goal']);
 	const todos = todosOf(values['todos']);
+	const team = teamOf(values['agentTeam']);
+	const worktrees = worktreesOf(values['worktree']);
 	// 只把真的读到的字段放进返回值；字段就缺席，不写 undefined。
 	return {
 		...(plan === undefined ? {} : { plan }),
 		...(goal === undefined ? {} : { goal }),
 		...(todos === undefined ? {} : { todos }),
+		...(team === undefined ? {} : { team }),
+		...(worktrees === undefined ? {} : { worktrees }),
 	};
 }
 
@@ -131,6 +138,64 @@ function todosOf(value: unknown): readonly DshIdeTodoView[] | undefined {
 		todos.push({ content, status });
 	}
 	return todos;
+}
+
+function worktreesOf(value: unknown): readonly DshIdeWorktreeView[] | undefined {
+	if (!Array.isArray(value)) {
+		return undefined;
+	}
+	const worktrees: DshIdeWorktreeView[] = [];
+	for (const item of value) {
+		if (!isRecord(item)) {
+			return undefined;
+		}
+		const worktree = isRecord(item['worktree']) ? item['worktree'] : undefined;
+		if (worktree === undefined) {
+			return undefined;
+		}
+		const path = nonEmpty(worktree['path']);
+		const branch = nonEmpty(worktree['branch']);
+		const baseCommit = nonEmpty(worktree['baseCommit']);
+		const repositoryRoot = nonEmpty(worktree['repositoryRoot']);
+		if (path === undefined || branch === undefined || baseCommit === undefined || repositoryRoot === undefined) {
+			return undefined;
+		}
+		worktrees.push({ path, branch, baseCommit, repositoryRoot, created: item['created'] === true });
+	}
+	return worktrees;
+}
+
+function teamOf(value: unknown): DshIdeTeamView | undefined {
+	if (!isRecord(value)) {
+		return undefined;
+	}
+	const enabled = value['enabled'];
+	const list = value['tasks'];
+	if (typeof enabled !== 'boolean' || !Array.isArray(list)) {
+		return undefined;
+	}
+	const tasks: DshIdeTeamTaskView[] = [];
+	for (const item of list) {
+		if (!isRecord(item)) {
+			return undefined;
+		}
+		const id = nonEmpty(item['id']);
+		const subject = typeof item['subject'] === 'string' ? item['subject'] : undefined;
+		const description = typeof item['description'] === 'string' ? item['description'] : undefined;
+		const status = nonEmpty(item['status']);
+		const revision = item['revision'];
+		const ready = item['ready'];
+		if (id === undefined || subject === undefined || description === undefined || status === undefined) {
+			return undefined;
+		}
+		if (typeof revision !== 'number' || !Number.isSafeInteger(revision) || revision <= 0 || typeof ready !== 'boolean') {
+			return undefined;
+		}
+		const ownerName = nonEmpty(item['ownerName']);
+		tasks.push({ id, revision, subject, description, status, ready, ...(ownerName === undefined ? {} : { ownerName }) });
+	}
+	const failure = nonEmpty(value['failure']);
+	return { enabled, tasks, ...(failure === undefined ? {} : { failure }) };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

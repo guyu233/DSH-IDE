@@ -1230,6 +1230,21 @@ function createMethodHandlers(bridge) {
 			// 官方 `accountController.getProfile(client)`：Host 依据 client 派生 Platform 请求头。
 			return account().getProfile(args.client);
 		},
+		async accountStartSignIn(args) {
+			// 官方 `deepseekAccount.startSignIn(client, callbackOrigin, loginSource)`：返回带 authorizeUrl 的视图。
+			const service = account();
+			if (typeof service.startSignIn !== 'function') {
+				throw coded(FEATURE_UNAVAILABLE, 'DSH deepseekAccount has no startSignIn()', { capability: 'accountStartSignIn' });
+			}
+			return service.startSignIn(args.client, args.callbackOrigin, args.loginSource);
+		},
+		async accountCancelSignIn(args) {
+			const service = account();
+			if (typeof service.cancelSignIn !== 'function') {
+				throw coded(FEATURE_UNAVAILABLE, 'DSH deepseekAccount has no cancelSignIn()', { capability: 'accountCancelSignIn' });
+			}
+			return service.cancelSignIn(args.attemptId);
+		},
 		async archiveSession(args) {
 			// 官方 remote 是 `workspaceController.archiveSession({ sessionId })`，返回完整归档集合。
 			// `workspaceRegistry.archiveSession` 是另一套签名：第一参是 sessionId 字符串，返回 void。
@@ -1239,8 +1254,24 @@ function createMethodHandlers(bridge) {
 		async unarchiveSession(args) {
 			return changeArchive(bridge, 'unarchiveSession', args.sessionId);
 		},
-		addAttachment: missing('addAttachment'),
-		removeAttachment: missing('removeAttachment'),
+		async saveImageAttachment(args) {
+			// 官方 `attachments.saveImages([{ data, mediaType, name? }])`：入库并返回 `ImageAttachmentRef`。
+			// 只接受 base64 解码后的真实字节，媒体类型由官方按字节复核。
+			const attachments = service(bridge.ctx, 'attachments');
+			if (typeof attachments.saveImages !== 'function') {
+				throw coded(FEATURE_UNAVAILABLE, 'DSH attachments service has no saveImages()', { capability: 'saveImageAttachment' });
+			}
+			const bytes = Buffer.from(args.data, 'base64');
+			if (bytes.length === 0) {
+				throw coded(INVALID_ARGUMENT, 'saveImageAttachment.data decoded to no bytes');
+			}
+			const refs = await attachments.saveImages([{ data: bytes, mediaType: args.mediaType, ...(args.name === undefined ? {} : { name: args.name }) }]);
+			const ref = Array.isArray(refs) ? refs[0] : undefined;
+			if (ref === undefined) {
+				throw coded(FEATURE_UNAVAILABLE, 'DSH attachments service returned no image reference', { capability: 'saveImageAttachment' });
+			}
+			return ref;
+		},
 		async setGoal(args) {
 			// 官方 `goals` 服务（`packages/goal/goal/src/index.ts`）：create/edit/pause/resume/complete/clear。
 			// agent 从本次调用声明的会话解析；edit/pause/resume/complete/clear 需要 { id, revision } 这一 CAS 引用。
@@ -1399,8 +1430,98 @@ function createMethodHandlers(bridge) {
 				}];
 			});
 		},
-		openInApp: missing('openInApp'),
-		dismissQuotaNotice: missing('dismissQuotaNotice'),
+		async inlineComplete(args) {
+			try {
+				const llm = optionalService(bridge.ctx, 'llm');
+				if (llm === undefined || typeof llm.stream !== 'function') {
+					return { text: '' };
+				}
+				const models = optionalService(bridge.ctx, 'agentDefaultModel');
+				const selection = models !== undefined && typeof models.currentSelection === 'function' ? models.currentSelection() : undefined;
+				if (!selection || !selection.provider || !selection.model) {
+					return { text: '' };
+				}
+				const prompt = [
+					'You are an inline code completion engine. Continue the code at the cursor.',
+					'Return ONLY the exact text to insert at the cursor. No prose, no backticks, no explanation.',
+					`Language: ${args.languageId || 'text'}`,
+					args.path ? `File: ${args.path}` : '',
+					'<prefix>',
+					String(args.prefix || ''),
+					'</prefix>',
+					'<suffix>',
+					String(args.suffix || ''),
+					'</suffix>',
+				].filter(Boolean).join('\n');
+				const stream = llm.stream({
+					provider: selection.provider,
+					model: selection.model,
+					messages: [{ role: 'user', content: [{ type: 'text', text: prompt }] }],
+					maxTokens: 192,
+					...(selection.reasoningEffort === undefined ? {} : { reasoningEffort: selection.reasoningEffort }),
+				});
+				let text = '';
+				for await (const chunk of stream) {
+					if (!chunk || typeof chunk !== 'object') { continue; }
+					if (chunk.type === 'text-delta' && typeof chunk.text === 'string') { text += chunk.text; }
+					else if (chunk.type === 'finish') { break; }
+				}
+				return { text: text.trim() };
+			} catch {
+				return { text: '' };
+			}
+		},
+		async jobList(args) {
+			// 官方 `jobController.list({ sessionId })` 是流：管理面只需要第一帧名单。
+			const jobs = service(bridge.ctx, 'jobController');
+			if (typeof jobs.list !== 'function') {
+				throw coded(FEATURE_UNAVAILABLE, 'DSH jobController has no list()', { capability: 'jobList' });
+			}
+			const signal = callerAbortSignal(bridge.ctx);
+			for await (const frame of jobs.list({ sessionId: args.sessionId }, signal)) {
+				if (frame && frame.type === 'rows') {
+					return frame.jobs;
+				}
+			}
+			return [];
+		},
+		async jobKill(args) {
+			const jobs = service(bridge.ctx, 'jobController');
+			if (typeof jobs.kill !== 'function') {
+				throw coded(FEATURE_UNAVAILABLE, 'DSH jobController has no kill()', { capability: 'jobKill' });
+			}
+			return jobs.kill({ sessionId: args.sessionId, jobId: args.jobId });
+		},
+		async mcpListServers() {
+			// 官方 `mcpManager.list()`：只读配置与运行时状态，不挂载、不探测。
+			const manager = service(bridge.ctx, 'mcpManager');
+			if (typeof manager.list !== 'function') {
+				throw coded(FEATURE_UNAVAILABLE, 'DSH mcpManager has no list()', { capability: 'mcpListServers' });
+			}
+			return manager.list();
+		},
+		async mcpRestartServer(args) {
+			const manager = service(bridge.ctx, 'mcpManager');
+			if (typeof manager.restart !== 'function') {
+				throw coded(FEATURE_UNAVAILABLE, 'DSH mcpManager has no restart()', { capability: 'mcpRestartServer' });
+			}
+			await manager.restart(args.name);
+			return { accepted: true };
+		},
+		async speechCatalog() {
+			const speech = service(bridge.ctx, 'speechController');
+			if (typeof speech.catalog !== 'function') {
+				throw coded(FEATURE_UNAVAILABLE, 'DSH speechController has no catalog()', { capability: 'speechCatalog' });
+			}
+			return speech.catalog();
+		},
+		async speechTranscribe(args) {
+			const speech = service(bridge.ctx, 'speechController');
+			if (typeof speech.transcribe !== 'function') {
+				throw coded(FEATURE_UNAVAILABLE, 'DSH speechController has no transcribe()', { capability: 'speechTranscribe' });
+			}
+			return speech.transcribe(args.request, callerAbortSignal(bridge.ctx));
+		},
 		async deleteSession(args) {
 			await assertVisibleRowForBridge(bridge, args.sessionId);
 			// 删除链由社区插件承担（§8.10.8 批准的端点），DSH-IDE 只做前置校验、调用与结果判定。

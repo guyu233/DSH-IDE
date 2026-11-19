@@ -9,7 +9,7 @@ import { createMarkdownCommandLink } from '../../../../base/common/htmlContent.j
 import { Disposable, DisposableMap, DisposableStore } from '../../../../base/common/lifecycle.js';
 import { Schemas } from '../../../../base/common/network.js';
 import { autorun, observableFromEvent } from '../../../../base/common/observable.js';
-import { isMacintosh, isWeb } from '../../../../base/common/platform.js';
+import { isMacintosh } from '../../../../base/common/platform.js';
 import { PolicyCategory } from '../../../../base/common/policy.js';
 import { registerEditorFeature } from '../../../../editor/common/editorFeatures.js';
 import * as nls from '../../../../nls.js';
@@ -36,7 +36,6 @@ import { SyncDescriptor } from '../../../../platform/instantiation/common/descri
 import { InstantiationType, registerSingleton } from '../../../../platform/instantiation/common/extensions.js';
 import { IInstantiationService, ServicesAccessor } from '../../../../platform/instantiation/common/instantiation.js';
 import { IJSONContributionRegistry, Extensions as JSONExtensions } from '../../../../platform/jsonschemas/common/jsonContributionRegistry.js';
-import { DEFAULT_LOCAL_TRANSCRIPTION_MODEL } from '../../../../platform/localTranscription/common/localTranscription.js';
 import { McpAccessValue, McpAutoStartValue, mcpAccessConfig, mcpAllowedServersConfig, mcpAppsEnabledConfig, mcpAutoStartConfig, mcpDeniedServersConfig, mcpGalleryServiceEnablementConfig, mcpGalleryServiceUrlConfig } from '../../../../platform/mcp/common/mcpManagement.js';
 import { AgentNetworkFilterService, IAgentNetworkFilterService } from '../../../../platform/networkFilter/common/networkFilterService.js';
 import { AgentNetworkDomainSettingId } from '../../../../platform/networkFilter/common/settings.js';
@@ -134,7 +133,7 @@ import { registerChatSpeechToTextActions } from './actions/chatSpeechToTextActio
 import { registerChatTitleActions } from './actions/chatTitleActions.js';
 import { registerChatToolActions } from './actions/chatToolActions.js';
 import { ChatTransferContribution } from './actions/chatTransfer.js';
-import { CONFIGURE_DICTATION_INSTRUCTIONS_ACTION_ID, registerConfigureSpeechInstructionsActions } from './actions/configureVoiceInstructionsAction.js';
+import { registerConfigureSpeechInstructionsActions } from './actions/configureVoiceInstructionsAction.js';
 import { AgentHostChatDebugContribution } from './chatDebug/agentHostChatDebugProvider.js';
 import { ChatDebugEditor } from './chatDebug/chatDebugEditor.js';
 import { ChatDebugEditorInput, ChatDebugEditorInputSerializer } from './chatDebug/chatDebugEditorInput.js';
@@ -144,8 +143,8 @@ import { CustomizationsTelemetryContribution, CustomizationsTelemetryService, IC
 import { ChatSubmitRequestHandlerService, IChatSubmitRequestHandlerService } from './chatSubmitRequestHandlerService.js';
 import { PromptsDebugContribution } from './promptsDebugContribution.js';
 import { PromptLanguageFeaturesProvider } from './promptSyntax/promptFileContributions.js';
-import { ChatSpeechToTextService, DICTATION_MAI_MODEL_ID, DictationSettingId, IChatSpeechToTextService } from './speechToText/chatSpeechToTextService.js';
-import { IVoiceCodeTranscriptionClient, VoiceCodeTranscriptionClient } from './speechToText/voiceCodeTranscriptionClient.js';
+import { DICTATION_MAI_MODEL_ID, DictationSettingId, IChatSpeechToTextService } from './speechToText/chatSpeechToTextService.js';
+import { DshChatSpeechToTextService } from './speechToText/dshChatSpeechToTextService.js';
 import './telemetry/chatEditorTopologyTelemetry.js';
 import './telemetry/chatModelCountTelemetry.js';
 import { ChatToolRiskAssessmentService, IChatToolRiskAssessmentService } from './tools/chatToolRiskAssessmentService.js';
@@ -360,19 +359,16 @@ configurationRegistry.registerConfiguration({
 		'dictation.model': {
 			type: 'string',
 			enum: [
-				DEFAULT_LOCAL_TRANSCRIPTION_MODEL,
 				DICTATION_MAI_MODEL_ID,
 			],
 			enumItemLabels: [
-				nls.localize('dictation.model.nemotronMultilingual.label', "Nemotron 3.5 ASR (Multilingual) — On-Device"),
-				nls.localize('dictation.model.mai.label', "MAI — Cloud"),
+				nls.localize('dictation.model.dsh.label', "DSH Host"),
 			],
 			markdownEnumDescriptions: [
-				nls.localize('dictation.model.nemotronMultilingual', "NVIDIA Nemotron 3.5 multilingual streaming RNN-T, run on-device through Microsoft Foundry Local. Works offline; no audio leaves the device. Automatic language selection follows the Voice Mode language setting; when that setting is Automatic, dictation uses the configured display language when supported, then the system or browser locale, with model detection as a fallback. Downloaded on first use and cached on disk."),
-				nls.localize('dictation.model.mai', "Cloud transcription through the same Microsoft AI voice service used by Voice Mode. Requires a network connection and GitHub sign-in; audio is streamed to the service."),
+				nls.localize('dictation.model.dsh', "Transcription uses the speech provider selected by DeepSeek Harness. DSH-IDE does not choose or start another recognizer."),
 			],
-			markdownDescription: nls.localize('dictation.model', "The model used for dictation. On-device models download on first use and run locally through Microsoft Foundry Local; the cloud option streams audio to the Microsoft AI voice service. On the web, user and default on-device selections use cloud transcription because local transcription is unsupported. If policy requires on-device transcription, dictation is unavailable on the web."),
-			default: isWeb ? DICTATION_MAI_MODEL_ID : DEFAULT_LOCAL_TRANSCRIPTION_MODEL,
+			markdownDescription: nls.localize('dictation.model', "Dictation uses the speech provider selected in DeepSeek Harness. This IDE does not run a separate recognizer."),
+			default: DICTATION_MAI_MODEL_ID,
 			tags: ['experimental'],
 			experiment: { mode: 'auto' },
 			policy: {
@@ -386,12 +382,8 @@ configurationRegistry.registerConfiguration({
 					},
 					enumDescriptions: [
 						{
-							key: 'dictation.model.nemotronMultilingual.policy',
-							value: nls.localize('dictation.model.nemotronMultilingual.policy', "Use the on-device transcription model. Audio does not leave the device.")
-						},
-						{
-							key: 'dictation.model.mai.policy',
-							value: nls.localize('dictation.model.mai.policy', "Use the cloud transcription service. Audio is streamed to the service.")
+							key: 'dictation.model.dsh.policy',
+							value: nls.localize('dictation.model.dsh.policy', "Use the speech provider selected by DeepSeek Harness.")
 						},
 					]
 				},
@@ -409,33 +401,7 @@ configurationRegistry.registerConfiguration({
 			default: true,
 			tags: ['experimental']
 		},
-		'dictation.experimental.llmCleanup': {
-			type: 'boolean',
-			markdownDescription: nls.localize('dictation.experimental.llmCleanup', "Experimental: when dictation ends, the final transcript is passed through a small language model to restore punctuation, capitalization, paragraphs, and lists. Requires Copilot to be enabled; the transcript is sent to the language model for cleanup. Falls back to the raw transcript when no model is available. Use [dictation instructions](command:{0}) to customize terminology and formatting.", CONFIGURE_DICTATION_INSTRUCTIONS_ACTION_ID),
-			default: true,
-			tags: ['experimental'],
-			policy: {
-				name: 'DictationLLMCleanup',
-				category: PolicyCategory.InteractiveSession,
-				minimumVersion: '1.136',
-				localization: {
-					description: {
-						key: 'dictation.experimental.llmCleanup.policy',
-						value: nls.localize('dictation.experimental.llmCleanup.policy', "Controls whether final dictation transcripts are sent to a language model for cleanup.")
-					}
-				},
-			}
-		},
-		'dictation.experimental.llmCleanupModel': {
-			type: 'string',
-			enum: ['auto', 'copilot-utility-small', 'gpt-5.6-luna'],
-			markdownDescription: nls.localize('dictation.experimental.llmCleanupModel', "Controls the language model used for experimental dictation cleanup. `auto` follows the experiment-provided default."),
-			default: 'auto',
-			tags: ['experimental'],
-			experiment: {
-				mode: 'auto'
-			}
-		},
+
 		'chat.editor.fontSize': {
 			type: 'number',
 			description: nls.localize('interactiveSession.editor.fontSize', "Controls the font size in pixels in chat codeblocks."),
@@ -2731,11 +2697,8 @@ Registry.as<IConfigurationMigrationRegistry>(Extensions.ConfigurationMigration).
 		}
 	},
 	{
-		// The on-device dictation runtime moved to Foundry Local; the old
-		// transformers.js/onnxruntime model IDs no longer resolve and would fail
-		// with an unknown-model error. Map any explicitly-stored legacy value to
-		// the new default so existing users keep working. Also migrate the setting
-		// from its old `chat.speechToText.model` id to `dictation.model`.
+		// DSH-IDE 只提供云端听写：把任何遗留的本地模型 id 迁到云端选项，
+		// 同时把旧键 `chat.speechToText.model` 迁到 `dictation.model`。
 		key: 'chat.speechToText.model',
 		migrateFn: (value: unknown, accessor) => {
 			const legacyModelIds = [
@@ -2746,7 +2709,7 @@ Registry.as<IConfigurationMigrationRegistry>(Extensions.ConfigurationMigration).
 				'nemotron-speech-streaming-en-0.6b',
 			];
 			const migrated = (typeof value === 'string' && legacyModelIds.includes(value))
-				? DEFAULT_LOCAL_TRANSCRIPTION_MODEL
+				? DICTATION_MAI_MODEL_ID
 				: value;
 			const pairs: ConfigurationKeyValuePairs = [['chat.speechToText.model', { value: undefined }]];
 			// Never clobber an explicitly configured new key (e.g. after settings
@@ -2758,13 +2721,10 @@ Registry.as<IConfigurationMigrationRegistry>(Extensions.ConfigurationMigration).
 		}
 	},
 	{
-		// Existing users may have the former English-only default stored
-		// explicitly. Move them to the multilingual replacement as well.
+		// 任何遗留的本地模型 id（含旧英文默认值）统一迁到云端选项。
 		key: 'dictation.model',
 		migrateFn: value => ({
-			value: value === 'nemotron-speech-streaming-en-0.6b'
-				? DEFAULT_LOCAL_TRANSCRIPTION_MODEL
-				: value
+			value: value === DICTATION_MAI_MODEL_ID ? value : DICTATION_MAI_MODEL_ID
 		})
 	},
 	{
@@ -3204,7 +3164,7 @@ class ToolReferenceNamesContribution extends Disposable implements IWorkbenchCon
 }
 
 /**
- * Forces the eager {@link ChatSpeechToTextService} to instantiate at startup so
+ * Forces the eager {@link DshChatSpeechToTextService} to instantiate at startup so
  * it can publish the `chatSpeechToTextConfigured` context key that gates the
  * dictation (mic) button. Registered singletons are created lazily on first
  * access, so without this the key would never be set and the button never shows.
@@ -3338,8 +3298,7 @@ agentPluginDiscoveryRegistry.register(new SyncDescriptor(ExtensionAgentPluginDis
 
 registerSingleton(IChatResponseResourceFileSystemProvider, ChatResponseResourceFileSystemProvider, InstantiationType.Delayed);
 registerSingleton(IChatTerminalOutputTextModelService, ChatTerminalOutputTextModelService, InstantiationType.Delayed);
-registerSingleton(IChatSpeechToTextService, ChatSpeechToTextService, InstantiationType.Eager);
-registerSingleton(IVoiceCodeTranscriptionClient, VoiceCodeTranscriptionClient, InstantiationType.Delayed);
+registerSingleton(IChatSpeechToTextService, DshChatSpeechToTextService, InstantiationType.Eager);
 registerSingleton(IChatTransferService, ChatTransferService, InstantiationType.Delayed);
 registerSingleton(IChatService, ChatService, InstantiationType.Delayed);
 registerSingleton(IChatWidgetService, ChatWidgetService, InstantiationType.Delayed);

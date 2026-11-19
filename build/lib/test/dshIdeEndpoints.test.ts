@@ -102,11 +102,12 @@ const UNVERIFIED: readonly string[] = [];
 // 契约口径：method 白名单（20 会话域 + 2 账号域 + 2 归档域 + 团队/预设/附加 + readAttachment）
 // ---------------------------------------------------------------------------
 
-	test('D16 contract still declares exactly 43 methods', () => {
+	test('D16 contract declares the current method whitelist', () => {
 	const block = /const DSH_IDE_METHOD_KEYS[\s\S]*?\n\};/.exec(protocol);
 	assert.ok(block !== null, 'DSH_IDE_METHOD_KEYS must exist in the protocol single source');
 	const keys = [...block[0].matchAll(/^\s*([a-zA-Z]+):/gm)].map(m => m[1]);
-	assert.equal(keys.length, 43, `expected 43 methods, got ${keys.length}`);
+	assert.ok(keys.length > 0, 'the contract must declare at least one method');
+	assert.equal(new Set(keys).size, keys.length, 'no duplicate method names');
 	for (const f of FINDINGS) {
 		assert.ok(keys.includes(f.method), `D16 finding must reference a real whitelist method: ${f.method}`);
 	}
@@ -127,8 +128,9 @@ test('D16 transport forwards every method to the kernel dispatcher and maps no e
 
 test('chat-baseline methods without a verified remote stay missing(...)', () => {
 	// setGoal / listSkills / searchSessions 已按官方服务核对接线（见 HANDOFF 记录），不再在此列。
+	// 这四个空壳已经删除：附件改走 saveImageAttachment，openInApp/dismissQuotaNotice 无落点。
 	for (const method of ['addAttachment', 'removeAttachment', 'openInApp', 'dismissQuotaNotice']) {
-		assert.match(host, new RegExp(`${method}:\\s*missing\\('${method}'\\)`), `${method} must stay fail-closed until its official remote is verified`);
+		assert.doesNotMatch(host, new RegExp(`${method}:\\s*missing\\('${method}'\\)`), `${method} must no longer be a fail-closed stub`);
 	}
 	assert.match(protocol, /searchSessions:/, 'searchSessions already exists and must not be duplicated');
 	assert.match(protocol, /resume:/, 'resume already exists and must not be duplicated as resumeSession');
@@ -222,7 +224,7 @@ test('D17 deleteSession calls the approved physical-delete endpoint, never a clo
 test('D59 archive endpoints are official remotes and now wired without third-party approval', () => {
 	const block = /const DSH_IDE_METHOD_KEYS[\s\S]*?\n\};/.exec(protocol);
 	assert.ok(block !== null);
-	assert.equal([...block[0].matchAll(/^\s*([a-zA-Z]+):/gm)].length, 43, 'contract must declare 43 methods after the chat-baseline expansion');
+	assert.ok([...block[0].matchAll(/^\s*([a-zA-Z]+):/gm)].length > 0, 'contract must declare methods');
 	for (const endpoint of ['archiveSession', 'unarchiveSession']) {
 		assert.ok(protocol.includes(endpoint + ':'), endpoint + ' must be a contract method');
 		// 窗口只经 ide/dispatch 转发；真正调官方 remote 的是内核桥接。
@@ -578,3 +580,60 @@ test('D27 §7.4 onboarding checklist matches the CI entry script behaviour', () 
 // 但这个「有意不纳入」若不写明，接入者会以为 CI 已覆盖全部检查。
 // 本测试同时钉住两侧：CI 里确实没有它们；手册里确实标注了「手动核对」。
 // ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// 新增能力的 Host 落点（语音 / 补全 / 附件入库 / 账号 / MCP / 作业）
+// ---------------------------------------------------------------------------
+
+test('new channel methods resolve their documented Host services', () => {
+	const cases: readonly { method: string; service: string; call: RegExp }[] = [
+		{ method: 'speechCatalog', service: 'speechController', call: /speech\.catalog\(\)/ },
+		{ method: 'speechTranscribe', service: 'speechController', call: /speech\.transcribe\(args\.request/ },
+		{ method: 'mcpListServers', service: 'mcpManager', call: /manager\.list\(\)/ },
+		{ method: 'mcpRestartServer', service: 'mcpManager', call: /manager\.restart\(args\.name\)/ },
+		{ method: 'jobList', service: 'jobController', call: /jobs\.list\(\{ sessionId: args\.sessionId \}/ },
+		{ method: 'jobKill', service: 'jobController', call: /jobs\.kill\(\{ sessionId: args\.sessionId, jobId: args\.jobId \}\)/ },
+		{ method: 'saveImageAttachment', service: 'attachments', call: /attachments\.saveImages\(\[/ },
+		{ method: 'accountStartSignIn', service: 'deepseekAccount', call: /service\.startSignIn\(args\.client, args\.callbackOrigin, args\.loginSource\)/ },
+		{ method: 'accountCancelSignIn', service: 'deepseekAccount', call: /service\.cancelSignIn\(args\.attemptId\)/ },
+	];
+	for (const entry of cases) {
+		// 无参方法（speechCatalog / mcpListServers）的 Host 实现写成 `async name()`。
+		assert.ok(
+			host.includes('async ' + entry.method + '(args)') || host.includes('async ' + entry.method + '()'),
+			entry.method + ' must be implemented by the Host bridge',
+		);
+		assert.ok(host.includes("service(bridge.ctx, '" + entry.service + "')"), entry.method + ' must resolve ' + entry.service);
+		assert.match(host, entry.call, entry.method + ' must call its documented service method');
+	}
+	// 补全走 llm + agentDefaultModel：没有默认模型时返回空文本，不抛错。
+	assert.match(host, /async inlineComplete\(args\)/);
+	assert.match(host, /optionalService\(bridge\.ctx, 'llm'\)/);
+	assert.match(host, /return \{ text: '' \}/);
+});
+
+test('no channel method is left as a fail-closed stub', () => {
+	assert.doesNotMatch(host, /:\s*missing\('/, 'the Host bridge must not keep any missing(...) stub');
+});
+// ---------------------------------------------------------------------------
+// 三面一致性：契约方法 ↔ Host handler 必须逐一对应
+// ---------------------------------------------------------------------------
+
+test('every contract method has a Host handler and no handler is orphaned', () => {
+	const block = /const DSH_IDE_METHOD_KEYS[\s\S]*?\n\};/.exec(protocol);
+	assert.ok(block !== null, 'DSH_IDE_METHOD_KEYS must exist');
+	const contract = [...block[0].matchAll(/^\s*([a-zA-Z]+):/gm)].map(m => m[1]);
+
+	// Host 里两种写法都算实现：`async name(args)` 与 `name: async args =>`。
+	const handlers = new Set<string>();
+	for (const m of host.matchAll(/^\t\tasync ([a-zA-Z]+)\(/gm)) {
+		handlers.add(m[1]);
+	}
+	for (const m of host.matchAll(/^\t\t([a-zA-Z]+): async /gm)) {
+		handlers.add(m[1]);
+	}
+
+	const missing = contract.filter(method => !handlers.has(method));
+	const orphaned = [...handlers].filter(name => !contract.includes(name));
+	assert.deepEqual(missing, [], 'every contract method must have a Host handler');
+	assert.deepEqual(orphaned, [], 'no Host handler may exist outside the contract');
+});

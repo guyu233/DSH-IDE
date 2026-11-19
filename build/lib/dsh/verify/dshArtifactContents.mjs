@@ -10,10 +10,11 @@
 // 终端相关的真实阻塞（desktop 入口、NAPI 已证、node-pty 依赖分类），但**从未重新打包**，
 // 因此那些修复是否真的落进产物，此前一直没有证据。
 //
-// 本脚本对产物做三项可静态判定、且与「代码是否进包」有关的检查：
-//   ① `package/common/` 下 10 个共享模块是否齐全（对应第 19/22/34 轮新增的投影模块与后续 3 个投影）；
+// 本脚本检查产物的入口、共享模块与本地原生资源。
+//   ① `package/common/` 下 11 个共享模块是否齐全（含协议真源 dshIdeProtocol.js）；
 //   ② Host 入口是否含 `archiveSession` / `searchSessions` / `loadLater` 等新 method 痕迹；
-//   ③ `node-pty` 是否随包（对应第 39 轮的依赖分类修复）。
+//   ③ `node-pty` 是否随包（对应第 39 轮的依赖分类修复）；
+//   ④ Host 搜索适配器随包，且 Windows 桌面不再重复分发宿主提供的 rg.exe。
 //
 // 它**不做**体积结论、**不判断**终端是否可用——后者必须真机（U06）。
 
@@ -55,6 +56,7 @@ const EXPECTED_COMMON = [
 	'dshIdeComposer.js',
 	'dshIdeWaterfallNotice.js',
 	'dshIdeRequestView.js',
+	'dshIdeProtocol.js',
 ];
 
 const present = new Set(list.filter(m => m.startsWith('package/common/')).map(m => path.basename(m)));
@@ -66,26 +68,32 @@ const methodTraces = ['archiveSession', 'unarchiveSession', 'searchSessions', 'l
 	.filter(name => hostEntry.includes(name));
 const missingTraces = ['archiveSession', 'searchSessions'].filter(name => !methodTraces.includes(name));
 
-// node-pty 是否随包（第 39 轮依赖分类 + 第 45 轮 .moduleignore 修复的直接后果）。
-// 注意 Electron 的布局：`.node` 二进制无法放进 asar，会被解包到
-// `node_modules.asar.unpacked/`；JS 代码则在 `node_modules.asar` 归档内。
-// 因此这里必须同时认这两种位置，只认 `node_modules/node-pty/` 会误报缺失。
-const nodePtyUnpacked = list.filter(m => /node_modules\.asar\.unpacked\/node-pty\//.test(m));
-const hasNodePtyBinary = nodePtyUnpacked.some(m => m.endsWith('.node'));
+// 终端：JS 在 `node_modules.asar` 内，原生绑定改由 DSH Host 提供（`DSH_IDE_HOST_PTY_PATH`）。
+// 因此这里不再要求 `.node` 随包，改为要求「ASAR 在 + Host 适配器在 + 载荷不重复带 prebuilds」。
 const hasNodePtyAsar = list.some(m => m.endsWith('/node_modules.asar'));
-const hasNodePty = hasNodePtyBinary;
+const ptyPrebuilds = list.filter(m => /node_modules\.asar\.unpacked\/node-pty\/prebuilds\//.test(m));
+
+const hostService = readMember('package/host/ide-service.js');
+const hasHostRipgrepAdapter = list.includes('package/host/host-ripgrep.js')
+	&& hostService.includes('await resolveHostRipgrep()')
+	&& hostService.includes('DSH_IDE_HOST_RG_PATH');
+const bundledWindowsRipgrep = list.filter(member => /^package\/runtime\/app\/node_modules(?:\.asar\.unpacked)?\/@vscode\/ripgrep-universal\/bin\/win32-[^/]+\/rg\.exe$/u.test(member));
 
 const failures = [];
+if (!hasHostRipgrepAdapter) { failures.push('产物缺 Host ripgrep 适配器或启动接线'); }
+if (bundledWindowsRipgrep.length > 0) { failures.push(`产物仍重复携带 Windows ripgrep: ${bundledWindowsRipgrep.join(', ')}`); }
 if (missingCommon.length > 0) { failures.push(`package/common/ 缺模块: ${missingCommon.join(', ')}`); }
 if (missingTraces.length > 0) { failures.push(`Host 入口缺新 method 痕迹: ${missingTraces.join(', ')}`); }
-if (!hasNodePty) { failures.push('node-pty 未随包（.moduleignore 的 node-pty/** 仍需例外）'); }
-if (hasNodePty && !hasNodePtyAsar) { failures.push('产物缺 node_modules.asar，node-pty 的 JS 代码可能没进去'); }
+if (!hasNodePtyAsar) { failures.push('产物缺 node_modules.asar，node-pty 的 JS 代码可能没进去'); }
+if (ptyPrebuilds.length > 0) { failures.push(`载荷重复携带 node-pty 原生绑定: ${ptyPrebuilds.slice(0, 3).join(', ')}`); }
 
 console.log(`  tar 成员数              : ${list.length}`);
 console.log(`  package/common/ 模块    : ${present.size} 个（期望 ${EXPECTED_COMMON.length}）`);
 console.log(`  Host 入口新 method 痕迹 : ${methodTraces.join(', ') || '（无）'}`);
-console.log(`  node-pty 二进制（unpacked）: ${nodePtyUnpacked.length} 个`);
+console.log(`  node-pty prebuilds（应为 0）: ${ptyPrebuilds.length} 个`);
 console.log(`  node_modules.asar 归档  : ${hasNodePtyAsar ? '在' : '缺'}`);
+console.log(`  Host ripgrep 适配        : ${hasHostRipgrepAdapter ? '在' : '缺'}`);
+console.log(`  Windows rg.exe 副本      : ${bundledWindowsRipgrep.length} 个`);
 console.log(`  产物大小                : ${fs.statSync(tgz).size} B`);
 
 if (failures.length > 0) {

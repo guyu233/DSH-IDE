@@ -8,8 +8,6 @@ import { escapeMarkdownSyntaxTokens, MarkdownString } from '../../../../../base/
 import { isWeb } from '../../../../../base/common/platform.js';
 import { localize } from '../../../../../nls.js';
 import { IConfigurationService } from '../../../../../platform/configuration/common/configuration.js';
-import { DEFAULT_LOCAL_TRANSCRIPTION_MODEL } from '../../../../../platform/localTranscription/common/localTranscription.js';
-import { DICTATION_MODEL_SETTING, resolveDictationBackend } from './chatSpeechToTextService.js';
 
 /**
  * Build a hover with a bold title line and a one-sentence description below it.
@@ -30,19 +28,11 @@ function asHoverContent(title: string, description: string): IManagedHoverConten
 }
 
 /**
- * Names the model dictation actually uses, so it is obvious that `dictation.model`
- * governs this button and not Voice Mode (see microsoft/vscode-internalbacklog#8600).
+ * 听写的识别后端由 DSH Host 决定，前端只说明这一点；不再读取 `dictation.model`，
+ * 那个设置在本集成下只有「DSH Host」一个取值。
  */
-function getDictationDescription(configurationService: IConfigurationService, web: boolean): string {
-	const modelId = configurationService.getValue<string>(DICTATION_MODEL_SETTING)?.trim();
-	const policyModelId = configurationService.inspect<string>(DICTATION_MODEL_SETTING).policyValue?.trim();
-	if (resolveDictationBackend(modelId, policyModelId, web) === 'mai') {
-		return localize('dictation.hover.cloud', "Types what you say into the input. Transcribes in the cloud with the MAI speech model.");
-	}
-	if (!modelId || modelId === DEFAULT_LOCAL_TRANSCRIPTION_MODEL) {
-		return localize('dictation.hover.nemotronMultilingual', "Types what you say into the input. Transcribes on-device with the Nemotron 3.5 ASR multilingual model.");
-	}
-	return localize('dictation.hover.onDevice', "Types what you say into the input. Transcribes on-device with {0}.", modelId);
+function getDictationDescription(): string {
+	return localize('dictation.hover.dsh', "Types what you say into the input. Transcription is performed by the speech provider selected in DeepSeek Harness.");
 }
 
 /**
@@ -55,12 +45,12 @@ function getVoiceModeDescription(): string {
 
 /** Hover markdown for the dictation mic button. */
 export function getDictationHoverMarkdown(title: string, configurationService: IConfigurationService, web = isWeb): MarkdownString {
-	return createMicButtonHover(title, getDictationDescription(configurationService, web));
+	return createMicButtonHover(title, getDictationDescription());
 }
 
 /** Hover for the dictation mic button, for APIs that take managed hover content. */
 export function getDictationHoverContent(title: string, configurationService: IConfigurationService): IManagedHoverContent {
-	return asHoverContent(title, getDictationDescription(configurationService, isWeb));
+	return asHoverContent(title, getDictationDescription());
 }
 
 /** Hover for the Voice Mode button, for APIs that take managed hover content. */

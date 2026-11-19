@@ -56,8 +56,9 @@ export class DshChatSpeechToTextService extends Disposable implements IChatSpeec
 	private readonly recordingKey: IContextKey<boolean>;
 	private readonly configuredKey: IContextKey<boolean>;
 
+	private readonly createCapture = createPcmCaptureNode;
+
 	constructor(
-		private readonly createCapture: typeof createPcmCaptureNode = createPcmCaptureNode,
 		@IDshClientService private readonly client: IDshClientService,
 		@IConfigurationService private readonly configuration: IConfigurationService,
 		@IContextKeyService contextKeys: IContextKeyService,
@@ -104,7 +105,7 @@ export class DshChatSpeechToTextService extends Disposable implements IChatSpeec
 		const generation = ++this.generation;
 		this.starting = true;
 		try {
-			const result = await this.client.call<DshSpeechCatalog>('speech/catalog', {});
+			const result = await this.client.call<DshSpeechCatalog>('speechCatalog', {});
 			if (generation !== this.generation) { return; }
 			if (!result.ok || !dshSpeechSampleLimit(result.value)) {
 				this.notifications.warn(localize('dshSpeech.unavailable', "DSH speech-to-text is unavailable or its selected provider is not ready. Configure it in DeepSeek Harness."));

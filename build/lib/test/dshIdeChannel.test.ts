@@ -49,9 +49,12 @@ const ALL_METHODS: DshIdeMethod[] = [
 	'accountGetState', 'accountGetProfile',
 	'archiveSession', 'unarchiveSession', 'searchSessions',
 	'composerState', 'presentationSettings', 'setTeamEnabled', 'setAgentPreset',
-	'addAttachment', 'removeAttachment', 'setGoal', 'listSkills', 'openInApp', 'dismissQuotaNotice',
+	'setGoal', 'listSkills',
 	'renameSession', 'setSessionFavorite', 'setSessionPinned', 'listWorkspaces', 'moveSession', 'openSessionPath',
 	'capabilities',
+	'speechCatalog', 'speechTranscribe', 'inlineComplete', 'saveImageAttachment',
+	'mcpListServers', 'mcpRestartServer', 'jobList', 'jobKill',
+	'accountStartSignIn', 'accountCancelSignIn',
 ];
 
 interface FakeBackend extends DshIdeBackend {
@@ -234,12 +237,8 @@ const VALID: Record<DshIdeMethod, unknown> = {
 	presentationSettings: {},
 	setTeamEnabled: { sessionId: 's-1', enabled: false },
 	setAgentPreset: { sessionId: 's-1', preset: 'create' },
-	addAttachment: { attachment: { attachmentId: 'img-1', mediaType: 'image/png', bytes: 3, width: 1, height: 1 } },
-	removeAttachment: { attachmentId: 'img-1' },
 	setGoal: { sessionId: 's-1', action: 'create', objective: 'ship the chat baseline' },
 	listSkills: { sessionId: 's-1' },
-	openInApp: { target: 'readme.md' },
-	dismissQuotaNotice: { seq: 1 },
 	capabilities: {},
 	renameSession: { sessionId: 's-1', title: '新标题' },
 	setSessionFavorite: { sessionId: 's-1' },
@@ -247,6 +246,16 @@ const VALID: Record<DshIdeMethod, unknown> = {
 	listWorkspaces: {},
 	moveSession: { sessionId: 's-1', workspaceId: 'w-1' },
 	openSessionPath: { sessionId: 's-1' },
+	speechCatalog: {},
+	speechTranscribe: { request: { audioBase64: 'AAAA' } },
+	inlineComplete: { prefix: 'const a = 1;' },
+	saveImageAttachment: { mediaType: 'image/png', data: 'AAAA' },
+	mcpListServers: {},
+	mcpRestartServer: { name: 'server-1' },
+	jobList: { sessionId: 's-1' },
+	jobKill: { sessionId: 's-1', jobId: 'job-1' },
+	accountStartSignIn: { client: { version: '2.0.0', locale: 'zh-CN', timezoneOffsetSeconds: 28800 }, callbackOrigin: 'http://127.0.0.1:1', loginSource: 'desktop' },
+	accountCancelSignIn: { attemptId: 'attempt-1' },
 };
 
 async function openedChannel(backend = fakeBackend()) {
@@ -261,7 +270,7 @@ async function openedChannel(backend = fakeBackend()) {
 	return { view: views[0]!, views, channel, backend, first };
 }
 
-test('channel dispatches all 43 DTO methods through validateDshIdeInput', async () => {
+test('channel dispatches all 49 DTO methods through validateDshIdeInput', async () => {
 	const { channel, backend } = await openedChannel();
 	for (const method of ALL_METHODS) {
 		const output = await channel.call<{ value: unknown }>('ctx-a', method, VALID[method]);

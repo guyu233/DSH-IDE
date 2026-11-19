@@ -429,16 +429,28 @@ export class AccountsActivityActionViewItem extends AbstractGlobalActivityAction
 	}
 
 	private async signInDsh(): Promise<void> {
-		// 官方登录是「浏览器授权」流程（`account/startSignIn` → 打开 authorizeUrl → 回调）。
-		// 完整实现见后续轮次；此处给出明确可用入口（打开官方 usage 页），避免死路。
+		// 官方浏览器授权：`accountStartSignIn` 返回 attempt.authorizeUrl，用户在浏览器完成授权，
+		// Host 在回调落定凭据后状态变为 credential-stored。IDE 不自行拼接授权地址。
 		try {
-			const res = await this.dshClientService.call<{ links?: { usageUrl?: string } }>('accountGetState', { client: dshAccountClientMetadata(this.dshLocale()) });
-			const usage = res.ok ? res.value?.links?.usageUrl : undefined;
-			if (usage) { await this.openerService.open(URI.parse(usage)); }
+			const res = await this.dshClientService.call<{ attempt?: { authorizeUrl?: string } }>('accountStartSignIn', {
+				client: dshAccountClientMetadata(this.dshLocale()),
+				callbackOrigin: `${window.location.protocol}//${window.location.host}`,
+				loginSource: 'desktop',
+			});
+			if (!res.ok) {
+				this.logService.warn('[dsh-account] startSignIn failed', res.error.message);
+				return;
+			}
+			const authorizeUrl = res.value?.attempt?.authorizeUrl;
+			if (authorizeUrl) {
+				await this.openerService.open(URI.parse(authorizeUrl));
+			}
+			await this.refreshDshAccount();
 		} catch (error) {
 			this.logService.error(error);
 		}
 	}
+
 
 	private safeAvatar(value: string): string {
 		try {

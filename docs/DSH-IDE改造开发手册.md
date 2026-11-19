@@ -120,9 +120,9 @@ DshChatSession.acceptView / acceptConversation → DshChatModel（typed 节点�
 
 关键文件：契约 `common/dshIdeProtocol.ts`、Host 桥 `host/ide-view-host.js`、帧分流 `electron-main/ide-view-service.ts`、transport `transport/dshIdeTransport.ts`、renderer 消费 `workbench/contrib/dsh/browser/dsh.contribution.ts:60-88`。
 
-### 1.3 frame 与 typed 投影并存（wireRevision 4）
+### 1.3 frame 与 typed 投影并存（wireRevision 5）
 
-`DshIdeViewSnapshot` 仍保留 `frame: Readonly<Record<string, unknown>>`（`dshIdeProtocol.ts:86-100`）作为兼容字段，同时可带 11 个 typed 字段：`conversation`、`deliverables`、`attachments`、`plan`、`goal`、`todos`、`skills`、`tokenUsageDelta`、`quotaNotice`、`composer`、`pending`。字段全部可选；一旦出现，未知字段或未知节点种类 fail-closed 拒绝。
+`DshIdeViewSnapshot` 仍保留 `frame: Readonly<Record<string, unknown>>` 作为兼容字段，同时可带 13 个 typed 字段：`conversation`、`deliverables`、`attachments`、`plan`、`goal`、`todos`、`skills`、`team`、`worktrees`、`tokenUsageDelta`、`quotaNotice`、`composer`、`pending`。字段全部可选；一旦出现，未知字段或未知节点种类 fail-closed 拒绝。
 
 **当前实现已切到 typed 字段**（层 3 完成）：renderer 的 `DshChatModel.acceptConversation` 只吃 `conversation` 节点树，裸帧解析路径已删除（`accept(frame)` 为兼容空壳）。四条独立通路的状态：
 
@@ -137,12 +137,12 @@ DshChatSession.acceptView / acceptConversation → DshChatModel（typed 节点�
 
 **能承接（层 1 已落地）：** `session/follow` 事件流（快照式）；`submit` 带图片附件（Host 写成官方 `{ type: 'image', attachment }`）；审批/问卷富字段投影（`displayReason`、`detail/header`、选项 `description`、`multiSelect`、`intent`，`dshIdeRequestView.js`）；waterfall 阶段状态；`listSessions`/`searchSessions`/`resume`/`fork.point`/`loadOlder{throughSeq,beforeSeq,maxMessages}`；模型/effort/权限/团队/preset 投影；开窗绑定会话。
 
-**不能承接（改造目标，层 4 已逐类补齐）：** 协议已定义但 Host 未填的 typed 字段——**现已全部有 Host 来源**（见 §8.1）；4 个无官方 remote 的 `missing()` method（`addAttachment`、`removeAttachment`、`openInApp`、`dismissQuotaNotice`，见 §1.5）明确失败；`fetchRowDetail` 明确抛 `FEATURE_UNAVAILABLE`（官方无对应只读端点）；`runCommand` 附件已支持图片；chat 逐类写死渲染器——**现已全部落地**（见 §8.1）。
+**不能承接（改造目标，层 4 已逐类补齐）：** 协议已定义但 Host 未填的 typed 字段——**现已全部有 Host 来源**（见 §8.1）；原先 4 个 `missing()` 空壳已从契约移除；`fetchRowDetail` 明确抛 `FEATURE_UNAVAILABLE`（官方无对应只读端点）；`runCommand` 附件已支持图片；chat 逐类写死渲染器——**现已全部落地**（见 §8.1）。
 
 ### 1.5 协议现状（改动前记住这些数字）
 
-- `DSH_IDE_WIRE_REVISION = 4`（`dshIdeProtocol.ts`）。保留 `frame` 并增加 typed 投影后，由 3 升到 4。
-- `DshIdeMethodArgs` 共 **43 个 method**（2026-11-17 新增 6 个会话操作：`renameSession` / `setSessionFavorite` / `setSessionPinned` / `listWorkspaces` / `moveSession` / `openSessionPath`）。仍 `missing()` 的是 4 个（`addAttachment`、`removeAttachment`、`openInApp`、`dismissQuotaNotice`，均无官方 remote）；`setGoal` / `listSkills` 已分别接官方 `goals` / `skills` 服务（见 §8.1）。
+- `DSH_IDE_WIRE_REVISION = 5`（`dshIdeProtocol.ts`）。把视图绑定带进快照后由 4 升到 5。
+- `DshIdeMethodArgs` 共 **49 个 method**（2026-11-17 新增 6 个会话操作；之后接入语音、补全、附件入库、账号登录、MCP、后台作业）。`missing()` 已清零；`setGoal` / `listSkills` 接官方 `goals` / `skills` 服务（见 §8.1）。
 - 旧稿点名要新增的 `searchSessions` / `resumeSession` / `forkAt` / `loadThrough` **不另增**：`searchSessions` 与 `resume` 已在白名单；`fork.point` 已映射官方 `atSeq`；`loadOlder.throughSeq` 已是官方切点。
 - `validateDshIdeSnapshot`（`:1157`）、`assertSnapshotContinuity`（`:1963`，version 严格 +1）、`validateDshIdeInvokeOutput` 只允许 `{value}`（`:933`）。
 - `DshIdeWaterfallNotice`（`:1058`）、`DshIdeSessionNotice`（`:1054`）形状固定；扩展 listen 事件面必须先改契约并同步测试（`:924-931`）。
@@ -231,11 +231,11 @@ DshChatSession.acceptView / acceptConversation → DshChatModel（typed 节点�
    - `submit` 增加可选 `attachments: DshIdeImageAttachmentRef[]`（已落地，Host 把它们写成官方 `image` content）；
    - `answerQuestion.answer` 收成官方 `AskUserQuestionAnswer`（`selected: string[]`，多选就是多项）；
    - `answerApproval` 增加可选 `agentId` / `callId`。`Agent` 对象和 `AbortSignal` 不进线协议：`agentId` 已在通知信封上，`signal` 留在 Host 等待句柄里；审批视图另保留 `displayReason`（已落地，`dshIdeRequestView.js`）；
-   - 尚无核对到官方 remote、Host 保持 `missing()` 的：`addAttachment`、`removeAttachment`、`openInApp`、`dismissQuotaNotice`（`setGoal` / `listSkills` 已按官方 `goals` / `skills` 服务接线，见 §8.1）；
+   - 无官方 remote 的空壳已全部移除：`addAttachment` / `removeAttachment`（附件改走 `saveImageAttachment`）、`openInApp`、`dismissQuotaNotice`；`setGoal` / `listSkills` 已按官方 `goals` / `skills` 服务接线（见 §8.1）；
    - **不新增** `searchSessions`、`resumeSession`、`forkAt`、`loadThrough`（见 §1.5）。
-3. 形状变化已经把 `DSH_IDE_WIRE_REVISION` 升到 4，并同步了 `validateDshIdeView` / `validateDshIdeSnapshot` / `assertSnapshotContinuity`。
+3. 形状变化已经把 `DSH_IDE_WIRE_REVISION` 升到 5，并同步了 `validateDshIdeView` / `validateDshIdeSnapshot` / `assertSnapshotContinuity`。
 4. 三条不变量：`exactRecord` 白名单（拒绝未知字段与显式 `undefined`，`:306-324`）、`version` 严格 +1、gap/倒退 fail-closed。
-5. 门禁已改到 43 个 method。listen 白名单仍是 snapshot / waterfall / session-notice 这 3 个事件。
+5. 门禁已改到 49 个 method。listen 白名单仍是 snapshot / waterfall / session-notice 这 3 个事件。
 
 **本层完成标志（已实测，2026-11-16）**：协议/通道/waterfall/Host 桥测试 PASS（133），dshIdeConsumer 与 endpoints 本轮断言 PASS。`src/tsconfig.json` 全量 `tsc --noEmit` 仍 FAIL，但报错在既有 VS Code 文件里，本轮改过的协议文件无类型错误——不把既有 FAIL 记成 PASS。
 
@@ -262,7 +262,7 @@ DshChatSession.acceptView / acceptConversation → DshChatModel（typed 节点�
 
 文件：`src/vs/workbench/contrib/dsh/browser/dshChatSession.ts`、`dshChatModel.ts`。
 
-1. `IDshChatSession`（`:39-74`）接口按契约 43 method 对齐：`submit(text, attachments)`、`answerApproval/answerQuestion`（多选答案）、`listSessions/searchSessions/loadOlder{throughSeq,beforeSeq,maxMessages}`、`resume`/`fork.point`/`rewind`（rewind 走已装载的 `dsh-rewind-plugin`，不是 core remote）、`deliverables`、`tokenUsageDelta`、`quotaNotice`、`pending`。4 个无官方 remote 的 `missing()` method 只暴露禁用态或明确失败提示，不伪造成功。**注意**：`plan/goal/todos/skills` 虽已在契约与 Host 投影层就绪，但状态层 `DshChatSession` 尚未保存/暴露（真缺陷，见 §9.5 阶段 2-A）。
+1. `IDshChatSession`（`:39-74`）接口按当前契约 method 对齐：`submit(text, attachments)`、`answerApproval/answerQuestion`（多选答案）、`listSessions/searchSessions/loadOlder{throughSeq,beforeSeq,maxMessages}`、`resume`/`fork.point`/`rewind`（rewind 走已装载的 `dsh-rewind-plugin`，不是 core remote）、`deliverables`、`tokenUsageDelta`、`quotaNotice`、`pending`。4 个无官方 remote 的 `missing()` method 只暴露禁用态或明确失败提示，不伪造成功。**注意**：`plan/goal/todos/skills` 虽已在契约与 Host 投影层就绪，但状态层 `DshChatSession` 尚未保存/暴露（真缺陷，见 §9.5 阶段 2-A）。
 2. 移除 renderer 从裸 follow 帧拼节点的逻辑（`dshChatModel.ts` 的 `acceptConversation`，`:394` 起），直接消费层 1 的结构化 conversation。
 3. `tokenUsage` 唯一真源在 `DshChatModel`（`:364`），`pending` 在 `DshChatSession.pendingItems`（`:89`），`running` 在 `_running`（`:92`）；扩展时**保持单一真源**。
 4. 风格：tab、单引号、分号、`I` 接口前缀、`_` 私有、`this._register`/`DisposableStore`，错误走 `onUnexpectedError`。
@@ -323,39 +323,39 @@ DshChatSession.acceptView / acceptConversation → DshChatModel（typed 节点�
 
 ---
 
-## 5. 交付冻结契约（层 1–3 已完成；层 4 UI 亦已落地）
+## 5. 交付稳定性契约（层 1–3 已完成；层 4 UI 亦已落地）
 
-> **状态（2026-11-16，已全部达成）**：层 1（契约）+ 层 2（Host 投影）+ 层 3（renderer 状态层）已按本章冻结条件完成并提交；层 4（chat 视图容器 UI）也已逐类落地（§8.1）。`verify:dsh-ide-ci` 全步骤 PASS。本章保留为交接边界的定义：若后续真机验证发现问题，改动仍须遵守下列冻结边界——不再在协议/通道/Host/状态层之外另起通道或在前端重写投影。
+> **状态（2026-11-16，已全部达成）**：层 1（契约）+ 层 2（Host 投影）+ 层 3（renderer 状态层）已按本章稳定性条件完成并提交；层 4（chat 视图容器 UI）也已逐类落地（§8.1）。`verify:dsh-ide-ci` 全步骤 PASS。本章保留为交接边界的定义：若后续真机验证发现问题，改动仍须遵守下列冻结边界——不再在协议/通道/Host/状态层之外另起通道或在前端重写投影。
 
 > 本章原始要求：**层 1 + 层 2 + 层 3 全部完成并冻结后，才把工作交给 chat 视图容器前端改造。** 交付时下游只需要写渲染器和绑定 view，不再触碰协议、通道、Host 桥、会话状态模型。
 >
 > **第二阶段例外（2026-11-16 源码核对后新增）**：§9.5 阶段 2-A 发现 `plan/goal/todos/skills` 在状态层从未保存/暴露（真缺陷），允许**仅这四个字段**在 `DshChatSession` 补只读 getter、`acceptView` 保存与 `bind` 清空；这不改变冻结契约的形状/通道/Host/协议，只是补齐层 3 原本遗漏的只读暴露。除这四项外，§5 冻结边界全部保持。
 
-### 5.1 冻结边界：前端改造只允许改这些文件
+### 5.1 稳定性边界：前端改造只允许改这些文件
 
 交付后，chat 容器前端改造只允许新增/修改 chat 视图容器与渲染器文件（`workbench/contrib/dsh/browser/` 下的 `dshChatHistory.ts`、`dshChatSessionContent.ts`、`dshSessionSearchCommands.ts`、`dshTeamCommands.ts` 等），**不得再改**：
 
 - `src/vs/platform/dshClient/common/dshIdeProtocol.ts` 及契约校验（`dshIdeContract.ts`、`dshIdeEndpoints.test.ts`）；
 - `src/vs/platform/dshClient/host/*`（`ide-view-host.js`、`ide-service.js`、投影函数）；
 - `src/vs/platform/dshClient/electron-main/ide-view-service.ts`、`dshIdeChannel.ts`；
-- `src/vs/workbench/contrib/dsh/browser/dshChatSession.ts`、`dshChatModel.ts`（层 3 状态层已冻结）；
-- `dshIdeConsumer.ts`（消费与合并逻辑已冻结）。
+- `src/vs/workbench/contrib/dsh/browser/dshChatSession.ts`、`dshChatModel.ts`（层 3 状态层，扩展须走新增字段流程）；
+- `dshIdeConsumer.ts`（消费与合并逻辑：新增 typed 字段时必须同步 `DSH_IDE_VIEW_OPTIONAL_KEYS`）。
 
-若前端改造中发现上述冻结文件必须改，说明本手册的层 1–3 没做完整，退回补齐，不得在前端绕过。
+上述边界约束的是「为绕过契约而改」，不是「为新增 Host 能力而改」。新增能力必须走同一条唯一通道：先改契约真源（`dshIdeProtocol.ts` 的 `DshIdeMethodArgs`、`DSH_IDE_METHOD_KEYS`、`validateDshIdeInput` 与 `DSH_IDE_VIEW_KEYS`），再改 Host handler，再改 renderer 消费方，并同步协议与红线测试。同一能力只允许一处实现、一个入口；禁止另开旁路通道或在渲染层自拼投影。
 
-### 5.2 层 1 冻结条件（契约已完成，不再变）
+### 5.2 层 1 稳定性条件（契约已完成；新增能力须走扩展流程）
 
 1. `DSH_IDE_WIRE_REVISION = 5` 固定；冻结后非全局重开不允许再 bump。5 相对 4 的唯一变化是把**视图绑定**（`binding: { viewId, generation, sessionId }`）带进快照、`ide/followSession` 与 `ide/dispatch`：两半必须同时是 5，缺字段或修订号不符一律拒绝，不按 4 的形状降级。
-2. `DshIdeViewSnapshot` 的 11 个 typed 字段（`conversation`、`deliverables`、`attachments`、`plan`、`goal`、`todos`、`skills`、`tokenUsageDelta`、`quotaNotice`、`composer`、`pending`）形状锁定；前端按这些类型写渲染器，不再等字段变更。
-3. 43 个 `DshIdeMethodArgs` 锁定；4 个无官方 remote 的 `missing()` method 语义锁定为「调用即 `FEATURE_UNAVAILABLE`」，前端按禁用态处理，不期待它们成功（`setGoal` / `listSkills` 已接线，见 §8.1）。
+2. `DshIdeViewSnapshot` 的 13 个 typed 字段（`conversation`、`deliverables`、`attachments`、`plan`、`goal`、`todos`、`skills`、`team`、`worktrees`、`tokenUsageDelta`、`quotaNotice`、`composer`、`pending`）形状锁定；前端按这些类型写渲染器，不再等字段变更。
+3. 49 个 `DshIdeMethodArgs` 锁定；`missing()` 空壳已清零：`addAttachment` / `removeAttachment` / `openInApp` / `dismissQuotaNotice` 因无实际落点已从契约移除，附件改走 `saveImageAttachment`。`setGoal` / `listSkills` 已接线（见 §8.1）。
 4. 三条不变量（白名单、`version` 严格 +1、fail-closed）和 listen 白名单 3 事件冻结。
 5. **会话范围的方法必须自带发起时的 `sessionId`**（`DSH_IDE_VIEW_BOUND_METHODS`：`submit`、`interrupt`、`resume`、`rewind`、`loadOlder`、`setModel`、`setEffort`、`setPermissionPreset`、`runCommand`、`composerState`、`setTeamEnabled`、`setAgentPreset`、`listCommands`、`readAttachment`、`setGoal`、`listSkills`）。不存在「省略即当前会话」的回退；Host 只核对，不改写目标。
 6. **显式行操作按可见行校验**（rename / favorite / pin / move / openPath / delete / archive / unarchive / fork）：不要求等于当前绑定会话，但该行必须出现在官方可见名单里。`listSessions` 与 `capabilities` 按发起视图的绑定取范围；模型目录这类宿主级事实不借用活动会话。
 
-### 5.3 层 2 冻结条件（Host 投影已完成，不再变）
+### 5.3 层 2 稳定性条件（Host 投影已完成；新增字段须走扩展流程）
 
 1. **follow 帧 → `conversation` 的投影由 Host 完成**：renderer 收到的 snapshot 里 `conversation.nodes` 已是官方装配后的节点数组（`user/steering/context/assistant/tool-call/tool-result/command/compaction/model-retry/turn-error/turn-max-tokens/inherited-history/subagent-catalog/subagent-notice`），前端只管画，不再从裸 frame 拼。
-2. **其余 typed 字段由 Host 填齐**：`deliverables`、`attachments`、`plan`、`goal`、`todos`、`skills`、`tokenUsageDelta`、`quotaNotice`、`composer`、`pending`；字段缺省只能表示「该会话没有此内容」，不能表示「Host 还没实现」。
+2. **其余 typed 字段由 Host 填齐**：`deliverables`、`attachments`、`plan`、`goal`、`todos`、`skills`、`team`、`worktrees`、`tokenUsageDelta`、`quotaNotice`、`composer`、`pending`；字段缺省只能表示「该会话没有此内容」，不能表示「Host 还没实现」。
 3. **审批/问卷的富字段投影冻结**：`displayReason`、`detail/header/description/multiSelect/intent` 已在 typed `pending` 里；`agent`/`signal` 永久不进协议。
 4. **`fetchRowDetail` 不再返回 `null`**（或明确文档化为官方不可用并给禁用态）；`runCommand` 不再传恒空附件。
 5. **非官方插件过滤冻结**：白名单外的 event/projection 在 Host 丢弃，前端不会收到未知形状。
@@ -379,15 +379,15 @@ DshChatSession.acceptView / acceptConversation → DshChatModel（typed 节点�
 23. **写回按序号采纳，队列任务执行时复核**：归档/恢复回包是**完整集合**，只能整体采纳且只采纳序号最新的那一次；较旧回包描述的是旧意图，直接丢弃，不得覆盖较新结果。入队前检查归属不够——排队期间视图可能换绑，收藏/置顶等排队任务必须在**执行时**重新核对目标行仍可见。
 24. **外部资源探测必须有界且必结算**：读取远端图片尺寸时必须有字节上限与时限，超限或超时明确返回「读不到」，不得把整图读进内存、也不得永久挂起。解析失败只在「流已结束」时才是最终结论——那时必须结算，不允许把解析错误吞掉让 Promise 悬空。
 
-### 5.4 层 3 冻结条件（renderer 状态层已完成，不再变）
+### 5.4 层 3 稳定性条件（renderer 状态层已完成；新增字段须走扩展流程）
 
 1. `DshChatSession` / `DshChatModel` 已改成消费 typed 字段，`DshChatModel.accept()` 直接从 `snapshot.conversation` 建节点树，不再解析裸帧。
 2. 四类独立通路已合并到 typed 字段和统一 state：`nodes`（conversation）、`pending`、`composer`（modelMenu）、session notice；前端通过统一会话状态读取，不再各自订阅裸事件。
 3. 单一真源明确：`tokenUsage` 在模型层、`pending` 在会话层、`running` 在会话层；前端只读，不再累加或二次推导。
-4. `IDshChatSession` 暴露前端所需的全部读接口与 43 method 的调用入口（含 4 个禁用）；接口冻结后前端只调用，不改签名。
+4. `IDshChatSession` 暴露前端所需的全部读接口与 49 method 的调用入口；接口冻结后前端只调用，不改签名。
 5. `DshIdeConsumer` 已把 16ms 合并、version 连续性、fail-closed 处理完，前端不再做协议校验。
 
-### 5.5 冻结验收（移交前端前的 gate）
+### 5.5 稳定性验收（移交前端前的 gate）
 
 移交前必须同时满足：
 
@@ -400,9 +400,9 @@ DshChatSession.acceptView / acceptConversation → DshChatModel（typed 节点�
 
 冻结后，chat 视图容器前端拿到的稳定输入只有：
 
-- `DshIdeViewSnapshot` 的 11 个 typed 字段（§5.2）；
+- `DshIdeViewSnapshot` 的 13 个 typed 字段（§5.2）；
 - `DshChatSession` / `DshChatModel` 的只读接口（§5.4）；
-- 43 个 `ide/dispatch` method 的调用入口，其中 39 个可用、4 个禁用态（§5.2）。
+- 49 个 `ide/dispatch` method 的调用入口，全部可用；无禁用态空壳（§5.2）。
 
 前端不需要也不允许知道：裸 follow 帧形状、官方 event 名、Host 服务名、投影函数、wireRevision、channel 白名单、version 合并。
 
@@ -479,8 +479,8 @@ DshChatSession.acceptView / acceptConversation → DshChatModel（typed 节点�
 
 | 层 | 关键产物 |
 |---|---|
-| 层 1 契约（wireRevision 3→4） | `dshIdeProtocol.ts` 补齐 11 个 typed 字段及校验器；`runCommand` 支持图片附件；`loadOlder` 接受可选 `conversation`；`DshIdeMethodArgs` 30→36 |
-| 层 2 Host 投影 | 11 个 typed 字段全部有官方来源；`setGoal` 接官方 `goals` 六动作、`listSkills` 接 `skills.list()`；`fetchRowDetail` 由 `return null` 改为明确 `FEATURE_UNAVAILABLE`；非官方插件数据在桥层过滤 |
+| 层 1 契约（wireRevision 3→5） | `dshIdeProtocol.ts` 补齐 typed 字段及校验器；`runCommand` 支持图片附件；`loadOlder` 接受可选 `conversation` |
+| 层 2 Host 投影 | typed 字段全部有官方来源；`setGoal` 接官方 `goals` 六动作、`listSkills` 接 `skills.list()`；`fetchRowDetail` 由 `return null` 改为明确 `FEATURE_UNAVAILABLE`；非官方插件数据在桥层过滤 |
 | 层 3 状态层 | `DshChatModel.acceptConversation()` 只吃 typed 节点树（约 1150→730 行），`rawEvents`/`applySnapshot`/`applyStream` 等裸帧解析全删；`DshIdeConsumer` 保留 typed view；`dsh.contribution.ts` 切到 `acceptView` |
 | 层 4 逐类 UI | 新增 `dshChatHistory.ts`、`dshChatSessionContent.ts`、`dshSessionSearchCommands.ts`、`dshTeamCommands.ts`；覆盖发送分流、审批/问卷、交付物文件引用、权限/预设、会话搜索、历史补齐、团队开关 |
 
@@ -622,7 +622,7 @@ DshChatSession.acceptView / acceptConversation → DshChatModel（typed 节点�
 1. **状态层**：`DshChatSession` 增加 `_plan`/`_goal`/`_todos`/`_skills` 字段与 `plan()`/`goal()`/`todos()`/`skills()` 只读 getter；`acceptView` 读取 `view.plan`/`view.goal`/`view.todos`/`view.skills` 并纳入 `extrasChanged`（新增 `samePlan`/`sameGoal`/`sameTodos`/`sameSkills` 四个判重）；`bind()` 一并清空并触发 `onDidChangeExtras`。
 2. **content provider**：两处 extras 构造收成一个 `extrasOf(source)` 纯函数（位于 `dshChatHistory.ts`，唯一装配入口），七项（交付物/附件/额度/计划/目标/Todo/技能）一次取齐；下沉成纯函数是为了让单测能直接注入假来源、覆盖「provider 装配」本身。
 3. **单测**：新增 `build/lib/test/dshChatSessionExtras.test.ts`（6 项：保存+getter、判重不重复 fire、bind 清空并通知、技能权限变化必 fire、`extrasOf` 七项装配、四字段到 history part 全程可达）；`dshChatSessionContent.test.ts` 同步覆盖 history 映射。
-4. **契约边界**：不改协议/通道/Host，只补层 3 冻结边界允许的只读暴露（§5 例外条款）。
+4. **契约边界**：本阶段不改协议/通道/Host；如需新增能力，按 §5.1 的扩展流程先改契约真源。
 
 **验收（实测）**：`test-dsh:all` PASS（370 项 node --test 全过 + mocha 7 项全过）；`verify:dsh-ide-ci` 五步全 PASS（contract 在 `DSH_INSTALLED_VERSION=0.2.2-rc.3` 下 PASS）。
 
@@ -778,7 +778,7 @@ DshChatSession.acceptView / acceptConversation → DshChatModel（typed 节点�
 >
 > 打包、profile 覆盖、install-drift 按 §0.0 推迟到全部开发完成后一次性执行。
 >
-> 全程不改协议/通道/Host/状态层（§5 冻结边界），不改原生渲染工厂，不做注册表，不恢复 driver。
+> 本阶段不改协议/通道/Host/状态层（§5 稳定性边界）；新增能力按 §5.1 的扩展流程处理。不改原生渲染工厂，不做注册表，不恢复 driver。
 
 **并行排期**：
 

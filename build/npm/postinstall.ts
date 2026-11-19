@@ -297,40 +297,6 @@ async function main() {
 
 	fs.writeFileSync(stateFile, JSON.stringify(_state));
 	fs.writeFileSync(stateContentsFile, JSON.stringify(computeContents()));
-
-	// foundry-local-sdk's libraryPath redirects its shared libraries but not its
-	// two N-API addons. Packaged builds provision all native files together, so
-	// patch the lazy loader to resolve the addons from libraryPath as well.
-	for (const dir of ['', 'remote']) {
-		const nativeLoaderFile = path.join(root, dir, 'node_modules', 'foundry-local-sdk', 'dist', 'detail', 'native.js');
-		if (!fs.existsSync(nativeLoaderFile)) {
-			continue;
-		}
-		const content = fs.readFileSync(nativeLoaderFile, 'utf8');
-		const marker = '// VSCODE_PATCH:foundry-addons-from-library-path';
-		if (content.includes(marker)) {
-			continue;
-		}
-		const replacements: readonly [string, string][] = [
-			[
-				`const addonPath = resolve(prebuildDir, "foundry_local_node.node");\nconst preloadAddonPath = resolve(prebuildDir, "foundry_local_preload.node");`,
-				`${marker}\nlet addonPath = resolve(prebuildDir, "foundry_local_node.node");\nlet preloadAddonPath = resolve(prebuildDir, "foundry_local_preload.node");`,
-			],
-			[
-				`if (!existsSync(fullPath)) {\n        throw new Error(\`libraryPath does not contain \${expected}: \${libraryPath}\`);\n    }`,
-				`if (!existsSync(fullPath)) {\n        throw new Error(\`libraryPath does not contain \${expected}: \${libraryPath}\`);\n    }\n    const configuredAddonPath = resolve(libraryPath, "foundry_local_node.node");\n    const configuredPreloadAddonPath = resolve(libraryPath, "foundry_local_preload.node");\n    if (!existsSync(configuredAddonPath) || !existsSync(configuredPreloadAddonPath)) {\n        throw new Error(\`libraryPath does not contain both Foundry Local addons: \${libraryPath}\`);\n    }\n    addonPath = configuredAddonPath;\n    preloadAddonPath = configuredPreloadAddonPath;`,
-			],
-		];
-		let patched = content;
-		for (const [needle, replacement] of replacements) {
-			if (!patched.includes(needle)) {
-				throw new Error(`Unexpected foundry-local-sdk native loader shape in ${nativeLoaderFile}`);
-			}
-			patched = patched.replace(needle, replacement);
-		}
-		fs.writeFileSync(nativeLoaderFile, patched);
-		log(dir || '.', 'Patched foundry-local-sdk native loader (addons from libraryPath)');
-	}
 }
 
 main().catch(err => {
