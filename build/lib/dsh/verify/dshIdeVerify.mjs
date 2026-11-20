@@ -155,6 +155,13 @@ function protocolSingleSource() {
 	});
 	assert.deepEqual(missing, [], `contract methods with no Host implementation: ${missing.join(', ')}`);
 
+	// 反向也要相等：Host 有而契约没有的方法，是无法经契约调用的死代码——
+	// 单向检查（契约→Host）发现不了它，只会一直留着没人能调用。
+	// 依据 CHK-242：实测 49 个方法双向完全对齐，这里把「反向」也钉住。
+	const hostMethods = [...hostSource.matchAll(/^\t\tasync (\w+)\(args\)/gm)].map(m => m[1]);
+	const orphaned = hostMethods.filter(method => !contractMethods.includes(method));
+	assert.deepEqual(orphaned, [], `Host methods with no contract declaration: ${orphaned.join(', ')}`);
+
 	console.log(`PASS  protocol-single-source: ${symbols.length} symbols declared once in ${protocolRel}; dependency one-way; no duplicate JS validator`);
 	return 'PASS';
 }
