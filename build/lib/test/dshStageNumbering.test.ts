@@ -113,3 +113,17 @@ test('the release gate covers the unit test suite too', () => {
 	assert.match(source, /isNpm \? 'PASS'/, 'npm scripts must be judged by exit code');
 	assert.match(source, /\.\.\.\(isNpm \? \{ shell: true \} : \{\}\)/, 'npm must run through a shell on Windows');
 });
+
+test('the dsh session type has exactly one definition', () => {
+	// 两份同名常量可以各自漂移；scheme 不一致时会话资源就认不出来。
+	const dir = 'src/vs/workbench/contrib/dsh/browser';
+	const files = fs.readdirSync(dir).filter(f => f.endsWith('.ts') && !f.includes('test'));
+	const definers: string[] = [];
+	for (const file of files) {
+		const source = readFileSync(`${dir}/${file}`, 'utf8');
+		if (/^export const DSH_CHAT_SESSION_TYPE = /m.test(source)) {
+			definers.push(file);
+		}
+	}
+	assert.deepEqual(definers, ['dshSessionType.ts'], 'only dshSessionType.ts may define the session type');
+});

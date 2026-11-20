@@ -28,8 +28,9 @@ import { IViewsService } from '../../../services/views/common/viewsService.js';
 import { getDshComposerSource } from './dshComposerRegistry.js';
 import { toPermissionItems } from './dshComposerProjection.js';
 import { archiveIdsFromResult, buildSessionTree, dropSession, flattenTree, isCurrentRefresh, mapTreeItem, sameTreeItem, sessionReadState } from './dshSessionTree.js';
-
-export const DSH_CHAT_SESSION_TYPE = 'dsh';
+// 会话类型的唯一定义在 `dshSessionType.ts`：这里原先另有一份同名常量，
+// 两份可以各自漂移，而 scheme 一旦不一致，会话资源就认不出来。
+import { DSH_CHAT_SESSION_TYPE } from './dshSessionType.js';
 
 export function dshSessionResource(sessionId: string): URI {
 	return URI.from({ scheme: DSH_CHAT_SESSION_TYPE, path: `/${encodeURIComponent(sessionId)}` });
