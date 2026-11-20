@@ -1721,6 +1721,11 @@ function asRecord(value: unknown, label: string): Record<string, unknown> {
 	if (typeof value !== 'object' || value === null || Array.isArray(value)) {
 		throw new TypeError(`${label} must be an object`);
 	}
+	// 同 `exactRecord`：调用方随后会读 `record['field']`，原型上的值会被读到。
+	const prototype = Object.getPrototypeOf(value);
+	if (prototype !== Object.prototype && prototype !== null) {
+		throw new TypeError(`${label} must be a plain object`);
+	}
 	return value as Record<string, unknown>;
 }
 
