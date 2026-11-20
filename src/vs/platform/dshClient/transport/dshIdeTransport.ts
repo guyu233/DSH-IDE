@@ -322,8 +322,12 @@ export class DshIdeTransport {
 		}
 		if (this.socket !== undefined) {
 			// 关闭事件可能尚未送达；替换前先结算旧代，避免旧流被新 socket 遗留。
+			// 同时**主动关闭旧 socket**：只置空的话旧连接不会被回收，句柄与缓冲会一直挂着
+			// （`dispose()` 里就是这么做的，这里原先漏了）。
+			const stale = this.socket;
 			this.socket = undefined;
 			this._failPending(new DshIdeTransportError('dsh-ide/stream-closed', 'Remote stream socket is no longer open'));
+			stale.close();
 		}
 		const url = `${this.origin.replace(/^http/, 'ws')}/api/remote.mux`;
 		const socket = new this.primitives.WebSocket(url, { headers: { cookie: this.cookie } });

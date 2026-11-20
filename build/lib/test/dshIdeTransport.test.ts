@@ -533,3 +533,19 @@ test('a transient contract failure is retryable; only incompatibility is cached'
 				});
 		});
 });
+
+test('replacing a stale socket closes it instead of leaking the connection', async () => {
+	// 依据 CHK-219：`ensureSocket` 换掉旧 socket 时只置空、不 close，
+	// 旧连接不会被回收（句柄与缓冲一直挂着）。这里钉住「必须主动关闭」。
+	FakeWebSocket.instances = [];
+	const primitives = { fetch: async () => { throw new Error('unused'); }, WebSocket: FakeWebSocket as never };
+	const transport = new DshIdeTransport({ origin: 'http://127.0.0.1:1', cookie: 'c', primitives });
+	// openStream 会触发 ensureSocket。
+	transport.openStream('/s', {}, () => undefined);
+	const first = FakeWebSocket.instances[0];
+	assert.ok(first);
+	// 模拟 socket 处于「已开但未收到 close」的状态，再触发一次 ensureSocket。
+	first.readyState = 2;
+	transport.openStream('/s', {}, () => undefined);
+	assert.equal(first.readyState, 3, '旧 socket 必须被 close()（readyState 变为 3）');
+});
