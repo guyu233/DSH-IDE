@@ -729,10 +729,11 @@ export function exactRecord(value: unknown, allowed: readonly string[], label: s
 	// `x-` 是留给客户端扩展的命名空间（见 `dshAccountClientMetadata`），但扩展值必须是
 	// 短标量。不设限的话，一个 10 MB 的 `x-anything` 字段会通过校验并随帧跨进程传输——
 	// 扩展点不该变成绕过所有大小检查的后门。
-	for (const key of Object.keys(obj)) {
-		if (!key.startsWith('x-')) {
-			continue;
-		}
+	const extensions = Object.keys(obj).filter(key => key.startsWith('x-'));
+	if (extensions.length > MAX_EXTENSION_FIELDS) {
+		throw new TypeError(`${label} carries ${extensions.length} "x-" fields, at most ${MAX_EXTENSION_FIELDS} allowed`);
+	}
+	for (const key of extensions) {
 		const item = obj[key];
 		if (typeof item === 'string') {
 			if (item.length > MAX_EXTENSION_CHARS) {
@@ -836,6 +837,14 @@ const MAX_SUBMIT_ATTACHMENTS = 64;
  * 不设限会让它变成绕过所有大小检查的后门。
  */
 const MAX_EXTENSION_CHARS = 256;
+
+/**
+ * 单个对象允许的 `x-` 扩展字段数量。
+ *
+ * 8 个足够客户端标识（版本/语言/时区/构建号等）；不设限时一万个 `x-` 键也能通过，
+ * 每帧都要序列化它们。
+ */
+const MAX_EXTENSION_FIELDS = 8;
 
 function nonEmptyString(value: unknown, label: string): string {
 	if (typeof value !== 'string' || value.trim() === '') {

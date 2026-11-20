@@ -646,3 +646,17 @@ test('x- extension fields must be short scalars', () => {
 	assert.throws(() => ok({ 'x-o': { a: 1 } }), /must be a short scalar/);
 	assert.throws(() => ok({ 'x-a': [1, 2] }), /must be a short scalar/);
 });
+
+test('the number of x- extension fields is bounded', () => {
+	// 不设数量上限时一万个 `x-` 键也能通过，每帧都要序列化它们。
+	const withExtensions = (count: number) => {
+		const value: Record<string, unknown> = { text: 'hi', sessionId: 's' };
+		for (let i = 0; i < count; i++) {
+			value[`x-${i}`] = 'v';
+		}
+		return value;
+	};
+	assert.doesNotThrow(() => validateDshIdeInput('submit', withExtensions(8)));
+	assert.throws(() => validateDshIdeInput('submit', withExtensions(9)), /at most 8 allowed/);
+	assert.throws(() => validateDshIdeInput('submit', withExtensions(10000)), /at most 8 allowed/);
+});
