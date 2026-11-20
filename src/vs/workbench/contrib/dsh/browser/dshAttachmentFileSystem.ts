@@ -206,4 +206,12 @@ export class DshAttachmentFileSystemProvider extends Disposable implements IFile
 		// 附件不可变：没有变更可推。返回空句柄，不抛错（抛错会让打开器把方案当坏掉）。
 		return { dispose() { } };
 	}
+
+	override dispose(): void {
+		// 缓存里最多 8 张图片数据（可能几十 MB）。基类 dispose 不会清，
+		// 插件卸载/窗口关闭时要显式释放，别把这份内存留到进程退出。
+		this._readCache.clear();
+		this._inflight.clear();
+		super.dispose();
+	}
 }
