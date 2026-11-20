@@ -16,6 +16,12 @@ import { fileURLToPath } from 'node:url';
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..', '..');
 const layerDir = join(repoRoot, 'src', 'vs', 'workbench', 'contrib', 'dsh', 'browser');
+// DSH 的用户可见文案不只在 `contrib/dsh/browser`：听写接入点放在
+// `contrib/chat/browser/speechToText/`（它要替换原生听写服务，必须在那一侧）。
+// 只扫第一个目录会漏掉这里的 localize，等于「门禁说全合规、实际没检查」。
+const extraDirs = [
+	join(repoRoot, 'src', 'vs', 'workbench', 'contrib', 'chat', 'browser', 'speechToText'),
+];
 const verbose = process.argv.includes('--verbose');
 
 /** 把 `localize(...)` 调用整段剔除，保留其余源码。支持跨行与嵌套括号。 */
@@ -52,13 +58,50 @@ function stripLocalizeCalls(source) {
 	return out;
 }
 
+/** 列举目录下所有 `.ts`（递归，跳过 test 目录与 .test.ts）。 */
+function listSources(dir) {
+	const out = [];
+	let entries;
+	try {
+		entries = readdirSync(dir, { withFileTypes: true });
+	} catch {
+		return out;
+	}
+	for (const entry of entries) {
+		if (entry.name === 'test' || entry.name === 'node_modules') {
+			continue;
+		}
+		const full = join(dir, entry.name);
+		if (entry.isDirectory()) {
+			out.push(...listSources(full));
+		} else if (entry.name.endsWith('.ts') && !entry.name.endsWith('.test.ts') && !entry.name.endsWith('.d.ts')) {
+			out.push(full);
+		}
+	}
+	return out;
+}
+
+/**
+ * DSH 改写过的 `speechToText` 文件白名单。
+ *
+ * 该目录下还有多个 VS Code 上游文件（`micButtonMenuActions.ts` 等），它们的英文
+ * source 是上游既定写法，不在本插件的本地化责任范围内——只检查 DSH 自己新增/改写的文件。
+ */
+const SPEECH_TO_TEXT_DSH_FILES = new Set(['dshSpeech.ts', 'dshChatSpeechToTextService.ts']);
+
 const problems = [];
 const keyText = new Map();
 let calls = 0;
 
-for (const name of readdirSync(layerDir).filter(entry => entry.endsWith('.ts'))) {
-	const file = join(layerDir, name);
+for (const file of [layerDir, ...extraDirs].flatMap(listSources)) {
+	// `contrib/dsh/browser` 全部纳入；`speechToText` 只纳入 DSH 自己改写的文件。
+	const inLayerDir = file.startsWith(layerDir);
+	if (!inLayerDir && !SPEECH_TO_TEXT_DSH_FILES.has(file.split(/[\\/]/).pop())) {
+		continue;
+	}
 	const source = readFileSync(file, 'utf8');
+	// 报错信息里仍用文件名（原实现用 `name`），保留可读性。
+	const name = file.slice(repoRoot.length + 1).replaceAll('\\', '/');
 
 	// 1 + 2 + 3：逐条检查调用。
 	const callPattern = /localize2?\(\s*'([^']+)',\s*["']([^"']*)["']((?:\s*,\s*[^,)]+)*)/g;
