@@ -438,6 +438,41 @@ function contract() {
 		throw new Error(`VSCODE_PATCH_POINTS 指纹与基线不符（${mismatches.length} 处）：\n    ${mismatches.join('\n    ')}\n  处置：按第 5 章 §7 核对上游改动，确认后更新契约里的 sha256 基线并记录原因。`);
 	}
 
+	// 会话归属：任何 Host 方法只要读了 `args.sessionId`，就必须在方法体内做过
+	// `sessionIdOf(...)` / `assertVisibleRowForBridge(...)` / `assertOwnership(...)` 之一，
+	// 或者把 sessionId 交给 `changeArchive` 这类已知会校验的下游函数。
+	//
+	// 依据 CHK-168：`jobList`/`jobKill` 曾直接透传 `args.sessionId` 调官方服务，
+	// 任意 id 都能读/杀别的会话的后台作业。这条断言把那个缺口钉死。
+	const hostText = read(hostRel);
+	const hostLines = hostText.split('\n');
+	const unguarded = [];
+	let current = undefined;
+	let guarded = false;
+	for (const line of hostLines) {
+		const start = /^\t\t(?:async )?([a-zA-Z]+)[:(]/.exec(line);
+		if (start !== null) {
+			if (current !== undefined && !guarded && current.usedSessionId) {
+				unguarded.push(current.name);
+			}
+			current = { name: start[1], usedSessionId: false };
+			guarded = false;
+		}
+		if (current === undefined) {
+			continue;
+		}
+		if (/sessionIdOf\(|assertVisibleRowForBridge\(|assertOwnership\(|changeArchive\(/.test(line)) {
+			guarded = true;
+		}
+		if (/args\.sessionId/.test(line)) {
+			current.usedSessionId = true;
+		}
+	}
+	if (current !== undefined && !guarded && current.usedSessionId) {
+		unguarded.push(current.name);
+	}
+	assert.deepEqual(unguarded, [], `Host methods reading args.sessionId without an ownership check: ${unguarded.join(', ')}`);
+
 	// ---------------------------------------------------------------------
 	// 第 68 轮：按 §9.3「何时变 PASS / FAIL」启用**完整**失败断言。
 	//
