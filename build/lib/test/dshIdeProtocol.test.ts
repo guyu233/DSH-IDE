@@ -603,3 +603,18 @@ test('a deeply nested json value is rejected instead of overflowing the stack', 
 		error => error instanceof TypeError && /levels of nesting/.test(error.message),
 	);
 });
+
+test('exactRecord rejects objects whose fields come from a prototype', () => {
+	// `Object.keys` 只列自有键，但 `record['field']` 会沿着原型链读。
+	// 不拒原型对象的话，一个 `Object.create({sessionId:'attacker'})` 就能绕过
+	// 「字段必须显式提供」的检查，甚至伪造会话 id。
+	const evil = Object.create({ sessionId: 'attacker' }) as Record<string, unknown>;
+	evil.text = 'hi';
+	assert.throws(() => exactRecord(evil, ['text', 'sessionId'], 't'), /must be a plain object/);
+	class Instance { public a = 1; }
+	assert.throws(() => exactRecord(new Instance(), ['a'], 't'), /must be a plain object/);
+	// 普通对象与 null 原型对象仍接受。
+	assert.deepEqual(exactRecord({ a: 1 }, ['a'], 't'), { a: 1 });
+	const bare = Object.assign(Object.create(null) as Record<string, unknown>, { a: 1 });
+	assert.equal(exactRecord(bare, ['a'], 't')['a'], 1);
+});

@@ -706,6 +706,14 @@ export function exactRecord(value: unknown, allowed: readonly string[], label: s
 	if (typeof value !== 'object' || value === null || Array.isArray(value)) {
 		throw new TypeError(`${label} must be an object`);
 	}
+	// 必须是纯对象：带原型的对象（`Object.create({...})`、class 实例）会有「不在自有键里、
+	// 但 `record['field']` 读得到」的属性。`Object.keys` 只列自有键，于是 `exactRecord`
+	// 放行之后，调用方读 `record['sessionId']` 会拿到原型上的值——等于绕过「字段必须显式提供」
+	// 的检查，可以伪造会话 id、绕过必填校验。与 `jsonValue` 的 plain-object 要求保持一致。
+	const prototype = Object.getPrototypeOf(value);
+	if (prototype !== Object.prototype && prototype !== null) {
+		throw new TypeError(`${label} must be a plain object`);
+	}
 	const obj = value as Record<string, unknown>;
 	// 显式 undefined 一律省略：线协议不允许出现值为 undefined 的字段（JSON 会静默丢弃，
 	// 其存在即说明生产端未省略），fail-closed 拒绝。先于未知字段检查，保证判据确定。
