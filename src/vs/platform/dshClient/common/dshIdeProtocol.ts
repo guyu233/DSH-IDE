@@ -723,6 +723,22 @@ export function exactRecord(value: unknown, allowed: readonly string[], label: s
 
 /** 有限数、纯对象、无环；class 实例（非 Object.prototype）一律拒绝。 */
 export function jsonValue(value: unknown, label: string, ancestors: Set<object>): void {
+	jsonValueAt(value, label, ancestors, 0);
+}
+
+/**
+ * 嵌套深度上限。
+ *
+ * `jsonValue` 是递归校验；不设限时一个十万层嵌套的对象会让它自己栈溢出
+ * （`RangeError: Maximum call stack size exceeded`），把「校验失败」变成「进程崩溃」。
+ * 32 层足够任何真实配置（官方 options 通常是两三层）。
+ */
+const MAX_JSON_DEPTH = 32;
+
+function jsonValueAt(value: unknown, label: string, ancestors: Set<object>, depth: number): void {
+	if (depth > MAX_JSON_DEPTH) {
+		throw new TypeError(`${label} exceeds ${MAX_JSON_DEPTH} levels of nesting`);
+	}
 	if (value === null || typeof value === 'boolean' || typeof value === 'string') {
 		return;
 	}
@@ -742,14 +758,14 @@ export function jsonValue(value: unknown, label: string, ancestors: Set<object>)
 	ancestors.add(obj);
 	try {
 		if (Array.isArray(value)) {
-			value.forEach((item, index) => jsonValue(item, `${label}[${index}]`, ancestors));
+			value.forEach((item, index) => jsonValueAt(item, `${label}[${index}]`, ancestors, depth + 1));
 		} else {
 			const prototype = Object.getPrototypeOf(obj);
 			if (prototype !== Object.prototype && prototype !== null) {
 				throw new TypeError(`${label} must contain only plain objects`);
 			}
 			for (const [key, item] of Object.entries(obj)) {
-				jsonValue(item, `${label}.${key}`, ancestors);
+				jsonValueAt(item, `${label}.${key}`, ancestors, depth + 1);
 			}
 		}
 	} finally {

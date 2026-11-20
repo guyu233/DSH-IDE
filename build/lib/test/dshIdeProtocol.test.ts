@@ -580,3 +580,26 @@ test('a submission cannot carry an unbounded number of attachments', () => {
 	assert.doesNotThrow(() => validateDshIdeInput('submit', { text: 'hi', sessionId: 's', attachments: Array.from({ length: 64 }, (_, i) => ref(i)) }));
 	assert.throws(() => validateDshIdeInput('submit', { text: 'hi', sessionId: 's', attachments: Array.from({ length: 65 }, (_, i) => ref(i)) }));
 });
+
+test('a deeply nested json value is rejected instead of overflowing the stack', () => {
+	// 不设深度限制时，十万层嵌套会让 jsonValue 自己栈溢出（RangeError），
+	// 把「校验失败」变成「进程崩溃」。
+	const nested = (depth: number) => {
+		const root: Record<string, unknown> = {};
+		let cursor = root;
+		for (let i = 0; i < depth; i++) {
+			const next: Record<string, unknown> = {};
+			cursor.a = next;
+			cursor = next;
+		}
+		return root;
+	};
+	assert.doesNotThrow(() => validateDshIdeInput('newSession', { options: nested(3) }));
+	assert.doesNotThrow(() => validateDshIdeInput('newSession', { options: nested(32) }));
+	assert.throws(() => validateDshIdeInput('newSession', { options: nested(33) }), /levels of nesting/);
+	// 关键：十万层必须是 TypeError 而不是 RangeError。
+	assert.throws(
+		() => validateDshIdeInput('newSession', { options: nested(100000) }),
+		error => error instanceof TypeError && /levels of nesting/.test(error.message),
+	);
+});
