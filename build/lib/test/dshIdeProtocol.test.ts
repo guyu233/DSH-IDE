@@ -557,3 +557,18 @@ test('an error with only a code never renders as an empty message', () => {
 	assert.equal(dshErrorText(undefined, '兜底'), '兜底');
 	assert.equal(dshErrorText({}, '兜底'), '兜底');
 });
+
+test('base64 payloads have a runaway-size ceiling but no business limit', () => {
+	// 契约不设业务上限（图片 20 MiB 与音频按官方 maxAudioBytes 都由调用方限制），
+	// 但要挡住明显失控的输入：Host 侧 Buffer.from(data,'base64') 会为任意长度先分配内存。
+	const ok = 'A'.repeat(1024);
+	assert.doesNotThrow(() => validateDshIdeInput('saveImageAttachment', { mediaType: 'image/png', data: ok }));
+	assert.doesNotThrow(() => validateDshIdeInput('speechTranscribe', { request: { audioBase64: ok } }));
+	// 空串仍要拒绝。
+	assert.throws(() => validateDshIdeInput('saveImageAttachment', { mediaType: 'image/png', data: '' }));
+	assert.throws(() => validateDshIdeInput('speechTranscribe', { request: { audioBase64: '' } }));
+	// 超限也要拒绝。
+	const huge = 'A'.repeat(140 * 1024 * 1024 + 1);
+	assert.throws(() => validateDshIdeInput('saveImageAttachment', { mediaType: 'image/png', data: huge }));
+	assert.throws(() => validateDshIdeInput('speechTranscribe', { request: { audioBase64: huge } }));
+});

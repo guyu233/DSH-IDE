@@ -772,6 +772,15 @@ function nonNegativeFinite(value: unknown, label: string): number {
 	return value;
 }
 
+/**
+ * base64 载荷的字符数上限（约 140 MB）。
+ *
+ * 不是业务上限——图片与音频的合理大小由各调用方按场景决定。
+ * 这里只挡明显失控的输入：Host 侧 `Buffer.from(data, 'base64')` 会为任意长度的
+ * 字符串先分配内存，没有这道闸，一个坏掉的调用方就能让 Host 申请几个 GB。
+ */
+const MAX_BASE64_CHARS = 140 * 1024 * 1024;
+
 function nonEmptyString(value: unknown, label: string): string {
 	if (typeof value !== 'string' || value.trim() === '') {
 		throw new TypeError(`${label} must be a non-empty string`);
@@ -1014,7 +1023,10 @@ export function validateDshIdeInput<K extends DshIdeMethod>(command: K, args: un
 			break;
 		case 'speechTranscribe': {
 			const request = exactRecord(record['request'], ['audioBase64', 'providerId', 'language'], 'DshIdeInput.speechTranscribe.request');
+			// 业务上限由 IDE 侧按官方 `maxAudioBytes` 动态限制（见 `dshSpeech.ts`）；
+			// 这里只挡明显失控的输入，理由同 `saveImageAttachment.data`。
 			nonEmptyString(request['audioBase64'], 'DshIdeInput.speechTranscribe.request.audioBase64');
+			boundedString(request['audioBase64'], 'DshIdeInput.speechTranscribe.request.audioBase64', MAX_BASE64_CHARS);
 			optionalString(request['providerId'], 'DshIdeInput.speechTranscribe.request.providerId');
 			optionalString(request['language'], 'DshIdeInput.speechTranscribe.request.language');
 			break;
@@ -1043,7 +1055,11 @@ export function validateDshIdeInput<K extends DshIdeMethod>(command: K, args: un
 			if (mediaType !== 'image/png' && mediaType !== 'image/jpeg' && mediaType !== 'image/webp' && mediaType !== 'image/gif') {
 				throw new TypeError('DshIdeInput.saveImageAttachment.mediaType must be a supported image media type');
 			}
+			// 这里不设业务上限（合理大小由调用方按场景决定，见 `dshChatSession.ts` 的 20 MiB 守卫），
+			// 只挡明显失控的输入：base64 后约 140 MB 对应约 105 MB 原始字节。
+			// 不挡的话 Host 侧 `Buffer.from(data,'base64')` 会为任意长度的字符串先分配内存。
 			nonEmptyString(record['data'], 'DshIdeInput.saveImageAttachment.data');
+			boundedString(record['data'], 'DshIdeInput.saveImageAttachment.data', MAX_BASE64_CHARS);
 			optionalString(record['name'], 'DshIdeInput.saveImageAttachment.name');
 			break;
 		}
