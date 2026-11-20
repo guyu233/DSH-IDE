@@ -438,6 +438,33 @@ function contract() {
 		throw new Error(`VSCODE_PATCH_POINTS 指纹与基线不符（${mismatches.length} 处）：\n    ${mismatches.join('\n    ')}\n  处置：按第 5 章 §7 核对上游改动，确认后更新契约里的 sha256 基线并记录原因。`);
 	}
 
+	// 注入点的 `symbol` 必须在对应文件里真实存在。
+	//
+	// 依据 CHK-215：4 个注入点里 3 个 `symbol` 写的是上游的旧名字（`ChatViewPane`、
+	// `ITerminalService`、`QuickAccessController`），本仓库把这些文件精简后符号早已不在——
+	// 而门禁只比 `sha256` 不比 `symbol`，于是这份「注入点核对表」长期是好看的假数据。
+	// 这里改成真实断言：查不到就 FAIL，让失真无法静默存活。
+	const pairRe = /\{\s*id:\s*'([^']+)'[\s\S]*?file:\s*'([^']+)'[\s\S]*?symbol:\s*'([^']+)'/g;
+	const missingSymbols = [];
+	for (const m of text.matchAll(pairRe)) {
+		const [, id, file, symbol] = m;
+		const abs = path.join(repoRoot, file);
+		// 文件本身缺失已由上一步报出；这里只管「文件在、符号不在」。
+		if (!fs.existsSync(abs)) {
+			continue;
+		}
+		const body = fs.readFileSync(abs, 'utf8');
+		// 锚点允许写成「A / B」这种多锚点描述，逐个查。
+		const anchors = symbol.split('/').map(part => part.trim()).filter(Boolean);
+		const absent = anchors.filter(anchor => !body.includes(anchor));
+		if (absent.length === anchors.length) {
+			missingSymbols.push(`${id} (${file}): 找不到 ${absent.join(' / ')}`);
+		}
+	}
+	if (missingSymbols.length > 0) {
+		throw new Error(`VSCODE_PATCH_POINTS 的 symbol 在对应文件里不存在（${missingSymbols.length} 处）：\n    ${missingSymbols.join('\n    ')}\n  处置：把 symbol 改成该文件里真实存在的锚点（本仓库可能已精简掉上游符号）。`);
+	}
+
 	// 会话归属：任何 Host 方法只要读了 `args.sessionId`，就必须在方法体内做过
 	// `sessionIdOf(...)` / `assertVisibleRowForBridge(...)` / `assertOwnership(...)` 之一，
 	// 或者把 sessionId 交给 `changeArchive` 这类已知会校验的下游函数。

@@ -31,10 +31,16 @@ export const BLESSED_PACKAGES = Object.freeze([
 	{ name: '@deepseek-ai/dsh-web-frontend', range: '^0.2.2' },
 ] as readonly DshBlessedPackage[]);
 
-/** VS Code 侧需保留的注入点占位（上游升级打 patch 时核对）。 */
+/**
+ * VS Code 侧需保留的注入点占位（上游升级打 patch 时核对）。
+ *
+ * `symbol` 必须是**本仓库该文件里真实存在的锚点**：`file` 与 `sha256` 描述本仓库现状，
+ * `symbol` 若写成上游的旧名字（本仓库已精简掉的类），这份清单就只是好看、核对时对不上。
+ */
 export interface VSCodePatchPoint {
 	readonly id: string;
 	readonly file: string;
+	/** 该文件里真实存在的锚点符号；文件已精简到无导出时，写其保留的注册入口描述。 */
 	readonly symbol: string;
 	readonly note: string;
 	/**
@@ -53,7 +59,7 @@ export const VSCODE_PATCH_POINTS = Object.freeze([
 	{
 		id: 'chat-viewlet',
 		file: 'src/vs/workbench/contrib/chat/browser/chat.contribution.ts',
-		symbol: 'ChatViewPane',
+		symbol: 'registerAction2 / registerSingleton（本文件已精简为注册入口）',
 		note: 'DSH Chat 视图接入点（鲸鱼按钮 / 面板骨架）',
 		sha256: 'efce7729d4bbe245',
 	},
@@ -67,14 +73,14 @@ export const VSCODE_PATCH_POINTS = Object.freeze([
 	{
 		id: 'terminal',
 		file: 'src/vs/platform/terminal/common/terminal.ts',
-		symbol: 'ITerminalService',
+		symbol: 'IRawTerminalInstanceLayoutInfo',
 		note: '原生 node-pty 终端接入点（按宿主 Electron ABI 重编）',
 		sha256: '4bc444eea27988a3',
 	},
 	{
 		id: 'command-palette',
 		file: 'src/vs/workbench/browser/quickaccess.ts',
-		symbol: 'QuickAccessController',
+		symbol: 'inQuickPickContext',
 		note: 'DSH 命令入口接入点',
 		sha256: 'd7babb3efa906bdd',
 	},
