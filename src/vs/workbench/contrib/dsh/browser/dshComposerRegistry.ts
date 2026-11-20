@@ -24,6 +24,7 @@ const placeholderChanges = new Emitter<void>();
 const PLACEHOLDER: IDshComposerSource = {
 	state: { models: [], current: null, permission: null, team: null, presets: null, locked: false },
 	onDidChange: placeholderChanges.event,
+	setSession: () => undefined,
 	refresh: async () => undefined,
 	selectModel: async () => undefined,
 	selectEffort: async () => undefined,

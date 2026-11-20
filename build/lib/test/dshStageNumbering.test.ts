@@ -15,6 +15,7 @@
 // 防止后续提交把旧路线编号重新写回源码。
 
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import fs from 'node:fs';
 import path from 'node:path';
 import { test } from 'node:test';
@@ -91,7 +92,8 @@ test('D28 verify script uses P-numbered PENDING markers only', () => {
 	// 它的注释必须写明「金标准回放」，且门禁函数必须真的做协议校验。
 	assert.match(verify, /projection-golden: typed 投影金标准|projection-golden: \$\{view\.nodes\.length\}/,
 		'projection-golden must describe the typed projection golden replay');
-	assert.match(verify, /function projectionGolden\(\) \{\n\tconst projectPath/, 'projection-golden must actually replay the projector');
+	// 换行可能是 CRLF（仓库在 Windows 上检出）：用 `\r?\n` 定位，别写死 `\n`。
+	assert.match(verify, /function projectionGolden\(\) \{\r?\n\tconst projectPath/, 'projection-golden must actually replay the projector');
 });
 
 test('D28 legal PROVENANCE retains its historical deletion snapshot (must not be rewritten)', () => {
@@ -100,4 +102,14 @@ test('D28 legal PROVENANCE retains its historical deletion snapshot (must not be
 	const provenance = fs.readFileSync(path.join(repoRoot, 'src/vs/platform/dshClient/PROVENANCE.md'), 'utf8');
 	assert.match(provenance, /删除前/, 'PROVENANCE must keep its pre-deletion snapshot');
 	assert.match(provenance, /sha256/, 'PROVENANCE must keep its per-file digests');
+});
+
+test('the release gate covers the unit test suite too', () => {
+	// 注释写着「必须覆盖全部门禁」，但列表早先漏了 test-dsh:all——
+	// 而 verify:dsh-ide-ci 一直把它算在聚合里。「发布通过」不该对应一个测试全红的包。
+	const source = readFileSync(new URL('../../../build/lib/dsh/verify/dshIdeVerify.mjs', import.meta.url), 'utf8');
+	assert.match(source, /\['test-dsh:all', \{ npm: 'test-dsh:all' \}\]/, 'the release gate must run the unit tests');
+	// npm 脚本没有 STATUS 行，必须按退出码判定，且 Windows 上要经 shell。
+	assert.match(source, /isNpm \? 'PASS'/, 'npm scripts must be judged by exit code');
+	assert.match(source, /\.\.\.\(isNpm \? \{ shell: true \} : \{\}\)/, 'npm must run through a shell on Windows');
 });

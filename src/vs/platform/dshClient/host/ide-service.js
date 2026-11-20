@@ -20,9 +20,9 @@ import { bindTypertRemote } from '@deepseek-ai/dsh-typert-protocol';
 import { materializeElectronHome } from './electron-home.js';
 import { DSH_IDE_HOST_PTY_PATH, DSH_IDE_HOST_RG_PATH, resolveHostNodePty, resolveHostRipgrep } from './host-ripgrep.js';
 import { IdeLaunchQueue, ideWorkspaceArgs } from './ide-launch-queue.js';
+import { projectDshIdeComposer } from '../common/dshIdeComposer.js';
 // Host 与 IDE 共用同一份契约真源：字段白名单、方法校验与修订号只有一处定义。
 import {
-	DSH_IDE_INCOMPATIBLE_WIRE,
 	DSH_IDE_WIRE_REVISION,
 	requireDshIdeWireRevision,
 	validateDshIdeInput,
@@ -43,6 +43,13 @@ export class IdeRemoteService extends Service {
     this.spawnedAt = undefined;
     /** 最近一次拉起的 IDE 子进程句柄；防抖据此判断进程是否仍存活。 */
     this.ideChild = undefined;
+    /**
+     * 进行中的拉起。防抖只看 `ideChild`，而 `spawn` 之前有一段 await（物化主页、
+     * 解析 ripgrep/node-pty、取 composerState）；这期间 `ideChild` 仍是 undefined，
+     * 两个并发点击会各自通过防抖、各拉起一个窗口（真机可复现的双开）。
+     * 这里把首个请求的 Promise 存下来，后到的请求直接复用同一结果。
+     */
+    this.launchInFlight = undefined;
     /** Electron 主页的物化进行中/已完成 Promise（并发首点只建一次）。 */
     this.electronHomeBuild = undefined;
     this.typertRemote = bindTypertRemote(this, 'ide', { namespace: 'ide' });
@@ -57,6 +64,7 @@ export class IdeRemoteService extends Service {
     const child = this.ideChild;
     this.ideChild = undefined;
     this.spawnedAt = undefined;
+    this.launchInFlight = undefined;
     if (child === undefined || child.exitCode !== null || child.signalCode !== null) {
       return;
     }
@@ -107,6 +115,8 @@ export class IdeRemoteService extends Service {
    * @returns {{ ok: boolean, message?: string }}
    */
   async launch(workspace, sessionId) {
+    // 与其余六个远程方法同一口径：launch 也能拉起本机进程，必须是可信本地主体。
+    this._requireTrustedCaller('launch');
     // 1) 参数校验（会话/工作区由调用方给，Host 不猜）。
     if (workspace !== undefined && typeof workspace !== 'string') {
       return { ok: false, message: 'launch(workspace) must be a string when provided' };
@@ -121,8 +131,9 @@ export class IdeRemoteService extends Service {
       ...(sessionId === undefined ? {} : { sessionId }),
     };
     if (this.launchQueue.dispatch(spec)) {
-      // 已报到的 IDE 会自己开窗：这是真正的「已交给窗口」。
-      return { ok: true, via: 'registered-ide', opened: true };
+      // 已报到的 IDE 会在下一次 1.5s 轮询时取走这条请求并自己开窗。
+      // 这一刻只是「已交给在线的 IDE 进程」，还不能说窗口已经打开——如实标注，不抢跑。
+      return { ok: true, via: 'registered-ide', opened: false, queued: true };
     }
 
     // 3) 还没有 IDE 报到：这是**首次点击**，由 Host 拉起 IDE 进程（插件载荷，不是独立应用）。
@@ -167,6 +178,32 @@ export class IdeRemoteService extends Service {
     if (lastAlive && this.spawnedAt !== undefined && now - this.spawnedAt < 60000) {
       return { ok: true };
     }
+    // 同一次拉起只跑一份：并发点击必须合流，否则会开出两个窗口。
+    if (this.launchInFlight !== undefined) {
+      return this.launchInFlight;
+    }
+    const inFlight = this._spawnIdeProcessOnce(appPath, workspace, sessionId);
+    this.launchInFlight = inFlight;
+    try {
+      return await inFlight;
+    } finally {
+      if (this.launchInFlight === inFlight) {
+        this.launchInFlight = undefined;
+      }
+    }
+  }
+
+  /**
+   * 真正执行一次拉起（由 `spawnIdeProcess` 做并发合流后调用）。
+   *
+   * 拆出来的原因：合流需要「先登记 Promise、再执行」，而执行体本身很长；
+   * 混在一起会让 finally 清理和后续逻辑互相穿插，难读也易错。
+   * @param {string} appPath IDE 载荷目录
+   * @param {string | undefined} workspace 要打开的工作区
+   * @param {string | undefined} sessionId 要订阅的会话
+   * @returns {Promise<{ ok: boolean, message?: string }>}
+   */
+  async _spawnIdeProcessOnce(appPath, workspace, sessionId) {
     const home = await this.ensureElectronHome(appPath);
     if (home.ok !== true) {
       return { ok: false, message: home.message };
@@ -274,7 +311,12 @@ export class IdeRemoteService extends Service {
       const presets = agentPresets && typeof agentPresets.list === 'function'
         ? await agentPresets.list()
         : undefined;
-      return JSON.stringify({ values, catalog, permission, presets });
+      // 必须经 `projectDshIdeComposer`：IDE 端 `normalizeDshComposerState` 读的是
+      // `{ model:{groups,current}, permission:{options}, preset:{options}, team }`。
+      // 直接把 `{ values, catalog, permission, presets }` 塞进环境变量时字段名对不上，
+      // IDE 会整份解析成 EMPTY——预取看起来生效、实际第一帧仍是空的（真机前的静态核对发现）。
+      // 与 `composerState` 用同一个投影函数，保证两条读取路径形状一致。
+      return JSON.stringify(projectDshIdeComposer({ values, catalog, permission, presets }));
     } catch {
       return undefined;
     }
@@ -354,8 +396,9 @@ export class IdeRemoteService extends Service {
 
   /**
    * 跟随一个会话。帧来自桥接里那一次 `sessionController.follow`，原样送出。
-   * @param {string} sessionId
-   * @param {AbortSignal} signal
+   * @param {object} binding 发起视图的绑定（viewId / generation / sessionId）
+   * @param {number} wireRevision 两半共用的线协议修订号
+   * @param {AbortSignal} signal 调用方取消信号
    */
   async *followSession(binding, wireRevision, signal) {
     requireDshIdeWireRevision(wireRevision);

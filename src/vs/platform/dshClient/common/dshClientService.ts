@@ -16,7 +16,6 @@
 
 import { Emitter, Event } from '../../../base/common/event.js';
 import { Disposable } from '../../../base/common/lifecycle.js';
-import { generateUuid } from '../../../base/common/uuid.js';
 import { IChannel } from '../../../base/parts/ipc/common/ipc.js';
 import { createDecorator } from '../../instantiation/common/instantiation.js';
 import { IMainProcessService } from '../../ipc/common/mainProcessService.js';
@@ -34,32 +33,10 @@ export type DshClientCallResult<T = unknown> =
 	| { readonly ok: true; readonly value: T }
 	| { readonly ok: false; readonly error: DshRemoteError };
 
-/** 推送给渲染器的流帧。 */
-export interface IDshStreamFrame {
-	readonly streamId: string;
-	readonly type: 'item' | 'end' | 'error';
-	readonly value?: unknown;
-	readonly error?: DshRemoteError;
-}
-
-/** 可写逻辑流句柄（对齐官方 ClientStreamHandle / chatapp WritableRemoteStream）。 */
-export interface WritableRemoteStream {
-	readonly streamId: string;
-	/** 上行一个 item（C→H {type:'item'}）；返回的 Promise 在该帧 IPC 落定/失败后结算（可等待的背压）。 */
-	send(value: unknown): Promise<void>;
-	/** 上行半关闭（C→H {type:'end'}）；下行继续。 */
-	end(): Promise<void>;
-	/** 终止（C→H {type:'cancel'}）。 */
-	cancel(): Promise<void>;
-	/** 本地清理（等同 cancel）。 */
-	close(): Promise<void>;
-}
-
 /** 渲染器侧官方客户端访问器。 */
 export interface IDshClientService {
 	readonly _serviceBrand: undefined;
 	readonly onDidChangeState: Event<{ connected: boolean }>;
-	readonly onDidStreamFrame: Event<IDshStreamFrame>;
 	/** 唯一快照流：`listen('snapshot')` 的原样转发（校验由 DshIdeConsumer 负责）。 */
 	readonly onDidSnapshot: Event<DshIdeSnapshot>;
 	/** waterfall 流：`listen('waterfall')` 的原样转发（校验由独立消费者负责，不进快照）。 */
@@ -76,15 +53,6 @@ export interface IDshClientService {
 	connect(): Promise<{ ok: boolean; endpoint?: string; error?: DshRemoteError }>;
 	/** 一元调用；当前骨架返回 FEATURE_UNAVAILABLE。 */
 	call<T = unknown>(endpoint: string, args?: Record<string, unknown>, signal?: AbortSignal): Promise<DshClientCallResult<T>>;
-	/**
-	 * 打开一条逻辑流。当前骨架立即回传 error 帧（「重建中」），绝不静默。
-	 */
-	follow(endpoint: string, args: Record<string, unknown>, onFrame: (frame: IDshStreamFrame) => void): { streamId: string; close: () => void };
-}
-
-/** 具备可写双向流能力的客户端切片（P5 接入真实上行流）。 */
-export interface IDshStreamClient extends IDshClientService {
-	openWritableStream(endpoint: string, args: Record<string, unknown>, signal: AbortSignal | undefined, onFrame: (frame: IDshStreamFrame) => void): WritableRemoteStream;
 }
 
 export const IDshClientService = createDecorator<IDshClientService>('dshClientService');
@@ -94,14 +62,13 @@ const REBUILD_ERROR: DshRemoteError = {
 	message: 'DSH-IDE connection layer is being rebuilt',
 };
 
-export class DshClientService extends Disposable implements IDshStreamClient {
+export class DshClientService extends Disposable implements IDshClientService {
 	declare readonly _serviceBrand: undefined;
 
 	private readonly channel: IChannel;
 	/** 连接态：任一 `open` 成功或收到快照帧即为已连接（账号头像据此判断能否读账号）。 */
 	private _connected = false;
 	private readonly _onDidChangeState = this._register(new Emitter<{ connected: boolean }>());
-	private readonly _onDidStreamFrame = this._register(new Emitter<IDshStreamFrame>());
 	private readonly _onDidSnapshot = this._register(new Emitter<DshIdeSnapshot>());
 	private readonly _onDidWaterfall = this._register(new Emitter<DshIdeWaterfallNotice>());
 	private readonly _onDidSessionNotice = this._register(new Emitter<DshIdeSessionNotice>());
@@ -203,29 +170,7 @@ export class DshClientService extends Disposable implements IDshStreamClient {
 		}
 	}
 
-	follow(_endpoint: string, _args: Record<string, unknown>, onFrame: (frame: IDshStreamFrame) => void): { streamId: string; close: () => void } {
-		const streamId = generateUuid();
-		// 立即以 error 帧通知调用方：连接层重建中，绝不静默。
-		onFrame({ streamId, type: 'error', error: REBUILD_ERROR });
-		return { streamId, close: () => undefined };
-	}
-
-	openWritableStream(_endpoint: string, _args: Record<string, unknown>, _signal: AbortSignal | undefined, onFrame: (frame: IDshStreamFrame) => void): WritableRemoteStream {
-		const streamId = generateUuid();
-		const fail = () => onFrame({ streamId, type: 'error', error: REBUILD_ERROR });
-		// 异步触发一次 error，避免同步抛到 UI。
-		Promise.resolve().then(fail);
-		return {
-			streamId,
-			send: () => Promise.resolve(),
-			end: () => Promise.resolve(),
-			cancel: () => Promise.resolve(),
-			close: () => Promise.resolve(),
-		};
-	}
-
 	readonly onDidChangeState: Event<{ connected: boolean }> = this._onDidChangeState.event;
-	readonly onDidStreamFrame: Event<IDshStreamFrame> = this._onDidStreamFrame.event;
 }
 
 /** 把通道抛出的错误收敛成 `DshRemoteError`；未知形状按给定默认码处理。 */

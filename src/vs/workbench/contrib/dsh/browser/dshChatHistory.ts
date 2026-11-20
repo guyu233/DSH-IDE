@@ -11,9 +11,11 @@
 // 原生 history 是「request / response」成对的行：用户消息开启一条 request，
 // 其后的助手 / 工具内容并进对应的 response；没有 turn 坐标的内容并入当前 response。
 
+import { localize } from '../../../../nls.js';
 import { isAbsolute } from '../../../../base/common/path.js';
 import { URI } from '../../../../base/common/uri.js';
 import type { DshChatNode, DshToolResultNode } from './dshChatModel.js';
+import { dshAttachmentUri } from './dshAttachmentFileSystem.js';
 
 /**
  * 原生 chat 进度部件的窄形状：只声明本文件产出的几种。
@@ -108,6 +110,8 @@ export interface DshHistoryDeliverable {
 
 /** 计划 / 目标 / Todo / Skill / 额度提示：来自快照 typed 字段。 */
 export interface DshHistoryExtras {
+	/** 附件所属会话：构造只读附件 URI 时必须带会话身份（Host 会核对归属）。 */
+	readonly sessionId?: string;
 	readonly plan?: { readonly active: boolean; readonly pending: boolean };
 	readonly goal?: {
 		readonly goal: { readonly objective: string; readonly phase: string };
@@ -125,6 +129,7 @@ export interface DshHistoryExtras {
 
 /** 会话状态里 extras 的最小读取面（`DshChatSession` 满足它，单测可注入假对象）。 */
 export interface DshHistoryExtrasSource {
+	readonly activeSessionId: string | undefined;
 	deliverables(): readonly DshHistoryDeliverable[];
 	attachments(): readonly { readonly attachmentId: string; readonly name?: string; readonly mediaType: string }[];
 	quotaNotice(): { readonly code: string; readonly seq: number } | undefined;
@@ -145,6 +150,7 @@ export interface DshHistoryExtrasSource {
  */
 export function extrasOf(source: DshHistoryExtrasSource): DshHistoryExtras {
 	return {
+		sessionId: source.activeSessionId,
 		deliverables: source.deliverables(),
 		attachments: source.attachments(),
 		quotaNotice: source.quotaNotice(),
@@ -155,6 +161,30 @@ export function extrasOf(source: DshHistoryExtrasSource): DshHistoryExtras {
 		team: source.team(),
 		worktrees: source.worktrees(),
 	};
+}
+
+/**
+ * extras 的内容指纹：用于判断「这一帧有没有改变 history 尾部」。
+ *
+ * 只取会影响渲染的标量，不序列化整个对象——extras 里可能带大数组（交付物、待办），
+ * `JSON.stringify` 反而比直接重建 history 更贵。字段用 `|` 分隔，缺省统一成空串。
+ */
+export function extrasFingerprint(extras: DshHistoryExtras): string {
+	const goal = extras.goal?.goal;
+	const plan = extras.plan;
+	return [
+		extras.sessionId ?? '',
+		goal === undefined ? '' : `${goal.objective}|${goal.phase}|${extras.goal?.roundsStarted ?? 0}`,
+		plan === undefined ? '' : `${plan.active ? 'a' : ''}${plan.pending ? 'p' : ''}`,
+		(extras.todos ?? []).length,
+		(extras.skills ?? []).length,
+		(extras.deliverables ?? []).length,
+		(extras.attachments ?? []).length,
+		(extras.worktrees ?? []).length,
+		extras.team?.enabled === true ? '1' : '0',
+		extras.team?.failure === undefined ? '' : 'fail',
+		extras.quotaNotice === undefined ? '' : 'quota',
+	].join('|');
 }
 
 /**
@@ -174,7 +204,8 @@ export function toHistory(
 	/** 本 response 的 turn-error（渲染成原生 response 级错误，不再埋进 markdown）。 */
 	let turnError: DshHistoryErrorDetails | undefined;
 	/** 已经有结果的 callId：工具调用块与工具结果只画一行，避免同一调用出现两张卡。 */
-	const settledCallIds = collectSettledCallIds(session.nodes());
+	const nodes = session.nodes();
+	const settledCallIds = collectSettledCallIds(nodes);
 	/**
 	 * 本 response 里已经画过的 callId（含 assistant 块 / 独立 tool-call 节点 / tool-result）。
 	 *
@@ -206,10 +237,12 @@ export function toHistory(
 		drawnCallIds = new Set<string>();
 	};
 
-	for (const node of session.nodes()) {
+	for (const node of nodes) {
 		if (node.kind === 'user') {
 			flush();
-			pending = { prompt: textOf(node.content), participant: 'dsh', timestamp: node.time };
+			pending = { prompt: textWithFiles(node.content), participant: 'dsh', timestamp: node.time };
+			// 图片跟这条用户消息走，不要等整段对话结束再堆到最后一条回复上。
+			pushImageReferences(node.content, extras.sessionId, parts);
 			continue;
 		}
 		if (node.kind === 'steering' || node.kind === 'subagent-notice') {
@@ -217,10 +250,12 @@ export function toHistory(
 			if (pending === undefined) {
 				pending = { prompt: '', participant: 'dsh' };
 			}
+			// 两个分支都是用户可见标签，且此前一个英文一个中文（`**Steering:**` vs `> 子智能体：`）。
 			const value = node.kind === 'steering'
-				? `**Steering:** ${textOf(node.content)}`
-				: `> 子智能体：${textOf(node.content)}`;
+				? localize('dsh.history.steering', "**介入：** {0}", textWithFiles(node.content))
+				: localize('dsh.history.subagentBody', "> 子智能体：{0}", textWithFiles(node.content));
 			parts.push({ kind: 'markdownContent', content: { value } });
+			pushImageReferences(node.content, extras.sessionId, parts);
 			continue;
 		}
 		if (node.kind === 'turn-error') {
@@ -240,7 +275,7 @@ export function toHistory(
 			// 没有前置用户消息的内容（例如 fork 继承历史）：开一条内容行。
 			pending = { prompt: '', participant: 'dsh' };
 		}
-		appendNode(node, parts, settledCallIds, drawnCallIds);
+		appendNode(node, parts, settledCallIds, drawnCallIds, extras.sessionId);
 	}
 	flush();
 	// 配额提示是「本回合」的 response 级状态：必须在追加交付物 / extras / pending 之前落到
@@ -287,7 +322,7 @@ function applyQuotaNotice(quotaNotice: DshHistoryExtras['quotaNotice'], history:
 	if (quotaNotice === undefined) {
 		return;
 	}
-	const message = `额度不足（${quotaNotice.code}），请检查账号额度。`;
+	const message = localize('dsh.history.quotaExceeded', "额度不足（{0}），请检查账号额度。", quotaNotice.code);
 	// 交付物行不带 prompt，这里用「结构上由 appendDeliverables 追加的行」无法区分，
 	// 因此只在末尾 response 没有 errorDetails 时把配额写进去；否则降级为 warning 部件。
 	const last = history[history.length - 1];
@@ -311,51 +346,100 @@ function applyQuotaNotice(quotaNotice: DshHistoryExtras['quotaNotice'], history:
  * 这些是快照级状态，不属于某一条消息；放在尾部保证用户一眼能看到当前进度与提醒。
  * 额度提示不在这里：它是 response 级 `errorDetails.isQuotaExceeded`（见 `applyQuotaNotice`）。
  */
+/**
+ * 目标阶段 → 中文标签。
+ *
+ * 契约里是  /  /  /  四值枚举；直接拼进中文句子
+ * 会让用户看到英文原词。未知值原样显示，不猜含义。
+ */
+function goalPhaseText(phase: string): string {
+	switch (phase) {
+		case 'active': return localize('dsh.history.goalActive', "进行中");
+		case 'paused': return localize('dsh.history.goalPaused', "已暂停");
+		case 'blocked': return localize('dsh.history.goalBlocked', "受阻");
+		case 'complete': return localize('dsh.history.goalComplete', "已完成");
+		default: return phase;
+	}
+}
+
+/**
+ * 共享任务状态 → 中文标签。
+ *
+ * 契约里 `status` 只要求非空字符串（官方任务板状态会随版本增加），所以这里只翻
+ * 已知的三种，其余原样显示——猜一个中文词比露出原词更容易误导。
+ */
+function taskStatusText(status: string): string {
+	switch (status) {
+		case 'pending': return localize('dsh.history.taskPending', "待处理");
+		case 'in_progress': return localize('dsh.history.taskInProgress', "进行中");
+		case 'completed': return localize('dsh.history.taskCompleted', "已完成");
+		default: return status;
+	}
+}
+
 function appendExtras(extras: DshHistoryExtras, history: DshHistoryItem[]): void {
 	const parts: DshHistoryPart[] = [];
 	const push = (part: DshHistoryPart) => parts.push(part);
 
 	if (extras.plan !== undefined) {
-		const state = extras.plan.active ? (extras.plan.pending ? '计划模式（等待确认）' : '计划模式已启用') : '计划模式未启用';
+		const state = extras.plan.active
+			? (extras.plan.pending ? localize('dsh.history.planPending', "计划模式（等待确认）") : localize('dsh.history.planActive', "计划模式已启用"))
+			: localize('dsh.history.planOff', "计划模式未启用");
 		push({ kind: 'info', content: { value: state } });
 	}
 	if (extras.goal !== undefined) {
+		const phase = goalPhaseText(extras.goal.goal.phase);
 		push({
 			kind: 'info',
-			content: { value: `目标：${extras.goal.goal.objective}（${extras.goal.goal.phase}，已进行 ${extras.goal.roundsStarted} 轮）` },
+			content: { value: localize('dsh.history.goal', "目标：{0}（{1}，已进行 {2} 轮）", extras.goal.goal.objective, phase, extras.goal.roundsStarted) },
 		});
 	}
-	if (extras.todos !== undefined && extras.todos.length > 0) {
+	// 下列数组的元素都来自 Host：`filter` 掉 null / 非对象，避免渲染期抛错
+	// （这些 getter 的返回值最终由原生面板在 rebuild 时消费，那里没有 try/catch）。
+	const todos = asObjects(extras.todos);
+	if (todos.length > 0) {
 		// Todo 用原生任务行承接：标题给出完成数，逐项进 progress，保持可收起。
-		const done = extras.todos.filter(todo => todo.status === 'completed').length;
+		const done = todos.filter(todo => todo.status === 'completed').length;
 		push({
 			kind: 'progressTaskSerialized',
-			content: { value: `待办 ${done}/${extras.todos.length}` },
-			progress: extras.todos.map(todo => {
+			content: { value: localize('dsh.history.todos', "待办 {0}/{1}", done, todos.length) },
+			progress: todos.map(todo => {
 				const mark = todo.status === 'completed' ? '[x]' : todo.status === 'in_progress' ? '[-]' : '[ ]';
-				return { kind: 'warning' as const, content: { value: `${mark} ${todo.content}` } };
+				return { kind: 'warning' as const, content: { value: `${mark} ${String(todo.content ?? '')}` } };
 			}),
 		});
 	}
-	if (extras.skills !== undefined && extras.skills.length > 0) {
-		push({ kind: 'info', content: { value: `可用技能：${extras.skills.map(skill => skill.name).join('、')}` } });
+	const skills = asObjects(extras.skills);
+	if (skills.length > 0) {
+		push({ kind: 'info', content: { value: localize('dsh.history.skills', "可用技能：{0}", skills.map(skill => String(skill.name ?? '')).join('、')) } });
 	}
-	if (extras.worktrees !== undefined && extras.worktrees.length > 0) {
-		push({ kind: 'info', content: { value: `工作树 ${extras.worktrees.length} 个：${extras.worktrees.map(worktree => `${worktree.branch}${worktree.created ? '' : '（继承）'}`).join('、')}` } });
+	const worktrees = asObjects(extras.worktrees);
+	if (worktrees.length > 0) {
+		push({ kind: 'info', content: { value: localize('dsh.history.worktrees', "工作树 {0} 个：{1}", worktrees.length, worktrees.map(worktree => `${String(worktree.branch ?? '')}${worktree.created ? '' : localize('dsh.history.worktreeInherited', "（继承）")}`).join('、')) } });
 	}
-	if (extras.team !== undefined && extras.team.tasks.length > 0) {
-		const done = extras.team.tasks.filter(task => task.status === 'completed').length;
-		push({
-			kind: 'progressTaskSerialized',
-			content: { value: `共享任务 ${done}/${extras.team.tasks.length}` },
-			progress: extras.team.tasks.map(task => ({
-				kind: 'warning' as const,
-				content: { value: `[${task.status}] ${task.subject}${task.ownerName === undefined ? '' : `（${task.ownerName}）`}` },
-			})),
-		});
-	}
-	if (extras.attachments !== undefined && extras.attachments.length > 0) {
-		push({ kind: 'info', content: { value: `会话附件 ${extras.attachments.length} 个` } });
+	// 团队关闭时不该列出任务：那些任务是上一次开启时的残留，画出来会让用户以为还开着。
+	// 设置失败也要说明，否则开关看起来生效了、实际没写进内核。
+	const team = extras.team;
+	if (team !== undefined) {
+		if (team.enabled !== true) {
+			push({ kind: 'info', content: { value: localize('dsh.history.teamOff', "共享任务未启用") } });
+		} else {
+			const teamTasks = asObjects(team.tasks);
+			if (teamTasks.length > 0) {
+				const done = teamTasks.filter(task => task.status === 'completed').length;
+				push({
+					kind: 'progressTaskSerialized',
+					content: { value: localize('dsh.history.teamTasks', "共享任务 {0}/{1}", done, teamTasks.length) },
+					progress: teamTasks.map(task => ({
+						kind: 'warning' as const,
+						content: { value: `[${taskStatusText(String(task.status ?? ''))}] ${String(task.subject ?? '')}${task.ownerName === undefined ? '' : `（${String(task.ownerName)}）`}` },
+					})),
+				});
+			}
+		}
+		if (typeof team.failure === 'string' && team.failure !== '') {
+			push({ kind: 'warning', content: { value: localize('dsh.history.teamFailed', "共享任务设置失败：{0}", team.failure) } });
+		}
 	}
 	if (parts.length === 0) {
 		return;
@@ -412,11 +496,11 @@ function appendPending(pending: readonly DshHistoryPending[], history: DshHistor
 		if (item.kind === 'approval') {
 			parts.push({
 				kind: 'command',
-				command: { id: 'dsh.answerApproval', title: '允许', arguments: [item.eventId, 'approve'] },
+				command: { id: 'dsh.answerApproval', title: localize('dsh.history.allow', "允许"), arguments: [item.eventId, 'approve'] },
 			});
 			parts.push({
 				kind: 'command',
-				command: { id: 'dsh.answerApproval', title: '拒绝', arguments: [item.eventId, 'reject'] },
+				command: { id: 'dsh.answerApproval', title: localize('dsh.history.reject', "拒绝"), arguments: [item.eventId, 'reject'] },
 			});
 		} else {
 			for (const option of item.options) {
@@ -436,7 +520,7 @@ function appendPending(pending: readonly DshHistoryPending[], history: DshHistor
 	history.push({ type: 'response', parts, participant: 'dsh' });
 }
 
-function appendNode(node: DshChatNode, parts: DshHistoryPart[], settledCallIds: ReadonlySet<string>, drawnCallIds: Set<string>): void {
+function appendNode(node: DshChatNode, parts: DshHistoryPart[], settledCallIds: ReadonlySet<string>, drawnCallIds: Set<string>, sessionId: string | undefined): void {
 	switch (node.kind) {
 		case 'assistant': {
 			for (const block of node.blocks) {
@@ -444,6 +528,8 @@ function appendNode(node: DshChatNode, parts: DshHistoryPart[], settledCallIds: 
 					parts.push({ kind: 'markdownContent', content: { value: block.text } });
 				} else if (block.kind === 'reasoning') {
 					parts.push({ kind: 'thinking', value: block.text });
+				} else if (block.kind === 'image') {
+					pushImageReferences([block], sessionId, parts);
 				} else if (block.kind === 'tool-call') {
 					// 已经有结果的调用由 tool-result 节点画成完整工具卡；同一 response 内任何来源
 					// 画过一次就不再画（running 阶段 assistant 块与独立节点会同时存在）。
@@ -467,7 +553,7 @@ function appendNode(node: DshChatNode, parts: DshHistoryPart[], settledCallIds: 
 			// 此时官方卡片头部显示 callId（`records.ts:167` 的注释：「card head shows callId」）。
 			parts.push(toolInvocationOf(node.callId, node.name === '' ? node.callId : node.name, argsTextOf(node.call?.argsRaw, node.args), node));
 			for (const child of node.subCalls) {
-				appendNode(child, parts, settledCallIds, drawnCallIds);
+				appendNode(child, parts, settledCallIds, drawnCallIds, sessionId);
 			}
 			return;
 		case 'command': {
@@ -476,24 +562,25 @@ function appendNode(node: DshChatNode, parts: DshHistoryPart[], settledCallIds: 
 			return;
 		}
 		case 'turn-max-tokens':
-			parts.push({ kind: 'markdownContent', content: { value: '> 本轮达到 token 上限' } });
+			parts.push({ kind: 'markdownContent', content: { value: localize('dsh.history.tokenLimit', "> 本轮达到 token 上限") } });
 			return;
 		case 'compaction':
-			parts.push({ kind: 'markdownContent', content: { value: '> 上下文已压缩' } });
+			parts.push({ kind: 'markdownContent', content: { value: localize('dsh.history.compacted', "> 上下文已压缩") } });
 			return;
 		case 'model-retry':
-			parts.push({ kind: 'markdownContent', content: { value: '> 模型重试' } });
+			parts.push({ kind: 'markdownContent', content: { value: localize('dsh.history.modelRetry', "> 模型重试") } });
 			return;
 		case 'context':
 			if (node.content.length > 0) {
-				parts.push({ kind: 'markdownContent', content: { value: `> 上下文：${textOf(node.content)}` } });
+				parts.push({ kind: 'markdownContent', content: { value: localize('dsh.history.context', "> 上下文：{0}", textWithFiles(node.content)) } });
 			}
+			pushImageReferences(node.content, sessionId, parts);
 			return;
 		case 'inherited-history':
-			parts.push({ kind: 'markdownContent', content: { value: '> 继承自上游会话的历史' } });
+			parts.push({ kind: 'markdownContent', content: { value: localize('dsh.history.inherited', "> 继承自上游会话的历史") } });
 			return;
 		case 'subagent-catalog':
-			parts.push({ kind: 'markdownContent', content: { value: `> 子智能体：${node.name ?? node.label ?? node.childId ?? ''}` } });
+			parts.push({ kind: 'markdownContent', content: { value: localize('dsh.history.subagent', "> 子智能体：{0}", node.name ?? node.label ?? node.childId ?? '') } });
 			return;
 		default:
 			return;
@@ -515,7 +602,9 @@ function toolInvocationOf(callId: string, name: string, input: string, result: D
 		source: INTERNAL_TOOL_SOURCE,
 		invocationMessage: name,
 		originMessage: undefined,
-		pastTenseMessage: result !== undefined && result.isError ? `${name} 失败` : `${name} 完成`,
+		pastTenseMessage: result !== undefined && result.isError
+			? localize('dsh.history.toolFailed', "{0} 失败", name)
+			: localize('dsh.history.toolDone', "{0} 完成", name),
 		isComplete: true,
 		isConfirmed: undefined,
 		presentation: undefined,
@@ -541,6 +630,91 @@ function argsTextOf(argsRaw: string | undefined, args: unknown): string {
 	}
 }
 
+/**
+ * 图片块 → 可打开的 `dsh-attachment:` 引用。
+ *
+ * 挂在产生它的那一轮上（用户消息、上下文、助手块），不收集到对话末尾。
+ * 没有会话 id 时不编 URI：Host 会按会话核对归属，空 id 打不开。
+ */
+function pushImageReferences(blocks: readonly unknown[], sessionId: string | undefined, parts: DshHistoryPart[]): void {
+	if (sessionId === undefined || sessionId === '') {
+		return;
+	}
+	for (const block of blocks) {
+		if (typeof block !== 'object' || block === null) {
+			continue;
+		}
+		const record = block as { type?: unknown; kind?: unknown; attachment?: unknown };
+		if (record.type !== 'image' && record.kind !== 'image') {
+			continue;
+		}
+		const attachment = record.attachment;
+		if (typeof attachment !== 'object' || attachment === null) {
+			continue;
+		}
+		const ref = attachment as { attachmentId?: unknown; mediaType?: unknown };
+		if (typeof ref.attachmentId !== 'string' || ref.attachmentId === '' || typeof ref.mediaType !== 'string' || ref.mediaType === '') {
+			continue;
+		}
+		parts.push({ kind: 'reference', reference: dshAttachmentUri({ attachmentId: ref.attachmentId, mediaType: ref.mediaType }, sessionId) });
+	}
+}
+
+/** 文本加上同一内容里的文件名和图片标签。都没有时与 `textOf` 相同。 */
+function textWithFiles(content: readonly { readonly type: string }[]): string {
+	// 原先这里走 textOf + fileNames + imageLabels 三次遍历同一份 content。
+	// 用户消息与上下文节点每帧都要过这里，合并成一次遍历。
+	const texts: string[] = [];
+	const extras: string[] = [];
+	for (const block of content) {
+		if (typeof block !== 'object' || block === null) {
+			continue;
+		}
+		const record = block as { type?: unknown; kind?: unknown; text?: unknown; attachment?: unknown };
+		if (typeof record.text === 'string' && record.text !== '') {
+			texts.push(record.text);
+		}
+		if (record.type === 'file') {
+			const name = fileNameOf(record.attachment);
+			if (name !== undefined) {
+				extras.push(localize('dsh.history.file', "文件：{0}", name));
+			}
+			continue;
+		}
+		if (record.type === 'image' || record.kind === 'image') {
+			extras.push(imageLabelOf(record.attachment));
+		}
+	}
+	const text = texts.join('\n');
+	if (extras.length === 0) {
+		return text;
+	}
+	return text === '' ? extras.join('\n') : `${text}\n${extras.join('\n')}`;
+}
+
+/** 文件附件的可读名；没有名字时退回 attachmentId。 */
+function fileNameOf(attachment: unknown): string | undefined {
+	if (typeof attachment !== 'object' || attachment === null) {
+		return undefined;
+	}
+	const ref = attachment as { name?: unknown; attachmentId?: unknown };
+	if (typeof ref.name === 'string' && ref.name !== '') {
+		return ref.name;
+	}
+	return typeof ref.attachmentId === 'string' && ref.attachmentId !== '' ? ref.attachmentId : undefined;
+}
+
+/** 图片没有可读文本。只有图片时用户 prompt 会变成空串，气泡里什么都没有。 */
+function imageLabelOf(attachment: unknown): string {
+	if (typeof attachment !== 'object' || attachment === null) {
+		return localize('dsh.history.image', "图片");
+	}
+	const name = (attachment as { name?: unknown }).name;
+	return typeof name === 'string' && name !== ''
+		? localize('dsh.history.imageNamed', "图片：{0}", name)
+		: localize('dsh.history.image', "图片");
+}
+
 /** 内容块里可读文本的拼接。 */
 function textOf(content: readonly { readonly type: string }[]): string {
 	const texts: string[] = [];
@@ -551,4 +725,16 @@ function textOf(content: readonly { readonly type: string }[]): string {
 		}
 	}
 	return texts.join('\n');
+}
+
+/**
+ * 把来源数组收敛成「只含非 null 对象」的数组。
+ *
+ * 这些字段跨进程而来，运行时可能是任何东西（`undefined` 已由调用方判空）。
+ * 统一在这里过滤，避免每个消费点各写一遍 `filter`。
+ */
+function asObjects<T>(value: readonly T[] | undefined): readonly Record<string, unknown>[] {
+	return Array.isArray(value)
+		? value.filter((item): item is Record<string, unknown> => typeof item === 'object' && item !== null)
+		: [];
 }

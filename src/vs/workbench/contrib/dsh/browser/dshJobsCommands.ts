@@ -16,29 +16,9 @@ import { IQuickInputService } from '../../../../platform/quickinput/common/quick
 import { INotificationService } from '../../../../platform/notification/common/notification.js';
 import { localize, localize2 } from '../../../../nls.js';
 import { IDshClientService } from '../../../../platform/dshClient/common/dshClientService.js';
+import { dshErrorText } from '../../../../platform/dshClient/common/dshIdeProtocol.js';
 import { dshChatSessionFor } from './dshChatSession.js';
-
-/** 官方 `JobView` 的线协议子集。 */
-interface DshJobView {
-	readonly id: string;
-	readonly kind: string;
-	readonly label: string;
-	readonly status: string;
-	readonly progress?: string;
-	readonly detail?: string;
-}
-
-/** 把作业状态合成一行描述；缺省字段不显示，不补占位。 */
-function describeJob(job: DshJobView): string {
-	const parts: string[] = [job.status];
-	if (job.progress !== undefined && job.progress !== '') {
-		parts.push(job.progress);
-	}
-	if (job.detail !== undefined && job.detail !== '') {
-		parts.push(job.detail);
-	}
-	return parts.join(' · ');
-}
+import { dshJobChoices } from './dshRuntimeLists.js';
 
 /** 注册 `dsh.jobs`：列出当前会话的后台作业，并可终止其中一个。 */
 export function registerDshJobsCommand(
@@ -53,20 +33,24 @@ export function registerDshJobsCommand(
 			notifications.warn(localize('dsh.jobs.noSession', "当前没有绑定 DSH 会话，无法读取后台作业。"));
 			return;
 		}
-		const listed = await client.call<readonly DshJobView[]>('jobList', { sessionId });
+		const listed = await client.call('jobList', { sessionId });
 		if (!listed.ok) {
-			notifications.error(localize('dsh.jobs.listFailed', "读取后台作业失败：{0}", listed.error.message));
+			const detail = dshErrorText(listed.error, localize('dsh.jobs.listFailedUnknown', "未知原因"));
+			notifications.error(localize('dsh.jobs.listFailed', "读取后台作业失败：{0}", detail));
 			return;
 		}
-		const jobs = Array.isArray(listed.value) ? listed.value : [];
+		const raw = Array.isArray(listed.value) ? listed.value : [];
+		const jobs = dshJobChoices(raw);
 		if (jobs.length === 0) {
-			notifications.info(localize('dsh.jobs.empty', "当前会话没有后台作业。"));
+			notifications.info(raw.length === 0
+				? localize('dsh.jobs.empty', "当前会话没有后台作业。")
+				: localize('dsh.jobs.unreadable', "后台作业列表无法识别，没有可终止的条目。"));
 			return;
 		}
 		const picked = await quickInputService.pick(
 			jobs.map(job => ({
 				label: job.label,
-				description: describeJob(job),
+				description: job.description,
 				job,
 			})),
 			{ placeHolder: localize('dsh.jobs.pick', "选择一个后台作业进行终止") },
@@ -76,8 +60,11 @@ export function registerDshJobsCommand(
 		}
 		const killed = await client.call('jobKill', { sessionId, jobId: picked.job.id });
 		if (!killed.ok) {
-			notifications.error(localize('dsh.jobs.killFailed', "终止后台作业失败：{0}", killed.error.message));
+			const detail = dshErrorText(killed.error, localize('dsh.jobs.killFailedUnknown', "未知原因"));
+			notifications.error(localize('dsh.jobs.killFailed', "终止后台作业失败：{0}", detail));
+			return;
 		}
+		notifications.info(localize('dsh.jobs.killed', "已终止后台作业 {0}", picked.job.label));
 	}));
 	return disposables;
 }

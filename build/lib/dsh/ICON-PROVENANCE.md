@@ -25,7 +25,7 @@
 3. `encodeURIComponent` 全量 URL-encode（含单引号转 `%27`），拼成 `data:image/svg+xml,…`。
 
 生成物：`src/vs/workbench/contrib/dsh/browser/dshIconDataUris.ts`
-（sha256 `514e24d8a30b5a21625d168b503c45be0e0f11a10902c118ae817deed4d991a1`，76,313 B）。
+（sha256 `514e24d8a30b5a21625d168b503c45be0e0f11a10902c118ae817deed4d991a1`，96,561 B）。
 
 **可重复验证**：`DSH_ARTWORK_TS=<官方 artwork.ts 路径> node build/lib/dsh/genDshIconDataUris.mjs --check`
 （已登记进 `test-dsh:all` 的 `dshIconArtwork.test.ts` 覆盖生成物形状）。

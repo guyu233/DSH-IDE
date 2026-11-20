@@ -14,6 +14,7 @@
 import { Disposable } from '../../../../base/common/lifecycle.js';
 import { Emitter, Event } from '../../../../base/common/event.js';
 import { CancellationToken } from '../../../../base/common/cancellation.js';
+import { localize } from '../../../../nls.js';
 import { ExtensionIdentifier } from '../../../../platform/extensions/common/extensions.js';
 import { ILogService } from '../../../../platform/log/common/log.js';
 import type { IDshClientService } from '../../../../platform/dshClient/common/dshClientService.js';
@@ -22,9 +23,10 @@ import type {
 	ILanguageModelChatProvider,
 	ILanguageModelChatRequestOptions,
 	ILanguageModelChatResponse,
+	ILanguageModelConfigurationSchema,
 	ILanguageModelsService,
 } from '../../chat/common/languageModels.js';
-import { DSH_MODEL_VENDOR, toLanguageModel } from './dshComposerProjection.js';
+import { DSH_EFFORT_PROPERTY, DSH_MODEL_VENDOR, toLanguageModel } from './dshComposerProjection.js';
 import { dshChatSessionFor } from './dshChatSession.js';
 
 /**
@@ -44,7 +46,45 @@ function sameLanguageModel(left: ILanguageModelChatMetadataAndIdentifier, right:
 		&& left.metadata.maxInputTokens === right.metadata.maxInputTokens
 		&& left.metadata.maxOutputTokens === right.metadata.maxOutputTokens
 		&& left.metadata.modelGroup?.id === right.metadata.modelGroup?.id
-		&& JSON.stringify(left.metadata.configurationSchema) === JSON.stringify(right.metadata.configurationSchema);
+		&& sameEffortSchema(left.metadata.configurationSchema, right.metadata.configurationSchema);
+}
+
+/**
+ * 推理档 schema 是否等价。
+ *
+ * 不用 `JSON.stringify` 比：schema 的形状由 `toLanguageModel` 固定，会变的只有
+ * `enum` / `enumItemLabels` / `default` 三项。每次判等都整份序列化两个对象，
+ * 在模型表刷新时是纯浪费。
+ */
+function sameEffortSchema(left: ILanguageModelConfigurationSchema | undefined, right: ILanguageModelConfigurationSchema | undefined): boolean {
+	if (left === right) {
+		return true;
+	}
+	if (left === undefined || right === undefined) {
+		return false;
+	}
+	const a = left.properties?.[DSH_EFFORT_PROPERTY];
+	const b = right.properties?.[DSH_EFFORT_PROPERTY];
+	if (a === b) {
+		return true;
+	}
+	if (a === undefined || b === undefined) {
+		return false;
+	}
+	if (a.default !== b.default || a.enum?.length !== b.enum?.length || a.enumItemLabels?.length !== b.enumItemLabels?.length) {
+		return false;
+	}
+	for (let i = 0; i < (a.enum?.length ?? 0); i++) {
+		if (a.enum?.[i] !== b.enum?.[i]) {
+			return false;
+		}
+	}
+	for (let i = 0; i < (a.enumItemLabels?.length ?? 0); i++) {
+		if (a.enumItemLabels?.[i] !== b.enumItemLabels?.[i]) {
+			return false;
+		}
+	}
+	return true;
 }
 
 interface ComposerModel {
@@ -88,6 +128,8 @@ export class DshLanguageModelProvider extends Disposable implements ILanguageMod
 
 	private models: ILanguageModelChatMetadataAndIdentifier[] = [];
 	private loading: Promise<void> | undefined;
+	/** 插件停用后不再写模型表，也不再 fire。 */
+	private _disposed = false;
 
 	constructor(
 		private readonly client: IDshClientService,
@@ -95,6 +137,11 @@ export class DshLanguageModelProvider extends Disposable implements ILanguageMod
 		private readonly vendorHost?: { ensureVendor(vendor: string): void },
 	) {
 		super();
+	}
+
+	override dispose(): void {
+		this._disposed = true;
+		super.dispose();
 	}
 
 	/** 拉一次 DSH 目录；并发调用合并成一次请求。 */
@@ -113,6 +160,10 @@ export class DshLanguageModelProvider extends Disposable implements ILanguageMod
 			return;
 		}
 		const result = await this.client.call<ComposerState>('composerState', { sessionId });
+		// 等待期间插件可能已被停用：这时不能再写模型表，更不能 fire。
+		if (this._disposed) {
+			return;
+		}
 		if (!result.ok) {
 			// 会话还没绑定或视图还没开：保持空列表，不发假模型，也不弹错误。
 			this.logService.trace('[dsh] composerState 暂不可用，模型列表保持上一次', result.error.code);
@@ -142,7 +193,7 @@ export class DshLanguageModelProvider extends Disposable implements ILanguageMod
 
 	async sendChatRequest(_modelId: string, _messages: unknown[], _from: ExtensionIdentifier | undefined, _options: ILanguageModelChatRequestOptions, _token: CancellationToken): Promise<ILanguageModelChatResponse> {
 		// 回答只由 DSH 产生并经 DTO 快照回显；这里不生成第二个回答。
-		throw new Error('DSH 模型不通过 IDE 侧发起请求');
+		throw new Error(localize('dsh.model.noDirectRequest', "DSH 模型不通过 IDE 侧发起请求。"));
 	}
 
 	async provideTokenCount(): Promise<number> {

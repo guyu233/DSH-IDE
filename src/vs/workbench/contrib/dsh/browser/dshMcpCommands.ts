@@ -18,20 +18,8 @@ import { IQuickInputService } from '../../../../platform/quickinput/common/quick
 import { INotificationService } from '../../../../platform/notification/common/notification.js';
 import { localize, localize2 } from '../../../../nls.js';
 import { IDshClientService } from '../../../../platform/dshClient/common/dshClientService.js';
-
-/** 官方 `McpManagedServerView` 的线协议子集。 */
-interface DshMcpServerView {
-	readonly name: string;
-	readonly configured: boolean;
-	readonly status: { readonly state?: string; readonly reason?: string };
-}
-
-/** 把状态转成一行可读文案；未知状态原样显示，不猜测含义。 */
-function describeStatus(view: DshMcpServerView): string {
-	const state = view.status?.state ?? 'unknown';
-	const reason = view.status?.reason === undefined ? '' : ` (${view.status.reason})`;
-	return `${state}${reason}`;
-}
+import { dshErrorText } from '../../../../platform/dshClient/common/dshIdeProtocol.js';
+import { dshMcpChoices } from './dshRuntimeLists.js';
 
 /** 注册 `dsh.mcp`：列出 DSH 管理的 MCP 服务器并可重启其中一个。 */
 export function registerDshMcpCommand(
@@ -41,20 +29,24 @@ export function registerDshMcpCommand(
 ): { dispose(): void } {
 	const disposables = new DisposableStore();
 	disposables.add(CommandsRegistry.registerCommand('dsh.mcp', async () => {
-		const listed = await client.call<readonly DshMcpServerView[]>('mcpListServers', {});
+		const listed = await client.call('mcpListServers', {});
 		if (!listed.ok) {
-			notifications.error(localize('dsh.mcp.listFailed', "读取 DSH MCP 服务器失败：{0}", listed.error.message));
+			const detail = dshErrorText(listed.error, localize('dsh.mcp.listFailedUnknown', "未知原因"));
+			notifications.error(localize('dsh.mcp.listFailed', "读取 DSH MCP 服务器失败：{0}", detail));
 			return;
 		}
-		const servers = Array.isArray(listed.value) ? listed.value : [];
+		const raw = Array.isArray(listed.value) ? listed.value : [];
+		const servers = dshMcpChoices(raw);
 		if (servers.length === 0) {
-			notifications.info(localize('dsh.mcp.empty', "DeepSeek Harness 当前没有配置 MCP 服务器。"));
+			notifications.info(raw.length === 0
+				? localize('dsh.mcp.empty', "DeepSeek Harness 当前没有配置 MCP 服务器。")
+				: localize('dsh.mcp.unreadable', "MCP 服务器列表无法识别，没有可重启的条目。"));
 			return;
 		}
 		const picked = await quickInputService.pick(
 			servers.map(server => ({
 				label: server.name,
-				description: describeStatus(server),
+				description: server.description,
 				picked: false,
 			})),
 			{ placeHolder: localize('dsh.mcp.pick', "选择一个 DSH MCP 服务器进行重启") },
@@ -64,8 +56,11 @@ export function registerDshMcpCommand(
 		}
 		const restarted = await client.call('mcpRestartServer', { name: picked.label });
 		if (!restarted.ok) {
-			notifications.error(localize('dsh.mcp.restartFailed', "重启 MCP 服务器失败：{0}", restarted.error.message));
+			const detail = dshErrorText(restarted.error, localize('dsh.mcp.restartFailedUnknown', "未知原因"));
+			notifications.error(localize('dsh.mcp.restartFailed', "重启 MCP 服务器失败：{0}", detail));
+			return;
 		}
+		notifications.info(localize('dsh.mcp.restarted', "已重启 MCP 服务器 {0}", picked.label));
 	}));
 	return disposables;
 }

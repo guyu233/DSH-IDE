@@ -488,3 +488,26 @@ test('openView binds the session id it is given (and only then can follow a sess
 // 直接整帧喂给 translator 会被「未知类型」全部丢弃 → 绑定成功但一帧都发不出（FRAMES=0）。
 // ---------------------------------------------------------------------------
 
+
+test('launch rejects malformed specs instead of forwarding them', async () => {
+	// 现有用例只测了合法调用；非法参数若被放行，会一路传到主进程的窗口 API。
+	// 这里逐条钉住：多余字段、空串、错类型都必须拿到确定错误码，且**不调用** launcher。
+	const launcher = fakeLauncher({ ok: true });
+	const channel = new DshIdeChannel(() => new DshIdeViewService(fakeBackend()), launcher);
+
+	const cases: { label: string; arg: unknown }[] = [
+		{ label: 'unknown field', arg: { workspace: 'w', extra: 1 } },
+		{ label: 'empty workspace', arg: { workspace: '   ' } },
+		{ label: 'non-string workspace', arg: { workspace: 42 } },
+		{ label: 'empty sessionId', arg: { sessionId: '' } },
+		{ label: 'non-string sessionId', arg: { sessionId: 7 } },
+		{ label: 'array payload', arg: [] },
+		{ label: 'null payload', arg: null },
+	];
+	for (const item of cases) {
+		const result = await channel.call<{ ok: boolean; code?: string }>('ctx-a', DSH_IDE_CONTROL_LAUNCH, item.arg);
+		assert.equal(result.ok, false, `${item.label}: must not be accepted`);
+		assert.equal(result.code, DSH_IDE_INVALID_ARGUMENT, `${item.label}: must be invalid-argument`);
+	}
+	assert.equal(launcher.calls.length, 0, 'no malformed spec may reach the launcher');
+});

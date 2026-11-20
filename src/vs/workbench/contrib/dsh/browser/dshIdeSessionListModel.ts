@@ -110,9 +110,14 @@ export class DshIdeSessionListModel extends Disposable {
 				if (generation !== this._generation) {
 					return;
 				}
+				// 窗口每次聚焦都会重查，而名单绝大多数时候没变。内容相同就不通知：
+				// 每收到一次，列表视图都要重建一次行。
+				const changed = this._lastError !== undefined || !sameSummaryList(this._items, items);
 				this._items = items;
 				this._lastError = undefined;
-				this._onDidChangeState.fire(this.state);
+				if (changed) {
+					this._onDidChangeState.fire(this.state);
+				}
 			} catch (error) {
 				if (generation !== this._generation) {
 					return;
@@ -178,4 +183,20 @@ function errorMessage(error: unknown): string {
 		}
 	}
 	return error instanceof Error ? error.message : String(error);
+}
+
+/** 两份名单是否等价：条数、顺序与每条的会话 id 都一致。 */
+function sameSummaryList(left: readonly IDshIdeSessionSummary[], right: readonly IDshIdeSessionSummary[]): boolean {
+	if (left === right) {
+		return true;
+	}
+	if (left.length !== right.length) {
+		return false;
+	}
+	for (let i = 0; i < left.length; i++) {
+		if (left[i].sessionId !== right[i].sessionId) {
+			return false;
+		}
+	}
+	return true;
 }

@@ -9,7 +9,9 @@
 // 运行：node --experimental-strip-types --test --test-force-exit build/lib/test/dshChatSubmitRouting.test.ts
 
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
+import { dshImagePayload, dshUnsentAttachmentNames } from '../../../src/vs/workbench/contrib/dsh/browser/dshImagePayload.ts';
 
 /**
  * 复刻 `ChatWidget._dshSubmitTarget` 的判定顺序（见 chatWidget.ts）。
@@ -89,4 +91,65 @@ test('an image without an ingested reference is rejected instead of silently dro
 	]);
 	assert.deepEqual(refs, []);
 	assert.equal(rejected.length, 3, 'every unsupported image must be reported to the caller');
+});
+
+test('files and folders block send, tools do not', () => {
+	assert.deepEqual(dshUnsentAttachmentNames([
+		{ kind: 'file', name: 'notes.md' },
+		{ kind: 'directory', name: 'src' },
+		{ kind: 'image', name: 'a.png' },
+		{ kind: 'tool', name: 'bash' },
+		{ kind: 'implicit' },
+	]), ['notes.md', 'src']);
+	assert.deepEqual(dshUnsentAttachmentNames([{ kind: 'paste' }]), ['paste']);
+	assert.deepEqual(dshUnsentAttachmentNames([{ kind: 'string', name: '选区' }]), ['选区']);
+	assert.deepEqual(dshUnsentAttachmentNames([{ kind: 'implicit', name: 'open.ts', enabled: true }]), ['open.ts']);
+	assert.deepEqual(dshUnsentAttachmentNames([{ kind: 'implicit', name: 'open.ts', enabled: false }]), []);
+	assert.deepEqual(dshUnsentAttachmentNames([]), []);
+});
+
+test('a dragged image without a media type is still a payload', () => {
+	// 拖进输入框的文件名经常是「Image from URL」，条目上没有 mimeType。
+	// 只看声明会把发送取消；字节头必须能认出 png。
+	const png = new Uint8Array([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x01]);
+	const payload = dshImagePayload({ value: png, name: 'Image from URL' });
+	assert.equal(payload?.mediaType, 'image/png');
+	assert.equal(payload?.data, png);
+});
+
+test('jpeg bytes win over a wrong declared png type', () => {
+	const jpeg = new Uint8Array([0xFF, 0xD8, 0xFF, 0xD9]);
+	assert.equal(dshImagePayload({ value: jpeg, mimeType: 'image/png', name: 'a.png' })?.mediaType, 'image/jpeg');
+});
+
+test('a named file without a header still uses the extension', () => {
+	const bytes = new Uint8Array([1, 2, 3, 4]);
+	assert.equal(dshImagePayload({ value: bytes, name: 'shot.jpg' })?.mediaType, 'image/jpeg');
+	assert.equal(dshImagePayload({ value: bytes, mimeType: 'image/jpg' })?.mediaType, 'image/jpeg');
+});
+
+test('bmp and empty bytes are not a payload', () => {
+	assert.equal(dshImagePayload({ value: new Uint8Array([0x42, 0x4D, 0x00]), mimeType: 'image/bmp', name: 'a.bmp' }), undefined);
+	assert.equal(dshImagePayload({ value: new Uint8Array(0), mimeType: 'image/png' }), undefined);
+	assert.equal(dshImagePayload({ value: { buffer: new Uint8Array([0x47, 0x49, 0x46, 0x38, 0x39, 0x61]) } })?.mediaType, 'image/gif');
+});
+
+test('send and open paths keep the payload and the single read', () => {
+	const widget = readFileSync(new URL('../../../src/vs/workbench/contrib/chat/browser/widget/chatWidget.ts', import.meta.url), 'utf8');
+	assert.match(widget, /return dshImagePayload\(entry\)/, 'image bytes must go through the shared payload helper');
+	const resolve = readFileSync(new URL('../../../src/vs/workbench/contrib/chat/browser/attachments/chatAttachmentResolveService.ts', import.meta.url), 'utf8');
+	assert.match(resolve, /mimeType: image\.mimeType/, 'picked files must keep their media type on the chat entry');
+	const drag = readFileSync(new URL('../../../src/vs/workbench/contrib/chat/browser/widget/chatDragAndDrop.ts', import.meta.url), 'utf8');
+	assert.match(drag, /file\.name !== '' \? file\.name : createDisplayName\(\)/, 'a dropped file must keep its own name');
+	assert.match(drag, /mimeType\.startsWith\('image\/'\)/, 'a dropped file must forward its media type');
+	const fs = readFileSync(new URL('../../../src/vs/workbench/contrib/dsh/browser/dshAttachmentFileSystem.ts', import.meta.url), 'utf8');
+	assert.match(fs, /private readonly _readCache = new Map/, 'the read cache must hold more than one image');
+	assert.match(fs, /READ_CACHE_LIMIT = 8/, 'the cache must stay bounded');
+	assert.match(fs, /private _remember\(key: string, data: Uint8Array\)/, 'inserts must evict the oldest entry');
+	assert.match(fs, /this\._readCache\.delete\(key\);\s*\n\s*this\._readCache\.set\(key, cached\)/, 'a hit must refresh LRU order');
+	assert.match(fs, /private readonly _inflight = new Map/, 'concurrent reads of one attachment must share one Host transfer');
+	assert.match(fs, /const pending = this\._inflight\.get\(key\)/, 'an in-flight read must be reused instead of re-requested');
+	assert.match(fs, /this\._inflight\.delete\(key\)/, 'a settled read must leave the in-flight map');
+	assert.match(fs, /decodeBase64\(base64\)/, 'bad base64 must be decoded without atob');
+	assert.doesNotMatch(fs, /atob\(/, 'atob throws on malformed bytes and takes down the viewer');
 });

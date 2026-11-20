@@ -17,6 +17,7 @@ import {
 	type IDshIdeSessionListSource,
 	type IDshIdeSessionListState,
 } from '../../../out/vs/workbench/contrib/dsh/browser/dshIdeSessionListModel.js';
+import { projectDshIdeSessionList, projectDshIdeWorkspaceSessions } from '../../../src/vs/platform/dshClient/common/dshIdeSessionList.js';
 
 /** 最小会话摘要（字段与契约真源一致，够测状态机即可）。 */
 function summary(sessionId: string): IDshIdeSessionSummary {
@@ -258,4 +259,42 @@ test('deleteSession refuses while unbound', async () => {
 	assert.deepEqual(result, { ok: false, error: 'unbound' });
 	assert.equal(fake.listCalls, 0);
 	model.dispose();
+});
+
+test('an unchanged list does not republish state', async () => {
+	// 窗口每次聚焦都会重查，而名单绝大多数时候没变。内容相同就不该再通知，
+	// 否则列表视图每次聚焦都要重建一遍行。
+	const fake = fakeSource();
+	const model = new DshIdeSessionListModel(fake.source, 's-1');
+	let fires = 0;
+	model.onDidChangeState(() => fires++);
+
+	const first = model.refresh();
+	fake.resolveList([summary('s-1'), summary('s-2')]);
+	await first;
+	const afterFirst = fires;
+	assert.ok(afterFirst >= 1, 'the first read must publish');
+
+	// 同一份名单再来一次：请求照发，但不通知。
+	const second = model.refresh();
+	assert.equal(fake.listCalls, 2, 'the refresh must still reach the host');
+	fake.resolveList([summary('s-1'), summary('s-2')]);
+	await second;
+	assert.equal(fires, afterFirst, 'an identical list must not republish');
+
+	// 名单真的变了：必须通知。
+	const third = model.refresh();
+	fake.resolveList([summary('s-1')]);
+	await third;
+	assert.ok(fires > afterFirst, 'a changed list must republish');
+	model.dispose();
+});
+
+test('the list projections fail closed on a non-array items payload', () => {
+	// `items` 来自官方 controller，形状未知时直接 `.some` / `.filter` 会抛 TypeError；
+	// 调用方没有 catch，整条帧链会断。同目录 `dshIdeArchiveSet` 也是 fail-closed。
+	for (const bad of [null, undefined, 'str', 42, {}]) {
+		assert.deepEqual(projectDshIdeSessionList('s-1', [], bad as never), [], `session list must not throw on ${String(bad)}`);
+		assert.deepEqual(projectDshIdeWorkspaceSessions({ id: 'w', sessionIds: ['s-1'] }, bad as never), [], `workspace list must not throw on ${String(bad)}`);
+	}
 });

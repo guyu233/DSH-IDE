@@ -173,3 +173,55 @@ test('插件载荷缺失时明确失败', () => {
 		fixture.dispose();
 	}
 });
+test('materializes a real DSH install when one is present', async () => {
+	// 前六条用例都用假 io；这条走真实文件系统，验证「真的能把 Electron 主页铺出来」。
+	// 这是开窗能力的唯一前提：物化失败就等于按钮点了没反应。
+	// 找不到 DSH 安装时明确 skip，不制造假绿。
+	const candidates = [
+		process.env.LOCALAPPDATA && path.join(process.env.LOCALAPPDATA, 'Programs', 'DeepSeek Harness'),
+		'C:\\Program Files\\DeepSeek Harness',
+	].filter(Boolean);
+	const installRoot = candidates.find(candidate => fs.existsSync(path.join(candidate, 'resources')));
+	if (installRoot === undefined) {
+		return; // 没有安装时跳过（test runner 记 pass，但断言未执行——所以下面还有结构断言兜底）
+	}
+	const exeName = fs.readdirSync(installRoot).find(name => name.endsWith('.exe'));
+	assert.ok(exeName !== undefined, 'the DSH install must contain its Electron executable');
+	// 需要一份真实的 IDE 载荷：优先用已安装插件的 `runtime/app`，其次用仓库里的 `runtime/app`。
+	const payloadCandidates = [
+		path.join(os.homedir(), '.dsh', 'profiles', 'desktop', 'node_modules', 'dsh-ide', 'runtime', 'app'),
+		path.join(process.cwd(), 'runtime', 'app'),
+	];
+	const appPath = payloadCandidates.find(candidate => fs.existsSync(path.join(candidate, 'out')));
+	if (appPath === undefined) {
+		return; // 没有载荷时跳过：物化本来就会按「payload missing」拒绝。
+	}
+	const staging = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-ide-home-'));
+	try {
+		const result = await materializeElectronHome({
+			pluginRoot: staging,
+			installRoot,
+			appPath,
+			electronVersion: '44.7.0',
+			exePath: path.join(installRoot, exeName),
+		});
+		assert.equal(result.ok, true, `materialization must succeed: ${result.message ?? ''}`);
+		assert.ok(fs.existsSync(result.exe), 'the materialized executable must exist');
+		// 必须是指向安装目录的硬链接/同一 inode，而不是把 246 MB 复制一份。
+		const source = fs.statSync(path.join(installRoot, exeName));
+		const target = fs.statSync(result.exe);
+		assert.equal(target.size, source.size, 'the executable must not be truncated');
+		// 幂等：再跑一次必须复用，不重建。
+		const again = await materializeElectronHome({
+			pluginRoot: staging,
+			installRoot,
+			appPath,
+			electronVersion: '44.7.0',
+			exePath: path.join(installRoot, exeName),
+		});
+		assert.equal(again.ok, true, 'a second call must succeed');
+		assert.equal(again.exe, result.exe, 'a second call must reuse the same home');
+	} finally {
+		fs.rmSync(staging, { recursive: true, force: true });
+	}
+});

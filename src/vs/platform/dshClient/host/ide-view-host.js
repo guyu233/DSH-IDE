@@ -25,13 +25,9 @@ import { projectApprovalRequest, projectQuestionRequest } from '../common/dshIde
 import { safeErrorText } from '../common/dshIdeAuthRedaction.js';
 // 共享契约真源：Host 与 IDE 用同一份字段白名单与方法校验，不再各自复制一套规则。
 import {
-	DSH_IDE_INCOMPATIBLE_WIRE,
 	DSH_IDE_VIEW_BOUND_FRAME,
-	DSH_IDE_VIEW_BOUND_METHODS,
-	DSH_IDE_WIRE_REVISION,
 	requireDshIdeWireRevision,
-	sameDshIdeViewBinding,
-	validateDshIdeInput,
+	resolveDshSessionPin,
 	validateDshIdeViewBinding,
 } from '../common/dshIdeProtocol.js';
 
@@ -40,7 +36,6 @@ export const FEATURE_UNAVAILABLE = 'dsh-ide/feature-unavailable';
 export const INVALID_ARGUMENT = 'dsh-ide/invalid-argument';
 export const ALREADY_RESOLVED = 'ALREADY_RESOLVED';
 export const SESSION_SWITCHED = 'SESSION_SWITCHED';
-export const INCOMPATIBLE_WIRE = DSH_IDE_INCOMPATIBLE_WIRE;
 
 /**
  * 校验对端声明的线协议修订号。
@@ -314,6 +309,8 @@ export class DshIdeHostBridge {
 		this.disposers = [];
 		this.seq = 0;
 		this.methods = createMethodHandlers(this);
+		/** 模型目录短缓存（见 cachedModelCatalog）；桥销毁时随实例一起丢弃。 */
+		this._modelCatalogCache = undefined;
 		this._sessionReads = new Set();
 		/** @type {Map<string, { abort: AbortController, listeners: Set<(frame: unknown) => void>, ref: number }>} */
 		this._follows = new Map();
@@ -626,6 +623,13 @@ export class DshIdeHostBridge {
 		this.disposers.push(this.ctx.on('api-session/removed', listChanged));
 	}
 
+	/**
+	 * 交互式 answerer：登记请求、广播给所有视图、把决定交回官方。
+	 *
+	 * 界面未接管时 `next()` 委托给下一个 answerer，因此不会与 DSH 自己的 answerer 争抢，
+	 * 也不会出现第二套答案形态。`approval/request` 与 `user-questions/request`
+	 * 两个事件都接到这里（见构造函数里的 `ctx.on`）。
+	 */
 	async _share(kind, request, next) {
 		const requestId = request && request.requestId;
 		if (typeof requestId !== 'string' || requestId === '') {
@@ -686,8 +690,10 @@ export class DshIdeHostBridge {
 	}
 
 	/**
-	 * 唯一的交互式 answerer。请求登记后交给界面；界面未接管则 `next()` 委托给下一个 answerer，
-	 * 因此不会与 DSH 自己的 answerer 争抢，也不会出现第二套答案形态。
+	 * 旧版单视图 answerer，已被 `_share` 取代（`_share` 额外向所有视图广播请求帧）。
+	 *
+	 * 当前没有任何调用点：两个官方事件都接在 `_share` 上。保留是因为它是公开方法，
+	 * 删掉属于破坏性改动；但**不要**用它接新事件——那会让其它窗口看不到请求。
 	 */
 	async answer(kind, request, next) {
 		const requestId = request && request.requestId;
@@ -778,11 +784,21 @@ export class DshIdeHostBridge {
 			cancel();
 		}
 		this._sessionReads.clear();
+		// 换绑/重建时模型目录可能已变：不能让下一个会话读到上一轮的缓存。
+		this._modelCatalogCache = undefined;
 		for (const shared of this._follows.values()) {
 			shared.abort.abort();
 		}
 		this._follows.clear();
 		this.disposeSubscriptions();
+		// 视图代次表也要清：桥重启后旧窗口的代次不再有意义，
+		// 留着只会在内存里攒下历史上出现过的每个 viewId。
+		this._views.clear();
+		// 关闭的窗口不再需要广播：留着的话，后续每次 `_fanout` 都会调到
+		// 已经关掉的窗口回调，白做一轮遍历还可能往死掉的 transport 写帧。
+		this._statusListeners.clear();
+		// 串行化队列也要清：未完成的任务随桥一起作废，条目不该留到下一轮。
+		this._toggles.clear();
 		// 桥要消失了：本桥等待中的决议全部交还给下一个 answerer，不留悬空 Promise。
 		this.pending.settleAll(undefined);
 		this.channelId = undefined;
@@ -842,6 +858,23 @@ function createMethodHandlers(bridge) {
 	// 不发这帧的话，面板要等到下次连接或工作区变化才看得到结果。
 	// 删除不发：名单是最终一致的，刚删完就刷新会把还在名单里的旧行又画出来。
 	const notifySessionList = () => bridge._fanout({ type: 'session-list' });
+
+	/**
+	 * 模型目录的短 TTL 缓存。
+	 *
+	 * `composerState` 与 `listModels` 要的是同一份目录，而它在一次输入框刷新里会被
+	 * 连着问好几次（模型表 + 当前选择）。目录由内核按配置生成，几秒内不会变；
+	 * 缓存 2 秒能把一轮刷新的多次内核查询压成一次。失败不缓存，下次重试。
+	 */
+	const cachedModelCatalog = async () => {
+		const now = Date.now();
+		if (bridge._modelCatalogCache !== undefined && now - bridge._modelCatalogCache.at < 2000) {
+			return bridge._modelCatalogCache.value;
+		}
+		const value = await controller().modelCatalog();
+		bridge._modelCatalogCache = { at: Date.now(), value };
+		return value;
+	};
 	// 账号域是独立服务：官方服务名是 `deepseekAccount`（`accountController` 只是 Remote 包装类，
 	// 不是注册进 ctx 的服务名；用错会把调用打到一个不存在的服务上）。
 	const account = () => service(bridge.ctx, 'deepseekAccount');
@@ -988,6 +1021,9 @@ function createMethodHandlers(bridge) {
 			if (settled !== true) {
 				throw coded(ALREADY_RESOLVED, `approval request ${args.requestId} is already resolved or unknown`);
 			}
+			// 与 `cancelRequest` 同一口径：答复也是终态，其余视图必须一起收卡，
+			// 否则别的窗口会一直显示一张已经答过的卡片。
+			bridge._fanout({ type: 'waterfall', kind: 'cancel', eventId: args.requestId });
 			return { accepted: true };
 		},
 		async answerQuestion(args) {
@@ -998,6 +1034,8 @@ function createMethodHandlers(bridge) {
 			if (settled !== true) {
 				throw coded(ALREADY_RESOLVED, `question request ${args.requestId} is already resolved or unknown`);
 			}
+			// 问卷答案同样是终态，其余视图要一起收卡。
+			bridge._fanout({ type: 'waterfall', kind: 'cancel', eventId: args.requestId });
 			return { accepted: true };
 		},
 		async cancelRequest(args) {
@@ -1119,7 +1157,7 @@ function createMethodHandlers(bridge) {
 			const sessionId = sessionIdOf(args);
 			const projected = await controller().projections({ sessionId }, callerSignal());
 			const values = projected && typeof projected === 'object' ? projected.values : undefined;
-			const catalog = await controller().modelCatalog();
+			const catalog = await cachedModelCatalog();
 			return projectDshIdeComposer({
 				values,
 				catalog,
@@ -1165,7 +1203,7 @@ function createMethodHandlers(bridge) {
 			return { accepted: true };
 		},
 		async listModels() {
-			const catalog = await controller().modelCatalog();
+			const catalog = await cachedModelCatalog();
 			const groups = Array.isArray(catalog && catalog.groups) ? catalog.groups : [];
 			const models = [];
 			for (const group of groups) {
@@ -1335,9 +1373,10 @@ function createMethodHandlers(bridge) {
 				await assertVisibleRowForBridge(bridge, args.sessionId);
 				const current = await registry.favoriteSessions();
 				const ids = current && Array.isArray(current.favoriteSessionIds) ? current.favoriteSessionIds : [];
-				await registry.setSessionFavorite({ sessionId: args.sessionId, favorite: !ids.includes(args.sessionId) });
+				const favorite = !ids.includes(args.sessionId);
+				await registry.setSessionFavorite({ sessionId: args.sessionId, favorite });
 				notifySessionList();
-				return { accepted: true };
+				return { accepted: true, favorite };
 			});
 		},
 		async setSessionPinned(args) {
@@ -1347,14 +1386,17 @@ function createMethodHandlers(bridge) {
 				// 同 setSessionFavorite：排队期间换绑后不能再按旧意图执行。
 				await assertVisibleRowForBridge(bridge, args.sessionId);
 				const registry = optionalService(bridge.ctx, 'workspaceRegistry');
-				const pinned = registry && Array.isArray(registry.pinnedSessionIds) ? registry.pinnedSessionIds.includes(args.sessionId) : false;
-				const method = pinned ? 'unpinSession' : 'pinSession';
-				if (typeof workspaces[method] !== 'function') {
-					throw coded(FEATURE_UNAVAILABLE, `DSH workspaceController has no ${method}()`, { capability: 'setSessionPinned' });
+				const currently = registry && Array.isArray(registry.pinnedSessionIds) ? registry.pinnedSessionIds.includes(args.sessionId) : false;
+				const pinned = resolveDshSessionPin(currently, args.pinned);
+				if (pinned !== currently) {
+					const method = pinned ? 'pinSession' : 'unpinSession';
+					if (typeof workspaces[method] !== 'function') {
+						throw coded(FEATURE_UNAVAILABLE, `DSH workspaceController has no ${method}()`, { capability: 'setSessionPinned' });
+					}
+					await workspaces[method]({ sessionId: args.sessionId });
+					notifySessionList();
 				}
-				await workspaces[method]({ sessionId: args.sessionId });
-				notifySessionList();
-				return { accepted: true };
+				return { accepted: true, pinned };
 			});
 		},
 		async listWorkspaces() {
@@ -1575,7 +1617,12 @@ async function changeArchive(bridge, method, sessionId) {
 	await assertVisibleRowForBridge(bridge, sessionId);
 	const controller = optionalService(bridge.ctx, 'workspaceController');
 	if (controller !== undefined && typeof controller[method] === 'function') {
-		return Promise.resolve(controller[method]({ sessionId })).then(projectDshIdeArchiveSet);
+		return Promise.resolve(controller[method]({ sessionId })).then(value => {
+			// 归档集合变了，名单归属也就变了：其它窗口必须一起刷新，
+			// 否则它们会继续把这一行画在原来的分组里。
+			notifySessionListOf(bridge);
+			return projectDshIdeArchiveSet(value);
+		});
 	}
 	const registry = service(bridge.ctx, 'workspaceRegistry');
 	if (typeof registry[method] !== 'function') {
@@ -1583,8 +1630,14 @@ async function changeArchive(bridge, method, sessionId) {
 	}
 	return Promise.resolve(registry[method](sessionId)).then(() => {
 		const ids = Array.isArray(registry.archivedSessionIds) ? registry.archivedSessionIds : [];
+		notifySessionListOf(bridge);
 		return projectDshIdeArchiveSet({ archivedSessionIds: ids });
 	});
+}
+
+/** `changeArchive` 在方法处理器之外，拿不到 `createMethodHandlers` 里的闭包。 */
+function notifySessionListOf(bridge) {
+	bridge._fanout({ type: 'session-list' });
 }
 
 /** 提交给官方 prompt 的图片引用：只留 ImageAttachmentRef 字段，不带 x- 扩展。 */

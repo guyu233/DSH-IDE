@@ -27,7 +27,10 @@ import { fileURLToPath } from 'node:url';
 // build/lib/dsh/verify/ 下，向上四级即仓库根；否则从其它目录直接 `node <本文件>`
 // 会把 cwd 当成仓库根，误报「未找到产物」。
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../..');
-const tgz = path.join(repoRoot, 'dist', 'dsh-ide-2.0.0.tgz');
+// 版本从 manifest 读，不硬编码：升版后旧 tgz 残留会让门禁检查错对象。
+const manifestForVersion = JSON.parse(fs.readFileSync(path.join(repoRoot, 'build', 'lib', 'dsh', 'package.json'), 'utf8'));
+const PACKAGE_VERSION = manifestForVersion.version;
+const tgz = path.join(repoRoot, 'dist', `dsh-ide-${PACKAGE_VERSION}.tgz`);
 
 if (!fs.existsSync(tgz)) {
 	console.error(`STATUS: FAIL  [artifact] 未找到产物 ${path.relative(repoRoot, tgz)}`);
@@ -80,6 +83,72 @@ const hasHostRipgrepAdapter = list.includes('package/host/host-ripgrep.js')
 const bundledWindowsRipgrep = list.filter(member => /^package\/runtime\/app\/node_modules(?:\.asar\.unpacked)?\/@vscode\/ripgrep-universal\/bin\/win32-[^/]+\/rg\.exe$/u.test(member));
 
 const failures = [];
+
+// ① manifest 白名单逐项核对：`files` 里声明的每个条目都必须在产物里真的出现。
+// 旧实现只抽查 11 个 common 模块，删掉 `package/index.js`、`client.js`、`package.json`、
+// `PROVENANCE.md`、`LICENSE-DSH`、整个 `runtime/app/out/` 都仍判 PASS，等于没有守护。
+const manifest = JSON.parse(readMember('package/package.json'));
+const manifestFiles = Array.isArray(manifest.files) ? manifest.files : [];
+if (manifestFiles.length === 0) { failures.push('package/package.json 缺 files 白名单'); }
+for (const entry of manifestFiles) {
+	const normalized = entry.replace(/\/$/, '');
+	if (/[*?[\]]/.test(normalized)) {
+		const prefix = normalized.split(/[*?[\]]/)[0].replace(/[^/]*$/, '');
+		const suffix = normalized.slice(prefix.length);
+		const ext = suffix.startsWith('*.') ? suffix.slice(1) : '';
+		const hits = list.filter(member => member.startsWith(`package/${prefix}`) && (ext === '' || member.endsWith(ext)));
+		if (hits.length === 0) { failures.push(`manifest files 声明的通配条目没有产物成员: ${entry}`); }
+		continue;
+	}
+	const expected = `package/${normalized}`;
+	const present = list.includes(expected) || list.some(member => member.startsWith(`${expected}/`));
+	if (!present) {
+		failures.push(`manifest files 声明的条目在产物里缺失: ${entry}`);
+	}
+}
+
+// ② IDE 载荷入口与来源凭据：没有它们，包能装但窗口打不开、审计也断链。
+const REQUIRED_MEMBERS = [
+	'package/index.js',
+	'package/client.js',
+	'package/package.json',
+	'package/cordis.patch.yml',
+	'package/icon.svg',
+	'package/PROVENANCE.md',
+	'package/LICENSE-DSH',
+	'package/locale/en.json',
+	'package/locale/zh.json',
+	'package/locale/ja.json',
+	'package/locale/es.json',
+	'package/locale/fr.json',
+	'package/locale/de.json',
+	'package/locale/ru.json',
+	'package/locale/pt.json',
+	'package/docs/DETAIL.md',
+	'package/docs/DETAIL.zh.md',
+	'package/docs/preview.svg',
+	'package/runtime/app/out/main.js',
+	'package/runtime/app/out/mainImpl.js',
+	'package/runtime/build-provenance.json',
+];
+for (const member of REQUIRED_MEMBERS) {
+	if (!list.includes(member)) { failures.push(`产物缺必需成员: ${member}`); }
+}
+
+// ③ 版本一致性：manifest、tar 内的 package.json 与文件名必须是同一版。
+const manifestVersion = manifest.version;
+const tarVersion = /^dsh-ide-(.+)\.tgz$/.exec(path.basename(tgz))?.[1];
+if (typeof manifestVersion !== 'string' || manifestVersion === '') {
+	failures.push('package/package.json 缺 version');
+} else if (tarVersion !== manifestVersion) {
+	failures.push(`产物文件名版本 ${tarVersion} 与 manifest ${manifestVersion} 不一致`);
+}
+
+// ④ engines.dsh 必须存在：运行宿主版本契约是插件可安装的前提。
+if (typeof manifest?.engines?.dsh !== 'string' || manifest.engines.dsh === '') {
+	failures.push('package/package.json 缺 engines.dsh');
+}
+
 if (!hasHostRipgrepAdapter) { failures.push('产物缺 Host ripgrep 适配器或启动接线'); }
 if (bundledWindowsRipgrep.length > 0) { failures.push(`产物仍重复携带 Windows ripgrep: ${bundledWindowsRipgrep.join(', ')}`); }
 if (missingCommon.length > 0) { failures.push(`package/common/ 缺模块: ${missingCommon.join(', ')}`); }

@@ -63,6 +63,14 @@ const STEPS = Object.freeze([
 	{ name: 'boundary', script: 'verify:dsh-ide-boundary' },
 	{ name: 'projection-golden', script: 'verify:dsh-ide-projection-golden' },
 	{ name: 'contract', script: 'verify:dsh-ide-contract' },
+	{ name: 'localization', script: 'verify:dsh-ide-localization' },
+	{ name: 'bundle-integrity', script: 'verify:dsh-ide-bundle-integrity' },
+	// 产物完整性属于「能不能装」，不是可选的旁证：缺入口/凭据/版本契约的 tgz 必须在这一步拦下。
+	{ name: 'artifact', script: 'verify:dsh-artifact' },
+	// 安装漂移只在有 profile 时可判：未设 `DSH_PROFILE_DIR` 时该门禁以 PENDING(exit 2) 结束，
+	// PENDING(exit 2) 一律是「本机无法断言」：未设 profile、或 profile 里没装本插件。
+	// 真正的不一致是 FAIL(exit 1)，仍然照常失败——不能把漂移当成跳过。
+	{ name: 'install-drift', script: 'verify:dsh-install-drift', skipWhenPending: true },
 	{ name: 'test-dsh:all', script: 'test-dsh:all' },
 ]);
 
@@ -124,9 +132,14 @@ for (const step of STEPS) {
 	// 门禁类步骤**必须**打印 `STATUS:`。缺了它说明脚本没有给出判定（例如中途异常退出
 	// 却仍返回 0），这时不能当成通过——「没有结论」不是「结论为通过」。
 	// 非门禁步骤（测试类）不看 STATUS，只认退出码。
-	const passed = isGate ? (code === 0 && status === 'PASS') : code === 0;
-	results.push({ name: step.name, code, status, passed });
-	if (!passed) {
+	// 依赖外部环境的门禁（install-drift 需要 profile）：环境未设置时的 PENDING
+	// 是「本机无法断言」，不是产品失败。明确标注并单独计数，仍不当作通过。
+	const skippedForEnv = status === 'PENDING' && code === 2 && (step.skipWhenPending === true
+		|| (step.pendingWhenUnset !== undefined
+			&& (process.env[step.pendingWhenUnset] === undefined || process.env[step.pendingWhenUnset] === '')));
+	const passed = skippedForEnv ? false : (isGate ? (code === 0 && status === 'PASS') : code === 0);
+	results.push({ name: step.name, code, status, passed, skippedForEnv });
+	if (!passed && !skippedForEnv) {
 		failures.push({ name: step.name, code, status });
 	}
 	// 透传原始输出，便于 CI 日志定位（不裁剪、不美化）。
@@ -137,8 +150,10 @@ for (const step of STEPS) {
 
 console.log('\n=== DSH-IDE CI aggregate ===');
 for (const result of results) {
-	console.log(`  ${result.passed ? 'PASS' : 'NOT-PASS'}  ${result.name}${result.status === undefined ? ` (exit ${result.code})` : ` (STATUS: ${result.status}, exit ${result.code})`}`);
+	const verdict = result.skippedForEnv ? 'SKIPPED' : result.passed ? 'PASS' : 'NOT-PASS';
+	console.log(`  ${verdict}  ${result.name}${result.status === undefined ? ` (exit ${result.code})` : ` (STATUS: ${result.status}, exit ${result.code})`}`);
 }
+const skipped = results.filter(result => result.skippedForEnv).map(result => result.name);
 
 if (failures.length > 0) {
 	// 按第 5 章 §9：PENDING 不计通过；这里如实以退出 1 结束，不写「门禁全过」。
@@ -146,4 +161,9 @@ if (failures.length > 0) {
 	process.exit(1);
 }
 
-console.log('\nSTATUS: PASS  [dsh-ide-ci] all steps passed');
+if (skipped.length > 0) {
+	// 全过但有环境相关跳过：如实说明「哪些没验证」，不写成「全部通过」。
+	console.log(`\nSTATUS: PASS  [dsh-ide-ci] all runnable steps passed; skipped for missing environment: ${skipped.join(', ')}`);
+} else {
+	console.log('\nSTATUS: PASS  [dsh-ide-ci] all steps passed');
+}

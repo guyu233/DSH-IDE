@@ -121,6 +121,7 @@ import { IChatPetWidgetService } from './chatPetWidgetService.js';
 import { IChatPetService } from '../chatPetService.js';
 import { ChatPetAchievementIds, hasChatPetImageAttachment } from '../chatPetAchievements.js';
 import type { DshIdeImageAttachmentRef } from '../../../../../platform/dshClient/common/dshIdeProtocol.js';
+import { dshImagePayload, dshUnsentAttachmentNames } from '../../../dsh/browser/dshImagePayload.js';
 import { INotificationService } from '../../../../../platform/notification/common/notification.js';
 import { stopDictationForEditor } from '../speechToText/dictationSession.js';
 import { ChatUserInteraction } from '../chatUserInteractionTelemetry.js';
@@ -216,6 +217,10 @@ type DshSubmitTarget =
 /** content provider 产出的会话对象里，本文件真正用到的那一个方法。 */
 interface IDshSubmitSession {
 	submit(text: string, attachments?: readonly DshIdeImageAttachmentRef[]): Promise<boolean>;
+	/** 最近一次发送失败的原因。没有失败时为 undefined。 */
+	submitFailure?(): string | undefined;
+	/** 最近一次图片入库失败的原因。 */
+	imageFailure?(): string | undefined;
 	/** 把尚未入库的图片交给 Host 入库；不支持时返回 undefined。 */
 	saveImage?(data: Uint8Array, mediaType: string, name?: string): Promise<DshIdeImageAttachmentRef | undefined>;
 }
@@ -249,16 +254,9 @@ function collectDshImageAttachments(entries: readonly { readonly kind: string; r
 }
 
 /** 从聊天条目里取出原始图片字节和媒体类型；不是图片或没有字节时返回 undefined。 */
-function imageBytesOf(entry: { readonly value?: unknown; readonly mimeType?: string }): { readonly data: Uint8Array; readonly mediaType: string } | undefined {
-	const value = entry.value;
-	if (!(value instanceof Uint8Array) || value.length === 0) {
-		return undefined;
-	}
-	const mediaType = entry.mimeType;
-	if (mediaType !== 'image/png' && mediaType !== 'image/jpeg' && mediaType !== 'image/webp' && mediaType !== 'image/gif') {
-		return undefined;
-	}
-	return { data: value, mediaType };
+function imageBytesOf(entry: { readonly value?: unknown; readonly mimeType?: string; readonly name?: string }): { readonly data: Uint8Array; readonly mediaType: string } | undefined {
+	// 拖入和从磁盘选择的图片经常没有 mimeType。识别规则在 dshImagePayload，不在这里再写一套。
+	return dshImagePayload(entry);
 }
 
 function isDshImageAttachmentRef(value: unknown): value is DshIdeImageAttachmentRef {
@@ -3982,6 +3980,18 @@ export class ChatWidget extends Disposable implements IChatWidget {
 			}
 			if (target.kind === 'provider') {
 				const entries = [...requestInputs.attachedContext.asArray(), ...resolvedImageVariables];
+				const unsent = dshUnsentAttachmentNames(entries);
+				if (unsent.length > 0) {
+					if (transcriptContext) {
+						this.setTranscriptContext(transcriptContext);
+					}
+					this.notificationService.warn(localize(
+						'chat.dsh.unsentAttachments',
+						"DeepSeek Harness 带不走这些附件：{0}。本次输入已保留，未发送任何内容。",
+						unsent.join('、'),
+					));
+					return undefined;
+				}
 				const images = collectDshImageAttachments(entries);
 				const refs: DshIdeImageAttachmentRef[] = [...images.refs];
 				if (images.rejected.length > 0) {
@@ -3997,13 +4007,14 @@ export class ChatWidget extends Disposable implements IChatWidget {
 						return undefined;
 					}
 					for (const entry of images.rejected) {
-						const bytes = imageBytesOf(entry as { readonly value?: unknown; readonly mimeType?: string });
+						const bytes = imageBytesOf(entry as { readonly value?: unknown; readonly mimeType?: string; readonly name?: string });
 						const ref = bytes === undefined ? undefined : await target.session.saveImage(bytes.data, bytes.mediaType, (entry as { readonly name?: string }).name);
 						if (ref === undefined) {
 							if (transcriptContext) {
 								this.setTranscriptContext(transcriptContext);
 							}
-							this.notificationService.warn(localize(
+							const imageReason = target.session.imageFailure?.();
+							this.notificationService.warn(imageReason !== undefined && imageReason !== '' ? imageReason : localize(
 								'chat.dsh.imageNotStored',
 								"这张图片无法交给 DeepSeek Harness 入库；本次输入已保留，未发送任何内容。",
 							));
@@ -4017,6 +4028,10 @@ export class ChatWidget extends Disposable implements IChatWidget {
 					if (transcriptContext) {
 						this.setTranscriptContext(transcriptContext);
 					}
+					const reason = target.session.submitFailure?.();
+					this.notificationService.warn(reason !== undefined && reason !== ''
+						? reason
+						: localize('chat.dsh.submitFailed', "发送失败，输入已保留。"));
 					return undefined;
 				}
 				this._acceptDshSubmission(requestInputs.input, isUserQuery, submittedWithImage, options);

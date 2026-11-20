@@ -40,8 +40,9 @@ export function registerDshTeamCommands(
 		const disable = localize('dsh.team.disable', "关闭团队");
 		const picked = await quickInputService.pick(
 			[
-				{ label: enable, description: team.enabled === false ? localize('dsh.team.current', "当前状态") : undefined },
-				{ label: disable, description: team.enabled === true ? localize('dsh.team.current', "当前状态") : undefined },
+				// 标记必须落在与 enabled 相同的那一项。标反时，用户点「开启」会被当成没变化直接返回。
+				{ label: enable, description: team.enabled === true ? localize('dsh.team.current', "当前状态") : undefined },
+				{ label: disable, description: team.enabled === false ? localize('dsh.team.current', "当前状态") : undefined },
 			],
 			{
 				placeHolder: team.enabled
@@ -54,14 +55,21 @@ export function registerDshTeamCommands(
 		}
 		const next = picked.label === enable;
 		if (next === team.enabled) {
+			notifications.info(next
+				? localize('dsh.team.alreadyOn', "团队已经是开启状态。")
+				: localize('dsh.team.alreadyOff', "团队已经是关闭状态。"));
 			return;
 		}
 		await source.setTeam(next);
 		// 写回后 refresh() 会更新 state；这里再读一次，只报真实结果。
 		const after = getDshComposerSource()?.state.team;
 		if (after !== null && after !== undefined && after.enabled !== next) {
-			notifications.warn(localize('dsh.team.failed', "团队设置未能切换，请稍后重试。"));
+			notifications.error(localize('dsh.team.failed', "团队设置未能切换，请稍后重试。"));
+			return;
 		}
+		notifications.info(next
+			? localize('dsh.team.turnedOn', "团队已开启。")
+			: localize('dsh.team.turnedOff', "团队已关闭。"));
 	}));
 	return disposables;
 }

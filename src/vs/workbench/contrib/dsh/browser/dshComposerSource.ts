@@ -15,8 +15,10 @@
 
 import { Disposable } from '../../../../base/common/lifecycle.js';
 import { Emitter, Event } from '../../../../base/common/event.js';
+import { localize } from '../../../../nls.js';
 import { ILogService } from '../../../../platform/log/common/log.js';
 import type { IDshClientService } from '../../../../platform/dshClient/common/dshClientService.js';
+import { dshErrorText } from '../../../../platform/dshClient/common/dshIdeProtocol.js';
 
 /** 模型目录里的一项。 */
 export interface DshComposerModel {
@@ -60,12 +62,31 @@ const EMPTY: DshComposerState = {
 export interface IDshComposerSource {
 	readonly state: DshComposerState;
 	readonly onDidChange: Event<void>;
+	/** 权限 / 模式写回被拒绝。团队切换自己有提示，不走这里。 */
+	readonly onDidReject?: Event<string>;
+	/** 绑定输入框当前代表的会话；未绑定时读取不发请求、写回不生效。 */
+	setSession(sessionId: string | undefined): void;
 	refresh(): Promise<void>;
 	selectModel(provider: string, model: string): Promise<void>;
 	selectEffort(effort: string): Promise<void>;
 	selectPreset(preset: string): Promise<void>;
 	selectPermission(permission: string): Promise<void>;
 	setTeam(enabled: boolean): Promise<void>;
+}
+
+function composerRejectText(method: string, detail: string): string {
+	switch (method) {
+		case 'setModel':
+			return localize('dsh.composer.modelRejected', "切换模型失败：{0}", detail);
+		case 'setEffort':
+			return localize('dsh.composer.effortRejected', "切换推理档失败：{0}", detail);
+		case 'setAgentPreset':
+			return localize('dsh.composer.presetRejected', "切换模式失败：{0}", detail);
+		case 'setPermissionPreset':
+			return localize('dsh.composer.permissionRejected', "切换权限失败：{0}", detail);
+		default:
+			return localize('dsh.composer.writeRejected', "这次选择没有生效：{0}", detail);
+	}
 }
 
 /** 把通道返回的原样对象收敛成上面的形状；形状不对就当没有。 */
@@ -186,6 +207,8 @@ export class DshComposerSource extends Disposable implements IDshComposerSource 
 
 	private readonly _onDidChange = this._register(new Emitter<void>());
 	readonly onDidChange: Event<void> = this._onDidChange.event;
+	private readonly _onDidReject = this._register(new Emitter<string>());
+	readonly onDidReject: Event<string> = this._onDidReject.event;
 
 	private stateValue: DshComposerState = EMPTY;
 	private loading: Promise<void> | undefined;
@@ -289,12 +312,18 @@ export class DshComposerSource extends Disposable implements IDshComposerSource 
 	private async write(method: string, args: Record<string, unknown>): Promise<void> {
 		const sessionId = this.sessionId();
 		if (sessionId === undefined) {
-			this.logService.trace(`[dsh] ${method} skipped: no bound session`);
+			// 团队命令自己会说明「没有可用的团队设置」，这里再报一次就是两条。
+			if (method !== 'setTeamEnabled') {
+				this._onDidReject.fire(localize('dsh.composer.noSession', "还没有绑定 DSH 会话，这次选择没有生效。"));
+			}
 			return;
 		}
 		const result = await this.client.call(method, { sessionId, ...args });
 		if (!result.ok) {
-			this.logService.warn(`[dsh] ${method} 被拒绝`, result.error.code, result.error.message);
+			const detail = dshErrorText(result.error, result.error.code);
+			if (method !== 'setTeamEnabled') {
+				this._onDidReject.fire(composerRejectText(method, detail));
+			}
 			return;
 		}
 		// 写前的 composerState 还在飞时，refresh 会复用那次回包，把刚写上的选择盖回去。
@@ -309,6 +338,80 @@ export class DshComposerSource extends Disposable implements IDshComposerSource 
 	}
 }
 
+/**
+ * 两次投影是否等价。
+ *
+ * 不用 `JSON.stringify(a) === JSON.stringify(b)`：那要对整份状态做两次序列化，
+ * 而模型目录可能几十项。这里逐字段比较，绝大多数字段是同一个引用或短字符串。
+ */
 function sameState(a: DshComposerState, b: DshComposerState): boolean {
-	return JSON.stringify(a) === JSON.stringify(b);
+	if (a === b) {
+		return true;
+	}
+	return a.locked === b.locked
+		&& sameCurrent(a.current, b.current)
+		&& sameModels(a.models, b.models)
+		&& samePermission(a.permission, b.permission)
+		&& sameTeam(a.team, b.team)
+		&& samePresets(a.presets, b.presets);
+}
+
+function sameCurrent(a: DshComposerState['current'], b: DshComposerState['current']): boolean {
+	if (a === b) {
+		return true;
+	}
+	if (a === null || b === null) {
+		return false;
+	}
+	return a.provider === b.provider && a.model === b.model && a.effort === b.effort;
+}
+
+function sameModels(a: DshComposerState['models'], b: DshComposerState['models']): boolean {
+	if (a === b) {
+		return true;
+	}
+	if (a.length !== b.length) {
+		return false;
+	}
+	for (let i = 0; i < a.length; i++) {
+		const left = a[i];
+		const right = b[i];
+		if (left.provider !== right.provider || left.id !== right.id || left.name !== right.name
+			|| left.defaultEffort !== right.defaultEffort || left.efforts.length !== right.efforts.length) {
+			return false;
+		}
+		for (let k = 0; k < left.efforts.length; k++) {
+			if (left.efforts[k].id !== right.efforts[k].id || left.efforts[k].name !== right.efforts[k].name) {
+				return false;
+			}
+		}
+	}
+	return true;
+}
+
+function samePermission(a: DshComposerState['permission'], b: DshComposerState['permission']): boolean {
+	if (a === b) {
+		return true;
+	}
+	if (a === null || b === null || a.current !== b.current || a.options.length !== b.options.length) {
+		return false;
+	}
+	return a.options.every((option, index) => option.value === b.options[index].value && option.name === b.options[index].name);
+}
+
+function sameTeam(a: DshComposerState['team'], b: DshComposerState['team']): boolean {
+	if (a === b) {
+		return true;
+	}
+	return a !== null && b !== null && a.enabled === b.enabled && a.confirmDisable === b.confirmDisable;
+}
+
+function samePresets(a: DshComposerState['presets'], b: DshComposerState['presets']): boolean {
+	if (a === b) {
+		return true;
+	}
+	if (a === null || b === null || a.current !== b.current || a.options.length !== b.options.length) {
+		return false;
+	}
+	return a.options.every((option, index) => option.id === b.options[index].id && option.name === b.options[index].name);
 }

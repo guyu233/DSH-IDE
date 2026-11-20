@@ -434,7 +434,13 @@ export class ChatDragAndDrop extends Themable {
 		const getImageTransferDataFromFile = async (file: File): Promise<ImageTransferData | undefined> => {
 			try {
 				const buffer = await file.arrayBuffer();
-				return { data: new Uint8Array(buffer), name: createDisplayName() };
+				const mimeType = file.type === 'image/jpg' ? 'image/jpeg' : file.type;
+				return {
+					data: new Uint8Array(buffer),
+					// 用文件名而不是「Image from URL」：后者没有扩展名，发送侧认不出格式。
+					name: file.name !== '' ? file.name : createDisplayName(),
+					...(mimeType.startsWith('image/') ? { mimeType } : {}),
+				};
 			} catch (error) {
 				this.logService.error('Error reading file:', error);
 			}

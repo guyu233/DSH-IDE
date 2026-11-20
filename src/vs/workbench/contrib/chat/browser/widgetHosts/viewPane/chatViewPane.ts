@@ -13,7 +13,7 @@ import { Orientation, Sash } from '../../../../../../base/browser/ui/sash/sash.j
 import { DomScrollableElement } from '../../../../../../base/browser/ui/scrollbar/scrollableElement.js';
 import { IAction } from '../../../../../../base/common/actions.js';
 import { CancellationToken, CancellationTokenSource } from '../../../../../../base/common/cancellation.js';
-import { isCancellationError } from '../../../../../../base/common/errors.js';
+import { isCancellationError, onUnexpectedError } from '../../../../../../base/common/errors.js';
 import { Event } from '../../../../../../base/common/event.js';
 import { MutableDisposable, toDisposable, DisposableStore, IDisposable } from '../../../../../../base/common/lifecycle.js';
 import { LRUCache } from '../../../../../../base/common/map.js';
@@ -63,7 +63,6 @@ import { IChatOpen, IChatOpenDiagnosticsService } from '../../../common/chatOpen
 import { LocalChatSessionUri, getChatSessionType, getNewChatSessionResource, isUntitledChatSession } from '../../../common/model/chatUri.js';
 import { ChatAgentLocation, ChatConfiguration, ChatModeKind, getDefaultNewChatSessionType, getDefaultNewChatSessionTypeAndReasonFromServices, getLocalFallbackSessionTypeSelectionReason, managedPolicyRequiresAgentHostMessage, SessionTypeSelectionReason } from '../../../common/constants.js';
 import { AgentSessionsControl } from '../../agentSessions/agentSessionsControl.js';
-import { ACTION_ID_NEW_CHAT } from '../../actions/chatActions.js';
 import { ChatWidget, layoutChatWidgetForInputHeight } from '../../widget/chatWidget.js';
 import { ChatViewWelcomeController, IViewWelcomeDelegate } from '../../viewsWelcome/chatViewWelcomeController.js';
 import { IChatViewsWelcomeDescriptor } from '../../viewsWelcome/chatViewsWelcome.js';
@@ -901,13 +900,18 @@ export class ChatViewPane extends ViewPane implements IViewWelcomeDelegate {
 			sessionsToolbarContainer.classList.toggle('filtered', !sessionsFilter.isDefault());
 		}));
 
-		// New Session Button —— DSH 集成：先在本工作区新建一个 DSH 会话，再开一个新聊天（列表由 DSH 拉取，新会话会随之出现）
+		// New Session Button —— DSH 集成：只走 DSH 的建会话路径。
+		//
+		// 为什么不再并发 fire `ACTION_ID_NEW_CHAT`：那条命令按「默认会话类型」重新解析，
+		// 而 `dsh` 不是默认类型时会再开一个本地空会话，与 DSH 刚建好的会话抢同一个面板
+		// （用户看到「新会话没内容」）。`dsh.newSession` 内部已负责建会话并打开对应资源。
 		const newSessionButtonContainer = this.sessionsNewButtonContainer = append(sessionsContainer, $('.agent-sessions-new-button-container'));
 		const newSessionButton = this._register(new Button(newSessionButtonContainer, { ...defaultButtonStyles, secondary: true }));
 		newSessionButton.label = localize('newSession', "New Session");
 		const createNewChat = () => {
-			void this.commandService.executeCommand('dsh.newSession').catch(() => { /* ignore */ });
-			return this.commandService.executeCommand(ACTION_ID_NEW_CHAT, this.getActionsContext());
+			return this.commandService.executeCommand('dsh.newSession').then(() => undefined, error => {
+				onUnexpectedError(error);
+			});
 		};
 		this._register(newSessionButton.onDidClick(createNewChat));
 

@@ -1,0 +1,7 @@
+{
+  "meta": {
+    "title": "DSH-IDE",
+    "description": "Öffnet aus der Sitzungskopfzeile ein vollständiges VS-Code-Fenster für den aktuellen Arbeitsbereich und nutzt dabei die mit DeepSeek Harness gelieferte Electron-Laufzeit. Das Fenster verbindet sich über den offiziellen Client-Transport mit demselben DSH-Host, sodass Chat, Modelle, Freigaben und Werkzeuge bei DSH bleiben. Der Wal-Schaltknopf sitzt in der Kopfzeile rechts neben dem Unterhaltungsmenü. Nur Windows x64: andere Plattformen melden diese Grenze, statt einen Start vorzutäuschen.",
+    "detail": "docs/DETAIL.md"
+  }
+}

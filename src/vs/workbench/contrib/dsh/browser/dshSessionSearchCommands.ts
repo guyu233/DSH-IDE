@@ -53,12 +53,16 @@ export function registerDshSessionSearchCommands(
 		}
 		const result = await sessions.search(query.trim());
 		if (!result.ok) {
-			notifications.warn(localize('dsh.searchSessions.failed', "搜索 DSH 会话失败：{0}", result.error));
+			notifications.error(localize('dsh.searchSessions.failed', "搜索 DSH 会话失败：{0}", result.error));
 			return;
 		}
 		if (result.items.length === 0) {
 			notifications.info(localize('dsh.searchSessions.empty', "没有匹配的 DSH 会话。"));
 			return;
+		}
+		// 官方单批上限 20 条：还有下一批时必须说明，否则用户以为这就是全部命中。
+		if (result.hasMore) {
+			notifications.info(localize('dsh.searchSessions.truncated', "匹配的会话超过 {0} 条，这里只列出前 {0} 条；换个更具体的关键字可以缩小范围。", result.items.length));
 		}
 		const picks: IDshSessionSearchPick[] = result.items.map(item => ({
 			sessionId: item.sessionId,

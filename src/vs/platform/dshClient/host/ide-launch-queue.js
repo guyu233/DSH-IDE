@@ -10,8 +10,8 @@
 // 交还开窗请求。本文件不引入任何私有管道或第二套传输。
 
 /**
- * 一次开窗请求（工作区由调用方传入，Host 不猜）。
- * @typedef {{ workspace?: string }} IdeLaunchSpec
+ * 一次开窗请求（工作区与会话都由调用方传入，Host 不猜）。
+ * @typedef {{ workspace?: string, sessionId?: string }} IdeLaunchSpec
  */
 
 /**
@@ -175,9 +175,17 @@ export class IdeLaunchQueue {
 
 	/**
 	 * 暂存首次开窗请求：IDE 尚未报到时由 Host 拉起进程，报到后经 `poll` 取走。
+	 *
+	 * **只保留一条**：`launch()` 在 IDE 启动的数秒内会反复进来（用户会连点，
+	 * 防抖只是不再重复 spawn，但仍会走到 enqueue）。若每次 push，等 IDE 报到时
+	 * 会把 N 条陈年请求一次性投给它，开出 N 个窗口。
+	 *
+	 * 语义上这段时间只可能有「当前这一次首点」有意义：后到的请求覆盖前一条
+	 * （用户最后一次点的会话/工作区就是要打开的那个）。
 	 * @param {IdeLaunchSpec} spec
 	 */
 	enqueue(spec) {
+		this.pending.length = 0;
 		this.pending.push(spec);
 	}
 

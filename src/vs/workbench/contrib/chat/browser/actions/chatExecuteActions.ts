@@ -387,13 +387,26 @@ export class OpenModelPickerAction extends Action2 {
 				weight: KeybindingWeight.WorkbenchContrib,
 				when: ChatContextKeys.inChatInput
 			},
-			precondition: ChatContextKeys.enabled,
+			// `chatIsEnabled` 由「有默认聊天 Agent」驱动，而 DSH 不注册 chat agent
+			// （它走自己的 `dsh:` 会话类型），该键在 DSH 下始终为 false，保留它会让命令不可执行。
+			// 这里只放宽**可执行性**；是否显示仍由下面 `when` 里的 `chatSessionHasModels` 精确控制，
+			// 所以其它会话类型既看不到这个菜单项、也不会因此多出可执行路径。
+			precondition: ContextKeyExpr.or(
+				ChatContextKeys.location.isEqualTo(ChatAgentLocation.Chat),
+				ChatContextKeys.chatSessionHasModels,
+			),
 			menu: {
 				id: MenuId.ChatInput,
 				order: 3,
 				group: 'navigation',
-				// DSH 集成：隐藏内建模型选择器（模型/推理强度由 DSH 会话侧决定）。when 恒假 => 不渲染。
-				when: ContextKeyExpr.false(),
+				// 只在「该会话确实有模型目录」时显示：`dsh:` 会话由 content provider 注入
+				// 模型组（`chatSessionHasModels` 为真），其它会话类型保持上游原本的隐藏行为。
+				// 这样既给 DSH 留出切换模型/推理档的入口，又不改变 Copilot 等会话的既有 UI。
+				when: ContextKeyExpr.and(
+					ChatContextKeys.location.isEqualTo(ChatAgentLocation.Chat),
+					ChatContextKeys.inQuickChat.negate(),
+					ChatContextKeys.chatSessionHasModels,
+				),
 			}
 		});
 	}
@@ -430,9 +443,13 @@ export class OpenPermissionPickerAction extends Action2 {
 						ChatContextKeys.chatModeKind.notEqualsTo(ChatModeKind.Ask),
 						ChatContextKeys.inQuickChat.negate(),
 						ChatContextKeys.inAutomationsDialog.negate(),
+						// 锁定到某个编码代理时，权限仍由该会话自己的权限组提供
+						// （`getActiveExtensionPermissionGroup`）。原先这里一律隐藏，
+						// 于是 `dsh:` 这类「锁定了且有权限组」的会话永远看不到权限选择器。
 						ContextKeyExpr.or(
 							ChatContextKeys.lockedToCodingAgent.negate(),
 							ChatContextKeys.lockedCodingAgentId.isEqualTo(AgentSessionProviders.Background),
+							ChatContextKeys.chatSessionHasPermissionGroup,
 						),
 					)
 			}

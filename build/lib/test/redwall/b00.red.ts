@@ -587,11 +587,12 @@ test('BUG-022: the stream baseline reads revision from the outer assistantStream
 });
 
 test('BUG-018: a first-click open reports queued, not opened', () => {
-	// 只核对结果语义：拉起进程不等于窗口已经打开。
+	// 只核对结果语义：拉起进程不等于窗口已经打开；已报到的 IDE 也只是「已排队、待其轮询取走」。
 	const service = source('src/vs/platform/dshClient/host/ide-service.js');
-	assert.match(service, /via: 'registered-ide', opened: true/, 'a registered IDE really opens the window');
+	assert.match(service, /via: 'registered-ide', opened: false, queued: true/, 'a registered IDE only queues the request until it polls');
 	assert.match(service, /via: 'spawned-ide', opened: false, queued: true/, 'a freshly spawned IDE is only queued');
 	assert.doesNotMatch(service, /via: 'spawned-ide' \};/, 'a spawned IDE must never be reported as opened');
+	assert.doesNotMatch(service, /opened: true/, 'no path may claim the window is already open');
 });
 
 test('BUG-018: the spawn result waits for the asynchronous error event', () => {

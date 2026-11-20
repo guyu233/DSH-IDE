@@ -123,6 +123,13 @@ export namespace ChatContextKeys {
 	export const languageModelsAreUserSelectable = new RawContextKey<boolean>('chatModelsAreUserSelectable', false, { type: 'boolean', description: localize('chatModelsAreUserSelectable', "True when the chat model can be selected manually by the user.") });
 	export const nonCopilotLanguageModelsAreUserSelectable = new RawContextKey<boolean>('chatNonCopilotModelsAreUserSelectable', false, { type: 'boolean', description: localize('chatNonCopilotModelsAreUserSelectable', "True when a user-selectable chat model from a non-Copilot vendor is available.") });
 	export const chatSessionHasModels = new RawContextKey<boolean>('chatSessionHasModels', false, { type: 'boolean', description: localize('chatSessionHasModels', "True when the chat is in a contributed chat session that has available 'models' to display.") });
+	/**
+	 * 当前会话是否带有扩展提供的权限组（`kind: 'permissions'`）。
+	 *
+	 * 与 `chatSessionHasModels` 分开：权限组不参与 `getVisibleOptionGroups`（它们只在权限
+	 * 选择器内部渲染），所以「有权限组」不能由「有可见选项组」推出来。
+	 */
+	export const chatSessionHasPermissionGroup = new RawContextKey<boolean>('chatSessionHasPermissionGroup', false, { type: 'boolean', description: localize('chatSessionHasPermissionGroup', "True when the current chat session contributes its own permission group.") });
 	export const chatSessionOptionsValid = new RawContextKey<boolean>('chatSessionOptionsValid', true, { type: 'boolean', description: localize('chatSessionOptionsValid', "True when all selected session options exist in their respective option group items.") });
 	export const extensionInvalid = new RawContextKey<boolean>('chatExtensionInvalid', false, { type: 'boolean', description: localize('chatExtensionInvalid', "True when the installed chat extension is invalid and needs to be updated.") });
 	export const inputCursorAtTop = new RawContextKey<boolean>('chatCursorAtTop', false);

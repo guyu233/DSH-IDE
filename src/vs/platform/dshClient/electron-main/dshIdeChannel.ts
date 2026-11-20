@@ -165,7 +165,10 @@ export class DshIdeChannel extends Disposable implements IServerChannel<string> 
 		}
 		let spec: Record<string, unknown>;
 		try {
-			spec = exactRecord(arg ?? {}, ['workspace', 'sessionId'], 'DshIdeChannel.launch');
+			// 只把 `undefined`（调用方省略参数）当成空规格；`null` 是畸形输入，
+			// 必须交给 exactRecord 拒绝。原先写 `arg ?? {}` 会把 null 也吞成 {}，
+			// 让一次畸形调用被当成「打开当前工作区」而静默成功。
+			spec = exactRecord(arg === undefined ? {} : arg, ['workspace', 'sessionId'], 'DshIdeChannel.launch');
 		} catch (error) {
 			// 参数形状违规：按契约返回确定错误码，不让异常穿透通道（与 22 method 口径一致）。
 			return { ok: false, code: DSH_IDE_INVALID_ARGUMENT, message: error instanceof Error ? error.message : String(error) };

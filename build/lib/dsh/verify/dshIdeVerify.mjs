@@ -3,10 +3,12 @@
  *  Licensed under the MIT License.
  *--------------------------------------------------------------------------------------------*/
 
-// DSH-IDE 四条门禁（P1 建脚手架，随各阶段填充）。
+// DSH-IDE 门禁入口（P1 建脚手架，随各阶段填充）。
+// 本文件自己实现 protocol-single-source / boundary / projection-golden / contract，
+// 以及把全部门禁（含独立脚本 localization / bundle-integrity / artifact / install-drift）
+// 聚合成 release-gate。用法见文件末尾的 gates 表。
 //
 //   node build/lib/dsh/verify/dshIdeVerify.mjs <gate>
-//   gate ∈ protocol-single-source | boundary | projection-golden | contract
 //
 // 状态语义（诚实标注，不假装修复/通过）：
 //   PASS    —— 门禁已实现且检查通过
@@ -23,6 +25,39 @@ import * as zlib from 'node:zlib';
 
 const repoRoot = path.resolve(import.meta.dirname, '../../../..');
 const srcRoot = path.join(repoRoot, 'src/vs');
+
+/**
+ * 从本机 DSH 运行时元数据读已安装版本。
+ *
+ * 依据：DSH_HOME/dsh-runtimes/<name>/runtime.json 由 DSH 自己写，字段 desktopVersion。
+ * 只在显式环境变量缺省时使用；读不到返回 undefined，由调用方保持 PENDING。
+ */
+function detectInstalledDshVersion() {
+	const home = process.env['DSH_HOME'];
+	if (typeof home !== 'string' || home === '') {
+		return undefined;
+	}
+	const root = path.join(home, 'dsh-runtimes');
+	let names;
+	try {
+		names = fs.readdirSync(root);
+	} catch {
+		return undefined;
+	}
+	for (const name of names) {
+		try {
+			const meta = JSON.parse(fs.readFileSync(path.join(root, name, 'runtime.json'), 'utf8'));
+			const version = meta?.desktopVersion;
+			if (typeof version === 'string' && version !== '') {
+				return version;
+			}
+		} catch {
+			// 单个运行时目录损坏不影响其它候选。
+		}
+	}
+	return undefined;
+}
+
 const commonDir = 'platform/dshClient/common';
 const protocolRel = `${commonDir}/dshIdeProtocol.ts`;
 const contractRel = `${commonDir}/dshIdeContract.ts`;
@@ -105,6 +140,7 @@ function protocolSingleSource() {
 	}
 
 	console.log(`PASS  protocol-single-source: ${symbols.length} symbols declared once in ${protocolRel}; dependency one-way; no duplicate JS validator`);
+	return 'PASS';
 }
 
 // ---------------------------------------------------------------------------
@@ -209,6 +245,7 @@ function boundary() {
 	const channelForValidation = read('platform/dshClient/electron-main/dshIdeChannel.ts');
 	assert.doesNotMatch(channelForValidation, /validateDshIdeSnapshot/,
 		'the channel must not duplicate frame validation — that belongs to the consumer');
+	return 'PASS';
 }
 
 // ---------------------------------------------------------------------------
@@ -276,6 +313,72 @@ async function projectionGolden() {
 // ---------------------------------------------------------------------------
 // 4. verify:dsh-ide-contract  —— 上游升级时启用失败门禁；P1 建立脚手架
 // ---------------------------------------------------------------------------
+/**
+ * 极简 semver 区间判断：只支持 manifest 实际使用的 `>=A <B` / `>` / `<=` 组合。
+ *
+ * 不引第三方依赖（门禁脚本必须能在裸 Node 下运行）；遇到不认识的运算符直接抛错，
+ * 不静默放行——版本契约宁可显式失败，也不能「看不懂就当满足」。
+ * @param {string} version 已安装版本
+ * @param {string} range manifest 的 engines.dsh
+ * @returns {boolean}
+ */
+function versionInRange(version, range) {
+	const parse = v => {
+		const m = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+[0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*)?$/.exec(String(v).trim());
+		if (m === null) { return undefined; }
+		return { nums: [Number(m[1]), Number(m[2]), Number(m[3])], pre: m[4] ?? '' };
+	};
+	const comparePre = (x, y) => {
+		if (x === y) { return 0; }
+		if (x === '') { return 1; }
+		if (y === '') { return -1; }
+		const px = x.split('.');
+		const py = y.split('.');
+		for (let i = 0; i < Math.max(px.length, py.length); i++) {
+			const u = px[i];
+			const v = py[i];
+			if (u === undefined) { return -1; }
+			if (v === undefined) { return 1; }
+			const un = /^\d+$/.test(u);
+			const vn = /^\d+$/.test(v);
+			if (un && vn) {
+				const diff = Number(u) - Number(v);
+				if (diff !== 0) { return diff < 0 ? -1 : 1; }
+				continue;
+			}
+			if (un) { return -1; }
+			if (vn) { return 1; }
+			if (u !== v) { return u < v ? -1 : 1; }
+		}
+		return 0;
+	};
+	const compare = (a, b) => {
+		for (let i = 0; i < 3; i++) {
+			if (a.nums[i] !== b.nums[i]) { return a.nums[i] < b.nums[i] ? -1 : 1; }
+		}
+		return comparePre(a.pre, b.pre);
+	};
+	const target = parse(version);
+	if (target === undefined) {
+		throw new Error(`contract: 无法解析已安装版本 ${version}`);
+	}
+	const clauses = String(range).trim().split(/\s+/).filter(Boolean);
+	if (clauses.length === 0) {
+		throw new Error('contract: engines.dsh 为空');
+	}
+	for (const clause of clauses) {
+		const m = /^(>=|<=|>|<|=)?(.+)$/.exec(clause);
+		if (m === null) { throw new Error(`contract: 无法解析 engines.dsh 片段 ${clause}`); }
+		const op = m[1] ?? '=';
+		const bound = parse(m[2]);
+		if (bound === undefined) { throw new Error(`contract: engines.dsh 中的版本 ${m[2]} 非法`); }
+		const c = compare(target, bound);
+		const ok = op === '>=' ? c >= 0 : op === '<=' ? c <= 0 : op === '>' ? c > 0 : op === '<' ? c < 0 : c === 0;
+		if (!ok) { return false; }
+	}
+	return true;
+}
+
 function contract() {
 	const text = read(contractRel);
 	for (const symbol of ['UPSTREAM_VALIDATED_VERSION', 'BLESSED_PACKAGES', 'installedMeetsVersion', 'upstreamDrift', 'VSCODE_PATCH_POINTS']) {
@@ -335,11 +438,26 @@ function contract() {
 		throw new Error('dshIdeContract.ts must declare UPSTREAM_VALIDATED_VERSION');
 	}
 
-	const installed = process.env['DSH_INSTALLED_VERSION'];
+	// 已安装版本优先取显式变量；缺省时从本机运行时元数据读。
+	// 之前只认环境变量：本机装好了也永远 PENDING，门禁不跑就等于没有门禁。
+	const installed = process.env['DSH_INSTALLED_VERSION'] || detectInstalledDshVersion();
 	if (installed === undefined || installed === '') {
-		console.log('PENDING(上游升级) contract: 4 个注入点指纹与基线一致；未设置 DSH_INSTALLED_VERSION，无法证明已安装版本 ≥ 校验版本');
+		console.log('PENDING(上游升级) contract: 4 个注入点指纹与基线一致；既未设置 DSH_INSTALLED_VERSION，也未找到本机运行时版本');
 		console.log(`  设定 DSH_INSTALLED_VERSION（如 ${validated}）后，本门禁将比对版本并判定 PASS / FAIL（§9.3）`);
 		return 'PENDING';
+	}
+
+	// manifest 声明的支持区间才是对外契约：`UPSTREAM_VALIDATED_VERSION` 只是「上次人工核对过」的下界。
+	// 只比后者的旧实现会放行低于 engines.dsh 的宿主（例如 0.2.2-rc.1）和未来大版本（9.9.9）。
+	const manifestPath = path.join(repoRoot, 'build', 'lib', 'dsh', 'package.json');
+	const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+	const engineRange = manifest?.engines?.dsh;
+	if (typeof engineRange !== 'string' || engineRange === '') {
+		throw new Error('build/lib/dsh/package.json must declare engines.dsh');
+	}
+	const inRange = versionInRange(installed, engineRange);
+	if (!inRange) {
+		throw new Error(`contract: 已安装版本 ${installed} 不满足 manifest engines.dsh ${JSON.stringify(engineRange)}`);
 	}
 
 	// 版本比对：契约文件 import 了 base/common/process.js（TS 相对导入），node 无法直接
@@ -401,26 +519,61 @@ function contract() {
 // ---------------------------------------------------------------------------
 // 5. verify:dsh-ide-release-gate  —— §9.4 发布级状态聚合检查（D57）
 //
-// 只读四条门禁的 STATUS，不改任何单条门禁的语义与退出码：
+// 只读 RELEASE_GATES 里每一项的 STATUS，不改任何单条门禁的语义与退出码：
 //   - 任一 FAIL 或任一命令退出码非 0 → 拒绝发布（退出 1）；
 //   - 任一 PENDING → 拒绝发布（退出 1），因为 PENDING 不计入通过；
 //   - 全部 PASS → 聚合通过（退出 0）。
 // ---------------------------------------------------------------------------
-const RELEASE_GATES = ['protocol-single-source', 'boundary', 'projection-golden', 'contract'];
-
+// 发布级聚合必须覆盖**全部**门禁，不只是最早那四条。
+// 第四十一轮发现这里硬编码了四项，导致 localization / bundle-integrity / artifact / install-drift
+// 在发布检查里被静默跳过——「发布门禁通过」实际只覆盖了一半。
+// 每项写成 [显示名, 调用方式]：本文件内的子命令传 `sub`，独立脚本传 `script`。
+// 两种形态都要支持——localization 与 bundle-integrity 是独立入口，不是本文件的子命令。
+const RELEASE_GATES = [
+	['protocol-single-source', { sub: 'protocol-single-source' }],
+	['boundary', { sub: 'boundary' }],
+	['projection-golden', { sub: 'projection-golden' }],
+	['contract', { sub: 'contract' }],
+	['localization', { script: 'build/lib/dsh/verify/dshLocalizationAudit.mjs' }],
+	['bundle-integrity', { script: 'build/lib/dsh/verify/dshBundleIntegrity.mjs' }],
+	// 产物内容与安装一致性同样是发布前的必要条件：前者保证 tgz 里确实是这一版代码，
+	// 后者保证 profile 里装的就是这个 tgz。缺任一条，「发布通过」都可能对应一个用户装不上的包。
+	['artifact', { script: 'build/lib/dsh/verify/dshArtifactContents.mjs' }],
+	['install-drift', { script: 'build/lib/dsh/verify/dshInstallDrift.mjs' }],
+	// 单元测试也是发布前的必要条件：`verify:dsh-ide-ci` 一直把它算在聚合里，
+	// 而 release-gate 早先漏了它——「发布通过」可能对应一个测试全红的包。
+	['test-dsh:all', { npm: 'test-dsh:all' }],
+];
 function releaseGate() {
 	const results = [];
-	for (const gate of RELEASE_GATES) {
+	for (const [gate, invocation] of RELEASE_GATES) {
 		let status = 'FAIL';
 		let code = 1;
+		// 三种调用形态：本文件子命令（`sub`）、独立脚本（`script`）、npm 脚本（`npm`）。
+		// npm 脚本没有 `STATUS:` 行，只能按退出码判定：0 即 PASS。
+		// Windows 上 npm 是 `npm.cmd`，`execFileSync` 直接调它拿不到退出码（status 为 null）。
+		// npm 脚本必须经 shell 执行；其余两种形态仍是「node + 脚本路径」，不经 shell。
+		const isNpm = invocation.npm !== undefined;
+		const file = isNpm ? (process.platform === 'win32' ? 'npm.cmd' : 'npm') : process.execPath;
+		const argv = invocation.npm !== undefined
+			? ['run', invocation.npm]
+			: invocation.script !== undefined
+				? [path.join(repoRoot, invocation.script)]
+				: [import.meta.filename, invocation.sub];
 		try {
-			const out = execFileSync(process.execPath, [import.meta.filename, gate], { encoding: 'utf8', cwd: repoRoot, stdio: ['ignore', 'pipe', 'pipe'] });
+			const out = execFileSync(file, argv, {
+				encoding: 'utf8',
+				cwd: repoRoot,
+				env: process.env,
+				stdio: ['ignore', 'pipe', 'pipe'],
+				...(isNpm ? { shell: true } : {}),
+			});
 			code = 0;
-			status = /^STATUS:\s*(\S+)/m.exec(out)?.[1] ?? 'UNKNOWN';
+			status = isNpm ? 'PASS' : (/^STATUS:\s*(\S+)/m.exec(out)?.[1] ?? 'UNKNOWN');
 		} catch (error) {
 			code = typeof error.status === 'number' ? error.status : 1;
 			const text = `${error.stdout ?? ''}${error.stderr ?? ''}`;
-			status = /^STATUS:\s*(\S+)/m.exec(text)?.[1] ?? 'FAIL';
+			status = isNpm ? 'FAIL' : (/^STATUS:\s*(\S+)/m.exec(text)?.[1] ?? 'FAIL');
 		}
 		results.push({ gate, status, code });
 		console.log(`  ${gate}: ${status} (exit ${code})`);
@@ -431,9 +584,10 @@ function releaseGate() {
 		// PENDING 与 FAIL 都拒绝发布，但原因不同：PENDING 是「未启用断言、不计通过」，
 		// 不是失败也不是通过（§9.3 / §9.4 无歧义口径）。
 		const reasons = blocking.map(result => `${result.gate}=${result.status}(exit ${result.code})`).join(', ');
-		throw new Error(`release refused: ${reasons} — 发布聚合要求四条门禁全部 PASS（PENDING 不计入通过）`);
+		throw new Error(`release refused: ${reasons} — 发布聚合要求全部门禁 PASS（PENDING 不计入通过）`);
 	}
-	console.log(`PASS  release-gate: ${results.length} gates all PASS (${RELEASE_GATES.join(', ')})`);
+	console.log(`PASS  release-gate: ${results.length} gates all PASS (${RELEASE_GATES.map(([name]) => name).join(', ')})`);
+	return 'PASS';
 }
 
 // ---------------------------------------------------------------------------
@@ -455,7 +609,15 @@ if (!gate || !Object.hasOwn(gates, gate)) {
 try {
 	// 部分门禁（projection-golden）需要动态 import TS 模块，返回 Promise。
 	const status = await gates[gate]();
-	console.log(`STATUS: ${status ?? 'PASS'}  [${gate}]`);
+	console.log(`STATUS: ${status ?? 'FAIL'}  [${gate}]`);
+	// 未返回状态按 FAIL 处理：忘记 return 的新门禁不得被当成通过。
+	// PENDING 也以非零退出：直接调用者（shell &&、CI step、npm script）必须能看到「没有证据」。
+	if (status === 'PENDING') {
+		process.exit(2);
+	}
+	if (status !== 'PASS') {
+		process.exit(1);
+	}
 } catch (err) {
 	console.error(`STATUS: FAIL  [${gate}]`);
 	console.error(err?.message ?? err);

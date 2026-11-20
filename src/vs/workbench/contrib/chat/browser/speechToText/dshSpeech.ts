@@ -19,6 +19,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 import { VSBuffer, encodeBase64 } from '../../../../../base/common/buffer.js';
+import { localize } from '../../../../../nls.js';
 import { IDshClientService } from '../../../../../platform/dshClient/common/dshClientService.js';
 
 export interface DshSpeechCatalog {
@@ -60,7 +61,7 @@ export function encodeDshSpeechWave(samples: Float32Array): Uint8Array {
 export async function transcribeDshSpeech(client: Pick<IDshClientService, 'call'>, catalog: DshSpeechCatalog, samples: Float32Array): Promise<string> {
 	const limit = dshSpeechSampleLimit(catalog);
 	if (!samples.length || !limit || samples.length > limit) {
-		throw new Error('Speech recording is unavailable or exceeds the Host limits');
+		throw new Error(localize('dshSpeech.outOfRange', "录音不可用或超出 DSH 允许的时长与大小上限。"));
 	}
 	const request = {
 		audioBase64: encodeBase64(VSBuffer.wrap(encodeDshSpeechWave(samples))),

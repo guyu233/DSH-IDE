@@ -553,8 +553,11 @@ export interface DshIdeMethodArgs {
 	renameSession: { sessionId: string; title: string };
 	/** 归档管理器 `setSessionFavorite`。只传会话，Host 按当前收藏状态切换。 */
 	setSessionFavorite: { sessionId: string };
-	/** 官方 `workspace/pinSession` 与 `unpinSession`。只传会话，Host 按当前置顶状态切换。 */
-	setSessionPinned: { sessionId: string };
+	/**
+	 * 官方 `workspace/pinSession` 与 `unpinSession`。
+	 * `pinned` 缺省时按当前状态切换；给出布尔值时设成该状态（已经是该状态则不再打一次）。
+	 */
+	setSessionPinned: { sessionId: string; pinned?: boolean };
 	/** 官方工作区名单，供「移动到工作区」。 */
 	listWorkspaces: Record<string, never>;
 	/** 归档管理器 `workspaceRegistry.moveSessionToWorkspace`。 */
@@ -677,7 +680,7 @@ const DSH_IDE_METHOD_KEYS: Record<DshIdeMethod, readonly string[]> = {
 	listSkills: ['sessionId'],
 	renameSession: ['sessionId', 'title'],
 	setSessionFavorite: ['sessionId'],
-	setSessionPinned: ['sessionId'],
+	setSessionPinned: ['sessionId', 'pinned'],
 	listWorkspaces: [],
 	moveSession: ['sessionId', 'workspaceId'],
 	openSessionPath: ['sessionId'],
@@ -778,6 +781,37 @@ function optionalString(value: unknown, label: string): void {
 	if (value !== undefined) {
 		nonEmptyString(value, label);
 	}
+}
+
+function optionalBoolean(value: unknown, label: string): void {
+	if (value !== undefined && typeof value !== 'boolean') {
+		throw new TypeError(`${label} must be a boolean`);
+	}
+}
+
+/**
+ * 置顶的下一状态。
+ *
+ * 调用方给出 `pinned` 时以它为准，这样 IDE 列表上的钉子和 Host 记账不会各翻一次。
+ * 缺省仍是切换，旧调用只传 sessionId 时行为不变。
+ */
+export function resolveDshSessionPin(currentlyPinned: boolean, requested: boolean | undefined): boolean {
+	return typeof requested === 'boolean' ? requested : !currentlyPinned;
+}
+
+/**
+ * 通道错误的可读文案。
+ *
+ * `DshRemoteError.message` 允许为空串（Host 只带 code 时）：此时退回 code，
+ * 否则用户会看到一句只有冒号的「发送失败：」。
+ */
+export function dshErrorText(error: { readonly code?: string; readonly message?: string } | undefined, fallback: string): string {
+	const message = typeof error?.message === 'string' ? error.message.trim() : '';
+	if (message !== '') {
+		return message;
+	}
+	const code = typeof error?.code === 'string' ? error.code.trim() : '';
+	return code === '' ? fallback : code;
 }
 
 /** 有长度上限的字符串。optional 为真时允许缺省，但仍拒绝非字符串。 */
@@ -960,8 +994,11 @@ export function validateDshIdeInput<K extends DshIdeMethod>(command: K, args: un
 			nonEmptyString(record['title'], 'DshIdeInput.renameSession.title');
 			break;
 		case 'setSessionFavorite':
+			nonEmptyString(record['sessionId'], `DshIdeInput.${command}.sessionId`);
+			break;
 		case 'setSessionPinned':
 			nonEmptyString(record['sessionId'], `DshIdeInput.${command}.sessionId`);
+			optionalBoolean(record['pinned'], 'DshIdeInput.setSessionPinned.pinned');
 			break;
 		case 'moveSession':
 			nonEmptyString(record['sessionId'], 'DshIdeInput.moveSession.sessionId');
@@ -1025,7 +1062,10 @@ export function validateDshIdeInput<K extends DshIdeMethod>(command: K, args: un
 			break;
 		case 'archiveSession':
 		case 'unarchiveSession':
-			// 归档类 method 只接受一个会话标识；官方形状见 §8.10.11 `{ sessionId }`。
+		case 'deleteSession':
+			// 归档/删除类 method 只接受一个会话标识；官方形状见 §8.10.11 `{ sessionId }`。
+			// `deleteSession` 原先漏了这一条：空串能过协议边界，只靠 Host 的可见性检查兜住——
+			// 契约真源必须自己拒绝，不能把「不越权」寄托在下游实现上。
 			nonEmptyString(record['sessionId'], `DshIdeInput.${command}.sessionId`);
 			break;
 		case 'searchSessions':
@@ -1056,6 +1096,7 @@ export function validateDshIdeInput<K extends DshIdeMethod>(command: K, args: un
 		case 'presentationSettings':
 		case 'refreshSnapshot':
 		case 'listSkills':
+		case 'listWorkspaces':
 			// 无字段，exactRecord 已确保空对象。
 			break;
 	}

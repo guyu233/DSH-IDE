@@ -295,6 +295,10 @@ test('D27 CI aggregate entry exists, follows §2 order, and refuses PENDING', ()
 		'verify:dsh-ide-boundary',
 		'verify:dsh-ide-projection-golden',
 		'verify:dsh-ide-contract',
+		// 本地化审计（第三十九轮新增）：中文 source、占位符与实参吻合、key 无冲突、无裸字符串。
+		'verify:dsh-ide-localization',
+		// 产物完整性（第四十轮新增）：相对 import 可达、外部依赖与 peer 声明一致、exports 目标齐全。
+		'verify:dsh-ide-bundle-integrity',
 		'test-dsh:all',
 	], 'the CI steps must follow chapter-5 §2 order');
 	// PENDING 不计通过（§9）。
@@ -493,14 +497,31 @@ test('D68 contract gate can actually reach PASS, and fails on a lower installed 
 		}
 	};
 
-	// 未设版本：不得判 PASS（无法证明相符）。
-	const unset = run({ DSH_INSTALLED_VERSION: '' });
-	assert.match(unset.out, /STATUS: PENDING/, 'without DSH_INSTALLED_VERSION the gate must stay PENDING');
+	// 未设版本且本机没有运行时元数据：不得判 PASS（无法证明相符），且退出码必须非 0
+	// （「没有证据」不能算成功）。两个来源都要清掉，否则自动发现会补上版本。
+	const unset = run({ DSH_INSTALLED_VERSION: '', DSH_HOME: '' });
+	assert.match(unset.out, /STATUS: PENDING/, 'without any version evidence the gate must stay PENDING');
+	assert.notEqual(unset.code, 0, 'PENDING must not exit 0 — a caller using && would treat it as success');
 
-	// 版本相符：应当 PASS。
-	const ok = run({ DSH_INSTALLED_VERSION: '0.2.2-rc.1' });
-	assert.equal(ok.code, 0, 'a matching installed version must not fail the gate');
-	assert.match(ok.out, /STATUS: PASS/, 'a matching installed version must yield PASS');
+	// 未显式设置、但本机能读到运行时元数据：自动取用，不再永久 PENDING。
+	// 之前只认环境变量，本机装好了门禁也从不判定——等于没有门禁。
+	const auto = run({ DSH_INSTALLED_VERSION: '' });
+	assert.doesNotMatch(auto.out, /PENDING\(上游升级\)/, 'a readable runtime version must be used instead of staying PENDING');
+
+	// 版本在 manifest engines.dsh 区间内：应当 PASS。
+	const ok = run({ DSH_INSTALLED_VERSION: '0.2.2-rc.5' });
+	assert.equal(ok.code, 0, 'an in-range installed version must not fail the gate');
+	assert.match(ok.out, /STATUS: PASS/, 'an in-range installed version must yield PASS');
+
+	// 低于 engines.dsh 下界：必须 FAIL —— 只比「上次核对过的版本」会放行这里。
+	const belowEngine = run({ DSH_INSTALLED_VERSION: '0.2.2-rc.1' });
+	assert.notEqual(belowEngine.code, 0, 'a version below engines.dsh must fail the gate');
+	assert.match(belowEngine.out, /engines\.dsh/, 'the failure must name the manifest range');
+
+	// 未来大版本（不在 engines.dsh 区间）：同样必须 FAIL。
+	const future = run({ DSH_INSTALLED_VERSION: '9.9.9' });
+	assert.notEqual(future.code, 0, 'a future major outside engines.dsh must fail the gate');
+	assert.match(future.out, /engines\.dsh/, 'the failure must name the manifest range');
 
 	// 版本过低：应当 FAIL（退出非 0）。
 	const low = run({ DSH_INSTALLED_VERSION: '0.1.0' });
@@ -636,4 +657,61 @@ test('every contract method has a Host handler and no handler is orphaned', () =
 	const orphaned = [...handlers].filter(name => !contract.includes(name));
 	assert.deepEqual(missing, [], 'every contract method must have a Host handler');
 	assert.deepEqual(orphaned, [], 'no Host handler may exist outside the contract');
+});
+
+test('accountCancelSignIn is reachable from the account menu, not just the contract', async () => {
+	// 契约与 Host 早就实现了 cancelSignIn，但 renderer 没有调用点：用户关掉浏览器授权页后
+	// 只能等超时。这里锁住「有 attemptId、有取消入口、失败如实提示」三件事。
+	const fs = await import('node:fs');
+	const file = fs.readFileSync('src/vs/workbench/browser/parts/globalCompositeBar.ts', 'utf8');
+	assert.match(file, /accountCancelSignIn/, 'the account menu must call the official cancel endpoint');
+	assert.match(file, /attemptId\?: string/, 'startSignIn must read the attempt id returned by the Host');
+	assert.match(file, /private async cancelSignIn\(attemptId: string\)/, 'cancel must be one shared implementation');
+	assert.match(file, /dsh\.cancelSignInFailed/, 'a failed cancel must be reported, not swallowed');
+});
+
+test('a disabled provider bundle is diagnosable instead of silent', async () => {
+	// Cordis 的 ctx.inject 在依赖未注册时静默等待、不报错也不超时。
+	// sessionController 由 dsh-web-app bundle 提供：那个 bundle 被禁用时，Host 半身永远不建立，
+	// 日志里一行原因都没有。体检必须存在，且不能改变等待语义。
+	const fs = await import('node:fs');
+	const entry = fs.readFileSync('src/vs/platform/dshClient/index.js', 'utf8');
+	assert.match(entry, /host bridge is waiting for services/, 'the watchdog must name the missing services');
+	assert.match(entry, /REQUIRED_SERVICES\.filter/, 'the watchdog must check the same required list');
+	assert.match(entry, /bridgeWatchdog\.unref|unref\(\)/, 'the watchdog must not keep the process alive');
+	assert.match(entry, /clearTimeout\(bridgeWatchdog\)/, 'the watchdog must be cleared once the bridge is up');
+});
+
+test('concurrent launch clicks are coalesced, not spawned twice', async () => {
+	// 防抖只看 ideChild，而 spawn 之前有 await（物化主页/解析工具路径/预取 composerState）。
+	// 这期间 ideChild 仍是 undefined，两个并发点击会各拉起一个窗口。
+	const fs = await import('node:fs');
+	const service = fs.readFileSync('src/vs/platform/dshClient/host/ide-service.js', 'utf8');
+	assert.match(service, /this\.launchInFlight !== undefined/, 'a second click must reuse the in-flight launch');
+	assert.match(service, /async _spawnIdeProcessOnce\(/, 'the spawn body must be separable from the coalescing gate');
+	assert.match(service, /this\.launchInFlight === inFlight/, 'the gate must only clear its own promise');
+	assert.match(service, /this\.launchInFlight = undefined;\s*\n\s*if \(child === undefined/, 'unload must clear the gate too');
+});
+
+test('the release gate covers every CI gate, not a stale subset', () => {
+	// `release-gate` 曾经硬编码最早那四条门禁；后来新增的 localization / bundle-integrity /
+	// artifact / install-drift 全被静默跳过——「发布门禁通过」实际只覆盖一半。
+	// 这里钉住：CI 聚合里的每条 verify 门禁都必须出现在 RELEASE_GATES 里。
+	const ci = read('build/lib/dsh/verify/dshIdeCi.mjs');
+	const verify = read('build/lib/dsh/verify/dshIdeVerify.mjs');
+
+	const ciGates = [...ci.matchAll(/script:\s*'(verify:dsh-ide-[a-z-]+)'/g)].map(m => m[1]);
+	assert.ok(ciGates.length >= 6, `expected the CI entry to list its gates (found ${ciGates.length})`);
+
+	// 把 npm script 名映射到 RELEASE_GATES 里用的短名：`verify:dsh-ide-<name>` → `<name>`。
+	const expected = ciGates
+		.map(script => script.replace('verify:dsh-ide-', ''))
+		// `release-gate` 自身不参与聚合（会递归）。
+		.filter(name => name !== 'release-gate');
+	const block = /const RELEASE_GATES = \[([\s\S]*?)\n\];/.exec(verify);
+	assert.ok(block !== null, 'RELEASE_GATES must be declared as a literal array');
+	const covered = [...block[1].matchAll(/\['([a-z-]+)'/g)].map(m => m[1]);
+	for (const gate of expected) {
+		assert.ok(covered.includes(gate), `release-gate must cover "${gate}"`);
+	}
 });

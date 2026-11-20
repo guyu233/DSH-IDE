@@ -37,6 +37,7 @@ import { IRequestService } from '../../../platform/request/common/request.js';
 import { IWorkbenchEnvironmentService } from '../../services/environment/common/environmentService.js';
 import { IHoverService } from '../../../platform/hover/browser/hover.js';
 import { ILifecycleService, LifecyclePhase } from '../../services/lifecycle/common/lifecycle.js';
+import { INotificationService, Severity } from '../../../platform/notification/common/notification.js';
 import { IUserDataProfileService } from '../../services/userDataProfile/common/userDataProfile.js';
 import { DEFAULT_ICON } from '../../services/userDataProfile/common/userDataProfileIcons.js';
 import { isString } from '../../../base/common/types.js';
@@ -295,6 +296,8 @@ export class AccountsActivityActionViewItem extends AbstractGlobalActivityAction
 
 	private avatarImg: HTMLImageElement | undefined;
 	private dshAccount: { signedIn: boolean; unavailable?: boolean; name: string; contact: string; avatarUrl: string } | undefined;
+	/** 正在等待的浏览器授权 attempt；用于提供「取消登录」入口（官方 `cancelSignIn(attemptId)`）。 */
+	private pendingSignInAttemptId: string | undefined;
 	// DSH 鲸鱼 logo（未登录/无头像时作为账号按钮标识，替掉 GitHub/Copilot 的通用人像）。
 	// DSH 鲸鱼 logo（未登录/无头像时作为账号按钮标识，替掉 GitHub/Copilot 的通用人像）。
 	// 直接取**宿主官方资源**：`FileAccess.asBrowserUri` 指向仓库内 `dsh-whale.svg`（该文件本身是
@@ -321,6 +324,7 @@ export class AccountsActivityActionViewItem extends AbstractGlobalActivityAction
 		@IDshClientService private readonly dshClientService: IDshClientService,
 		@IOpenerService private readonly openerService: IOpenerService,
 		@ICommandService private readonly commandService: ICommandService,
+		@INotificationService private readonly notificationService: INotificationService,
 	) {
 		const action = instantiationService.createInstance(CompositeBarAction, {
 			id: ACCOUNTS_ACTIVITY_ID,
@@ -413,6 +417,10 @@ export class AccountsActivityActionViewItem extends AbstractGlobalActivityAction
 				// `deepseek-account/src/types.ts` AccountDetails），必须剥一层 `.value`。
 				const profile = await this.dshClientService.call<{ status?: string; value?: { name?: string | null; contact?: string | null; avatarUrl?: string | null } }>(
 					'accountGetProfile', { client: meta });
+				if (!profile.ok) {
+					// 读失败不能静默变成空昵称：否则界面上只看到头像区突然变空，无从排查。
+					this.logService.warn(`[dsh] accountGetProfile failed: ${profile.error.code} ${profile.error.message}`);
+				}
 				const p = profile.ok && profile.value?.status === 'ready' ? profile.value.value : undefined;
 				if (p) {
 					name = typeof p.name === 'string' ? p.name : '';
@@ -432,7 +440,7 @@ export class AccountsActivityActionViewItem extends AbstractGlobalActivityAction
 		// 官方浏览器授权：`accountStartSignIn` 返回 attempt.authorizeUrl，用户在浏览器完成授权，
 		// Host 在回调落定凭据后状态变为 credential-stored。IDE 不自行拼接授权地址。
 		try {
-			const res = await this.dshClientService.call<{ attempt?: { authorizeUrl?: string } }>('accountStartSignIn', {
+			const res = await this.dshClientService.call<{ attempt?: { authorizeUrl?: string; attemptId?: string } }>('accountStartSignIn', {
 				client: dshAccountClientMetadata(this.dshLocale()),
 				callbackOrigin: `${window.location.protocol}//${window.location.host}`,
 				loginSource: 'desktop',
@@ -442,8 +450,15 @@ export class AccountsActivityActionViewItem extends AbstractGlobalActivityAction
 				return;
 			}
 			const authorizeUrl = res.value?.attempt?.authorizeUrl;
+			const attemptId = res.value?.attempt?.attemptId;
 			if (authorizeUrl) {
 				await this.openerService.open(URI.parse(authorizeUrl));
+			}
+			// 浏览器授权可能一直不回来（用户关掉页面）：本轮先给一个明确的「取消」入口，
+			// 走官方 `cancelSignIn(attemptId)`，避免界面永远停在「等待授权」。
+			if (typeof attemptId === 'string' && attemptId !== '') {
+				this.pendingSignInAttemptId = attemptId;
+				this.showCancelSignInHint(attemptId);
 			}
 			await this.refreshDshAccount();
 		} catch (error) {
@@ -451,6 +466,43 @@ export class AccountsActivityActionViewItem extends AbstractGlobalActivityAction
 		}
 	}
 
+
+	/**
+	 * 取消当前浏览器授权（官方 `cancelSignIn(attemptId)`）。
+	 *
+	 * 授权页可能被用户直接关掉，没有取消入口就只能等超时；失败如实提示，不假装已取消。
+	 * @param attemptId 官方 startSignIn 返回的 attempt 标识
+	 */
+	private async cancelSignIn(attemptId: string): Promise<void> {
+		const result = await this.dshClientService.call('accountCancelSignIn', { attemptId });
+		if (!result.ok) {
+			this.notificationService.warn(localize('dsh.cancelSignInFailed', "取消登录失败：{0}", result.error.message));
+			return;
+		}
+		if (this.pendingSignInAttemptId === attemptId) {
+			this.pendingSignInAttemptId = undefined;
+		}
+		await this.refreshDshAccount();
+	}
+
+	/**
+	 * 浏览器授权进行中的提示 + 取消入口。
+	 *
+	 * 用户关掉浏览器页面时授权不会回来；不提供取消就只能等超时。这里用一条可关闭的通知
+	 * 承接官方 `cancelSignIn(attemptId)`，失败也如实提示（不静默）。
+	 * @param attemptId 官方 startSignIn 返回的 attempt 标识
+	 */
+	private showCancelSignInHint(attemptId: string): void {
+		this.notificationService.notify({
+			severity: Severity.Info,
+			message: localize('dsh.signInPending', "请在浏览器完成 DeepSeek 授权。"),
+			actions: {
+				primary: [new Action('dsh.cancelSignIn', localize('dsh.cancelSignIn', "取消登录"), undefined, true, () => {
+					void this.cancelSignIn(attemptId);
+				})],
+			},
+		});
+	}
 
 	private safeAvatar(value: string): string {
 		try {
@@ -538,7 +590,17 @@ export class AccountsActivityActionViewItem extends AbstractGlobalActivityAction
 			return [disposables.add(new Action('dshAccountUnavailable', localize('dshAccountUnavailable', "DeepSeek 账号不可用"), undefined, false))];
 		}
 		if (!account.signedIn) {
-			return [disposables.add(new Action('dsh.signIn', localize('dshSignIn', "登录 DeepSeek"), undefined, true, () => { void this.signInDsh(); }))];
+			const actions: IAction[] = [
+				disposables.add(new Action('dsh.signIn', localize('dshSignIn', "登录 DeepSeek"), undefined, true, () => { void this.signInDsh(); })),
+			];
+			// 授权已发起但还没回来：菜单里给出取消入口（与通知里的按钮同一动作）。
+			const attemptId = this.pendingSignInAttemptId;
+			if (attemptId !== undefined) {
+				actions.push(disposables.add(new Action('dsh.cancelSignIn', localize('dsh.cancelSignIn', "取消登录"), undefined, true, () => {
+					void this.cancelSignIn(attemptId);
+				})));
+			}
+			return actions;
 		}
 		const actions: IAction[] = [
 			disposables.add(new Action('dsh.accountName', account.name || 'DeepSeek', undefined, false)),
@@ -692,6 +754,7 @@ export class SimpleAccountActivityActionViewItem extends AccountsActivityActionV
 		@IDshClientService dshClientService: IDshClientService,
 		@IOpenerService openerService: IOpenerService,
 		@ICommandService commandService: ICommandService,
+		@INotificationService notificationService: INotificationService,
 	) {
 		super(() => simpleActivityContextMenuActions(storageService, true),
 			{
@@ -702,7 +765,7 @@ export class SimpleAccountActivityActionViewItem extends AccountsActivityActionV
 				}),
 				hoverOptions,
 				compact: true,
-			}, () => undefined, actions => actions, themeService, lifecycleService, hoverService, contextMenuService, menuService, contextKeyService, configurationService, keybindingService, logService, activityService, instantiationService, requestService, dshClientService, openerService, commandService);
+			}, () => undefined, actions => actions, themeService, lifecycleService, hoverService, contextMenuService, menuService, contextKeyService, configurationService, keybindingService, logService, activityService, instantiationService, requestService, dshClientService, openerService, commandService, notificationService);
 	}
 }
 

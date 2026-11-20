@@ -43,11 +43,17 @@ suite('DSH speech', () => {
 	test('unavailable catalog and failed RPC never invoke preparation or fallback', async () => {
 		const call = sinon.stub().resolves({ ok: false, error: { code: 'remote/missing', message: 'disabled' } });
 		const client = { call } as Pick<IDshClientService, 'call'>;
-		await assert.rejects(transcribeDshSpeech(client, catalog, new Float32Array([0])));
+		// 目录不可用（选中的服务不存在）时必须在本地就拒绝，不发起任何调用。
+		// 传可用的 catalog 会真的发请求，那时 callCount 不可能为 0。
+		await assert.rejects(transcribeDshSpeech(client, { ...catalog, selection: { ...catalog.selection, providerId: 'missing' } }, new Float32Array([0])));
 		assert.strictEqual(call.callCount, 0);
 		call.resolves({ ok: false, error: { code: 'speech/transcription-failed', message: 'not ready' } });
 		await assert.rejects(transcribeDshSpeech(client, { ...catalog, maxAudioBytes: 46 }, new Float32Array([0])));
-		assert.deepStrictEqual(call.firstCall.args, ['speech/transcribe', sinon.match.object]);
+		// deepStrictEqual 不认识 sinon matcher，会把 matcher 当值比对。这里直接取实参断言。
+		const [method, payload] = call.firstCall.args as [string, { request: { audioBase64: string; providerId: string; language: string } }];
+		assert.strictEqual(method, 'speechTranscribe');
+		assert.strictEqual(typeof payload.request.audioBase64, 'string');
+		assert.deepStrictEqual({ providerId: payload.request.providerId, language: payload.request.language }, { providerId: 'selected', language: 'zh' });
 		assert.strictEqual(call.callCount, 1);
 	});
 
@@ -56,7 +62,7 @@ suite('DSH speech', () => {
 		const client = { call } as Pick<IDshClientService, 'call'>;
 		const samples = new Float32Array([0, 1]);
 		assert.strictEqual(await transcribeDshSpeech(client, catalog, samples), '识别结果');
-		assert.deepStrictEqual(call.firstCall.args, ['speech/transcribe', { request: {
+		assert.deepStrictEqual(call.firstCall.args, ['speechTranscribe', { request: {
 			audioBase64: Buffer.from(encodeDshSpeechWave(samples)).toString('base64'), providerId: 'selected', language: 'zh',
 		} }]);
 	});

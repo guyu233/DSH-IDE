@@ -1,1 +1,7 @@
-{ "meta": { "title": "DSH-IDE", "description": "Adds a DSH-IDE entry in the session header: reuses the DSH host Electron to open an independent VS Code window bound to the current workspace, connected to the same DSH Host over the official transport (AI fully provided by DSH)." } }
+{
+  "meta": {
+    "title": "DSH-IDE",
+    "description": "Opens a full VS Code window for the current workspace from the session header, reusing the Electron runtime that ships with DeepSeek Harness. The window connects to the same DSH Host over the official client transport, so chat, models, approvals and tools keep running on DSH. Look for the whale button in the session header, right of the conversation menu. Windows x64 only: the window materialization path is Windows-only and other platforms report that limitation instead of pretending to launch.",
+    "detail": "docs/DETAIL.md"
+  }
+}

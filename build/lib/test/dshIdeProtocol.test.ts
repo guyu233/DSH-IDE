@@ -25,6 +25,8 @@ import {
 	validateDshIdeInput,
 	validateDshIdeInvokeOutput,
 	validateDshIdeLoadOlderResult,
+	resolveDshSessionPin,
+	dshErrorText,
 	validateDshIdeSnapshot,
 	type DshIdeMethod,
 	type DshIdeSnapshot,
@@ -103,6 +105,19 @@ test('fixture covers exactly the contract method set', () => {
 	const fixture = [...ALL_METHODS].sort();
 	assert.deepEqual(fixture, contract, 'VALID_ARGS must cover exactly the contract methods');
 	assert.equal(new Set(ALL_METHODS).size, ALL_METHODS.length, 'no duplicates');
+});
+
+test('every declared method has a validation branch', () => {
+	// 校验 switch 漏一个方法不会让校验失效（无参方法有 exactRecord 兜底），
+	// 但会让「有声明无校验」成为静默惯例——将来给该方法加字段时就漏校验了。
+	const source = readFileSync(new URL('../../../src/vs/platform/dshClient/common/dshIdeProtocol.ts', import.meta.url), 'utf8');
+	const withArgs = new Set([...source.matchAll(/^\t(\w+): \{[^}]*\};/gm)].map(match => match[1]));
+	const noArgs = new Set([...source.matchAll(/^\t(\w+): Record<string, never>;/gm)].map(match => match[1]));
+	const declared = new Set([...withArgs, ...noArgs]);
+	assert.ok(declared.size > 40, `the contract should declare dozens of methods (saw ${declared.size})`);
+	const cases = new Set([...source.matchAll(/^\t\tcase '(\w+)':/gm)].map(match => match[1]));
+	const missing = [...declared].filter(name => !cases.has(name));
+	assert.deepEqual(missing, [], 'a declared method without a validation branch is a silent gap');
 });
 
 test('validateDshIdeInput accepts every method positive case', () => {
@@ -193,7 +208,6 @@ function snapshot(overrides: Record<string, unknown> = {}): DshIdeSnapshot {
 	return {
 		wireRevision: DSH_IDE_WIRE_REVISION,
 		channelId: 'c1',
-		binding: { viewId: 'c1', generation: 1, sessionId: null },
 		version: 0,
 		binding: { viewId: 'c1', generation: 1, sessionId: null },
 		state: { state: 'starting' },
@@ -509,4 +523,37 @@ test('team and worktrees typed fields are validated and unknown shapes rejected'
 		() => validateDshIdeSnapshot(snapshot({ state: { state: 'ready', view: { frame: { type: 'snapshot' }, worktrees: [{ path: '' }] } } })),
 		/non-empty string/,
 	);
+});
+
+test('setSessionPinned accepts an absolute flag and resolves the next state', () => {
+	assert.doesNotThrow(() => validateDshIdeInput('setSessionPinned', { sessionId: 's1', pinned: true }));
+	assert.doesNotThrow(() => validateDshIdeInput('setSessionPinned', { sessionId: 's1', pinned: false }));
+	assert.throws(() => validateDshIdeInput('setSessionPinned', { sessionId: 's1', pinned: 'yes' }), /must be a boolean/);
+	assert.equal(resolveDshSessionPin(false, true), true);
+	assert.equal(resolveDshSessionPin(true, true), true);
+	assert.equal(resolveDshSessionPin(true, undefined), false);
+	assert.equal(resolveDshSessionPin(false, undefined), true);
+});
+
+test('pin and favorite update the list the user is looking at', () => {
+	const menu = readFileSync(new URL('../../../src/vs/workbench/contrib/dsh/browser/dshSessionMenu.ts', import.meta.url), 'utf8');
+	assert.match(menu, /id: 'dsh\.session\.unpin'/);
+	assert.match(menu, /setPinned\(accessor, sessionId, arg, true\)/);
+	assert.match(menu, /setPinned\(accessor, sessionId, arg, false\)/);
+	assert.match(menu, /session\?\.setPinned\?\.\(applied\)/);
+	assert.match(menu, /dsh\.session\.favorited/);
+	assert.match(menu, /dsh\.session\.unfavorited/);
+	const host = readFileSync(new URL('../../../src/vs/platform/dshClient/host/ide-view-host.js', import.meta.url), 'utf8');
+	assert.match(host, /resolveDshSessionPin\(currently, args\.pinned\)/);
+	assert.match(host, /return \{ accepted: true, pinned \}/);
+	assert.match(host, /return \{ accepted: true, favorite \}/);
+});
+
+test('an error with only a code never renders as an empty message', () => {
+	assert.equal(dshErrorText({ code: 'dsh-ide/feature-unavailable', message: '' }, '兜底'), 'dsh-ide/feature-unavailable');
+	assert.equal(dshErrorText({ code: 'x', message: '   ' }, '兜底'), 'x');
+	assert.equal(dshErrorText({ code: 'x', message: '真的原因' }, '兜底'), '真的原因');
+	assert.equal(dshErrorText({ message: '只有原因' }, '兜底'), '只有原因');
+	assert.equal(dshErrorText(undefined, '兜底'), '兜底');
+	assert.equal(dshErrorText({}, '兜底'), '兜底');
 });

@@ -17,7 +17,7 @@ import { localize } from '../../../../nls.js';
 import { INotificationService } from '../../../../platform/notification/common/notification.js';
 import { IWorkspaceContextService } from '../../../../platform/workspace/common/workspace.js';
 import { IDshClientService } from '../../../../platform/dshClient/common/dshClientService.js';
-import type { IDshIdeSessionSummary } from '../../../../platform/dshClient/common/dshIdeProtocol.js';
+import { dshErrorText, type IDshIdeSessionSummary } from '../../../../platform/dshClient/common/dshIdeProtocol.js';
 import { IWorkbenchContribution, registerWorkbenchContribution2, WorkbenchPhase } from '../../../common/contributions.js';
 import { IChatSessionTiming } from '../../chat/common/chatService/chatService.js';
 import { ChatSessionStatus, IChatSessionItem, IChatSessionItemController, IChatSessionItemsDelta, IChatSessionProviderOptionGroup, IChatSessionsService } from '../../chat/common/chatSessionsService.js';
@@ -79,6 +79,12 @@ export class DshAgentSessionsController extends Disposable implements IChatSessi
 	private archiveEpoch = 0;
 	/** 后发起的 refresh 作废先发起的回包。 */
 	private refreshEpoch = 0;
+	/** 空列表上已经提示过的失败原文，避免连接抖动时重复弹窗。 */
+	private _lastRefreshError: string | undefined;
+	/** 控制器已释放：在途回包不再写列表、不再 fire。 */
+	private _disposed = false;
+	/** 在途的刷新；同一时刻只跑一轮 listSessions。 */
+	private _refreshInFlight: Promise<void> | undefined;
 
 	get items(): readonly IChatSessionItem[] {
 		return this._items;
@@ -165,7 +171,7 @@ export class DshAgentSessionsController extends Disposable implements IChatSessi
 			const selected = permissionItems.find(item => item.id === current);
 			groups.push({
 				id: 'dsh.permission',
-				name: '权限',
+				name: localize('dsh.optionGroup.permission', "权限"),
 				...(selected === undefined ? {} : { selected }),
 				items: permissionItems,
 				kind: 'permissions',
@@ -176,7 +182,7 @@ export class DshAgentSessionsController extends Disposable implements IChatSessi
 			const selectedPreset = presets.options.find(option => option.id === presets.current);
 			groups.push({
 				id: 'dsh.preset',
-				name: '模式',
+				name: localize('dsh.optionGroup.preset', "模式"),
 				...(selectedPreset === undefined ? {} : { selected: { id: selectedPreset.id, name: selectedPreset.name } }),
 				items: presets.options.map(option => ({ id: option.id, name: option.name })),
 			});
@@ -202,10 +208,36 @@ export class DshAgentSessionsController extends Disposable implements IChatSessi
 	/**
 	 * 后台刷新入口：`refresh()` 在 listSessions 失败时会 throw（原生 `IChatSessionItemController`
 	 * 需要感知失败），但所有「连接状态变化 / 工作区变化 / 定时合并」的触发点都是 fire-and-forget，
-	 * 必须自己收口，否则会变成 unhandled rejection。失败只记日志，不弹通知。
+	 * 必须自己收口，否则会变成 unhandled rejection。列表里已经有行时只记日志；
+	 * 列表是空的时用户会以为没有会话，所以同一种失败只提示一次。
 	 */
+	override dispose(): void {
+		this._disposed = true;
+		super.dispose();
+	}
+
 	private refreshNow(): void {
-		void this.refresh(CancellationToken.None).catch(onUnexpectedError);
+		// 启动时会连着触发几次（构造、getStatus、连接状态变化），工作区切换也可能连发。
+		// 不合并的话每次都是一整轮 listSessions（按工作区目录数还要翻倍）。
+		// 在途期间再来的触发直接复用同一次刷新，回包到了就自然带上最新名单。
+		if (this._refreshInFlight !== undefined) {
+			return;
+		}
+		const work = this.refresh(CancellationToken.None).then(() => {
+			this._lastRefreshError = undefined;
+		}, error => {
+			if (flattenTree(this._items).length === 0) {
+				const message = error instanceof Error && error.message !== '' ? error.message : String(error);
+				if (message !== this._lastRefreshError) {
+					this._lastRefreshError = message;
+					this._notifications.warn(localize('dsh.sessions.refreshFailed', "DSH 会话列表没有加载：{0}", message));
+				}
+			}
+			onUnexpectedError(error);
+		}).finally(() => {
+			this._refreshInFlight = undefined;
+		});
+		this._refreshInFlight = work;
 	}
 
 	async refresh(token: CancellationToken): Promise<void> {
@@ -215,43 +247,67 @@ export class DshAgentSessionsController extends Disposable implements IChatSessi
 		const epoch = ++this.refreshEpoch;
 		const folders = this.workspace.getWorkspace().folders.map(folder => folder.uri.fsPath);
 		const queries = folders.length === 0 ? [undefined] : folders;
-		const summaries: IDshIdeSessionSummary[] = [];
-		for (const folder of queries) {
-			if (token.isCancellationRequested || !isCurrentRefresh(epoch, this.refreshEpoch)) {
-				return;
+		// 每个工作区目录各要一次 listSessions。串行等的话，多根工作区要叠加 N 次往返；
+		// 并发发出去，总耗时接近一次。取消与过期判定在每步之间照旧检查。
+		const stale = (): boolean => token.isCancellationRequested || !isCurrentRefresh(epoch, this.refreshEpoch);
+		// 并发之后，多个目录可能同时发现「视图没开」。共用一个在途 openView，
+		// 否则多根工作区会同时开多次视图。
+		let opening: Promise<{ readonly ok: boolean; readonly error?: { readonly code: string; readonly message?: string } }> | undefined;
+		const ensureViewOpen = (): Promise<{ readonly ok: boolean; readonly error?: { readonly code: string; readonly message?: string } }> => {
+			opening ??= this.client.openView({ view: 'chat', params: {} });
+			return opening;
+		};
+		const listed = await Promise.all(queries.map(async folder => {
+			const args = folder === undefined ? {} : { workspace: folder };
+			let result = await this.client.call<readonly IDshIdeSessionSummary[]>('listSessions', args);
+			if (stale()) {
+				return undefined;
 			}
-			let result = await this.client.call<readonly IDshIdeSessionSummary[]>('listSessions', folder === undefined ? {} : { workspace: folder });
-			if (token.isCancellationRequested || !isCurrentRefresh(epoch, this.refreshEpoch)) {
-				return;
-			}
-			if (!result.ok && result.error.message.includes('is not open')) {
-				const opened = await this.client.openView({ view: 'chat', params: {} });
-				if (token.isCancellationRequested || !isCurrentRefresh(epoch, this.refreshEpoch)) {
-					return;
+			if (!result.ok && dshErrorText(result.error, '').includes('is not open')) {
+				const opened = await ensureViewOpen();
+				if (stale()) {
+					return undefined;
 				}
 				if (!opened.ok) {
-					throw Object.assign(new Error(opened.error.message), { code: opened.error.code });
+					const openedError = opened.error;
+					throw Object.assign(new Error(dshErrorText(openedError, openedError?.code ?? '')), { code: openedError?.code ?? '' });
 				}
-				result = await this.client.call<readonly IDshIdeSessionSummary[]>('listSessions', folder === undefined ? {} : { workspace: folder });
-				if (token.isCancellationRequested || !isCurrentRefresh(epoch, this.refreshEpoch)) {
-					return;
+				result = await this.client.call<readonly IDshIdeSessionSummary[]>('listSessions', args);
+				if (stale()) {
+					return undefined;
 				}
 			}
 			if (!result.ok) {
-				throw Object.assign(new Error(result.error.message), { code: result.error.code });
+				throw Object.assign(new Error(dshErrorText(result.error, result.error.code)), { code: result.error.code });
 			}
 			if (!Array.isArray(result.value)) {
 				throw Object.assign(new Error('listSessions must return an array'), { code: 'dsh-ide/invalid-argument' });
 			}
-			summaries.push(...result.value);
-		}
-		if (token.isCancellationRequested || !isCurrentRefresh(epoch, this.refreshEpoch)) {
+			return result.value;
+		}));
+		if (stale()) {
 			return;
+		}
+		const summaries: IDshIdeSessionSummary[] = [];
+		for (const value of listed) {
+			if (value !== undefined) {
+				summaries.push(...value);
+			}
 		}
 
 		// 子智能体会话按原生 children 树承接：只有 origin==='subagent' 且父在列表里才挂子项。
 		const oldAll = flattenTree(this._items);
 		const beforeByKey = new Map(oldAll.map(item => [item.resource.toString(), item]));
+		// 本轮名单里出现过的会话 id。`liveRunning` 只增不清会让删掉/归档的会话
+		// 一直留在内存里；每轮按当前名单剪一次，长会话不会越积越多。
+		const liveIds = new Set(summaries.map(summary => summary.sessionId));
+		if (this.liveRunning.size > liveIds.size) {
+			for (const sessionId of [...this.liveRunning.keys()]) {
+				if (!liveIds.has(sessionId)) {
+					this.liveRunning.delete(sessionId);
+				}
+			}
+		}
 		const roots = buildSessionTree(summaries, summary => toSessionItem(summary, this.liveRunning, this.archivedIds, beforeByKey.get(dshSessionResource(summary.sessionId).toString())));
 		const allItems = flattenTree(roots);
 		const seen = new Set(allItems.map(item => item.resource.toString()));
@@ -288,8 +344,12 @@ export class DshAgentSessionsController extends Disposable implements IChatSessi
 			return;
 		}
 		const result = await this.client.call('deleteSession', { sessionId });
+		// 控制器已释放：回包回来时不能再动列表。
+		if (this._disposed) {
+			return;
+		}
 		if (!result.ok) {
-			throw new Error(result.error.message);
+			throw new Error(dshErrorText(result.error, result.error.code));
 		}
 		// 删除已经在 Host 生效。即使调用方这时取消，行也要拿掉。
 		const key = dshSessionResource(sessionId).toString();
@@ -333,9 +393,17 @@ export class DshAgentSessionsController extends Disposable implements IChatSessi
 		const result = archived
 			? await this.client.call('archiveSession', { sessionId })
 			: await this.client.call('unarchiveSession', { sessionId });
+		// 控制器已释放：回包回来时不再改行状态，也不 fire。
+		if (this._disposed) {
+			return;
+		}
 		if (!result.ok) {
 			// 失败只提示，不改状态；序号已经前进，较旧的成功回包也不会再覆盖更新的意图。
-			this._notifications.warn(localize('dsh.sessions.archiveFailed', "DSH 会话归档失败：{0}", result.error.message));
+			const detail = dshErrorText(result.error, result.error.code);
+			// 归档/恢复是用户主动点的动作，失败要按 error 报；与其它会话操作一致。
+			this._notifications.error(archived
+				? localize('dsh.sessions.archiveFailed', "DSH 会话归档失败：{0}", detail)
+				: localize('dsh.sessions.unarchiveFailed', "DSH 会话恢复失败：{0}", detail));
 			return;
 		}
 		if (!isCurrentRefresh(epoch, this.archiveEpoch)) {

@@ -4,6 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { test } from 'node:test';
@@ -70,6 +71,12 @@ test('DSH bundle: host/client/manifest/icon live at their native positions', () 
 		'resources/dsh/icon.svg',
 		'resources/dsh/locale/en.json',
 		'resources/dsh/locale/zh.json',
+		'resources/dsh/locale/ja.json',
+		'resources/dsh/locale/es.json',
+		'resources/dsh/locale/fr.json',
+		'resources/dsh/locale/de.json',
+		'resources/dsh/locale/ru.json',
+		'resources/dsh/locale/pt.json',
 		'src/vs/platform/dshClient/index.js',
 		'src/vs/platform/dshClient/client/client.js',
 		'src/vs/platform/dshClient/host/ide-service.js',
@@ -109,8 +116,41 @@ test('DSH bundle: dsh-ide-pack stages host entries from out/ and manifest/icon f
 test('DSH bundle: manifest files whitelist only names runtime payloads', () => {
 	const pkg = JSON.parse(fs.readFileSync(path.join(vscodeRoot, 'build/lib/dsh/package.json'), 'utf8'));
 	assert.ok(Array.isArray(pkg.files));
-	for (const required of ['index.js', 'client.js', 'host/', 'common/', 'cordis.patch.yml', 'locale/*.json', 'icon.svg', 'runtime/']) {
+	for (const required of ['index.js', 'client.js', 'host/', 'common/', 'cordis.patch.yml', 'locale/*.json', 'docs', 'icon.svg', 'runtime/']) {
 		assert.ok(pkg.files.includes(required), `manifest files must include ${required}`);
+	}
+	// files 里列了 icon.svg、exports 里有 ./icon，但 `icon` 字段缺失时插件详情页拿不到图标。
+	// 三处必须指向同一个文件。
+	assert.equal(pkg.icon, 'icon.svg', 'manifest icon must name the shipped icon');
+	assert.ok(Object.hasOwn(pkg.exports ?? {}, './icon'), 'the icon must stay importable');
+	// 插件页详情文档：`meta.detail` 指向它，缺文件时宿主会按「声明的文档不存在」报错，
+	// 而不是回退到 README，所以两份语言文档与唯一特性图必须真的在包里。
+	for (const locale of ['en', 'zh']) {
+		const meta = JSON.parse(fs.readFileSync(path.join(vscodeRoot, `resources/dsh/locale/${locale}.json`), 'utf8')).meta;
+		assert.equal(typeof meta.detail, 'string', `${locale} locale must declare meta.detail`);
+		assert.ok(fs.existsSync(path.join(vscodeRoot, 'resources/dsh', meta.detail)), `declared detail document must exist: ${meta.detail}`);
+		const image = /!\[.*?\]\(([^)]+)\)/.exec(fs.readFileSync(path.join(vscodeRoot, 'resources/dsh', meta.detail), 'utf8'))?.[1];
+		assert.ok(image !== undefined && fs.existsSync(path.join(vscodeRoot, 'resources/dsh/docs', image)), `${locale} detail must reference an existing image`);
+	}
+	// 详情页是用户了解这个插件的第一屏，必须真的有内容。
+	//
+	// 第五轮曾在这里写死「文档只允许一行图片，功能与用法放在 description 里」——
+	// 那是把当时的**实现现状**当成了规范，结果详情页只剩一张图，点开是空白的。
+	// 官方 `dsh-ops` 的 plugin-detail 有标题、要点与操作指引，这里按同样结构要求。
+	for (const [code, doc] of [['en', 'DETAIL.md'], ['zh', 'DETAIL.zh.md']] as const) {
+		const text = fs.readFileSync(path.join(vscodeRoot, 'resources/dsh/docs', doc), 'utf8');
+		assert.ok(text.startsWith('# DSH-IDE'), `${doc} must open with a title`);
+		assert.ok(/!\[.*?\]\(preview\.svg\)/.test(text), `${doc} must keep the preview image`);
+		const headings = (text.match(/^## /gm) ?? []).length;
+		assert.ok(headings >= 3, `${doc} must have sections explaining the plugin (found ${headings})`);
+		assert.ok(text.length > 600, `${code} detail document must actually explain something`);
+	}
+	// 特性图必须自描述且不含脚本/远程资源（宿主按静态资源渲染）。
+	const svg = fs.readFileSync(path.join(vscodeRoot, 'resources/dsh/docs/preview.svg'), 'utf8');
+	assert.match(svg, /viewBox="0 0 640 300"/, 'the detail preview must use the documented 640x300 canvas');
+	// 只禁「外部资源引用」；`xmlns="http://www.w3.org/2000/svg"` 是命名空间，不是网络请求。
+	for (const forbidden of ['<script', '<foreignObject', 'xlink:href', 'url(http', 'src="http']) {
+		assert.ok(!svg.includes(forbidden), `the detail preview must not contain ${forbidden}`);
 	}
 	for (const forbidden of ['chat-client/', 'chat-render/', 'node_modules/', 'vendor/']) {
 		assert.ok(!pkg.files.some((entry: string) => entry.startsWith(forbidden)),
@@ -211,7 +251,7 @@ test('D20 ptyHostMain stays in desktopEntryPoints (terminal host entry)', () => 
 	// 第 42 轮反向验证发现：若用 includes() 匹配，注释里写了同一个 entryPoint
 	// 字符串会让「入口已被删除」的守护仍然通过（假通过），故改为逐行比对。
 	const entryLines = desktop.split(/\r?\n/).map(line => line.trim());
-	const hasEntry = module => entryLines.includes(`'${module}',`);
+	const hasEntry = (module: string) => entryLines.includes(`'${module}',`);
 
 	assert.ok(hasEntry('vs/platform/terminal/node/ptyHostMain'),
 		'ptyHostMain must be a desktop entry point (an actual array element), otherwise the packaged desktop build has no PTY host');
@@ -222,4 +262,137 @@ test('D20 ptyHostMain stays in desktopEntryPoints (terminal host entry)', () => 
 	// 启动方确实指向该 entryPoint（证据链，防止入口与启动方脱节）。
 	const starter = fs.readFileSync(path.join(repoRoot, 'src/vs/platform/terminal/electron-main/electronPtyHostStarter.ts'), 'utf8');
 	assert.match(starter, /entryPoint:\s*'vs\/platform\/terminal\/node\/ptyHostMain'/, 'the Electron pty host starter must reference this entry point');
+});
+
+test('install-drift compares the IDE window runtime, not only the plugin layer', () => {
+	// 真机前踩到的盲区：插件层 0 漂移，但 `runtime/app` 还是旧构建，窗口跑的是旧 workbench。
+	const drift = fs.readFileSync(path.join(repoRoot, 'build/lib/dsh/verify/dshInstallDrift.mjs'), 'utf8');
+	assert.match(drift, /RUNTIME_CRITICAL/, 'the drift gate must define the runtime critical set');
+	for (const required of ['workbench.desktop.main.js', 'mainImpl.js', 'node_modules.asar', 'build-provenance.json']) {
+		assert.ok(drift.includes(required), `runtime drift must cover ${required}`);
+	}
+	// 大文件必须放大 maxBuffer，否则「读不出」会被误报成未核验。
+	assert.match(drift, /maxBuffer: 512 \* 1024 \* 1024/, 'large runtime members need an explicit maxBuffer');
+	// 聚合器必须把 drift 纳入，且环境缺失时记为 SKIPPED 而不是 PASS。
+	const ci = fs.readFileSync(path.join(repoRoot, 'build/lib/dsh/verify/dshIdeCi.mjs'), 'utf8');
+	assert.match(ci, /'install-drift'/, 'the CI aggregate must run install-drift');
+	assert.match(ci, /skippedForEnv/, 'a missing profile must be reported as skipped, never as pass');
+});
+
+test('the pack task compiles out/ before copying the plugin layer', () => {
+	// `out/` 是 gitignore 的生成目录：不先编译，干净检出会 ENOENT；
+	// 有旧 `out/` 时会把上一版代码静默打进 tgz。这条测试钉住前置编译步骤的存在与顺序。
+	const gulp = fs.readFileSync(path.join(repoRoot, 'build/gulpfile.vscode.ts'), 'utf8');
+	assert.match(gulp, /const compileDshPluginLayerTask = task\.define\('dsh-ide-compile-plugin-layer'/,
+		'the plugin layer compile step must exist as a named task');
+	const appTaskStart = gulp.indexOf('const appTask = task.define(`dsh-ide-${platform}-${arch}${dashed(minified)}`');
+	assert.ok(appTaskStart > 0, 'appTask definition not found');
+	const appTaskBody = gulp.slice(appTaskStart, appTaskStart + 1200);
+	assert.ok(appTaskBody.includes('compileDshPluginLayerTask'), 'the pack task must depend on the compile step');
+	assert.ok(appTaskBody.indexOf('compileDshPluginLayerTask') < appTaskBody.indexOf('packageAppTask'),
+		'compile must run before the app is packaged');
+	// 用官方编译实现，不自造编译流程。
+	assert.match(gulp, /compilation\.transpileTask\('src', 'out'\)/, 'the compile step must reuse the official transpile task');
+});
+
+test('plugin metadata covers exactly the languages the host UI can select', () => {
+	// 宿主内建 `LOCALE_IDS` 只有 zh/en，但 `dsh-client-locale` 的 apply() 还会
+	// `addLanguage` 登记 ja/es/fr/de/ru/pt（fallback 为 en），并把它们放进 catalog。
+	// Plugin Manager 的 `languageChain` 会按当前 UI 语言读 `locale/<id>.json`。
+	// 第二十四轮只留 zh/en，是把内建常量当成了全部可选语言；官方 91 个带 client 的包都是这 8 份。
+	const expected = ['de', 'en', 'es', 'fr', 'ja', 'pt', 'ru', 'zh'];
+	const dir = path.join(vscodeRoot, 'resources/dsh/locale');
+	const files = fs.readdirSync(dir).filter(name => name.endsWith('.json')).map(name => name.replace(/\.json$/, '')).sort();
+	assert.deepStrictEqual(files, expected, 'metadata files must match the host selectable set');
+	const asar = process.env.DSH_ASAR ?? 'C:\\Users\\guyu\\AppData\\Local\\Programs\\DeepSeek Harness\\resources\\app.asar';
+	if (fs.existsSync(asar)) {
+		const header = Buffer.alloc(16);
+		const fd = fs.openSync(asar, 'r');
+		try {
+			fs.readSync(fd, header, 0, 16, 0);
+			const size = header.readUInt32LE(12);
+			const json = Buffer.alloc(size);
+			fs.readSync(fd, json, 0, size, 16);
+			const root = JSON.parse(json.toString('utf8'));
+			const pad = (4 - (size % 4)) % 4;
+			let node = root;
+			for (const part of 'dsh/node_modules/@deepseek-ai/dsh-client-locale/lib/client.js'.split('/')) {
+				node = node.files?.[part];
+			}
+			assert.ok(node?.size, 'host locale client must be in the asar');
+			const body = Buffer.alloc(node.size);
+			fs.readSync(fd, body, 0, node.size, 16 + size + pad + Number(node.offset));
+			const source = body.toString('utf8');
+			const builtIn = /LOCALE_IDS=\[`([a-z]{2})`,`([a-z]{2})`\]/.exec(source);
+			assert.ok(builtIn !== null, 'host LOCALE_IDS must be present');
+			const extra = /for\(const\[id,label\]of\[(.*?)\]\)ctx\.effect\(\(\)=>locale\.addLanguage/.exec(source);
+			assert.ok(extra !== null, 'host must register the extra languages with addLanguage');
+			const added = [...extra[1].matchAll(/\[`([a-z]{2})`,/g)].map(match => match[1]);
+			const host = [...new Set([builtIn[1], builtIn[2], ...added])].sort();
+			assert.deepStrictEqual(files, host, 'our locale files must equal the languages this host actually registers');
+		} finally {
+			fs.closeSync(fd);
+		}
+	}
+	for (const code of files) {
+		const parsed = JSON.parse(fs.readFileSync(path.join(dir, `${code}.json`), 'utf8'));
+		assert.ok(typeof parsed.meta?.title === 'string' && parsed.meta.title !== '', `${code}: meta.title is required`);
+		assert.ok(typeof parsed.meta?.description === 'string' && parsed.meta.description.length > 40, `${code}: meta.description is required`);
+		assert.equal(typeof parsed.meta?.detail, 'string', `${code} locale must declare meta.detail`);
+		const detail = path.join(vscodeRoot, 'resources/dsh', parsed.meta.detail);
+		assert.ok(fs.existsSync(detail), `${code} detail document must exist: ${parsed.meta.detail}`);
+		assert.equal(parsed.meta.detail, code === 'zh' ? 'docs/DETAIL.zh.md' : 'docs/DETAIL.md',
+			`${code} must follow the official split: Chinese detail, everyone else the English document`);
+	}
+});
+
+test('the preview illustration stays legal and theme-neutral', () => {
+	// 规范明确要求避免 text / font / script / stylesheet / foreignObject 与外部资源；
+	// 同时同一张图在明暗两种主题下都要可读——所以只能靠中性灰 alpha 叠加，不能写死浅色底。
+	const file = path.join(vscodeRoot, 'resources/dsh/docs/preview.svg');
+	const svg = fs.readFileSync(file, 'utf8');
+	const stripped = svg.replace(/<!--[\s\S]*?-->/g, '');
+	for (const forbidden of ['<text', '<style', '<script', 'font-family', 'foreignObject']) {
+		assert.ok(!stripped.includes(forbidden), `preview.svg must not contain ${forbidden}`);
+	}
+	assert.ok(!/href="http|url\(http/.test(stripped), 'preview.svg must not reference remote resources');
+	const elements = new Set([...stripped.matchAll(/<([a-zA-Z]+)/g)].map(m => m[1]));
+	assert.deepStrictEqual([...elements].sort(), ['circle', 'path', 'rect', 'svg'], 'only plain shapes are allowed');
+	// 深色主题下不能出现接近纯白的实心大块（那会在深色页面里变成刺眼亮块）。
+	// 按真实亮度判断，而不是按十六进制前缀：`#0B6CF0` 是品牌蓝，不是白色。
+	const luminance = (hex: string): number => {
+		const value = hex.replace('#', '');
+		const channels = [0, 2, 4].map(index => parseInt(value.substr(index, 2), 16) / 255)
+			.map(channel => channel <= 0.03928 ? channel / 12.92 : Math.pow((channel + 0.055) / 1.055, 2.4));
+		return 0.2126 * channels[0] + 0.7152 * channels[1] + 0.0722 * channels[2];
+	};
+	// 只检查「大面积背景」：图标前景（鲸鱼在品牌蓝按钮上的白色描形）本来就是对的。
+	for (const match of stripped.matchAll(/<rect[^>]*fill="(#[0-9A-Fa-f]{6})"/g)) {
+		assert.ok(luminance(match[1]) < 0.95, `rect fill ${match[1]} is too bright for a theme-neutral illustration`);
+	}
+	assert.ok(stripped.includes('fill-opacity'), 'structural shading must use alpha so both themes work');
+});
+
+test('every bundled module is loadable as ESM, matching the package type', () => {
+	// 包根声明 `"type": "module"`，所以每个 `.js` 都必须能被 Node 以 ESM 解析。
+	// `transpileTask`（tsc）产出的是 CommonJS，staging 时必须就地改写成 ESM；
+	// 漏掉任何一个都会让 DSH 装载失败并报 `exports is not defined in ES module scope`。
+	// 这里直接读 tgz，避免依赖 staging 目录是否存在（那会让断言静默跳过）。
+	const tgz = path.join(vscodeRoot, 'dist', 'dsh-ide-2.0.0.tgz');
+	if (!fs.existsSync(tgz)) {
+		assert.fail('the bundle must be built before this test runs');
+	}
+	const names = execFileSync('tar', ['-tzf', tgz], { encoding: 'utf8' })
+		.split(/\r?\n/)
+		.filter(name => name.startsWith('package/') && name.endsWith('.js') && !name.includes('/runtime/'));
+	assert.ok(names.length > 0, 'the bundle must contain plugin modules');
+	const offenders: string[] = [];
+	for (const name of names) {
+		const source = execFileSync('tar', ['-xzOf', tgz, name], { encoding: 'utf8', maxBuffer: 32 * 1024 * 1024 });
+		const head = source.slice(0, 400);
+		if (/^"use strict";/.test(head) || /^exports\.[\w$]+ = /m.test(head)) {
+			offenders.push(name);
+		}
+	}
+	assert.deepStrictEqual(offenders, [], `these bundled modules are CommonJS but the package is ESM: ${offenders.join(', ')}`);
 });

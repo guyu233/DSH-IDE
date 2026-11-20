@@ -47,3 +47,18 @@ test('mapDshIdeCommandExecution is fail-closed for missing/malformed executions'
 		{ error: 'feature-unavailable', message: 'command execution returned no result' },
 	);
 });
+
+test('a handler error keeps its message whichever field name the host uses', () => {
+	// 官方 CommandResult 的错误文案字段名在不同版本里可能是 `text` 或 `message`。
+	// 只读一个会在另一个形态下丢掉真实原因，用户只看到通用兜底文案。
+	const fromText = mapDshIdeCommandExecution({ result: { kind: 'error', text: '来自 text' } });
+	assert.deepEqual(fromText, { error: 'feature-unavailable', message: '来自 text' });
+	const fromMessage = mapDshIdeCommandExecution({ result: { kind: 'error', message: '来自 message' } });
+	assert.deepEqual(fromMessage, { error: 'feature-unavailable', message: '来自 message' });
+	// 两个都空时才有兜底文案。
+	const neither = mapDshIdeCommandExecution({ result: { kind: 'error' } });
+	assert.deepEqual(neither, { error: 'feature-unavailable', message: 'command handler reported an error' });
+	// text 为空串时回退到 message。
+	const fallback = mapDshIdeCommandExecution({ result: { kind: 'error', text: '', message: '回退' } });
+	assert.deepEqual(fallback, { error: 'feature-unavailable', message: '回退' });
+});

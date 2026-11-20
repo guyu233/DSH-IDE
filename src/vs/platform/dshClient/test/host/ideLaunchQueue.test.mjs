@@ -148,3 +148,28 @@ test('重复报到刷新心跳，避免刚重启的 IDE 被误判离线', () => 
 	assert.equal(again.alreadyRegistered, true);
 	assert.equal(queue.dispatch({ workspace: '/w' }), true);
 });
+test('repeated first-clicks collapse into one window request', () => {
+	// `launch()` 在 IDE 启动的数秒内会反复进来：防抖只是不再重复 spawn，
+	// 但仍会走到 enqueue。如果每次 push，IDE 报到时会一次开出 N 个窗口。
+	// 语义上这段时间只有「最后一次点击」有意义（用户最后点的会话/工作区）。
+	const queue = new IdeLaunchQueue(() => 0);
+	for (let i = 0; i < 5; i++) {
+		assert.equal(queue.dispatch({ workspace: `w${i}` }), false, 'no client is registered yet');
+		queue.enqueue({ workspace: `w${i}` });
+	}
+	assert.equal(queue.pending.length, 1, 'only the latest request may be retained');
+
+	queue.register('ide-1');
+	const polled = queue.poll('ide-1');
+	assert.equal(polled.requests.length, 1, 'exactly one window may be requested');
+	assert.deepEqual(polled.requests[0], { workspace: 'w4' }, 'the last click wins');
+});
+
+test('a pending request is dropped once a live client takes it', () => {
+	const queue = new IdeLaunchQueue(() => 0);
+	queue.enqueue({ workspace: 'w' });
+	queue.register('ide-1');
+	assert.equal(queue.poll('ide-1').requests.length, 1);
+	assert.equal(queue.pending.length, 0, 'the stash must not survive delivery');
+	assert.equal(queue.poll('ide-1').requests.length, 0, 'a second poll must not replay it');
+});

@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "description": "DSH-IDE: deliver the VS Code desktop/workbench runtime as an official DeepSeek Assistant bundle plugin. Adds a DSH-IDE entry (whale icon) in the session header that opens an independent VS Code window bound to the current workspace, connected to the same DSH Host over the official client transport.",
+  "icon": "icon.svg",
   "exports": {
     ".": "./index.js",
     "./client": "./client.js",
@@ -17,6 +18,7 @@
     "common/",
     "cordis.patch.yml",
     "locale/*.json",
+    "docs",
     "icon.svg",
     "runtime/",
     "PROVENANCE.md",
@@ -30,9 +32,11 @@
       "platform": "web",
       "immediately": true,
       "inject": [
+        "@deepseek-ai/dsh-api-gateway",
+        "@deepseek-ai/dsh-client-locale",
         "@deepseek-ai/dsh-client-ui-renderer",
         "@deepseek-ai/dsh-client-ui-conversation",
-        "@deepseek-ai/dsh-client-ui-layout"
+        "@deepseek-ai/dsh-client-ui-session"
       ]
     }
   },
@@ -42,8 +46,6 @@
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.1",
     "@deepseek-ai/dsh-typert-protocol": ">=0.2.2-rc.1 <0.3.0-0",
-    "@deepseek-ai/dsh-client-ui-primitives": ">=0.2.2-rc.1 <0.3.0-0",
-    "@deepseek-ai/schemastery": "^3.18.1",
     "react": "^18.3.1"
   },
   "peerDependenciesMeta": {

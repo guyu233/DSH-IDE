@@ -19,6 +19,7 @@ import { test } from 'node:test';
 import { setImmediate } from 'node:timers/promises';
 import {
 	DSH_IDE_FEATURE_UNAVAILABLE,
+	DSH_IDE_INCOMPATIBLE_WIRE,
 	DSH_IDE_SESSION_SWITCHED,
 	DSH_IDE_WIRE_REVISION,
 	type DshIdeMethod,
@@ -327,8 +328,19 @@ function backendWithHost(handler: (url: string, body: unknown) => FakeHostRespon
 }
 
 const OK = (url: string, body: unknown) => ({
-	json: { type: 'server-response', rpcId: (body as { rpcId: string }).rpcId, result: { ok: true, value: { accepted: true } } },
+	json: {
+		type: 'server-response',
+		rpcId: (body as { rpcId: string }).rpcId,
+		// 建连后第一次业务调用前会先 `ide/ping` 核对修订号：假 Host 必须如实声明同一修订号，
+		// 否则后端按「两半不兼容」拒绝，这正是新门禁要保护的行为。
+		result: { ok: true, value: url.endsWith('/ide/ping') ? { ok: true, wireRevision: DSH_IDE_WIRE_REVISION } : { accepted: true } },
+	},
 });
+
+/** 过滤掉契约核对的 ping：业务断言只关心真正的业务端点。 */
+function endpointsOf(requests: readonly RecordedRequest[]): string[] {
+	return requests.map(request => request.url.split('/api/')[1]).filter(endpoint => endpoint !== 'ide/ping');
+}
 
 test('backend sends every operation to ide/dispatch with the method and payload', async () => {
 	const { backend, transport, requests } = backendWithHost(OK);
@@ -337,12 +349,13 @@ test('backend sends every operation to ide/dispatch with the method and payload'
 	await backend.invoke('interrupt', { sessionId: 's-1' }, BINDING);
 	await backend.invoke('setModel', { sessionId: 's-1', model: 'deepseek/deepseek-chat' }, BINDING);
 
-	assert.deepEqual(requests.map(request => request.url.split('/api/')[1]), ['ide/dispatch', 'ide/dispatch', 'ide/dispatch']);
-	const first = requests[0].body as { payload: { args: { method: string; payload: Record<string, unknown> } } };
+	assert.deepEqual(endpointsOf(requests), ['ide/dispatch', 'ide/dispatch', 'ide/dispatch']);
+	assert.equal(requests.filter(request => request.url.endsWith('/ide/ping')).length, 1, 'the contract check runs once per connection, not per call');
+	const first = requests.find(request => request.url.endsWith('/ide/dispatch'))!.body as { payload: { args: { method: string; payload: Record<string, unknown> } } };
 	assert.equal(first.payload.args.method, 'submit');
 	assert.deepEqual(first.payload.args.payload, { text: 'hi', sessionId: 's-1' });
 	assert.deepEqual(first.payload.args.binding, BINDING, 'every dispatch carries the originating view binding');
-	const second = requests[1].body as { payload: { args: { method: string; payload: Record<string, unknown> } } };
+	const second = requests.filter(request => request.url.endsWith('/ide/dispatch'))[1].body as { payload: { args: { method: string; payload: Record<string, unknown> } } };
 	assert.equal(second.payload.args.method, 'interrupt');
 	assert.deepEqual(second.payload.args.payload, { sessionId: 's-1' });
 	transport.dispose();
@@ -352,8 +365,8 @@ test('backend forwards rewind to the kernel, which refuses it', async () => {
 	const { backend, transport, requests } = backendWithHost(OK);
 	// 窗口只把 rewind 交给内核；内核再决定调不调 dsh-rewind-plugin。
 	await backend.invoke('rewind', { sessionId: 's-1', to: '0' }, BINDING);
-	assert.deepEqual(requests.map(request => request.url.split('/api/')[1]), ['ide/dispatch']);
-	const payload = requests[0].body as { payload: { args: { method: string } } };
+	assert.deepEqual(endpointsOf(requests), ['ide/dispatch']);
+	const payload = requests.find(request => request.url.endsWith('/ide/dispatch'))!.body as { payload: { args: { method: string } } };
 	assert.equal(payload.payload.args.method, 'rewind');
 	transport.dispose();
 });
@@ -367,7 +380,9 @@ test('backend opens one ide/followSession stream and closes it', () => {
 	socket.open();
 	const opened = socket.sent as { endpoint: string; streamId: string; payload?: { args?: Record<string, unknown> } }[];
 	assert.deepEqual(opened.map(s => s.endpoint), ['ide/followSession']);
-	assert.deepEqual(opened[0]!.payload?.args, { sessionId: 's-1', binding, wireRevision: DSH_IDE_WIRE_REVISION });
+	// Host 的 `followSession(binding, wireRevision, signal)` 只有两个 wire 字段：
+	// `binding` 已带会话 id；再发 `sessionId` 会被 Gateway 的 assertExactArguments 判成多余字段。
+	assert.deepEqual(opened[0]!.payload?.args, { binding, wireRevision: DSH_IDE_WIRE_REVISION });
 
 	// 身份先于内容：Host 先确认绑定，之后才是会话帧。
 	socket.deliver({ type: 'item', streamId: opened[0]!.streamId, value: { type: 'ide-view-bound', binding } });
@@ -390,6 +405,27 @@ test('unbound follow opens one status-only stream and closes it on dispose', () 
 	assert.ok((socket.sent as { type: string }[]).some(s => s.type === 'open'), 'the stream must be opened');
 	handle.dispose();
 	assert.ok((socket.sent as { type: string }[]).some(s => s.type === 'cancel'), 'dispose must close the status stream');
+	transport.dispose();
+});
+
+test('backend refuses a Host that declares a different wire revision', async () => {
+	resetSockets();
+	const host = fakeHost((url, body) => ({
+		json: {
+			type: 'server-response',
+			rpcId: (body as { rpcId: string }).rpcId,
+			result: { ok: true, value: url.endsWith('/ide/ping') ? { ok: true, wireRevision: 4 } : { accepted: true } },
+		},
+	}));
+	const transport = new DshIdeTransport({ origin: 'http://127.0.0.1:9', cookie: 'c', primitives: host.primitives });
+	const backend = new DshIdeTransportBackend(transport);
+	backend.open({ view: 'chat', params: { sessionId: 's-1' } });
+	await assert.rejects(
+		() => backend.invoke('submit', { text: 'hi', sessionId: 's-1' }, BINDING),
+		(error: DshIdeTransportError) => error.code === DSH_IDE_INCOMPATIBLE_WIRE,
+		'a mismatched Host must be rejected before any business call',
+	);
+	assert.equal(host.requests.filter(request => request.url.includes('/ide/dispatch')).length, 0, 'no business call may reach an incompatible Host');
 	transport.dispose();
 });
 
@@ -427,4 +463,73 @@ test('openStream notifies normal end once and does not affect another stream', (
 	socket.deliver({ type: 'end', streamId: first.streamId });
 	assert.equal(ends, 1);
 	transport.dispose();
+});
+
+test('a transient contract failure is retryable; only incompatibility is cached', () => {
+	// `checkContract()` 失败有两种：网络抖动（临时）与 wireRevision 不匹配（永久）。
+	// 原实现用 `??=` 把两者都缓存，一次偶发故障就把连接钉死到 `close()` 为止，
+	// 用户只能重载窗口。这里钉住三条语义。
+	const DSH_IDE_INCOMPATIBLE_WIRE = 'dsh-ide/incompatible-wire';
+
+	class Gate {
+		contract: Promise<void> | undefined;
+		calls = 0;
+		private readonly check: () => Promise<void>;
+		constructor(check: () => Promise<void>) {
+			this.check = check;
+		}
+		ensureContract(): Promise<void> {
+			if (this.contract !== undefined) {
+				return this.contract;
+			}
+			const pending = this.check().catch((error: unknown) => {
+				const code = error !== null && typeof error === 'object' ? (error as { code?: unknown }).code : undefined;
+				if (code === DSH_IDE_INCOMPATIBLE_WIRE) {
+					this.contract = pending;
+				} else if (this.contract === pending) {
+					this.contract = undefined;
+				}
+				throw error;
+			});
+			this.contract = pending;
+			return pending;
+		}
+	}
+
+	// 临时失败后必须能重试
+	let attempt = 0;
+	const transient = new Gate(async () => {
+		attempt += 1;
+		if (attempt === 1) {
+			const error = Object.assign(new Error('network'), { code: 'ECONNRESET' });
+			throw error;
+		}
+	});
+	return transient.ensureContract().catch(() => undefined)
+		.then(() => transient.ensureContract())
+		.then(() => {
+			assert.equal(attempt, 2, 'a transient failure must allow a retry');
+
+			// 不兼容必须只问一次
+			let incompatibleCalls = 0;
+			const incompatible = new Gate(async () => {
+				incompatibleCalls += 1;
+				throw Object.assign(new Error('wire'), { code: DSH_IDE_INCOMPATIBLE_WIRE });
+			});
+			return incompatible.ensureContract().catch(() => undefined)
+				.then(() => incompatible.ensureContract().catch(() => undefined))
+				.then(() => incompatible.ensureContract().catch(() => undefined))
+				.then(() => {
+					assert.equal(incompatibleCalls, 1, 'an incompatible peer must not be re-asked');
+
+					// 并发只发一次
+					let parallel = 0;
+					const concurrent = new Gate(async () => {
+						parallel += 1;
+						await new Promise<void>(resolve => setTimeout(resolve, 5));
+					});
+					return Promise.all([concurrent.ensureContract(), concurrent.ensureContract(), concurrent.ensureContract()])
+						.then(() => assert.equal(parallel, 1, 'concurrent callers must share one check'));
+				});
+		});
 });

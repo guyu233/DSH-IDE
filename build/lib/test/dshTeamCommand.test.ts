@@ -7,6 +7,7 @@
 // 运行：node --experimental-strip-types --test --test-force-exit build/lib/test/dshTeamCommand.test.ts
 
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 
 type Outcome = 'unavailable' | 'skipped' | 'unchanged' | 'written' | 'stale';
@@ -69,6 +70,21 @@ test('picking the current state does not issue a redundant write', async () => {
 	});
 	assert.equal(outcome, 'unchanged');
 	assert.equal(written, false);
+});
+
+test('the current-state mark is on the option that matches enabled', () => {
+	const file = readFileSync(new URL('../../../src/vs/workbench/contrib/dsh/browser/dshTeamCommands.ts', import.meta.url), 'utf8');
+	const enableAt = file.indexOf('label: enable');
+	const disableAt = file.indexOf('label: disable');
+	assert.ok(enableAt >= 0 && disableAt > enableAt);
+	const enableLine = file.slice(enableAt, disableAt);
+	const disableLine = file.slice(disableAt, file.indexOf('],', disableAt));
+	assert.match(enableLine, /team\.enabled === true/);
+	assert.doesNotMatch(enableLine, /team\.enabled === false/);
+	assert.match(disableLine, /team\.enabled === false/);
+	assert.match(file, /dsh\.team\.alreadyOn/);
+	assert.match(file, /dsh\.team\.turnedOn/);
+	assert.match(file, /dsh\.team\.turnedOff/);
 });
 
 test('a real toggle writes and is confirmed by the refreshed state', async () => {

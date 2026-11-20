@@ -15,7 +15,9 @@
 
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { toHistory } from '../../../out/vs/workbench/contrib/dsh/browser/dshChatHistory.js';
+import { readFileSync } from 'node:fs';
+import { toHistory, extrasOf } from '../../../out/vs/workbench/contrib/dsh/browser/dshChatHistory.js';
+import { DshChatSession } from '../../../out/vs/workbench/contrib/dsh/browser/dshChatSession.js';
 
 /** 最小节点来源：只实现 `toHistory` 用到的 `nodes()`。 */
 function session(nodes: readonly unknown[]) {
@@ -177,4 +179,195 @@ test('a quota notice does not overwrite a real turn error', () => {
 	assert.equal(response.errorDetails?.isQuotaExceeded, undefined);
 	const warnings = response.parts.filter(part => part.kind === 'warning') as { content: { value: string } }[];
 	assert.ok(warnings.some(part => part.content.value.includes('额度不足')), 'the quota notice must still be visible');
+});
+
+test('rebuilding the same state twice yields identical history', () => {
+	// 面板每帧都重建 history；同一状态重建两次必须完全相同，
+	// 否则原生列表会因引用变化而整体重绘（闪烁）。
+	const session = new DshChatSession();
+	session.acceptView({
+		conversation: {
+			hasMore: false,
+			nodes: [
+				{ seq: 1, time: 1, kind: 'user', messageId: 'm1', content: [{ kind: 'text', text: 'hi' }] },
+				{ seq: 2, time: 2, kind: 'assistant', messageId: 'm2', turn: 1, step: 1, blocks: [{ kind: 'text', text: 'yo' }] },
+			],
+		},
+		pending: [],
+		todos: [{ content: 'a', status: 'pending' }],
+	});
+	const first = JSON.stringify(toHistory(session, session.pending(), extrasOf(session)));
+	const second = JSON.stringify(toHistory(session, session.pending(), extrasOf(session)));
+	assert.equal(first, second, 'history must be a pure function of the current state');
+	session.dispose();
+});
+
+test('an evolving conversation grows without duplicating earlier content', () => {
+	// 三帧演进：同一 response 行内累积，旧内容不得重复出现。
+	const session = new DshChatSession();
+	const user = { seq: 1, time: 1, kind: 'user', messageId: 'm1', content: [{ kind: 'text', text: 'q' }] };
+	const a1 = { seq: 2, time: 2, kind: 'assistant', messageId: 'm2', turn: 1, step: 1, blocks: [{ kind: 'text', text: 'part1' }] };
+	const a2 = { seq: 3, time: 3, kind: 'assistant', messageId: 'm2', turn: 1, step: 2, blocks: [{ kind: 'text', text: 'part2' }] };
+	const frame = (nodes: unknown[]) => ({ conversation: { hasMore: false, nodes }, pending: [] });
+
+	session.acceptView(frame([user]));
+	const one = toHistory(session, session.pending(), extrasOf(session));
+	session.acceptView(frame([user, a1]));
+	const two = toHistory(session, session.pending(), extrasOf(session));
+	session.acceptView(frame([user, a1, a2]));
+	const three = toHistory(session, session.pending(), extrasOf(session));
+
+	assert.equal(one.length, 2, 'one request + one response');
+	assert.equal(two.length, 2, 'the assistant reply merges into the same response');
+	assert.equal(three.length, 2, 'later steps keep merging');
+	const serialized = JSON.stringify(three);
+	assert.equal((serialized.match(/part1/g) ?? []).length, 1, 'part1 must appear exactly once');
+	assert.ok(serialized.includes('part2'), 'part2 must be present');
+	session.dispose();
+});
+
+test('history labels go through localize instead of being hardcoded', () => {
+	// 上游生成聊天描述文本时一律走 `localize`（见 `chatSessionDescription.ts`）。
+	// 本文件此前 7 处界面标签是裸字符串：换语言时它们不会跟着变，
+	// 而同一层其它文件（`dshGoalCommands` / `dshSessionMenu` …）都用 `localize`。
+	const source = readFileSync(new URL('../../../src/vs/workbench/contrib/dsh/browser/dshChatHistory.ts', import.meta.url), 'utf8');
+	assert.match(source, /import \{ localize \} from '\.\.\/\.\.\/\.\.\/\.\.\/nls\.js';/, 'the history module must import localize');
+	for (const key of ['dsh.history.goal', 'dsh.history.todos', 'dsh.history.skills', 'dsh.history.worktrees', 'dsh.history.teamTasks', 'dsh.history.context', 'dsh.history.subagent', 'dsh.history.subagentBody', 'dsh.history.steering']) {
+		assert.ok(source.includes(`'${key}'`), `${key} must be localized`);
+	}
+	// 标签文字不得再以裸字符串出现在模板里。
+	// 只检查**代码行**里「反引号模板直接跟标签」这一形态：
+	// `localize` 的 source 参数里出现中文是正常的，注释里提到标签也是正常的。
+	const codeLines = source.split(/\r?\n/).filter(line => !/^\s*(\/\/|\*|\/\*)/.test(line));
+	for (const raw of ['`目标：', '`待办 ', '`可用技能：', '`工作树 ', '`共享任务 ', '`> 上下文：', '`> 子智能体：', '`**Steering:**']) {
+		const hit = codeLines.find(line => line.includes(raw));
+		assert.equal(hit, undefined, `the label ${raw} must not be a bare template literal: ${hit ?? ''}`);
+	}
+});
+
+test('text with files and images is collected in one pass', () => {
+	// 用户消息与上下文节点每帧都要过 textWithFiles。原先它走 textOf + fileNames +
+	// imageLabels 三次遍历同一份 content；现在必须只遍历一次，且旧的三个辅助函数不再存在。
+	const file = readFileSync(new URL('../../../src/vs/workbench/contrib/dsh/browser/dshChatHistory.ts', import.meta.url), 'utf8');
+	assert.doesNotMatch(file, /function fileNames\(/, 'the per-pass helper must be gone');
+	assert.doesNotMatch(file, /function imageLabels\(/, 'the per-pass helper must be gone');
+	assert.match(file, /function fileNameOf\(attachment: unknown\)/, 'name extraction must be per-block');
+	assert.match(file, /function imageLabelOf\(attachment: unknown\)/, 'label extraction must be per-block');
+	// 行为不变：文本、文件名、图片标签都还在。
+	const history = toHistory(session([
+		{ kind: 'user', seq: 1, time: 1, content: [
+			{ type: 'text', text: '看看这个' },
+			{ type: 'file', attachment: { name: 'notes.md' } },
+			{ type: 'image', attachment: { name: 'shot.png' } },
+		] },
+	]));
+	const prompt = (history[0] as { prompt?: string }).prompt ?? '';
+	assert.ok(prompt.includes('看看这个'));
+	assert.ok(prompt.includes('文件：notes.md'));
+	assert.ok(prompt.includes('图片：shot.png'));
+});
+
+test('localized history labels still render the same text', () => {
+	// `localize` 在没有翻译时原样返回 source，所以输出必须与改造前逐字一致，
+	// 且不得残留 `{0}` 这类未替换的占位符。
+	const session = new DshChatSession();
+	session.acceptView({
+		conversation: {
+			hasMore: false,
+			nodes: [
+				{ seq: 1, time: 1, kind: 'user', messageId: 'm1', content: [{ kind: 'text', text: 'q' }] },
+				{ seq: 2, time: 2, kind: 'assistant', messageId: 'm2', turn: 1, step: 1, blocks: [{ kind: 'text', text: 'a' }] },
+			],
+		},
+		pending: [],
+		todos: [{ content: 'x', status: 'completed' }, { content: 'y', status: 'pending' }],
+		goal: { goal: { objective: 'obj', phase: 'active' }, roundsStarted: 3 },
+		skills: [{ name: 'sk1' }],
+		worktrees: [{ path: '/p', branch: 'b', created: false }],
+		team: { enabled: true, tasks: [{ id: 't', subject: 's', status: 'completed', ready: true }] },
+	});
+	const text = JSON.stringify(toHistory(session, session.pending(), extrasOf(session)));
+	// 目标阶段是内核枚举（active/paused/blocked/complete），必须翻成中文标签再拼进句子；
+	// 其余标签保持逐字一致，且不得残留 `{0}` 这类未替换的占位符。
+	for (const expected of ['目标：obj（进行中，已进行 3 轮）', '待办 1/2', '可用技能：sk1', '工作树 1 个：b（继承）', '共享任务 1/1']) {
+		assert.ok(text.includes(expected), `history must contain ${expected}`);
+	}
+	assert.ok(!/\{\d+\}/.test(text), 'no placeholder may survive interpolation');
+	session.dispose();
+});
+
+test('approval, plan and quota texts are localized too', () => {
+	// 上一轮只覆盖了「目标/待办/技能/工作树/共享任务/上下文/子智能体」。
+	// 同一文件里还有审批标题、允许/拒绝按钮、计划状态、额度提示——同样是用户直接读到的文字。
+	const source = readFileSync(new URL('../../../src/vs/workbench/contrib/dsh/browser/dshChatHistory.ts', import.meta.url), 'utf8');
+	for (const key of ['dsh.history.quotaExceeded', 'dsh.history.planPending', 'dsh.history.planActive', 'dsh.history.planOff', 'dsh.history.allow', 'dsh.history.reject']) {
+		assert.ok(source.includes(`'${key}'`), `${key} must be localized`);
+	}
+	const sessionSource = readFileSync(new URL('../../../src/vs/workbench/contrib/dsh/browser/dshChatSession.ts', import.meta.url), 'utf8');
+	for (const key of ['dsh.pending.approvalTitle', 'dsh.pending.approvalTitleWithReason']) {
+		assert.ok(sessionSource.includes(`'${key}'`), `${key} must be localized`);
+	}
+	// 这两处不得再以裸模板出现。
+	assert.ok(!/`DSH 请求运行 \$\{/.test(sessionSource), 'the approval title must not be a bare template');
+	assert.ok(!/title: '允许'/.test(source), 'the allow button label must not be a bare string');
+});
+
+test('localized approval and plan texts still render the same words', () => {
+	const session = new DshChatSession();
+	session.acceptView({
+		conversation: { hasMore: false, nodes: [{ seq: 1, time: 1, kind: 'user', messageId: 'm1', content: [{ kind: 'text', text: 'q' }] }] },
+		pending: [{ eventId: 'e1', event: 'approval/request', request: { toolName: 'bash', reason: '需要执行' } }],
+		plan: { active: true, pending: true },
+		quotaNotice: { code: 'insufficient' },
+	});
+	const text = JSON.stringify(toHistory(session, session.pending(), extrasOf(session)));
+	for (const expected of ['计划模式（等待确认）', 'DSH 请求运行 bash：需要执行', '额度不足（insufficient）', '允许', '拒绝']) {
+		assert.ok(text.includes(expected), `history must contain ${expected}`);
+	}
+	assert.ok(!/\{\d+\}/.test(text), 'no placeholder may survive interpolation');
+	session.dispose();
+});
+
+test('an image reference stays on the turn that sent it', () => {
+	const history = toHistory(session([
+		{ kind: 'user', seq: 1, time: 1, content: [{ type: 'text', text: '看图' }, { type: 'image', attachment: { attachmentId: 'att-1', mediaType: 'image/png' } }] },
+		{ kind: 'assistant', seq: 2, time: 2, blocks: [{ kind: 'text', text: '看到了' }] },
+		{ kind: 'user', seq: 3, time: 3, content: [{ type: 'text', text: '下一句' }] },
+		{ kind: 'assistant', seq: 4, time: 4, blocks: [{ kind: 'text', text: '好' }] },
+	]), [], { sessionId: 's-1', attachments: [{ attachmentId: 'att-1', mediaType: 'image/png' }] });
+	const responses = history.filter(item => item.type === 'response');
+	assert.equal(responses.length, 2);
+	const first = JSON.stringify(responses[0]);
+	const second = JSON.stringify(responses[1]);
+	assert.ok(first.includes('dsh-attachment') && first.includes('att-1'), `first turn must carry the image: ${first}`);
+	assert.ok(!second.includes('att-1'), `later turns must not repeat it: ${second}`);
+});
+
+test('an image-only user message is not an empty prompt', () => {
+	const history = toHistory(session([
+		{ kind: 'user', seq: 1, time: 1, content: [{ type: 'image', attachment: { attachmentId: 'att-9', mediaType: 'image/png', name: 'shot.png' } }] },
+	]), [], { sessionId: 's-1' });
+	const request = history.find(item => item.type === 'request') as { prompt: string } | undefined;
+	assert.ok(request !== undefined, 'the image must still open a request');
+	assert.equal(request.prompt, '图片：shot.png');
+	assert.ok(JSON.stringify(history).includes('att-9'), 'the image must stay clickable on that turn');
+});
+
+test('a file attachment stays visible and is not given an openable URI', () => {
+	// 官方 readFileStream 默认拒绝，本机 provider 没有实现。编 URI 会变成点开即失败。
+	const history = toHistory(session([
+		{ kind: 'user', seq: 1, time: 1, content: [{ type: 'file', attachment: { attachmentId: 'file-1', name: 'notes.txt', bytes: 4 } }] },
+		{ kind: 'assistant', seq: 2, time: 2, blocks: [{ kind: 'text', text: '收到' }] },
+	]), [], { sessionId: 's-1' });
+	const request = history.find(item => item.type === 'request') as { prompt: string } | undefined;
+	assert.ok(request !== undefined, 'the file must still open a request');
+	assert.equal(request.prompt, '文件：notes.txt');
+	assert.ok(!JSON.stringify(history).includes('dsh-attachment'), 'a file must not be disguised as an openable attachment');
+});
+
+test('an image without a session id is not given a URI', () => {
+	const history = toHistory(session([
+		{ kind: 'user', seq: 1, time: 1, content: [{ type: 'image', attachment: { attachmentId: 'att-2', mediaType: 'image/png' } }] },
+	]), [], {});
+	assert.ok(!JSON.stringify(history).includes('dsh-attachment'), 'missing session id must not invent an attachment URI');
 });

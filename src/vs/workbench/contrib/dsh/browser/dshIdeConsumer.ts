@@ -138,7 +138,10 @@ export class DshIdeConsumer extends Disposable {
 			assertSnapshotContinuity(this.pending ?? this.last, validated);
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);
-			const stale = /version gap/.test(message);
+			// 三种不连续都意味着「本地序列已经跟不上 Host」：gap（丢帧）、倒退（Host 重开序列）、
+			// 持平（重复帧）。三者都只能靠重新拉一次快照恢复；只把 gap 归为 stale 的话，
+			// 另外两种会把界面永久钉死（`failed` 只能由 `reset()` 解除），用户看不到任何恢复入口。
+			const stale = /version gap|version went backwards|version did not advance/.test(message);
 			this.fail(stale ? DSH_IDE_SNAPSHOT_STALE : 'dsh-ide/snapshot-continuity', error);
 			return false;
 		}
@@ -158,6 +161,16 @@ export class DshIdeConsumer extends Disposable {
 		this.currentView = undefined;
 		this.failed = false;
 		this.failReason = undefined;
+	}
+
+	/**
+	 * 是否因帧被拒绝而熔断（只能靠 `reset()` 解除）。
+	 *
+	 * `fail()` 之后 `accept()` 一律返回 false。恢复走 `onDidFail` → `refreshSnapshot` →
+	 * `reset()`；本属性只用于**诊断与断言**，不触发任何动作，别当成恢复入口。
+	 */
+	get needsRefresh(): boolean {
+		return this.failed;
 	}
 
 	override dispose(): void {
@@ -204,7 +217,16 @@ export class DshIdeConsumer extends Disposable {
 			this.current = merged.frame;
 			this.currentView = merged;
 		}
+		// 版本没前进、状态也没变时不必再通知：内核会周期性重发同一份快照，
+		// 每帧都让渲染层重建一次是纯开销。`version` 只允许递增，用它判重最省。
+		const unchanged = previous !== undefined
+			&& !rebound
+			&& previous.version === frame.version
+			&& previous.state.state === frame.state.state;
 		this.last = frame;
+		if (unchanged) {
+			return;
+		}
 		this._onDidChangeFrame.fire({ state: this.state });
 	}
 

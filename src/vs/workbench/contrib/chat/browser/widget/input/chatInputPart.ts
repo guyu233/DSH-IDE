@@ -787,6 +787,7 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 	private withinEditSessionKey: IContextKey<boolean>;
 	private filePartOfEditSessionKey: IContextKey<boolean>;
 	private chatSessionHasOptions: IContextKey<boolean>;
+	private chatSessionHasPermissionGroupKey: IContextKey<boolean>;
 	private chatSessionOptionsValid: IContextKey<boolean>;
 	private agentSessionTypeKey: IContextKey<string>;
 	private chatSessionSupportsDelegationKey: IContextKey<boolean>;
@@ -1172,6 +1173,9 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 		this._register(this._modelConfigStore.onDidSelectConfiguration(modelId => {
 			const model = this._currentLanguageModel.get();
 			if (model?.identifier === modelId) {
+				// 模型配置项（DSH 的推理档）是内核状态：用户改动后必须写回会话，
+				// 否则界面显示新档位、实际仍按旧档运行。
+				void this._writeModelConfigurationToSession(modelId);
 				this.setCurrentLanguageModel(model, true, false);
 			}
 		}));
@@ -1199,6 +1203,7 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 		this.withinEditSessionKey = ChatContextKeys.withinEditSessionDiff.bindTo(contextKeyService);
 		this.filePartOfEditSessionKey = ChatContextKeys.filePartOfEditSession.bindTo(contextKeyService);
 		this.chatSessionHasOptions = ChatContextKeys.chatSessionHasModels.bindTo(contextKeyService);
+		this.chatSessionHasPermissionGroupKey = ChatContextKeys.chatSessionHasPermissionGroup.bindTo(contextKeyService);
 		this.chatSessionOptionsValid = ChatContextKeys.chatSessionOptionsValid.bindTo(contextKeyService);
 		this.agentSessionTypeKey = ChatContextKeys.agentSessionType.bindTo(contextKeyService);
 		this.chatSessionSupportsDelegationKey = ChatContextKeys.chatSessionSupportsDelegation.bindTo(contextKeyService);
@@ -2052,6 +2057,41 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 		}
 	}
 
+	/**
+	 * 把模型配置项（例如 DSH 的推理档）写回当前会话。
+	 *
+	 * 与模型选择分开：模型是「用哪条路由」，配置项是「同一条路由用哪个档」。
+	 * 会话自己决定认哪些键（`applyModelConfiguration` 可选）；不实现就是纯本地配置，
+	 * 不认识的值不会被假装接受。
+	 * @param modelId 发生配置改变的模型标识
+	 */
+	private async _writeModelConfigurationToSession(modelId: string): Promise<void> {
+		const resource = this._inputModelSessionResource;
+		if (resource === undefined) {
+			return;
+		}
+		const sessionType = getChatSessionType(resource);
+		if (!this.chatSessionsService.getContentProviderSchemes().includes(sessionType)) {
+			return;
+		}
+		const configuration = this._modelConfigStore.getModelConfiguration(modelId);
+		if (configuration === undefined) {
+			return;
+		}
+		try {
+			const session = await this.chatSessionsService.getOrCreateChatSession(resource, CancellationToken.None);
+			const candidate = session as unknown as {
+				applyModelConfiguration?: (configuration: IStringDictionary<unknown>) => Promise<void>;
+			};
+			if (typeof candidate.applyModelConfiguration !== 'function') {
+				return;
+			}
+			await candidate.applyModelConfiguration(configuration);
+		} catch (error) {
+			this.logService.warn('[chat] writing the model configuration to the session failed', getErrorMessage(error));
+		}
+	}
+
 	private _applyProgrammaticLanguageModel(model: ILanguageModelChatMetadataAndIdentifier): void {
 		this._modelSelectionController.applyProgrammaticSelection(model);
 	}
@@ -2780,6 +2820,9 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 		this.chatSessionHasTargetedModels.set(!!requiresCustomModels);
 
 		const visibleOptionGroups = this.getVisibleOptionGroups(sessionResource);
+		// 权限组不进 `visibleOptionGroups`（它们在权限选择器内部渲染），必须单独判定：
+		// 用「有可见选项组」代表「有权限组」会让只有权限、没有其它组的会话丢掉权限入口。
+		this.chatSessionHasPermissionGroupKey.set(this.getActiveExtensionPermissionGroup(sessionResource) !== undefined);
 		this.permissionWidget?.refresh();
 		if (!visibleOptionGroups.length) {
 			this.chatSessionHasOptions.set(false);

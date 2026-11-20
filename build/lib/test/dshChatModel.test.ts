@@ -9,6 +9,7 @@
 // 运行：node --experimental-strip-types --test build/lib/test/dshChatModel.test.ts
 
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import { DshChatModel } from '../../../out/vs/workbench/contrib/dsh/browser/dshChatModel.js';
 import {
@@ -250,6 +251,19 @@ test('prependPage skips records that are not strictly older', () => {
 	} as never);
 	assert.equal(result.added, 0);
 	assert.equal(model.list.length, 1);
+});
+
+test('the sorted node list is reused until the nodes actually change', () => {
+	// `list` 每帧被 `toHistory` 读一次，内部要合并两份 Map 再全量排序。
+	// 节点没变时必须复用上一次的结果，否则长会话每帧都在重复排序。
+	const model = new DshChatModel();
+	const first = model.list;
+	assert.equal(model.list, first, 'an unchanged model must return the same array instance');
+	const read = readFileSync(new URL('../../../src/vs/workbench/contrib/dsh/browser/dshChatModel.ts', import.meta.url), 'utf8');
+	assert.match(read, /private _nodesVersion = 0/, 'mutations must bump a version');
+	assert.match(read, /this\._listVersion === this\._nodesVersion/, 'the cache must be keyed on that version');
+	// firstSeq 不得为了一次比较复制整份节点表。
+	assert.doesNotMatch(read, /const merged = new Map<string, DshChatNode>\(this\.olderNodes\);\s*\n\s*for \(const \[id, node\] of this\.nodes\) \{\s*\n\s*merged\.set\(id, node\);\s*\n\s*\}\s*\n\s*for \(const \[id, node\] of merged\)/, 'firstSeq must not copy the whole node table');
 });
 
 test('an empty history page forces hasMore false', () => {

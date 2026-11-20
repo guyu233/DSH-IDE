@@ -1,1 +1,7 @@
-{ "meta": { "title": "DSH-IDE", "description": "在会话头部提供 DSH-IDE 入口：复用 DSH 宿主 Electron，打开独立 VS Code 窗口并打开当前工作区，连接同一 DSH Host（全官方传输，AI 100% 由 DSH 提供）。" } }
+{
+  "meta": {
+    "title": "DSH-IDE",
+    "description": "从会话头部为当前工作区打开完整的 VS Code 窗口，复用 DeepSeek Harness 自带的 Electron 运行时。窗口经官方客户端传输连接同一 DSH Host，聊天、模型、审批与工具仍由 DSH 提供。入口是会话头部「…」菜单右侧的鲸鱼按钮。当前仅支持 Windows x64：开窗路径只有 Windows 实现，其他平台会明确返回该限制，不会假装已启动。",
+    "detail": "docs/DETAIL.zh.md"
+  }
+}

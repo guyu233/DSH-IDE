@@ -1409,6 +1409,39 @@ test('cancelRequest settles the request as cancelled and blocks a later decision
 	);
 });
 
+test('closing the bridge drops the per-view generation table', async () => {
+	// `_views` 每个出现过的 viewId 一条记录，由 adoptBinding 写入。桥关闭后旧代次
+	// 不再有意义，不清就会在内存里攒下历史上每个窗口的 id。
+	const { bridge } = bridgeWith({ sessionController: sessionControllerStub({}) });
+	bridge.adoptBinding({ viewId: 'view-1', generation: 1, sessionId: null });
+	assert.ok(bridge._views.has('view-1'), 'the view must be tracked while bound');
+	bridge.close();
+	assert.equal(bridge._views.size, 0, 'close must drop the whole table');
+});
+
+test('the model catalog is read once per refresh, not once per call', async () => {
+	// composerState 与 listModels 要的是同一份目录。一次输入框刷新会连着问好几次，
+	// 每次都向内核要一遍是纯浪费；2 秒内的重复调用应复用同一次结果。
+	let reads = 0;
+	const controller = sessionControllerStub({
+		projections: async () => ({ values: {} }),
+		modelCatalog: async () => {
+			reads += 1;
+			return { groups: [{ id: 'xai', models: [{ id: 'm', name: 'M' }] }] };
+		},
+	});
+	const { bridge } = bridgeWith({ sessionController: controller });
+	bridge.open({ view: 'chat', params: { sessionId: 's-1' } });
+	await bridge.invoke('composerState', { sessionId: 's-1' });
+	await bridge.invoke('composerState', { sessionId: 's-1' });
+	await bridge.invoke('listModels', {});
+	assert.equal(reads, 1, 'three reads within the window must hit the kernel once');
+	// 关窗后缓存必须失效：不能让下一个会话读到上一轮的目录。
+	bridge.close();
+	await bridge.invoke('listModels', {});
+	assert.equal(reads, 2, 'a close must drop the cached catalog');
+});
+
 test('composerState keeps only the fields the input bar renders', async () => {
 	const controller = sessionControllerStub({
 		projections: async () => ({ values: {
@@ -1563,4 +1596,91 @@ test('setGoal refuses when there is no live agent', async () => {
 		() => bridge.invoke('setGoal', { sessionId: 's-1', action: 'create', objective: 'x' }),
 		error => error.code === 'dsh-ide/feature-unavailable',
 	);
+});
+
+test('archiving fans out the session list so other windows re-group the row', async () => {
+	// 归档会改变名单归属。不 fanout 的话，其它窗口会继续把这一行画在原来的分组里，
+	// 只有发起归档的那个窗口靠返回值更新了自己。
+	const frames = [];
+	const { bridge } = bridgeWith({
+		sessionController: {
+			...sessionControllerStub(),
+			follow() { return (async function* () { await new Promise(() => undefined); })(); },
+		},
+		workspaceController: {
+			archiveSession: async () => ({ archivedSessionIds: ['s-1'] }),
+			unarchiveSession: async () => ({ archivedSessionIds: [] }),
+		},
+	});
+	bridge.open({ view: 'chat', params: { sessionId: 's-1' } });
+	const handle = bridge.follow('s-1', frame => frames.push(frame));
+	frames.length = 0;
+	await bridge.invoke('archiveSession', { sessionId: 's-1' });
+	assert.ok(frames.some(frame => frame && frame.type === 'session-list'), 'archive must fan out session-list');
+	frames.length = 0;
+	await bridge.invoke('unarchiveSession', { sessionId: 's-1' });
+	assert.ok(frames.some(frame => frame && frame.type === 'session-list'), 'unarchive must fan out session-list');
+	handle.dispose();
+});
+
+test('answering an approval or a question tells the other views to drop the card', async () => {
+	// 答复是终态。只结算本表不广播的话，别的窗口会一直显示一张已经答过的卡片。
+	// `cancelRequest` 早就这么做了，答复路径漏了。
+	for (const [method, args] of [
+		['answerApproval', { requestId: 'r-1', decision: 'approve' }],
+		['answerQuestion', { requestId: 'r-2', answer: { answers: [{ id: 'q1', selected: ['a'] }] } }],
+	]) {
+		const frames = [];
+		const { bridge } = bridgeWith({
+			sessionController: {
+				...sessionControllerStub(),
+				follow() { return (async function* () { await new Promise(() => undefined); })(); },
+			},
+		});
+		bridge.open({ view: 'chat', params: { sessionId: 's-1' } });
+		const handle = bridge.follow('s-1', frame => frames.push(frame));
+		// 先登记一条待决议请求，settle 才可能成功。
+		bridge.pending.register(method === 'answerApproval' ? 'approval' : 'question', args.requestId);
+		frames.length = 0;
+		await bridge.invoke(method, args);
+		assert.ok(
+			frames.some(frame => frame && frame.type === 'waterfall' && frame.eventId === args.requestId),
+			`${method} must broadcast the terminal state to the other views`,
+		);
+		handle.dispose();
+	}
+});
+
+test('closing the bridge drops its broadcast listeners', async () => {
+	// 关掉的窗口不该继续收到广播：留着的话，后续每次 `_fanout` 都会调到
+	// 已经关掉的窗口回调，白做一轮遍历还可能往死掉的 transport 写帧。
+	const frames = [];
+	const { bridge } = bridgeWith({ sessionController: sessionControllerStub({}) });
+	// 未绑定会话的视图走 `_statusListeners`（绑定后的视图走 follow 流，另一条路径）。
+	const handle = bridge.follow(undefined, frame => frames.push(frame));
+	assert.ok(bridge._statusListeners.size > 0, 'an unbound view must be listening');
+	bridge.close();
+	assert.equal(bridge._statusListeners.size, 0, 'close must drop the broadcast listeners');
+	frames.length = 0;
+	bridge._fanout({ type: 'session-list' });
+	assert.deepEqual(frames, [], 'a closed view must not receive frames');
+	handle.dispose();
+});
+
+test('close clears every per-bridge collection', async () => {
+	// 桥是长生命周期对象，五个集合各自累积一类状态。少清一个就会在
+	// 反复开关窗口后留下越积越多的条目。
+	const { bridge } = bridgeWith({ sessionController: sessionControllerStub({}) });
+	bridge.open({ view: 'chat', params: { sessionId: 's-1' } });
+	bridge.follow(undefined, () => undefined);
+	bridge.enqueueToggle('pin:s-1', async () => undefined);
+	bridge.adoptBinding({ viewId: 'v-1', generation: 1, sessionId: null });
+	bridge._modelCatalogCache = { at: Date.now(), value: {} };
+	bridge.close();
+	for (const name of ['_sessionReads', '_follows', '_statusListeners', '_toggles', '_views']) {
+		const value = bridge[name];
+		const size = typeof value?.size === 'number' ? value.size : undefined;
+		assert.equal(size, 0, `${name} must be empty after close`);
+	}
+	assert.equal(bridge._modelCatalogCache, undefined, '_modelCatalogCache must be dropped after close');
 });

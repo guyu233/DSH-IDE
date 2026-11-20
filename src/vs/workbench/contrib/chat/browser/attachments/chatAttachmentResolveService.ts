@@ -250,7 +250,9 @@ export class ChatAttachmentResolveService implements IChatAttachmentResolveServi
 			fullName: image.resource ? image.resource.path : undefined,
 			value: await resizeImage(image.data, image.mimeType),
 			icon: image.icon,
-			kind: 'image',
+			kind: 'image' as const,
+			// 不抄过去的话，从磁盘选来的图在条目上没有媒体类型，发送侧只能猜。
+			...(image.mimeType === undefined || image.mimeType === '' ? {} : { mimeType: image.mimeType }),
 			isFile: false,
 			isDirectory: false,
 			omittedState: image.omittedState || OmittedState.NotOmitted,

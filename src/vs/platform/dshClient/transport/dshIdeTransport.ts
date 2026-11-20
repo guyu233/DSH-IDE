@@ -452,11 +452,40 @@ export class DshIdeTransportBackend implements DshIdeBackend {
 	private readonly transport: DshIdeTransport;
 	private channelId: string | undefined;
 	private sessionId: string | undefined;
+	/** 契约核对结果：成功缓存为已解析，失败缓存错误，避免每次调用都重问一次 ping。 */
+	private contract: Promise<void> | undefined;
 	/** 内核 followSession 这一条流。 */
 	private readonly streams = new Set<{ streamId: string; close(): void }>();
 
 	constructor(transport: DshIdeTransport) {
 		this.transport = transport;
+	}
+
+	/**
+	 * 首次业务调用前核对线协议修订号。
+	 *
+	 * 只在第一次 await：`ide/ping` 本身不校验修订号，两个半身版本错配时若跳过这一步，
+	 * 表现出来只是「流一直重连」或「调用失败但界面没提示」。失败后缓存同一个拒绝，
+	 * 不无限重试一个已证明不兼容的对端。
+	 */
+	private ensureContract(): Promise<void> {
+		if (this.contract !== undefined) {
+			return this.contract;
+		}
+		const pending = this.transport.checkContract().catch(error => {
+			// 只有「已证明不兼容」才值得永久记住：那种对端重试多少次都不会变。
+			// 网络抖动 / Host 还没起来 / 超时都是**临时**失败，缓存下来会让这一次
+			// 偶发故障把整个连接钉死到 `close()` 为止（用户只能重载窗口）。
+			const code = error !== null && typeof error === 'object' ? (error as { code?: unknown }).code : undefined;
+			if (code === DSH_IDE_INCOMPATIBLE_WIRE) {
+				this.contract = pending;
+			} else if (this.contract === pending) {
+				this.contract = undefined;
+			}
+			throw error;
+		});
+		this.contract = pending;
+		return pending;
 	}
 
 	open(spec: DshIdeOpenSpec): ChannelBinding {
@@ -481,10 +510,19 @@ export class DshIdeTransportBackend implements DshIdeBackend {
 		//
 		// 身份先于内容：Host 先回 `ide-view-bound` 确认这次流的逻辑视图，之后才送会话帧。
 		// 未确认就收到内容，说明对端不是本修订号的 Host，按断线处理，不把帧交给视图。
+		//
+		// 开流前先核对修订号：Gate 只校验参数形状，不校验语义版本；错配时必须在这里
+		// 明确报不兼容，而不是让上层看到一条反复重连的流。
+		void this.ensureContract().catch(error => {
+			onDisconnect?.(error);
+		});
 		let bound = false;
 		const content = this.transport.openStream(
 			'ide/followSession',
-			{ sessionId: sessionId ?? '', binding, wireRevision: DSH_IDE_WIRE_REVISION },
+			// Host 的 `followSession(binding, wireRevision, signal)` 只有两个 wire 字段：
+			// `binding` 已携带会话 id，再发 `sessionId` 会被 `assertExactArguments` 判成
+			// `gateway/arguments-invalid: unexpected "sessionId"`，整条会话流永久重连。
+			{ binding, wireRevision: DSH_IDE_WIRE_REVISION },
 			frame => {
 				if (!bound) {
 					if (frame.type === 'ide-view-bound') {
@@ -498,6 +536,8 @@ export class DshIdeTransportBackend implements DshIdeBackend {
 				onEvent(frame);
 			},
 			error => { onDisconnect?.(error); },
+			// Host 正常收尾（源结束）也必须让上层重建，否则界面停在最后一帧、停止按钮不再恢复。
+			() => { onDisconnect?.(new DshIdeTransportError('dsh-ide/stream-ended', 'DSH-IDE session stream ended')); },
 		);
 		this.streams.add(content);
 		return {
@@ -510,6 +550,8 @@ export class DshIdeTransportBackend implements DshIdeBackend {
 
 
 	async invoke(method: DshIdeMethod, args: unknown, binding: DshIdeViewBinding): Promise<unknown> {
+		// 业务调用前先确认两半声明同一个线协议修订号；不兼容就直接失败，不按旧形状继续。
+		await this.ensureContract();
 		// 操作只交给内核桥接。这里不再把 prompt / cancel / selectModel 重写成 session/* 请求。
 		// 视图身份随每次调用上行：Host 据此判定这次调用代表哪个窗口的哪一代绑定。
 		return this.transport.call('ide', 'dispatch', {
@@ -524,6 +566,7 @@ export class DshIdeTransportBackend implements DshIdeBackend {
 	close(): void {
 		this.channelId = undefined;
 		this.sessionId = undefined;
+		this.contract = undefined;
 		for (const stream of this.streams) {
 			stream.close();
 		}

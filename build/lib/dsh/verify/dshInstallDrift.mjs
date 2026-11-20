@@ -31,7 +31,9 @@ import { fileURLToPath } from 'node:url';
 // 用 `process.cwd()` 时从其它目录直接调用会去错误的目录找 `dist/`，
 // 于是把「在别的目录运行」误报成「产物缺失」。
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../..');
-const tgz = path.join(repoRoot, 'dist', 'dsh-ide-2.0.0.tgz');
+// 版本从 manifest 读，不硬编码（与 dshArtifactContents.mjs 同一口径）。
+const manifestForVersion = JSON.parse(fs.readFileSync(path.join(repoRoot, 'build', 'lib', 'dsh', 'package.json'), 'utf8'));
+const tgz = path.join(repoRoot, 'dist', `dsh-ide-${manifestForVersion.version}.tgz`);
 const profileDir = process.env['DSH_PROFILE_DIR'];
 const PACKAGE_NAME = 'dsh-ide';
 
@@ -43,39 +45,77 @@ if (!fs.existsSync(tgz)) {
 // 按审计要求缺证据统一 PENDING；发布聚合要求 PASS，因此发布流程不会把它当通过。
 if (!profileDir) {
 	console.log('STATUS: PENDING  [install-drift] 未设置 DSH_PROFILE_DIR，无法比对已安装副本');
-	process.exit(0);
+	// 缺证据不能以 0 退出：直接调用者（shell && / CI step）会把它当成功。
+	process.exit(2);
 }
 
 const installedRoot = path.join(profileDir, 'node_modules', PACKAGE_NAME);
 if (!fs.existsSync(installedRoot)) {
 	console.log(`STATUS: PENDING  [install-drift] profile 内未安装 ${PACKAGE_NAME}，无法比对`);
-	process.exit(0);
+	process.exit(2);
 }
 
-/** 产物里属于「插件层」的条目（排除随包 app 的 runtime/）。 */
+/** 产物里的全部成员（去掉 `package/` 前缀）。 */
 function artifactEntries() {
 	return execFileSync('tar', ['-tzf', tgz], { cwd: repoRoot, encoding: 'utf8' })
 		.split(/\r?\n/)
 		.map(line => line.trim())
 		.filter(line => line.startsWith('package/') && line !== 'package/')
 		.map(line => line.slice('package/'.length))
-		.filter(rel => rel !== '' && !rel.startsWith('runtime/'));
+		.filter(rel => rel !== '');
 }
+
+/**
+ * 产物里属于 IDE 窗口运行时的**关键**文件。
+ *
+ * 为什么不再整目录 `runtime/` 排除：`runtime/app` 就是 IDE 窗口真正执行的 workbench，
+ * 它陈旧时插件层再一致也没用——本轮真机前就踩到过「插件层 0 漂移、runtime 还是旧构建」。
+ * 整目录逐字节比对代价太高（2400+ 文件、228 MB），因此按「入口 + 打包产物 + 清单」
+ * 一组关键文件比对：任何一处不同都足以证明安装与产物不同源。
+ */
+const RUNTIME_CRITICAL = [
+	'runtime/app/out/main.js',
+	'runtime/app/out/mainImpl.js',
+	'runtime/app/out/vs/workbench/workbench.desktop.main.js',
+	'runtime/app/out/vs/workbench/workbench.desktop.main.css',
+	'runtime/app/out/vs/workbench/api/node/extensionHostProcess.js',
+	'runtime/app/out/vs/platform/terminal/node/ptyHostMain.js',
+	'runtime/app/node_modules.asar',
+	'runtime/app/package.json',
+	'runtime/app/product.json',
+	'runtime/build-provenance.json',
+];
+
+/** 插件层文件（不含 runtime/）：必须逐字节一致。 */
+const pluginFiles = artifactEntries().filter(rel => !rel.endsWith('/') && !rel.startsWith('runtime/'));
+/** 运行时关键文件：必须存在且逐字节一致。 */
+const runtimeFiles = RUNTIME_CRITICAL.filter(rel => artifactEntries().includes(rel));
 
 const sha = buffer => crypto.createHash('sha256').update(buffer).digest('hex');
 
-const files = artifactEntries().filter(rel => !rel.endsWith('/'));
+const files = [...pluginFiles, ...runtimeFiles];
 const drift = [];
 /** 产物里读不出内容的成员：既不是「一致」也不是「漂移」，是未核验。 */
 const unverified = [];
 let checked = 0;
+
+// 产物里声明了关键运行时文件、安装侧却整个缺失时，上面的 existsSync 只会报一条「缺失」；
+// 这里先核对「产物确实带了这些文件」，避免把「产物本身没打进去」误判成安装漂移。
+const missingFromArtifact = RUNTIME_CRITICAL.filter(rel => !artifactEntries().includes(rel));
+if (missingFromArtifact.length > 0) {
+	console.error(`  ✗ 产物缺关键运行时文件: ${missingFromArtifact.join(', ')}`);
+	console.error('STATUS: FAIL  [install-drift] 产物不完整，无法与安装比对');
+	process.exit(1);
+}
 
 for (const rel of files) {
 	const installedPath = path.join(installedRoot, rel);
 	if (!fs.existsSync(installedPath)) { drift.push(`缺失: ${rel}`); continue; }
 	let artifactBuffer;
 	try {
-		artifactBuffer = execFileSync('tar', ['-xzOf', tgz, `package/${rel}`], { cwd: repoRoot });
+		// 运行时关键文件可能上百 MB（node_modules.asar 约 45 MB、workbench 主包 20 MB）：
+		// 默认 maxBuffer 只有 1 MB，会把「读到一半失败」误报成「未核验」。这里显式放大。
+		artifactBuffer = execFileSync('tar', ['-xzOf', tgz, `package/${rel}`], { cwd: repoRoot, maxBuffer: 512 * 1024 * 1024 });
 	} catch {
 		// 读不出成员就是没有证据：记一条未核验，不能静默当成一致。
 		unverified.push(rel);
@@ -89,7 +129,8 @@ for (const rel of files) {
 	}
 }
 
-console.log(`  产物插件层文件数        : ${files.length}`);
+console.log(`  产物插件层文件数        : ${pluginFiles.length}`);
+console.log(`  运行时关键文件数        : ${runtimeFiles.length}`);
 console.log(`  逐字节比对文件数        : ${checked}`);
 console.log(`  漂移项                  : ${drift.length}`);
 console.log(`  未核验成员              : ${unverified.length}`);

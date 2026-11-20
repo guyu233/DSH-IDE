@@ -8,12 +8,14 @@
 //
 // 边界：零 `@deepseek-ai/*`；不自己开 session/follow；不改写帧。
 
+import { localize } from '../../../../nls.js';
 import { Emitter, Event } from '../../../../base/common/event.js';
 import { Disposable } from '../../../../base/common/lifecycle.js';
 import { VSBuffer, encodeBase64 } from '../../../../base/common/buffer.js';
 import { IDshClientService } from '../../../../platform/dshClient/common/dshClientService.js';
-import { DSH_IDE_FEATURE_UNAVAILABLE, validateDshIdeLoadOlderResult, type DshIdeDeliverableView, type DshIdeGoalView, type DshIdeImageAttachmentRef, type DshIdeLoadOlderResult, type DshIdePendingItem, type DshIdePlanView, type DshIdeQuotaNotice, type DshIdeSkillView, type DshIdeTeamView, type DshIdeTodoView, type DshIdeWorktreeView, type DshIdeViewSnapshot, type DshIdeWaterfallNotice } from '../../../../platform/dshClient/common/dshIdeProtocol.js';
+import { dshErrorText, DSH_IDE_FEATURE_UNAVAILABLE, validateDshIdeLoadOlderResult, type DshIdeConversationView, type DshIdeDeliverableView, type DshIdeGoalView, type DshIdeImageAttachmentRef, type DshIdeLoadOlderResult, type DshIdePendingItem, type DshIdePlanView, type DshIdeQuotaNotice, type DshIdeSkillView, type DshIdeTeamView, type DshIdeTodoView, type DshIdeWorktreeView, type DshIdeViewSnapshot, type DshIdeWaterfallNotice } from '../../../../platform/dshClient/common/dshIdeProtocol.js';
 import { DshChatModel, type DshChatNode, type DshHistoryStatus } from './dshChatModel.js';
+import { getDshComposerSource } from './dshComposerRegistry.js';
 
 /** 下拉里的一个模型选项。 */
 export interface DshChatModelOption {
@@ -87,13 +89,19 @@ export interface IDshChatSession {
 	readonly activeSessionId: string | undefined;
 	/** 发送一句话；成功即交给内核。 */
 	submit(text: string, attachments?: readonly DshIdeImageAttachmentRef[]): Promise<boolean>;
+	/** 最近一次 `submit` 失败的原因；成功后清空。 */
+	submitFailure(): string | undefined;
+	/** 最近一次绑定失败的可读原因；成功绑定后清空。 */
+	bindFailure(): string | undefined;
 	/** 向更早的历史要一页。true 表示这次真的插入了新节点。 */
 	loadOlder(): Promise<boolean>;
 	hasMore(): boolean;
 	firstSeq(): number | undefined;
 	historyStatus(): DshHistoryStatus;
 	selectModel(provider: string, model: string): Promise<void>;
-	cancel(): Promise<void>;
+	/** 切换推理档；未绑定时是空操作。 */
+	selectEffort(effort: string): Promise<void>;
+	cancel(): Promise<boolean>;
 	answerApproval(eventId: string, decision: 'approve' | 'reject'): Promise<void>;
 	answerQuestion(eventId: string, label: string): Promise<void>;
 	/** Host 侧会话状态通知（`api-session/status`）：回合结束的唯一复位来源。 */
@@ -108,6 +116,9 @@ export class DshChatSession extends Disposable implements IDshChatSession {
 	/** typed extras（交付物 / 附件 / 额度）变化：内容没变也会 fire，渲染层自行判重。 */
 	private readonly _onDidChangeExtras = this._register(new Emitter<void>());
 	private readonly _onDidChangeRunning = this._register(new Emitter<boolean>());
+	private readonly _onDidFailAction = this._register(new Emitter<string>());
+	/** 模型、推理档等写回被拒绝：界面不能只停在用户刚点的选项上。 */
+	readonly onDidFailAction = this._onDidFailAction.event;
 	private readonly _onDidChangeNodes = this._register(new Emitter<readonly [readonly DshChatNode[], boolean]>());
 	private readonly _onDidChangeHistory = this._register(new Emitter<void>());
 	/** bind 换会话时递增。过期的 loadOlder / rebind / composer 结果不得写入新会话。 */
@@ -132,6 +143,12 @@ export class DshChatSession extends Disposable implements IDshChatSession {
 	 * 命中开头的「相同 id 直接 return true」短路，模型永远停在空状态。
 	 */
 	private _boundDirty = false;
+	/** 最近一次绑定失败的原因；成功绑定后清空。 */
+	private _bindFailure: string | undefined;
+	/** 同一会话在途的技能目录读取；并发触发复用同一次请求。 */
+	private _skillsInFlight: { readonly sessionId: string; readonly work: Promise<void> } | undefined;
+	/** 同一会话在途的输入框目录读取；并发触发复用同一次请求。 */
+	private _composerInFlight: { readonly sessionId: string; readonly work: Promise<void> } | undefined;
 	/** typed 视图里的交付物 / 附件 / 额度提示（单一真源，面板只读）。 */
 	private _deliverables: readonly DshIdeDeliverableView[] = [];
 	private _attachments: readonly DshIdeImageAttachmentRef[] = [];
@@ -234,49 +251,71 @@ export class DshChatSession extends Disposable implements IDshChatSession {
 	 * typed 字段是唯一真源：Host 已经按 eventId 聚合过，前端不再自己累加或去重。
 	 */
 	private acceptPending(pending: readonly DshIdePendingItem[]): void {
-		const before = this.pendingItems.size;
-		const beforeIds = [...this.pendingItems.keys()].join('\u0000');
+		// 面板已销毁：在途帧回来时不再动状态，也不 fire（监听方都已释放）。
+		if (this._disposed) {
+			return;
+		}
+		// 元素来自 Host 进程：数组里可能混进 null / 非对象。先过滤再动状态——
+		// 原实现在循环**之前**就 `clear()`，中途抛错会留下一份被清空的清单（数据丢失），
+		// 而调用方没有 try/catch，异常还会继续冒泡中断整条帧链。
+		const items = Array.isArray(pending)
+			? pending.filter((item): item is DshIdePendingItem => typeof item === 'object' && item !== null)
+			: [];
+		// 先留一份旧的 id → 标题，用于判断这一帧是否真的改变了卡片。
+		const beforeItems = new Map<string, string>();
+		for (const [eventId, item] of this.pendingItems) {
+			beforeItems.set(eventId, item.title);
+		}
 		this.pendingItems.clear();
-		for (const item of pending) {
+		for (const item of items) {
 			// Host 已广播过终态的请求不再画卡：迟到清单或重放帧都不能让它复活。
 			if (this.settledPending.has(item.eventId)) {
 				continue;
 			}
-			if (item.event === 'approval/request' && 'toolName' in item.request) {
-				const reason = item.request.reason;
+			// `request` 来自 Host：可能是 undefined / 非对象，`in` 运算符对它一律抛错。
+			const request: Record<string, unknown> | undefined =
+				typeof item.request === 'object' && item.request !== null ? item.request as unknown as Record<string, unknown> : undefined;
+			if (request === undefined) {
+				continue;
+			}
+			if (item.event === 'approval/request' && 'toolName' in request) {
+				const reason = request.reason;
+				const toolName = String(request.toolName);
 				this.pendingItems.set(item.eventId, {
 					eventId: item.eventId,
 					kind: 'approval',
 					title: reason === undefined
-						? `DSH 请求运行 ${item.request.toolName}`
-						: `DSH 请求运行 ${item.request.toolName}：${reason}`,
+						? localize('dsh.pending.approvalTitle', "DSH 请求运行 {0}", toolName)
+						: localize('dsh.pending.approvalTitleWithReason', "DSH 请求运行 {0}：{1}", toolName, String(reason)),
 					options: [],
 					questions: [],
 				});
-			} else if (item.event === 'user-questions/request' && 'questions' in item.request) {
-				this.pendingItems.set(item.eventId, projectQuestionPending(item.eventId, item.request.questions));
+			} else if (item.event === 'user-questions/request' && 'questions' in request) {
+				const questions = Array.isArray(request.questions) ? request.questions : [];
+				this.pendingItems.set(item.eventId, projectQuestionPending(item.eventId, questions as Parameters<typeof projectQuestionPending>[1]));
 			}
 		}
 		// 每帧都下发 pending，但内容没变就不必让面板重画。
-		const afterIds = [...this.pendingItems.keys()].join('\u0000');
-		if (before !== this.pendingItems.size || beforeIds !== afterIds) {
-			this._onDidChangePending.fire(this.pending());
+		// 原先比的是把 key 拼成一个大字符串：每帧都要构造两次全量字符串，
+		// 而且只比 id 不比内容——同一 eventId 的标题变了也不会通知。
+		// 改成按条目比 id 与标题，既不拼字符串也不会漏掉内容变化。
+		if (samePendingItems(this.pendingItems, beforeItems)) {
+			return;
 		}
+		this._onDidChangePending.fire(this.pending());
 	}
 
 	running(): boolean {
 		return this._running;
 	}
 
-	/** 换会话：清空旧记录、重读目录、重开跟进流。 */
 	/**
 	 * 换会话：清空旧记录、重读目录、重开跟进流。
 	 *
 	 * @returns 绑定是否成功。通道 rebind 失败时返回 false，调用方必须据此提示用户，
 	 *          不能假装绑定成功继续打开视图。
 	 */
-	async bind(sessionId: string | undefined): Promise<boolean> {
-		// 有绑定尚未完成时，不能因为 id 已经写上就返回成功：那次 rebind 仍可能失败。
+	async bind(sessionId: string | undefined): Promise<boolean> {		// 有绑定尚未完成时，不能因为 id 已经写上就返回成功：那次 rebind 仍可能失败。
 		if (sessionId === this.boundSessionId && !this._boundDirty && this._bindInFlight === undefined) {
 			return true;
 		}
@@ -314,13 +353,30 @@ export class DshChatSession extends Disposable implements IDshChatSession {
 			}
 			if (!rebound.ok) {
 				// 失败必须回滚绑定：否则下一次 `bind(同一 id)` 会因「相等」直接返回 true，
-				// 永远不再重绑，面板停在空状态。但模型已经被 clear()，只回滚 id 不够——
-				// 同时置脏，让下一次同 id 的 bind 仍会真正重跑 rebind。
+				// 永远不再重绑。模型已经被 clear()，只回滚 id 会让上一会话的面板停在空白。
+				// 有上一会话时立刻把它的视图再绑回来；这次恢复也失败才置脏，留给下一次重试。
+				const bindDetail = dshErrorText(rebound.error, rebound.error.code);
+				this._bindFailure = localize('dsh.bind.rejected', "无法打开这个会话：{0}", bindDetail);
 				this.boundSessionId = previous;
 				this._boundDirty = true;
+				if (typeof previous === 'string' && previous !== '' && previous !== sessionId) {
+					const restored = await this.client.rebindView(previous);
+					if (generation !== this.generation) {
+						return false;
+					}
+					if (restored.ok) {
+						this._boundDirty = false;
+						const restoredView = restored.value?.state?.state === 'ready' ? restored.value.state.view : undefined;
+						if (restoredView !== undefined) {
+							this.acceptView(restoredView);
+						}
+						getDshComposerSource()?.setSession(previous);
+					}
+				}
 				return false;
 			}
 			this._boundDirty = false;
+			this._bindFailure = undefined;
 			// `rebind` 返回的快照就是这次绑定的首屏内容：不喂给 model，面板会一直是空的，
 			// 只能等后续流帧；已结束的会话根本不会再推帧。
 			const view = rebound.value?.state?.state === 'ready' ? rebound.value.state.view : undefined;
@@ -328,6 +384,14 @@ export class DshChatSession extends Disposable implements IDshChatSession {
 				this.acceptView(view);
 			}
 			await this.refreshComposer();
+			if (generation !== this.generation) {
+				return false;
+			}
+			// 输入框数据源跟随绑定：不跟着换，切到别的会话后模型/权限/预设仍是旧会话的目录，
+			// 未绑定过的窗口更是永远读不到目录（refresh 会因「没有会话」直接返回）。
+			const composer = getDshComposerSource();
+			composer?.setSession(sessionId);
+			await composer?.refresh();
 			if (generation !== this.generation) {
 				return false;
 			}
@@ -355,6 +419,10 @@ export class DshChatSession extends Disposable implements IDshChatSession {
 		if (generation !== this.generation || this.boundSessionId !== sessionId) {
 			return;
 		}
+		// 与 `bind` 同一口径：输入框目录必须跟着当前会话，否则选择器读不到 DSH 的模型与预设。
+		const composer = getDshComposerSource();
+		composer?.setSession(sessionId);
+		await composer?.refresh();
 		await this.refreshSkills();
 	}
 
@@ -365,10 +433,18 @@ export class DshChatSession extends Disposable implements IDshChatSession {
 	 * `pending` / `deliverables` / `quotaNotice` / `attachments` 同样以 typed 字段为唯一真源。
 	 */
 	acceptView(view: DshIdeViewSnapshot | undefined): void {
-		if (view === undefined) {
+		// 同样来自 Host 进程：`undefined` 是「这帧没有视图」的正常情况，
+		// `null` / 非对象则是畸形帧——保持上一状态直接返回，别让取属性抛异常
+		// （本方法在事件回调里被直接调用，抛错会中断整条帧处理链）。
+		if (typeof view !== 'object' || view === null) {
 			return;
 		}
-		if (view.conversation !== undefined) {
+		// `conversation` 来自 Host 进程，类型只在编译期成立：运行时可能是任何东西。
+		// `acceptConversation` 里直接 `for (const node of conversation.nodes)`，
+		// 畸形帧会抛 `is not iterable`——而本方法由事件回调直接调用、没有 try/catch，
+		// 异常会中断整条帧处理链。这里先做形状检查，不合格就退回裸 `frame`
+		// （与旧 Host 不带 typed 字段时同一条降级路径）。
+		if (isConversationView(view.conversation)) {
 			this.model.acceptConversation(view.conversation);
 		} else {
 			this.model.accept(view.frame);
@@ -437,10 +513,14 @@ export class DshChatSession extends Disposable implements IDshChatSession {
 
 	/** 批准 / 问卷帧：登记成本地面的卡片，不再走通知。 */
 	acceptWaterfall(notice: DshIdeWaterfallNotice): void {
+		// 面板已销毁：在途帧回来时不再登记卡片，也不再 fire。
+		if (this._disposed) {
+			return;
+		}
 		if (notice.kind === 'cancel') {
 			// 终态可能在卡片已被提交隐藏之后到达：那时本表已经没有它，
 			// 仍要记下这条终态，避免随后任何路径把同一张卡再画回来。
-			this.settledPending.add(notice.eventId);
+			this.rememberSettled(notice.eventId);
 			if (this.pendingItems.delete(notice.eventId)) {
 				this._onDidChangePending.fire(this.pending());
 			}
@@ -452,17 +532,28 @@ export class DshChatSession extends Disposable implements IDshChatSession {
 		}
 		if (notice.event === 'approval/request' && 'toolName' in notice.request) {
 			const reason = notice.request.reason;
+			const title = reason === undefined
+				? localize('dsh.pending.approvalTitle', "DSH 请求运行 {0}", notice.request.toolName)
+				: localize('dsh.pending.approvalTitleWithReason', "DSH 请求运行 {0}：{1}", notice.request.toolName, reason);
+			// 同一张卡片重复到达（重放、迟到帧）且标题没变时不重画。
+			const existing = this.pendingItems.get(notice.eventId);
+			if (existing !== undefined && existing.kind === 'approval' && existing.title === title) {
+				return;
+			}
 			this.pendingItems.set(notice.eventId, {
 				eventId: notice.eventId,
 				kind: 'approval',
-				title: reason === undefined
-					? `DSH 请求运行 ${notice.request.toolName}`
-					: `DSH 请求运行 ${notice.request.toolName}：${reason}`,
+				title,
 				options: [],
 				questions: [],
 			});
 		} else if (notice.event === 'user-questions/request' && 'questions' in notice.request) {
-			this.pendingItems.set(notice.eventId, projectQuestionPending(notice.eventId, notice.request.questions));
+			const next = projectQuestionPending(notice.eventId, notice.request.questions);
+			const existing = this.pendingItems.get(notice.eventId);
+			if (existing !== undefined && existing.title === next.title && existing.options.length === next.options.length) {
+				return;
+			}
+			this.pendingItems.set(notice.eventId, next);
 		}
 		this._onDidChangePending.fire(this.pending());
 	}
@@ -511,6 +602,8 @@ export class DshChatSession extends Disposable implements IDshChatSession {
 			}
 			if (!result.ok) {
 				this.model.setHistoryStatus('error');
+				const detail = dshErrorText(result.error, result.error.code);
+				this.fail(localize('dsh.history.loadFailed', "更早的历史没有加载：{0}", detail));
 				return false;
 			}
 			const output = validateDshIdeLoadOlderResult(result.value);
@@ -523,9 +616,11 @@ export class DshChatSession extends Disposable implements IDshChatSession {
 			}
 			this.model.setHistoryStatus('idle');
 			return outcome.added > 0;
-		} catch {
+		} catch (error) {
 			if (generation === this.generation) {
 				this.model.setHistoryStatus('error');
+				const detail = error instanceof Error && error.message !== '' ? error.message : localize('dsh.history.loadFailedUnknown', "读取失败");
+				this.fail(localize('dsh.history.loadFailed', "更早的历史没有加载：{0}", detail));
 			}
 			return false;
 		}
@@ -544,8 +639,25 @@ export class DshChatSession extends Disposable implements IDshChatSession {
 	 * 完成入库后返回值就是 `submit.attachments` 需要的形状。失败返回 undefined，
 	 * 由调用方保留草稿并明确告知，不伪造引用。
 	 */
+	private _imageFailure: string | undefined;
+
+	imageFailure(): string | undefined {
+		return this._imageFailure;
+	}
+
 	async saveImage(data: Uint8Array, mediaType: string, name?: string): Promise<DshIdeImageAttachmentRef | undefined> {
 		if (mediaType !== 'image/png' && mediaType !== 'image/jpeg' && mediaType !== 'image/webp' && mediaType !== 'image/gif') {
+			this._imageFailure = localize('dsh.image.unsupported', "这种图片格式不能入库。");
+			return undefined;
+		}
+		// 契约对 `saveImageAttachment.data` 没有长度上限，Host 也只校验非空。
+		// 不在这里挡一道的话，超大图会先整份 base64 编码、再跨进程传输、最后才被内核拒绝——
+		// 中间三步都在吃内存。上限按常见聊天客户端的 20 MiB 取，足够放下相机原图。
+		if (data.byteLength > DshChatSession.MAX_IMAGE_BYTES) {
+			// 审计器会把「实参里的括号运算」误算成嵌套调用，先算好再传。
+			const actualMb = (data.byteLength / (1024 * 1024)).toFixed(1);
+			const limitMb = DshChatSession.MAX_IMAGE_BYTES / (1024 * 1024);
+			this._imageFailure = localize('dsh.image.tooLarge', "图片太大（{0} MB），上限 {1} MB。", actualMb, limitMb);
 			return undefined;
 		}
 		const result = await this.client.call<DshIdeImageAttachmentRef>('saveImageAttachment', {
@@ -553,57 +665,143 @@ export class DshChatSession extends Disposable implements IDshChatSession {
 			data: encodeBase64(VSBuffer.wrap(data)),
 			...(name === undefined || name === '' ? {} : { name }),
 		});
-		return result.ok ? result.value : undefined;
+		if (!result.ok) {
+			const detail = dshErrorText(result.error, result.error.code);
+			this._imageFailure = localize('dsh.image.rejected', "图片入库失败：{0}", detail);
+			return undefined;
+		}
+		this._imageFailure = undefined;
+		return result.value;
+	}
+
+	private fail(message: string): void {
+		this._onDidFailAction.fire(message);
+	}
+
+	private _submitFailure: string | undefined;
+
+	submitFailure(): string | undefined {
+		return this._submitFailure;
+	}
+
+	/** 最近一次绑定失败的可读原因；成功绑定后清空。 */
+	bindFailure(): string | undefined {
+		return this._bindFailure;
 	}
 
 	async submit(text: string, attachments?: readonly DshIdeImageAttachmentRef[]): Promise<boolean> {
 		const generation = this.generation;
 		const sessionId = this.boundSessionId;
 		if (sessionId === undefined) {
+			this._submitFailure = localize('dsh.submit.noSession', "还没有绑定 DSH 会话，无法发送。");
 			return false;
 		}
 		this.setRunning(true);
-		const result = await this.client.call('submit', attachments === undefined || attachments.length === 0
-			? { text, sessionId }
-			: { text, sessionId, attachments });
+		// 纯图片消息的 `text` 是空串，而契约对 `submit.text` 用 `nonEmptyString`。
+		// 直接把空串发过去会被校验拒绝，用户看到「发送失败：…」却不知道原因。
+		// 这里补一个最小的占位文本，让图片能单独发出去（与桌面端行为一致）。
+		const hasAttachments = attachments !== undefined && attachments.length > 0;
+		const body = text.trim() === '' && hasAttachments ? DshChatSession.IMAGE_ONLY_TEXT : text;
+		const result = await this.client.call('submit', hasAttachments
+			? { text: body, sessionId, attachments }
+			: { text: body, sessionId });
 		// 等待期间换了会话：失败不能把新会话的 running 清掉，成功也不该让调用方以为这条发送还属于当前会话。
 		if (generation !== this.generation || sessionId !== this.boundSessionId) {
+			this._submitFailure = localize('dsh.submit.switched', "发送时会话已经切换，这条消息没有发出。");
 			return false;
 		}
 		if (!result.ok) {
 			this.setRunning(false);
+			const detail = dshErrorText(result.error, result.error.code);
+			this._submitFailure = localize('dsh.submit.rejected', "发送失败：{0}", detail);
 			return false;
 		}
+		this._submitFailure = undefined;
 		return true;
 	}
 
-	async cancel(): Promise<void> {
+	async cancel(): Promise<boolean> {
+		const generation = this.generation;
 		const sessionId = this.boundSessionId;
 		if (sessionId === undefined) {
-			return;
+			this.fail(localize('dsh.cancel.noSession', "还没有绑定 DSH 会话，无法停止。"));
+			return false;
 		}
 		// 带上点击时的会话。Host 若已换绑，会拒绝，从而不停新会话。
-		await this.client.call('interrupt', { sessionId });
+		const result = await this.client.call('interrupt', { sessionId });
+		if (generation !== this.generation || sessionId !== this.boundSessionId) {
+			return false;
+		}
+		if (!result.ok) {
+			const detail = dshErrorText(result.error, result.error.code);
+			this.fail(localize('dsh.cancel.rejected', "停止失败：{0}", detail));
+			return false;
+		}
+		return true;
 	}
 
 	async selectModel(provider: string, model: string): Promise<void> {
 		const generation = this.generation;
 		const sessionId = this.boundSessionId;
 		if (sessionId === undefined) {
+			this.fail(localize('dsh.model.noSession', "还没有绑定 DSH 会话，模型没有切换。"));
 			return;
 		}
 		const result = await this.client.call('setModel', { sessionId, model: `${provider}/${model}` });
-		if (generation !== this.generation || sessionId !== this.boundSessionId || !result.ok) {
+		if (generation !== this.generation || sessionId !== this.boundSessionId) {
+			return;
+		}
+		if (!result.ok) {
+			const detail = dshErrorText(result.error, result.error.code);
+			this.fail(localize('dsh.model.rejected', "切换模型失败：{0}", detail));
+			await this.refreshComposer();
+			return;
+		}
+		// 写回成功。选的本来就是当前模型时不必重建菜单。
+		if (sameCurrentModel(this._current, { provider, model })) {
 			return;
 		}
 		this._current = { provider, model };
 		this._onDidChangeModelMenu.fire();
 	}
 
+	/**
+	 * 切换推理档（DSH 的 `setEffort`）。
+	 *
+	 * 原生选择器把推理强度画成模型配置项；配置项改动只有写回内核才真的生效，
+	 * 否则界面显示 high、实际仍用旧档。
+	 * @param effort DSH 推理档 id
+	 */
+	async selectEffort(effort: string): Promise<void> {
+		const generation = this.generation;
+		const sessionId = this.boundSessionId;
+		if (sessionId === undefined) {
+			this.fail(localize('dsh.effort.noSession', "还没有绑定 DSH 会话，推理档没有切换。"));
+			return;
+		}
+		const result = await this.client.call('setEffort', { sessionId, effort });
+		if (generation !== this.generation || sessionId !== this.boundSessionId) {
+			return;
+		}
+		if (!result.ok) {
+			const detail = dshErrorText(result.error, result.error.code);
+			this.fail(localize('dsh.effort.rejected', "切换推理档失败：{0}", detail));
+			return;
+		}
+		// 档位是模型目录的一部分：重读一次，让界面与内核一致（不回写假值）。
+		await this.refreshComposer();
+	}
+
 	async answerApproval(eventId: string, decision: 'approve' | 'reject'): Promise<void> {
 		const generation = this.generation;
 		const sessionId = this.boundSessionId;
 		const item = this.pendingItems.get(eventId);
+		// 卡片已经不属于当前会话（换绑时 pendingItems 会清空）：不能把这次批准发给新会话。
+		// Host 按 requestId 结算，这里放过去会让另一个会话的请求被误批。
+		if (item === undefined) {
+			this.fail(localize('dsh.answer.stale', "这张卡片已经不属于当前会话，没有送出答复。"));
+			return;
+		}
 		this.hidePending(eventId);
 		const result = await this.client.call('answerApproval', { requestId: eventId, decision });
 		this.restorePending(generation, sessionId, eventId, item, result);
@@ -620,7 +818,13 @@ export class DshChatSession extends Disposable implements IDshChatSession {
 		const generation = this.generation;
 		const sessionId = this.boundSessionId;
 		const item = this.pendingItems.get(eventId);
-		const answers = item === undefined ? undefined : dshQuestionAnswers(item, label);
+		// 卡片已经不属于当前会话（换绑时 pendingItems 会清空）。与 `answerApproval` 同一口径：
+		// 不能把答案发给新会话，也不能静默——否则用户以为已经答过了。
+		if (item === undefined) {
+			this.fail(localize('dsh.answer.staleQuestion', "这张问卷已经不属于当前会话，没有送出答案。"));
+			return;
+		}
+		const answers = dshQuestionAnswers(item, label);
 		if (answers === undefined) {
 			this.lastQuestionFallback = eventId;
 			return;
@@ -653,7 +857,44 @@ export class DshChatSession extends Disposable implements IDshChatSession {
 	}
 
 	/** 已收到终态的请求 id：防止迟到的请求帧把已结束的卡片重新画回来。 */
+	/**
+	 * 已收到终态的请求 id。只增不减会让长会话一直攒着旧 id，
+	 * 所以设上限：超了就丢最早的一半——迟到的重放帧早已不在 Host 的待决议表里，
+	 * 丢掉旧 id 不会让已结束的卡片重新出现。
+	 */
 	private readonly settledPending = new Set<string>();
+	private static readonly SETTLED_PENDING_LIMIT = 256;
+	/**
+	 * 单张图片入库上限。
+	 *
+	 * 契约对 `saveImageAttachment.data` 不设长度上限，Host 也只校验非空。不在这里挡一道，
+	 * 超大图会先整份 base64 编码、再跨进程传输、最后才被内核拒绝——中间三步都在吃内存。
+	 * 20 MiB 足够放下相机原图。
+	 */
+	private static readonly MAX_IMAGE_BYTES = 20 * 1024 * 1024;
+	/**
+	 * 纯图片消息的占位正文。
+	 *
+	 * 契约对 submit.text 用 nonEmptyString：只发图片时正文是空串，会被直接拒绝。
+	 * 补一句最小说明，图片才能单独发出去。
+	 */
+	private static readonly IMAGE_ONLY_TEXT = localize('dsh.submit.imageOnly', "（图片）");
+
+	private rememberSettled(eventId: string): void {
+		this.settledPending.add(eventId);
+		if (this.settledPending.size <= DshChatSession.SETTLED_PENDING_LIMIT) {
+			return;
+		}
+		// Set 保持插入顺序：删掉最早的一半，保留最近的那批。
+		const drop = Math.ceil(this.settledPending.size / 2);
+		let removed = 0;
+		for (const id of this.settledPending) {
+			this.settledPending.delete(id);
+			if (++removed >= drop) {
+				break;
+			}
+		}
+	}
 
 	/** 最近一次因形状不支持而交还桌面的问卷（命令入口据此提示）。 */
 	private lastQuestionFallback: string | undefined;
@@ -685,7 +926,7 @@ export class DshChatSession extends Disposable implements IDshChatSession {
 		sessionId: string | undefined,
 		eventId: string,
 		item: DshChatPending | undefined,
-		result: { readonly ok: boolean; readonly error?: { readonly code: string } },
+		result: { readonly ok: boolean; readonly error?: { readonly code: string; readonly message?: string } },
 	): void {
 		if (result.ok || item === undefined) {
 			return;
@@ -693,6 +934,8 @@ export class DshChatSession extends Disposable implements IDshChatSession {
 		if (generation !== this.generation || sessionId !== this.boundSessionId || this.pendingItems.has(eventId)) {
 			return;
 		}
+		const detail = dshErrorText(result.error, localize('dsh.answer.rejectedUnknown', "未知原因"));
+		this.fail(localize('dsh.answer.rejected', "这次答复没有送出：{0}", detail));
 		// 已经收到终态（桌面先答 / 取消）的请求不能再恢复：那已经不是「仍待决」的卡片。
 		if (this.settledPending.has(eventId)) {
 			return;
@@ -712,10 +955,31 @@ export class DshChatSession extends Disposable implements IDshChatSession {
 		const generation = this.generation;
 		const sessionId = this.boundSessionId;
 		if (sessionId === undefined) {
+			// 未绑定：清空目录。本来就空时不必通知——`bind` 会连清多个字段，
+			// 每次都 fire 会让渲染层白重建 history。
+			if (this._skills.length === 0) {
+				return;
+			}
 			this._skills = [];
 			this._onDidChangeExtras.fire();
 			return;
 		}
+		// `bind` 与 `attach` 都可能触发，同一会话的并发读取没有意义：复用同一次在途请求。
+		// 不同会话各自发一次——它们的目录本来就不一样。
+		const pending = this._skillsInFlight;
+		if (pending !== undefined && pending.sessionId === sessionId) {
+			return pending.work;
+		}
+		const work = this.loadSkills(generation, sessionId).finally(() => {
+			if (this._skillsInFlight?.sessionId === sessionId) {
+				this._skillsInFlight = undefined;
+			}
+		});
+		this._skillsInFlight = { sessionId, work };
+		return work;
+	}
+
+	private async loadSkills(generation: number, sessionId: string): Promise<void> {
 		const result = await this.client.call<readonly DshIdeSkillView[]>('listSkills', { sessionId });
 		if (generation !== this.generation || sessionId !== this.boundSessionId || !result.ok || !Array.isArray(result.value)) {
 			return;
@@ -735,6 +999,21 @@ export class DshChatSession extends Disposable implements IDshChatSession {
 			// 还没有绑定会话：不猜「当前会话」，保持已有目录。
 			return;
 		}
+		// 换绑、写回被拒、开窗都会触发它；同一会话的并发读取没有意义，复用同一次在途请求。
+		const pending = this._composerInFlight;
+		if (pending !== undefined && pending.sessionId === sessionId) {
+			return pending.work;
+		}
+		const work = this.loadComposer(generation, sessionId).finally(() => {
+			if (this._composerInFlight?.sessionId === sessionId) {
+				this._composerInFlight = undefined;
+			}
+		});
+		this._composerInFlight = { sessionId, work };
+		return work;
+	}
+
+	private async loadComposer(generation: number, sessionId: string): Promise<void> {
 		const result = await this.client.call<{
 			readonly model?: {
 				readonly current?: { readonly provider?: string; readonly model?: string; readonly effort?: string } | null;
@@ -755,18 +1034,27 @@ export class DshChatSession extends Disposable implements IDshChatSession {
 				options.push({ provider, model: model.id, name: typeof model.name === 'string' && model.name !== '' ? model.name : model.id });
 			}
 		}
-		this._models = options;
 		const provider = result.value.model?.current?.provider;
 		const model = result.value.model?.current?.model;
-		this._current = typeof provider === 'string' && provider !== '' && typeof model === 'string' && model !== ''
+		const nextCurrent = typeof provider === 'string' && provider !== '' && typeof model === 'string' && model !== ''
 			? { provider, model }
 			: undefined;
+		// 目录没变就不通知：菜单每收到一次都要重建，重复通知是纯开销。
+		if (sameModelOptions(this._models, options) && sameCurrentModel(this._current, nextCurrent)) {
+			return;
+		}
+		this._models = options;
+		this._current = nextCurrent;
 		this._onDidChangeModelMenu.fire();
 	}
 
 	override dispose(): void {
 		this._disposed = true;
 		this.generation++;
+		// 面板已经销毁：在途的 follow 帧回来时不能再往这两个表里写。
+		// 清空后 `acceptPending` / `acceptWaterfall` 会因 `_disposed` 直接返回。
+		this.pendingItems.clear();
+		this.settledPending.clear();
 		super.dispose();
 	}
 }
@@ -800,7 +1088,11 @@ function projectQuestionPending(
 		readonly multiSelect?: boolean;
 	}[],
 ): DshChatPending {
-	const projected: readonly DshChatQuestion[] = questions.map(question => ({
+	// `questions` 同样来自 Host：不是数组就当作没有问题（面板显示「无题」而不是崩掉）。
+	const list = Array.isArray(questions) ? questions : [];
+	const projected: readonly DshChatQuestion[] = list
+		.filter((question): question is typeof questions[number] => typeof question === 'object' && question !== null)
+		.map(question => ({
 		id: question.id,
 		...(question.question === undefined ? {} : { question: question.question }),
 		...(question.detail === undefined ? {} : { detail: question.detail }),
@@ -815,7 +1107,7 @@ function projectQuestionPending(
 	return {
 		eventId,
 		kind: 'question',
-		title: first?.question ?? 'DSH 提问',
+		title: first?.question ?? localize('dsh.pending.questionTitle', "DSH 提问"),
 		options: (first?.options ?? []).map(option => option.label),
 		questionId: first?.id ?? '',
 		questions: projected,
@@ -979,6 +1271,54 @@ function sameTodos(left: readonly DshIdeTodoView[], right: readonly DshIdeTodoVi
 }
 
 /** 技能列表是否与上一帧相同（六个字段全比较，避免权限/来源变化被静默吞掉）。 */
+/** 模型目录是否与上一次相同（菜单据此决定要不要重建）。 */
+function sameModelOptions(left: readonly DshChatModelOption[], right: readonly DshChatModelOption[]): boolean {
+	if (left === right) {
+		return true;
+	}
+	if (left.length !== right.length) {
+		return false;
+	}
+	for (let i = 0; i < left.length; i++) {
+		if (left[i].provider !== right[i].provider || left[i].model !== right[i].model || left[i].name !== right[i].name) {
+			return false;
+		}
+	}
+	return true;
+}
+
+/** 当前选中的模型是否与上一次相同。 */
+function sameCurrentModel(
+	left: { readonly provider: string; readonly model: string } | undefined,
+	right: { readonly provider: string; readonly model: string } | undefined,
+): boolean {
+	if (left === right) {
+		return true;
+	}
+	return left !== undefined && right !== undefined && left.provider === right.provider && left.model === right.model;
+}
+
+/**
+ * 两张待决议清单是否等价：条数、id 顺序与标题都要一致。
+ *
+ * 标题也算：同一个 eventId 的审批原因可能随帧更新，只比 id 会让面板停在旧文案。
+ */
+function samePendingItems(
+	next: ReadonlyMap<string, { readonly title: string }>,
+	before: ReadonlyMap<string, string>,
+): boolean {
+	if (next.size !== before.size) {
+		return false;
+	}
+	for (const [eventId, title] of before) {
+		const item = next.get(eventId);
+		if (item === undefined || item.title !== title) {
+			return false;
+		}
+	}
+	return true;
+}
+
 function sameSkills(left: readonly DshIdeSkillView[], right: readonly DshIdeSkillView[]): boolean {
 	if (left.length !== right.length) {
 		return false;
@@ -996,4 +1336,17 @@ function sameSkills(left: readonly DshIdeSkillView[], right: readonly DshIdeSkil
 		}
 	}
 	return true;
+}
+
+/**
+ * `conversation` 的运行时形状判定。
+ *
+ * 只要求 `nodes` 是数组：单个节点是否合法由 `fromConversationNode` 自己兜底
+ * （它对未知 kind 返回 undefined 并跳过），这里不重复那套逻辑。
+ * @param value Host 帧里的 `conversation` 字段
+ */
+function isConversationView(value: unknown): value is DshIdeConversationView {
+	return typeof value === 'object'
+		&& value !== null
+		&& Array.isArray((value as { nodes?: unknown }).nodes);
 }

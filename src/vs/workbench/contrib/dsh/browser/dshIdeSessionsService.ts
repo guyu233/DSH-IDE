@@ -22,7 +22,7 @@ import { env } from '../../../../base/common/process.js';
 import { createDecorator } from '../../../../platform/instantiation/common/instantiation.js';
 import { DSH_IDE_SESSION_ENV } from '../../../../platform/dshClient/common/env.js';
 import { IDshClientService } from '../../../../platform/dshClient/common/dshClientService.js';
-import type { IDshIdeSessionSummary } from '../../../../platform/dshClient/common/dshIdeProtocol.js';
+import { dshErrorText, type IDshIdeSessionSummary } from '../../../../platform/dshClient/common/dshIdeProtocol.js';
 import { IHostService } from '../../../services/host/browser/host.js';
 import { DshIdeSessionListModel, type IDshIdeSessionListState } from './dshIdeSessionListModel.js';
 import { DshClientSessionListSource } from './dshIdeSessionListSource.js';
@@ -46,7 +46,7 @@ export interface IDshIdeSessionsService {
 	archiveSession(sessionId: string): Promise<{ readonly ok: true } | { readonly ok: false; readonly error: string }>;
 	unarchiveSession(sessionId: string): Promise<{ readonly ok: true } | { readonly ok: false; readonly error: string }>;
 	/** 检索会话（标题 / 正文）。 */
-	search(query: string | undefined): Promise<{ readonly ok: true; readonly items: readonly { readonly sessionId: string; readonly snippet: string }[] } | { readonly ok: false; readonly error: string }>;
+	search(query: string | undefined): Promise<{ readonly ok: true; readonly items: readonly { readonly sessionId: string; readonly snippet: string }[]; readonly hasMore: boolean } | { readonly ok: false; readonly error: string }>;
 	/** 切换绑定会话（开窗参数变化时）；重绑会作废在途旧读。 */
 	bind(sessionId: string | undefined): void;
 	/** 当前绑定的会话 id。 */
@@ -99,43 +99,54 @@ export class DshIdeSessionsService extends Disposable implements IDshIdeSessions
 	async createSession(): Promise<{ readonly ok: true; readonly sessionId?: string } | { readonly ok: false; readonly error: string }> {
 		const result = await this._client.call<{ readonly sessionId?: string }>('newSession', {});
 		if (!result.ok) {
-			return { ok: false, error: result.error.message };
+			return { ok: false, error: dshErrorText(result.error, result.error.code) };
 		}
 		const sessionId = result.value?.sessionId;
 		if (typeof sessionId === 'string') {
 			this.bind(sessionId);
 		}
-		await this.refresh();
+		// 不在这里再 refresh：Host 的 `newSession` 已经 fanout `session-list`，
+		// 列表控制器收到后会自己重查。这里再查一次等于每次新建都多打一轮 listSessions。
 		return { ok: true, sessionId };
 	}
 
 	async archiveSession(sessionId: string): Promise<{ readonly ok: true } | { readonly ok: false; readonly error: string }> {
 		const result = await this._client.call('archiveSession', { sessionId });
 		if (!result.ok) {
-			return { ok: false, error: result.error.message };
+			return { ok: false, error: dshErrorText(result.error, result.error.code) };
 		}
-		await this.refresh();
+		// 不在这里再 refresh：Host 已 fanout `session-list`，列表控制器会自己重查。
 		return { ok: true };
 	}
 
 	async unarchiveSession(sessionId: string): Promise<{ readonly ok: true } | { readonly ok: false; readonly error: string }> {
 		const result = await this._client.call('unarchiveSession', { sessionId });
 		if (!result.ok) {
-			return { ok: false, error: result.error.message };
+			return { ok: false, error: dshErrorText(result.error, result.error.code) };
 		}
-		await this.refresh();
+		// 不在这里再 refresh：Host 已 fanout `session-list`，列表控制器会自己重查。
 		return { ok: true };
 	}
 
-	async search(query: string | undefined): Promise<{ readonly ok: true; readonly items: readonly { readonly sessionId: string; readonly snippet: string }[] } | { readonly ok: false; readonly error: string }> {
+	async search(query: string | undefined): Promise<{
+		readonly ok: true;
+		readonly items: readonly { readonly sessionId: string; readonly snippet: string }[];
+		/** 官方单批上限 20 条；true 表示还有下一批没取。 */
+		readonly hasMore: boolean;
+	} | { readonly ok: false; readonly error: string }> {
 		if (typeof query !== 'string' || query.trim() === '') {
-			return { ok: true, items: [] };
+			return { ok: true, items: [], hasMore: false };
 		}
-		const result = await this._client.call<{ readonly items?: readonly { readonly sessionId: string; readonly snippet: string }[] }>('searchSessions', { query });
+		const result = await this._client.call<{
+			readonly items?: readonly { readonly sessionId: string; readonly snippet: string }[];
+			readonly hasMore?: boolean;
+		}>('searchSessions', { query });
 		if (!result.ok) {
-			return { ok: false, error: result.error.message };
+			return { ok: false, error: dshErrorText(result.error, result.error.code) };
 		}
-		return { ok: true, items: result.value?.items ?? [] };
+		// `hasMore` 不能丢：官方单批只回 20 条，丢了这个标记，用户搜到 20 条
+		// 会以为那就是全部结果。
+		return { ok: true, items: result.value?.items ?? [], hasMore: result.value?.hasMore === true };
 	}
 
 	bind(sessionId: string | undefined): void {

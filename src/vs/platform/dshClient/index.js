@@ -51,7 +51,22 @@ export function apply(ctx, config = {}) {
 
 	// Host 半身：订阅四类官方事件 + 唯一 answerer。
 	// 等会话 API 与工作区记账均就绪再建桥接；复用桥接自检清单，避免启动次序与声明漂移。
+	// 依赖未就绪时 Cordis 的 `ctx.inject` 是**静默等待**（不会报错，也不会超时）：
+	// 一旦承载 `sessionController` 的 bundle 被禁用，整个 Host 半身就永远不建立，
+	// 而日志里连一行原因都没有。这里加一次超时体检，只诊断、不改变等待语义。
+	const bridgeWatchdog = setTimeout(() => {
+		const absent = REQUIRED_SERVICES.filter(service => (typeof ctx.get === 'function' ? ctx.get(service) : undefined) === undefined);
+		if (absent.length > 0) {
+			console.warn(`[dsh-ide] host bridge is waiting for services: ${absent.join(', ')} (the bundle that provides them may be disabled)`);
+		}
+	}, 15000);
+	if (typeof bridgeWatchdog.unref === 'function') {
+		bridgeWatchdog.unref();
+	}
+	ctx.effect(() => () => clearTimeout(bridgeWatchdog), 'dsh-ide.bridge-watchdog');
+
 	ctx.inject(REQUIRED_SERVICES, bridgeCtx => {
+		clearTimeout(bridgeWatchdog);
 		try {
 			const bridge = createDshIdeHostBridge(bridgeCtx, config && config.transport ? { transport: config.transport } : {});
 			const ide = typeof bridgeCtx.get === 'function' ? bridgeCtx.get('ide') : undefined;

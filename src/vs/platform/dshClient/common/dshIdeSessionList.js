@@ -13,6 +13,11 @@
  * @returns {import('./dshIdeProtocol.js').IDshIdeSessionSummary[]}
  */
 export function projectDshIdeSessionList(sessionId, workspaces, items) {
+	// `items` 来自官方 controller，形状未知时不能直接 `.some`：那会抛 TypeError，
+	// 而调用方没有 catch，整条帧链会断。同目录 `dshIdeArchiveSet` 也是 fail-closed。
+	if (!Array.isArray(items)) {
+		return [];
+	}
 	if (sessionId === undefined || sessionId === '' || !items.some(item => item.sessionId === sessionId)) {
 		return [];
 	}
@@ -35,6 +40,10 @@ export function projectDshIdeSessionList(sessionId, workspaces, items) {
  */
 export function projectDshIdeWorkspaceSessions(workspace, items) {
 	if (workspace == null || !Array.isArray(workspace.sessionIds)) {
+		return [];
+	}
+	// 同 `projectDshIdeSessionList`：非数组一律 fail-closed，不抛。
+	if (!Array.isArray(items)) {
 		return [];
 	}
 	const sessionIds = new Set(workspace.sessionIds);

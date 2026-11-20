@@ -1,0 +1,7 @@
+{
+  "meta": {
+    "title": "DSH-IDE",
+    "description": "Ouvre une fenêtre VS Code complète pour l’espace de travail actuel depuis l’en-tête de session, en réutilisant le runtime Electron fourni avec DeepSeek Harness. La fenêtre se connecte au même hôte DSH via le transport client officiel : chat, modèles, approbations et outils restent sur DSH. Le bouton baleine se trouve dans l’en-tête, à droite du menu de conversation. Windows x64 uniquement : les autres plateformes signalent cette limite au lieu de prétendre lancer la fenêtre.",
+    "detail": "docs/DETAIL.md"
+  }
+}

@@ -17,11 +17,22 @@ export function redactAuthMaterial(text) {
 	let out = asString;
 	// 整段 URL：只保留 scheme://authority/path，丢弃 ?query 与 #fragment（token 在 query）。
 	out = out.replace(/\b[a-z][a-z0-9+.-]*:\/\/[^\s"'<>()]+/gi, url => {
-		const end = url.search(/[?#]/);
-		return end < 0 ? url : url.slice(0, end);
+		// URL 内嵌的 `user:password@host` 也是凭据：先把 userinfo 抹掉再截 query。
+		const withoutUserInfo = url.replace(/^([a-z][a-z0-9+.-]*:\/\/)[^/@\s]+@/i, '$1[redacted]@');
+		const end = withoutUserInfo.search(/[?#]/);
+		return end < 0 ? withoutUserInfo : withoutUserInfo.slice(0, end);
 	});
+	// `Authorization: Bearer xxx` 形态要先处理：后一条规则会把 `Authorization` 这个 key
+	// 换成 `[redacted]`，之后就认不出紧跟的 scheme 了，凭据本体会留在输出里。
+	// 上游 fetch/undici 的错误消息里可能出现这种 header 文本。
+	out = out.replace(/\b(Bearer|Basic|Digest)\s+[A-Za-z0-9._~+/=-]{8,}/gi, (_match, scheme) => `${scheme} [redacted]`);
 	// 裸 token / cookie 形态：key=value 中把 value 换成占位符，避免堆栈里出现明文。
-	out = out.replace(/\b(token|cookie|set-cookie|authorization|launchUrl)\b\s*[:=]\s*["']?[^\s"';,}&]+["']?/gi, (match, key) => `${key}=[redacted]`);
+	// 键名按「含 token / cookie / authorization / launchUrl / api-key / secret」判定，
+	// 这样 `access_token` / `launchToken` / `apiKey` / `x-api-key` 这些变体也能覆盖。
+	out = out.replace(
+		/\b((?:x-)?(?:api[-_]?key|access[-_]?token|launch[-_]?token|refresh[-_]?token|id[-_]?token|token|cookie|set-cookie|authorization|launchUrl|secret|password))\b\s*[:=]\s*["']?[^\s"';,}&]+["']?/gi,
+		(match, key) => `${key}=[redacted]`,
+	);
 	return out;
 }
 

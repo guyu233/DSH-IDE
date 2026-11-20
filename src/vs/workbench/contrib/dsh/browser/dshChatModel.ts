@@ -366,12 +366,25 @@ export class DshChatModel extends Disposable {
 
 	/** 按 seq 升序（DSH 的会话日志顺序）。实时窗口与已读旧页合并，同 identity 以实时窗口为准。 */
 	get list(): readonly DshChatNode[] {
+		// 这个 getter 每帧会被 `toHistory` 读一次，而它内部要合并两份 Map 再全量排序。
+		// 节点没变时复用上一次的结果：会话越长，排序越贵。
+		if (this._listCache !== undefined && this._listVersion === this._nodesVersion) {
+			return this._listCache;
+		}
 		const merged = new Map<string, DshChatNode>(this.olderNodes);
 		for (const [id, node] of this.nodes) {
 			merged.set(id, node);
 		}
-		return [...merged.values()].sort((a, b) => a.seq - b.seq);
+		const sorted = [...merged.values()].sort((a, b) => a.seq - b.seq);
+		this._listCache = sorted;
+		this._listVersion = this._nodesVersion;
+		return sorted;
 	}
+
+	/** 节点集合每变一次就递增；`list` 据此判断能否复用缓存。 */
+	private _nodesVersion = 0;
+	private _listVersion = -1;
+	private _listCache: readonly DshChatNode[] | undefined;
 
 	/**
 	 * 整个会话的 token 用量。
@@ -440,6 +453,7 @@ export class DshChatModel extends Disposable {
 		this.usage.cacheWriteTokens = 0;
 		this.usageSeen = false;
 		this.nodes.clear();
+		this._nodesVersion++;
 		// 已经读到日志开头就不再翻页：实时帧自称「还有更多」不能把它翻回 true。
 		this._hasMore = this._hasMore && conversation.hasMore;
 		// 分页边界只前进：实时窗口把旧页挤出画面时，游标仍停在已读到的最早 seq。
@@ -450,6 +464,7 @@ export class DshChatModel extends Disposable {
 		for (const live of mappedLive) {
 			const replaced = this.nodes.has(live.identity);
 			this.nodes.set(live.identity, live.node);
+			this._nodesVersion++;
 			if (live.usage !== undefined && live.usage.usage !== undefined) {
 				this.usageSeen = true;
 				this.usage.inputTokens += live.usage.usage.inputTokens;
@@ -473,17 +488,21 @@ export class DshChatModel extends Disposable {
 	firstSeq(): number | undefined {
 		let min: number | undefined;
 		// 流式临时节点的 seq 是合成值，不参与历史游标：按 identity 过滤。
-		const merged = new Map<string, DshChatNode>(this.olderNodes);
-		for (const [id, node] of this.nodes) {
-			merged.set(id, node);
-		}
-		for (const [id, node] of merged) {
+		// 不在这里合并成新 Map：这个方法在补历史时每页要问两次，合并一份全量副本
+		// 是纯浪费。两处各自遍历，取更小的那个即可。
+		const consider = (id: string, node: DshChatNode): void => {
 			if (id.startsWith(STREAM_NODE_PREFIX)) {
-				continue;
+				return;
 			}
 			if (min === undefined || node.seq < min) {
 				min = node.seq;
 			}
+		};
+		for (const [id, node] of this.olderNodes) {
+			consider(id, node);
+		}
+		for (const [id, node] of this.nodes) {
+			consider(id, node);
 		}
 		return min;
 	}
@@ -572,6 +591,7 @@ export class DshChatModel extends Disposable {
 			// 旧页只补画面：不覆盖实时窗口里同 identity 的节点。
 			if (!this.nodes.has(identity) && !this.olderNodes.has(identity)) {
 				this.olderNodes.set(identity, mapped);
+				this._nodesVersion++;
 				changes.push({ node: mapped, added: true });
 			}
 		}
@@ -601,6 +621,7 @@ export class DshChatModel extends Disposable {
 		this.usage.cacheWriteTokens = 0;
 		this.usageSeen = false;
 		this.nodes.clear();
+		this._nodesVersion++;
 		this.olderNodes.clear();
 		this._hasMore = true;
 		this.durableFloor = undefined;

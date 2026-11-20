@@ -1,0 +1,7 @@
+{
+  "meta": {
+    "title": "DSH-IDE",
+    "description": "セッションヘッダーから現在のワークスペースの VS Code ウィンドウを開きます。DeepSeek Harness 同梱の Electron を再利用し、公式のクライアント転送で同じ DSH Host に接続するため、チャット、モデル、承認、ツールは DSH 側のままです。入口はセッションヘッダーの会話メニュー右にあるクジラのボタンです。対応は Windows x64 のみで、他のプラットフォームでは起動したふりをせず、その制限を返します。",
+    "detail": "docs/DETAIL.md"
+  }
+}

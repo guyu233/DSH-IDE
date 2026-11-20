@@ -53,6 +53,7 @@ DSH-IDE 以 **DSH bundle 插件**形式交付，不提供独立的 IDE 安装包
 ```bash
 # 1. 构建（仓库根执行）
 npm install
+node build/next/index.ts transpile --out out   # 先把 src 编译到 out/（打包从 out/ 取插件层）
 npx gulp dsh-ide-pack        # 产出 dist/dsh-ide-2.0.0.tgz（minified）
 
 # 2. 在 DSH 中安装该插件包，然后重启 DSH
@@ -64,7 +65,7 @@ npx gulp dsh-ide-pack        # 产出 dist/dsh-ide-2.0.0.tgz（minified）
 
 | 命令 | 产物 | 说明 |
 | --- | --- | --- |
-| `npx gulp dsh-ide-pack` | `dist/dsh-ide-2.0.0.tgz` | **唯一发布构建**：minified，剔除 `*.js.map`；约 78.5 MB，安装后 283 MiB |
+| `npx gulp dsh-ide-pack` | `dist/dsh-ide-2.0.0.tgz` | **唯一发布构建**：minified、不含 `*.js.map`；约 56 MB，安装后约 776 MiB |
 | `npx gulp dsh-ide-pack-min` | 同上 | `dsh-ide-pack` 的别名，行为完全一致 |
 
 ## 架构
@@ -102,8 +103,8 @@ build/dsh/chat-render/            聊天渲染复用件的历史来源凭据（�
 ```bash
 npm install
 
-# 类型检查
-node --max-old-space-size=8192 node_modules/typescript/bin/tsc --noEmit -p src/tsconfig.json
+# 类型检查（仓库里的 TypeScript 以 `typescript6` 提供，二进制名是 tsc6）
+node --max-old-space-size=8192 node_modules/typescript/bin/tsc6 --noEmit -p src/tsconfig.json
 
 # 测试
 npm run test-dsh:all

@@ -45,7 +45,12 @@ export function mapDshIdeCommandExecution(execution) {
 	if (kind === 'success') {
 		return { accepted: true };
 	}
-	const text = typeof result.text === 'string' && result.text !== '' ? result.text : 'command handler reported an error';
+	// 官方 `CommandResult` 的错误文案字段名在不同版本里可能是 `text` 或 `message`。
+	// 只读一个会在另一个形态下丢掉 handler 给的真实原因，用户只看到通用兜底文案。
+	const handlerText = typeof result.text === 'string' && result.text !== ''
+		? result.text
+		: (typeof result.message === 'string' && result.message !== '' ? result.message : '');
+	const text = handlerText === '' ? 'command handler reported an error' : handlerText;
 	// handler 的 error 是官方已接纳但执行失败，按 FEATURE_UNAVAILABLE 带确定文案上报。
 	return { error: 'feature-unavailable', message: text };
 }

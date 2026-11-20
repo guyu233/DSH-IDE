@@ -10,6 +10,7 @@ import es from 'event-stream';
 import vfs from 'vinyl-fs';
 import electron from '@vscode/gulp-electron';
 import * as util from './lib/util.ts';
+import * as compilation from './lib/compilation.ts';
 import { getVersion } from './lib/getVersion.ts';
 import { readISODate, writeISODate } from './lib/date.ts';
 import * as task from './lib/gulp/task.ts';
@@ -44,7 +45,6 @@ let commit = getVersion(root);
 let sourceMappingURLBase = `https://main.vscode-cdn.net/sourcemaps/${commit}`;
 const isCI = !!process.env['CI'] || !!process.env['BUILD_ARTIFACTSTAGINGDIRECTORY'] || !!process.env['GITHUB_WORKSPACE'];
 const useCdnSourceMapsForPackagingTasks = isCI;
-const stripSourceMapsInPackagingTasks = isCI;
 
 // （T11-03）原有 `dshManifestSourceRoot` / `dshResourcesRoot` 两个常量已删除：
 // 它们是 §3.7 归位初期的中间产物，`dsh-ide-pack` 实际直接用 `path.join(buildRoot, ...)`
@@ -102,10 +102,15 @@ function computeChecksum(filename: string): string {
 	return hash;
 }
 
-function packageTask(platform: string, arch: string, sourceFolderName: string, destinationFolderName: string, _opts?: { stats?: boolean; appOnly?: boolean }) {
+function packageTask(platform: string, arch: string, sourceFolderName: string, destinationFolderName: string, _opts?: { stats?: boolean; appOnly?: boolean; stripSourceMaps?: boolean }) {
+	// 是否剔除 `*.js.map` 由**任务**决定（minified 版本剔除、普通版本保留），不看 CI 环境：
+	// 同一条命令在本地与 CI 必须产出同一形态的产物，否则不可复现、文档也无法如实描述。
+	const stripSourceMaps = _opts?.stripSourceMaps ?? isCI;
 	// 扁平化后 `root` 即仓库根：产物必须落在仓库内（历史实现写到仓库外的父目录，
 	// 导致 `dsh-ide-pack` 的 staging 里 `runtime/app` 为空、tgz 只有 157 KB）。
-	const destination = path.join(root, destinationFolderName);
+	// 目标目录允许绝对路径（插件 staging 可用 `DSH_IDE_STAGING_ROOT` 指到别的盘）：
+	// 绝对路径原样使用，相对路径才拼仓库根。
+	const destination = path.isAbsolute(destinationFolderName) ? destinationFolderName : path.join(root, destinationFolderName);
 	platform = platform || process.platform;
 
 	const task = () => {
@@ -136,7 +141,7 @@ function packageTask(platform: string, arch: string, sourceFolderName: string, d
 
 		const extensions = gulp.src(['.build/extensions/**', ...platformSpecificBuiltInExtensionsExclusions], { base: '.build', dot: true });
 
-		const sourceFilterPattern = stripSourceMapsInPackagingTasks
+		const sourceFilterPattern = stripSourceMaps
 			? ['**', '!**/*.{js,css}.map']
 			: ['**'];
 		const sources = es.merge(src, extensions)
@@ -192,7 +197,7 @@ function packageTask(platform: string, arch: string, sourceFolderName: string, d
 		const dependenciesSrc = productionDependencies.map(d => path.relative(root, d)).map(d => [`${d}/**`, `!${d}/**/{test,tests}/**`]).flat().concat('!**/*.mk');
 
 		const depFilterPattern = ['**', `!**/${config.version}/**`, '!**/bin/darwin-arm64-87/**', '!**/package-lock.json', '!**/yarn.lock'];
-		if (stripSourceMapsInPackagingTasks) {
+		if (stripSourceMaps) {
 			depFilterPattern.push('!**/*.{js,css}.map');
 		}
 
@@ -520,7 +525,9 @@ async function verifyDshBuildProvenance(stagingRoot: string): Promise<void> {
 	if (JSON.stringify(after) !== JSON.stringify(dshBuildProvenance)) {
 		throw new Error('DSH build inputs changed during the build; discard the staging output and rebuild.');
 	}
-	const runtimeDirectory = path.join(buildRoot, stagingRoot, 'runtime');
+	// `stagingRoot` 可能是绝对路径（`DSH_IDE_STAGING_ROOT` 指到别的盘）：绝对路径原样使用，
+	// 否则会拼出 `E:\DSH-IDE\E:\DSH-IDE\dist\…` 这种不存在的路径。
+	const runtimeDirectory = path.join(path.isAbsolute(stagingRoot) ? stagingRoot : path.join(buildRoot, stagingRoot), 'runtime');
 	await fs.promises.mkdir(runtimeDirectory, { recursive: true });
 	await fs.promises.writeFile(path.join(runtimeDirectory, 'build-provenance.json'), JSON.stringify({
 		...dshBuildProvenance,
@@ -534,6 +541,47 @@ async function verifyDshBuildProvenance(stagingRoot: string): Promise<void> {
  * 指向它；它不在 bundle 的 copyResources 精选 glob 内，必须 bundle 后补写。
  * 聊天内容由 `dshChatSessionContent` 的 content provider 提供 history，不再有 sidecar 产物。
  */
+/**
+ * 编译 DSH-IDE 插件层需要的 `out/`。
+ *
+ * 为什么必须显式做：`dsh-ide-pack` 从 `out/vs/platform/dshClient` 拷 index.js / client.js /
+ * host/**，而 `out/` 是 gitignore 的生成目录。不先编译时：干净检出直接 ENOENT；
+ * 存在旧 `out/` 时会把上一版代码静默打进 tgz（源码改了、产物没变）。
+ * 用官方 `compilation.transpileTask`（与 `gulp transpile-client` 同一实现），不另写编译流程。
+ */
+/**
+ * 把 tsc 产出的 CommonJS 模块就地改写成 ESM。
+ *
+ * 只覆盖 `transpileTask` 实际产生的形态：`"use strict";` 开头、`exports.X = void 0;` 前置声明、
+ * `exports.X = Y;` 赋值、`exports.X = X;` 再导出。够用即可，不做通用转换——
+ * 真要做通用转换应改用 esbuild，但它的临时目录在 Windows 上清理会失败。
+ * @param {string} source tsc 产物内容
+ */
+function cjsToEsm(source) {
+	const exported = new Set();
+	let out = source
+		// `"use strict";` 在 ESM 里是空操作，但 `exports` 引用会直接报错，先删。
+		.replace(/^"use strict";\r?\n/, '')
+		// `Object.defineProperty(exports, "__esModule", { value: true });` 无意义。
+		.replace(/^Object\.defineProperty\(exports, "__esModule", \{ value: true \}\);\r?\n/m, '');
+	// 前置声明：`exports.A = exports.B = void 0;`（可能多行）
+	out = out.replace(/^exports\.[\w$]+(?: = exports\.[\w$]+)* = void 0;\r?\n/gm, '');
+	// 赋值导出：`exports.X = <expr>;` → `const X = <expr>;`
+	out = out.replace(/^exports\.([\w$]+) = /gm, (_m, name) => {
+		exported.add(name);
+		return `const ${name} = `;
+	});
+	// `exports.X = X;`（同名再导出）已经在上一步变成 `const X = X;`，删掉这行自赋值。
+	for (const name of exported) {
+		out = out.replace(new RegExp(`^const ${name} = ${name};\\r?\\n`, 'gm'), '');
+	}
+	// 末尾补导出表。名字必须排序后稳定输出，避免每次打包产生无意义 diff。
+	out = out.trimEnd() + '\n\nexport { ' + [...exported].sort().join(', ') + ' };\n';
+	return out;
+}
+
+const compileDshPluginLayerTask = task.define('dsh-ide-compile-plugin-layer',
+	task.series(util.rimraf('out'), compilation.transpileTask('src', 'out')));
 const dshWhaleMediaSource = path.join(root, 'src', 'vs', 'workbench', 'contrib', 'dsh', 'browser', 'media', 'dsh-whale.svg');
 const dshWhaleMediaTargetPath = path.join('vs', 'workbench', 'contrib', 'dsh', 'browser', 'media');
 const DSH_MEDIA_OUTPUT_DIRS = ['out-build', 'out', 'out-vscode', 'out-vscode-min'];
@@ -599,23 +647,36 @@ BUILD_TARGETS.forEach(buildTarget => {
 		);
 		// 暂存根可由 `DSH_IDE_STAGING_ROOT` 覆盖：Windows 上 Defender 实时保护会长时间占用
 		// `node_modules.asar`，导致 rimraf 失败；指向别处即可绕开，默认仍是仓库内 `dist`。
-		const appStagingRoot = path.join(process.env['DSH_IDE_STAGING_ROOT'] ?? 'dist', '.dsh-ide-staging', `${platform}-${arch}`);
-		const appDestination = path.join(appStagingRoot, 'runtime', 'app');
+		// 绝对路径必须原样使用：以前无条件 `path.join(buildRoot, appStagingRoot)` 会把它当相对段，
+		// 拼出 `E:\DSH-IDE\D:\staging\…` 这种不存在的路径，覆盖功能等于不可用。
+		const stagingRootOption = process.env['DSH_IDE_STAGING_ROOT'];
+		const appStagingRoot = path.isAbsolute(stagingRootOption ?? '')
+			? path.join(stagingRootOption!, '.dsh-ide-staging', `${platform}-${arch}`)
+			: path.join(stagingRootOption ?? 'dist', '.dsh-ide-staging', `${platform}-${arch}`);
+		// 只有相对路径才需要拼仓库根；绝对路径直接用它自己（下面所有使用点统一走这里）。
+		const appStagingPath = path.isAbsolute(appStagingRoot) ? appStagingRoot : path.join(buildRoot, appStagingRoot);
+		const appDestination = path.join(appStagingPath, 'runtime', 'app');
 		const packageAppTask = task.series(
 			compileNativeExtensionsBuildTask,
-			util.rimraf(path.join(buildRoot, appDestination)),
-			packageTask(platform, arch, sourceFolderName, appDestination, { ...opts, appOnly: true })
+			util.rimraf(appDestination),
+			// 插件载荷固定按 minified 口径剔除 source map：`dsh-ide-pack` 只产出发布形态。
+			packageTask(platform, arch, sourceFolderName, appDestination, { ...opts, appOnly: true, stripSourceMaps: true })
 		);
 		const appTaskCI = task.define(`dsh-ide-${platform}-${arch}${dashed(minified)}-ci`, task.series(
 			prepareDshBuildProvenance,
 			prepareDshChatRenderTask,
 			packageAppTask,
-			() => verifyDshBuildProvenance(appStagingRoot)
+			() => verifyDshBuildProvenance(appStagingPath)
 		));
 		task.task(appTaskCI);
 		const appTask = task.define(`dsh-ide-${platform}-${arch}${dashed(minified)}`, task.series(
 			prepareDshBuildProvenance,
-			util.rimraf(path.join(buildRoot, appStagingRoot)),
+			// 插件层（index.js / client.js / host/**）是从 `out/vs/platform/dshClient` 拷的，
+			// 而 `out/` 是 gitignore 的生成目录：不先编译，干净检出会 ENOENT；有旧 `out/` 时
+			// 更糟——会把上一版代码静默打进新 tgz（真机前踩过：插件层与源码不一致）。
+			// 这里显式把 `src → out` 作为打包的前置步骤，产物永远与源码同源。
+			compileDshPluginLayerTask,
+			util.rimraf(appStagingPath),
 			copyCodiconsTask,
 			cleanExtensionsBuildTask,
 			compileNonNativeExtensionsBuildTask,
@@ -624,7 +685,7 @@ BUILD_TARGETS.forEach(buildTarget => {
 			esbuildBundleTask,
 			prepareDshChatRenderTask,
 			packageAppTask,
-			() => verifyDshBuildProvenance(appStagingRoot)
+			() => verifyDshBuildProvenance(appStagingPath)
 		));
 		task.task(appTask);
 		// 只产出 minified 载荷：标准构建（保留 *.js.map）已移除——source map 占安装后体积的 41%，
@@ -632,7 +693,7 @@ BUILD_TARGETS.forEach(buildTarget => {
 		// 保留旧名字只为不打断既有脚本与文档引用。
 		if (process.platform === platform && process.arch === arch && minified) {
 			const dshIdePackTask = task.define('dsh-ide-pack', task.series(appTask, async () => {
-				const stagingRoot = path.join(buildRoot, appStagingRoot);
+				const stagingRoot = appStagingPath;
 				// bundle 根清单由官方构建生成（§3.7：不再手维护 dsh-ide/ 目录）：
 				//   manifest 模板 + patch  ← build/lib/dsh/
 				//   icon + NLS locale      ← resources/dsh/
@@ -646,6 +707,8 @@ BUILD_TARGETS.forEach(buildTarget => {
 					[path.join(manifestSource, 'cordis.patch.yml'), 'cordis.patch.yml'],
 					[path.join(dshResources, 'icon.svg'), 'icon.svg'],
 					[path.join(dshResources, 'locale'), 'locale'],
+					// 插件页详情文档与唯一的特性图；`meta.detail` 在两条语言里都指向这里。
+					[path.join(dshResources, 'docs'), 'docs'],
 					[path.join(dshClientOut, 'index.js'), 'index.js'],
 					[path.join(dshClientOut, 'client', 'client.js'), 'client.js'],
 					// host/ 整目录 stage（electron-home / ide-launch-queue / ide-service / ide-view-host 都在其中）。
@@ -667,6 +730,23 @@ BUILD_TARGETS.forEach(buildTarget => {
 				];
 				for (const [from, to] of copyList) {
 					await fs.promises.cp(from, path.join(stagingRoot, to), { recursive: true });
+				}
+				// `common/` 下有两类文件：手写 ESM（env.js / dshIdeComposer.js 等）与
+				// `transpileTask`（tsc）编译出的 CommonJS（dshIdeProtocol.js / dshIdeWaterfallNotice.js）。
+				// 包根声明 `"type": "module"`，Node 会把后者也当 ESM 加载并报
+				// `exports is not defined in ES module scope`，Host 半身装载失败。
+				//
+				// 不能给整个目录加 `type: commonjs`（会破坏前者），也不改文件名（Host 侧
+				// 的 `import … from '../common/dshIdeProtocol.js'` 与开发期 `out/` 都要能跑）。
+				// 因此在 staging 时把这两份 CJS 产物**就地改写成 ESM**：
+				// `exports.X = void 0;` 这类前置声明删除，`exports.X = Y` 改成 `const X = Y`，
+				// 末尾补 `export { … }`。改动只发生在打包产物里，源码与 `out/` 不动。
+				for (const name of ['dshIdeProtocol', 'dshIdeWaterfallNotice']) {
+					const target = path.join(stagingRoot, 'common', `${name}.js`);
+					if (!fs.existsSync(target)) {
+						continue;
+					}
+					await fs.promises.writeFile(target, cjsToEsm(await fs.promises.readFile(target, 'utf8')), 'utf8');
 				}
 				// §5 复用凭据随包保留；聊天内容已由 `dshChatSessionContent` 的 content provider 提供
 				// history，不再有需要随包分发的 sidecar 渲染制品。
@@ -709,7 +789,7 @@ BUILD_TARGETS.forEach(buildTarget => {
 				if (missing.length > 0) {
 					throw new Error(`dsh-ide staging is missing manifest files entries: ${missing.join(', ')}`);
 				}
-				await verifyDshBuildProvenance(appStagingRoot);
+				await verifyDshBuildProvenance(appStagingPath);
 				const dist = path.join(buildRoot, 'dist');
 				await fs.promises.mkdir(dist, { recursive: true });
 				const npmCommand = process.platform === 'win32' ? 'npm.cmd' : 'npm';

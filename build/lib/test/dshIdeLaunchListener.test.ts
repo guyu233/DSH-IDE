@@ -23,6 +23,7 @@ import {
 	DshIdeLaunchListener,
 	type DshIdeLaunchRequest,
 } from '../../../out/vs/platform/dshClient/transport/dshIdeLaunchListener.js';
+import { DSH_IDE_WIRE_REVISION } from '../../../src/vs/platform/dshClient/common/dshIdeProtocol.ts';
 
 /** 假的 Host 调用面：按脚本回答，并记录调用顺序。 */
 function fakeCaller(script: { register?: () => unknown; poll?: () => unknown }) {
@@ -63,7 +64,13 @@ test('registers once, then polls and dispatches launch requests', async () => {
 
 	const registerCalls = caller.calls.filter(c => c.method === 'registerIdeClient');
 	assert.equal(registerCalls.length, 1, 'must register exactly once, not on every poll');
-	assert.equal(registerCalls[0].args['clientId'], 'ide-1');
+	// Host 的形参名就是 wire 字段：缺 wireRevision 会被 gateway/内部错误折成「点了没反应」。
+	assert.deepEqual(registerCalls[0].args, { clientId: 'ide-1', wireRevision: DSH_IDE_WIRE_REVISION });
+	const pollCalls = caller.calls.filter(c => c.method === 'pollLaunch');
+	assert.ok(pollCalls.length >= 1, 'polling must happen');
+	for (const call of pollCalls) {
+		assert.deepEqual(call.args, { clientId: 'ide-1', wireRevision: DSH_IDE_WIRE_REVISION }, 'every poll carries the wire revision');
+	}
 	assert.ok(pollCount >= 2, `polling must continue (got ${pollCount})`);
 	assert.deepEqual(launched, [{ workspace: 'E:\\repo' }], 'the request must reach onLaunch');
 	listener.dispose();
@@ -169,6 +176,26 @@ test('dispose stops the loop', async () => {
 	const after = caller.calls.slice(before);
 	// dispose 会立刻向 Host 注销（避免死登记项等心跳超时）；除这次注销外不得再有轮询。
 	assert.deepEqual(after.map(call => call.method), ['unregisterIdeClient'], 'no polling may happen after dispose');
+	assert.deepEqual(after[0].args, { clientId: 'ide-5', wireRevision: DSH_IDE_WIRE_REVISION }, 'unregister carries the wire revision');
+});
+
+test('a Host that dropped the registration is re-registered instead of staying offline', async () => {
+	// Host 重启或心跳超时后 `pollLaunch` 会以 `{ ok:false }` 正常返回（不抛错）。
+	// 不据此重新报到，接单器会永远认为自己在线，按钮从此打不开窗。
+	let registrations = 0;
+	let polls = 0;
+	const caller = fakeCaller({
+		register: () => { registrations += 1; return { ok: true }; },
+		poll: () => {
+			polls += 1;
+			return polls === 2 ? { ok: false, requests: [] } : { ok: true, requests: [] };
+		},
+	});
+	const listener = new DshIdeLaunchListener(caller, 'ide-7', () => undefined);
+	listener.start();
+	await wait(DSH_IDE_LAUNCH_POLL_MS * 4);
+	assert.ok(registrations >= 2, `must re-register after ok:false (registrations=${registrations})`);
+	listener.dispose();
 });
 
 test('dispose during registration unregisters and does not dispatch a later poll', async () => {
@@ -186,7 +213,31 @@ test('dispose during registration unregisters and does not dispatch a later poll
 	finishRegister({ ok: true });
 	await wait(20);
 	assert.deepEqual(caller.calls.map(call => call.method), ['registerIdeClient', 'unregisterIdeClient']);
+	assert.deepEqual(caller.calls[0].args, { clientId: 'ide-6', wireRevision: DSH_IDE_WIRE_REVISION });
+	assert.deepEqual(caller.calls[1].args, { clientId: 'ide-6', wireRevision: DSH_IDE_WIRE_REVISION });
 	finishPoll({ ok: true, requests: [{ workspace: 'E:\\late' }] });
 	await wait(20);
 	assert.deepEqual(launched, [], 'a poll that resolves after dispose must not open a window');
+});
+
+test('the IDE-side call shapes match the Host method parameter names', async () => {
+	// Typert SRC 模式把**形参名**当 wire 字段，多一个/少一个都会被判 invalid。
+	// 这条测试直接读两半源码，锁住「调用形状 == 方法签名」，防止再出现漏 wireRevision 的回归。
+	const fs = await import('node:fs');
+	const host = fs.readFileSync('src/vs/platform/dshClient/host/ide-service.js', 'utf8');
+	const hostParams = new Map<string, string[]>();
+	for (const match of host.matchAll(/(?:async\s+\*?)?(launch|registerIdeClient|unregisterIdeClient|pollLaunch|followSession|dispatch)\(([^)]*)\)\s*\{/g)) {
+		hostParams.set(match[1], match[2].split(',').map(part => part.trim()).filter(part => part !== 'signal'));
+	}
+	assert.deepEqual(hostParams.get('registerIdeClient'), ['clientId', 'wireRevision']);
+	assert.deepEqual(hostParams.get('pollLaunch'), ['clientId', 'wireRevision']);
+	assert.deepEqual(hostParams.get('unregisterIdeClient'), ['clientId', 'wireRevision']);
+
+	const listener = fs.readFileSync('src/vs/platform/dshClient/transport/dshIdeLaunchListener.ts', 'utf8');
+	for (const method of ['registerIdeClient', 'pollLaunch', 'unregisterIdeClient']) {
+		const call = new RegExp(`call\\('ide', '${method}', \\{([^}]*)\\}\\)`).exec(listener);
+		assert.ok(call !== null, `${method} must be called`);
+		const keys = [...call[1].matchAll(/(\w+):/g)].map(match => match[1]);
+		assert.deepEqual(keys, hostParams.get(method), `${method} call keys must equal the Host parameter names`);
+	}
 });

@@ -24,8 +24,13 @@ export function projectDshIdeArchiveSet(value) {
 		return [];
 	}
 	const sessions = [];
+	// 去重：同一 id 出现两次时，投影结果不该带重复项。
+	// 消费方（`archiveIdsFromResult`）用 Set 兜住了，但投影层也不该产出脏数据——
+	// 否则任何直接比较数组相等的地方都会误判「归档集合变了」。
+	const seen = new Set();
 	for (const id of ids) {
-		if (typeof id === 'string' && id !== '') {
+		if (typeof id === 'string' && id !== '' && !seen.has(id)) {
+			seen.add(id);
 			sessions.push(id);
 		}
 	}

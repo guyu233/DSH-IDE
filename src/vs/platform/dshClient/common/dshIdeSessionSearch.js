@@ -25,6 +25,9 @@ export function projectDshIdeSessionSearch(value) {
 	}
 	const rawItems = value.items;
 	const items = [];
+	// 同一个会话可能因多处命中被官方返回两次（不同 snippet）。选择器里会出现
+	// 两行同 id 的条目，选中后打开的是同一个会话——按 sessionId 保留第一份。
+	const seen = new Set();
 	if (Array.isArray(rawItems)) {
 		for (const item of rawItems) {
 			if (item === null || typeof item !== 'object') {
@@ -36,6 +39,10 @@ export function projectDshIdeSessionSearch(value) {
 			if (typeof sessionId !== 'string' || sessionId === '' || typeof snippet !== 'string') {
 				continue;
 			}
+			if (seen.has(sessionId)) {
+				continue;
+			}
+			seen.add(sessionId);
 			items.push({ sessionId, snippet });
 		}
 	}
