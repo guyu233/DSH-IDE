@@ -271,3 +271,26 @@ test('an in-window merge keeps the newest value of every optional field', async 
 	const planC = (seenC.at(-1) as { plan?: { active: boolean } }).plan;
 	assert.equal(planC?.active, false, 'a field missing from the last frame must be carried over');
 });
+
+test('可选字段清单与契约的视角字段一一对齐（漏一个就会每帧丢字段）', () => {
+	// 依据 CHK-239：`DSH_IDE_VIEW_OPTIONAL_KEYS` 与契约 `DshIdeViewSnapshot` 的可选字段
+	// 是两处维护的同一份事实。契约新增字段而 consumer 忘记加时，该字段每次帧都会被丢掉
+	// （「缺席=保留」语义失效），且不会报错——只能靠这条断言钉住。
+	const consumerSource = readFileSync('src/vs/workbench/contrib/dsh/browser/dshIdeConsumer.ts', 'utf8');
+	const block = /const DSH_IDE_VIEW_OPTIONAL_KEYS = \[([\s\S]*?)\] as const;/.exec(consumerSource);
+	assert.ok(block, 'DSH_IDE_VIEW_OPTIONAL_KEYS must be a const array');
+	const consumerKeys = [...block[1].matchAll(/'([^']+)'/g)].map(m => m[1]);
+
+	const protocolSource = readFileSync('src/vs/platform/dshClient/common/dshIdeProtocol.ts', 'utf8');
+	const viewBlock = /const DSH_IDE_VIEW_KEYS = \[([\s\S]*?)\] as const;/.exec(protocolSource);
+	assert.ok(viewBlock, 'DSH_IDE_VIEW_KEYS must be a const array');
+	const viewKeys = [...viewBlock[1].matchAll(/'([^']+)'/g)].map(m => m[1]);
+	// `frame` 是必填字段（有单独校验），不参与「缺席=保留」的合并。
+	const contractOptional = viewKeys.filter(key => key !== 'frame');
+
+	assert.deepEqual(
+		[...consumerKeys].sort(),
+		[...contractOptional].sort(),
+		'consumer 的可选字段清单必须与契约的视角字段（去掉必填的 frame）完全一致',
+	);
+});
