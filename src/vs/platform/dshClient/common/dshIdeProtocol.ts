@@ -726,6 +726,22 @@ export function exactRecord(value: unknown, allowed: readonly string[], label: s
 	if (unknown.length > 0) {
 		throw new TypeError(`${label} contains unknown field ${JSON.stringify(unknown[0])}`);
 	}
+	// `x-` 是留给客户端扩展的命名空间（见 `dshAccountClientMetadata`），但扩展值必须是
+	// 短标量。不设限的话，一个 10 MB 的 `x-anything` 字段会通过校验并随帧跨进程传输——
+	// 扩展点不该变成绕过所有大小检查的后门。
+	for (const key of Object.keys(obj)) {
+		if (!key.startsWith('x-')) {
+			continue;
+		}
+		const item = obj[key];
+		if (typeof item === 'string') {
+			if (item.length > MAX_EXTENSION_CHARS) {
+				throw new TypeError(`${label}.${key} exceeds ${MAX_EXTENSION_CHARS} characters`);
+			}
+		} else if (typeof item !== 'number' && typeof item !== 'boolean' && item !== null) {
+			throw new TypeError(`${label}.${key} must be a short scalar`);
+		}
+	}
 	return obj;
 }
 
@@ -812,6 +828,14 @@ const MAX_BASE64_CHARS = 140 * 1024 * 1024;
  * 64 足够任何真实消息（聊天客户端通常个位数）。
  */
 const MAX_SUBMIT_ATTACHMENTS = 64;
+
+/**
+ * `x-` 扩展字段的字符串长度上限。
+ *
+ * 扩展点只用于客户端标识（版本、语言、时区偏移），256 字符足够；
+ * 不设限会让它变成绕过所有大小检查的后门。
+ */
+const MAX_EXTENSION_CHARS = 256;
 
 function nonEmptyString(value: unknown, label: string): string {
 	if (typeof value !== 'string' || value.trim() === '') {

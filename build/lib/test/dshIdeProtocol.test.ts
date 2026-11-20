@@ -631,3 +631,18 @@ test('a locale map cannot inherit its required en field from a prototype', () =>
 	// 正常对象仍通过。
 	assert.doesNotThrow(() => validateDshIdeWaterfallNotice({ kind: 'request', eventId: 'e1', event: 'approval/request', agentId: 'a1', request: { toolName: 'bash' } }));
 });
+
+test('x- extension fields must be short scalars', () => {
+	// `x-` 是客户端扩展命名空间，但扩展值必须是短标量——不设限的话，
+	// 一个 10 MB 的 `x-anything` 会通过校验并随帧跨进程传输。
+	const ok = (extra: Record<string, unknown>) => validateDshIdeInput('submit', { text: 'hi', sessionId: 's', ...extra });
+	assert.doesNotThrow(() => ok({ 'x-v': '1.2.3' }));
+	assert.doesNotThrow(() => ok({ 'x-v': 'A'.repeat(256) }));
+	assert.doesNotThrow(() => ok({ 'x-n': 42 }));
+	assert.doesNotThrow(() => ok({ 'x-b': true }));
+	assert.doesNotThrow(() => ok({ 'x-z': null }));
+	assert.throws(() => ok({ 'x-v': 'A'.repeat(257) }), /exceeds 256 characters/);
+	assert.throws(() => ok({ 'x-big': 'A'.repeat(10 * 1024 * 1024) }), /exceeds 256 characters/);
+	assert.throws(() => ok({ 'x-o': { a: 1 } }), /must be a short scalar/);
+	assert.throws(() => ok({ 'x-a': [1, 2] }), /must be a short scalar/);
+});
