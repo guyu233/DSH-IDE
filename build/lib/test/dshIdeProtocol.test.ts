@@ -572,3 +572,11 @@ test('base64 payloads have a runaway-size ceiling but no business limit', () => 
 	assert.throws(() => validateDshIdeInput('saveImageAttachment', { mediaType: 'image/png', data: huge }));
 	assert.throws(() => validateDshIdeInput('speechTranscribe', { request: { audioBase64: huge } }));
 });
+
+test('a submission cannot carry an unbounded number of attachments', () => {
+	// Host 对每个附件各起一次读取与编码；超长数组等于把一次提交放大成任意多次 IO。
+	const ref = (i: number) => ({ attachmentId: `a${i}`, mediaType: 'image/png' as const, bytes: 100, width: 10, height: 10 });
+	assert.doesNotThrow(() => validateDshIdeInput('submit', { text: 'hi', sessionId: 's', attachments: [ref(0)] }));
+	assert.doesNotThrow(() => validateDshIdeInput('submit', { text: 'hi', sessionId: 's', attachments: Array.from({ length: 64 }, (_, i) => ref(i)) }));
+	assert.throws(() => validateDshIdeInput('submit', { text: 'hi', sessionId: 's', attachments: Array.from({ length: 65 }, (_, i) => ref(i)) }));
+});

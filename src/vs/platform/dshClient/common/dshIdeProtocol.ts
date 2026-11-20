@@ -781,6 +781,14 @@ function nonNegativeFinite(value: unknown, label: string): number {
  */
 const MAX_BASE64_CHARS = 140 * 1024 * 1024;
 
+/**
+ * 单条提交的附件数量上限。
+ *
+ * Host 侧对每个附件各起一次读取与编码；超长数组等于把一次提交放大成任意多次 IO。
+ * 64 足够任何真实消息（聊天客户端通常个位数）。
+ */
+const MAX_SUBMIT_ATTACHMENTS = 64;
+
 function nonEmptyString(value: unknown, label: string): string {
 	if (typeof value !== 'string' || value.trim() === '') {
 		throw new TypeError(`${label} must be a non-empty string`);
@@ -910,6 +918,11 @@ export function validateDshIdeInput<K extends DshIdeMethod>(command: K, args: un
 			if (record['attachments'] !== undefined) {
 				if (!Array.isArray(record['attachments'])) {
 					throw new TypeError('DshIdeInput.submit.attachments must be an array');
+				}
+				// 附件数量也要有上限：Host 侧会对每项各起一次读取与编码，
+				// 一个超长数组等于把一次提交放大成任意多次 IO。64 足够任何真实消息。
+				if (record['attachments'].length > MAX_SUBMIT_ATTACHMENTS) {
+					throw new TypeError(`DshIdeInput.submit.attachments exceeds ${MAX_SUBMIT_ATTACHMENTS} items`);
 				}
 				record['attachments'].forEach((item, index) => imageAttachmentRef(item, `DshIdeInput.submit.attachments[${index}]`));
 			}
