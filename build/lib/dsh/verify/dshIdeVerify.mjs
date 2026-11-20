@@ -61,6 +61,7 @@ function detectInstalledDshVersion() {
 const commonDir = 'platform/dshClient/common';
 const protocolRel = `${commonDir}/dshIdeProtocol.ts`;
 const contractRel = `${commonDir}/dshIdeContract.ts`;
+const hostRel = 'platform/dshClient/host/ide-view-host.js';
 
 function walk(dir, out = []) {
 	if (!fs.existsSync(dir)) { return out; }
@@ -138,6 +139,21 @@ function protocolSingleSource() {
 		assert.doesNotMatch(text, /\b(?:function|const|let)\s+(?:exactRecord|jsonValue|validateDshIde\w+)\b/,
 			`duplicate JS validator in ${rel(file)} — protocol must be the single source`);
 	}
+
+	// 契约里的每个方法都必须有 Host 实现：有契约无实现 = 调用必然失败。
+	// Host 混用两种写法（`async name(args)` 与 `name: async args =>`），两种都要认。
+	const methodBlock = /export interface DshIdeMethodArgs \{([\s\S]*?)\n\}/.exec(protocol);
+	assert.ok(methodBlock, 'DshIdeMethodArgs must be declared as an interface body');
+	const contractMethods = [...methodBlock[1].matchAll(/^\t(\w+):/gm)].map(m => m[1]);
+	assert.ok(contractMethods.length > 0, 'DshIdeMethodArgs must declare at least one method');
+	const hostSource = read(hostRel);
+	const missing = contractMethods.filter(method => {
+		// 两种写法都认：`async name(args) {` 与 `name: async args => {`。
+		const asMethod = new RegExp(`\\basync\\s+${method}\\s*\\(`);
+		const asProperty = new RegExp(`\\b${method}\\s*:\\s*async\\b`);
+		return !asMethod.test(hostSource) && !asProperty.test(hostSource);
+	});
+	assert.deepEqual(missing, [], `contract methods with no Host implementation: ${missing.join(', ')}`);
 
 	console.log(`PASS  protocol-single-source: ${symbols.length} symbols declared once in ${protocolRel}; dependency one-way; no duplicate JS validator`);
 	return 'PASS';
