@@ -48,10 +48,6 @@ export function validateDshIdeViewBinding(value: unknown): DshIdeViewBinding {
 	return { viewId, generation, sessionId };
 }
 
-export function sameDshIdeViewBinding(a: DshIdeViewBinding, b: DshIdeViewBinding): boolean {
-	return a.viewId === b.viewId && a.generation === b.generation && a.sessionId === b.sessionId;
-}
-
 /**
  * `deleteSession` 依赖的社区插件版本（§8.10.8（4）版本绑定）。
  *
