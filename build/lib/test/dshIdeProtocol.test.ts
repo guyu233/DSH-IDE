@@ -677,3 +677,14 @@ test('json objects and arrays have bounded item counts and key lengths', () => {
 	assert.doesNotThrow(() => validateDshIdeInput('newSession', { options: Array.from({ length: 10000 }, (_, i) => i) }));
 	assert.throws(() => validateDshIdeInput('newSession', { options: Array.from({ length: 10001 }, (_, i) => i) }), /exceeds 10000 array items/);
 });
+
+test('every string field shares one length ceiling', () => {
+	// nonEmptyString / optionalString 是所有字符串字段的统一入口，在那里挡一道
+	// 就能覆盖全部方法。不设限时 50 MB 的 submit.text 也能通过并跨进程传输。
+	const oneMb = 'A'.repeat(1024 * 1024);
+	assert.doesNotThrow(() => validateDshIdeInput('submit', { text: oneMb, sessionId: 's' }));
+	assert.throws(() => validateDshIdeInput('submit', { text: `${oneMb}A`, sessionId: 's' }), /exceeds 1048576 characters/);
+	// 其它方法的字符串字段同样受这一道闸保护。
+	assert.throws(() => validateDshIdeInput('renameSession', { sessionId: 's', title: 'A'.repeat(50 * 1024 * 1024) }), /exceeds 1048576 characters/);
+	assert.throws(() => validateDshIdeInput('searchSessions', { query: 'A'.repeat(50 * 1024 * 1024) }), /exceeds 1048576 characters/);
+});

@@ -771,6 +771,15 @@ const MAX_JSON_ITEMS = 10000;
 /** JSON 对象的单个键名长度上限（完整路径也会随之膨胀，所以键名也要有界）。 */
 const MAX_JSON_KEY_CHARS = 256;
 
+/**
+ * 任意单个字符串字段的长度上限。
+ *
+ * `nonEmptyString` / `optionalString` 是所有字符串字段的统一入口，在这里挡一道即可
+ * 覆盖全部方法。不设限时 50 MB 的 `submit.text` 能通过校验并跨进程传输。
+ * 1 MiB 远大于任何真实字符串字段。
+ */
+const MAX_STRING_CHARS = 1024 * 1024;
+
 function jsonValueAt(value: unknown, label: string, ancestors: Set<object>, depth: number): void {
 	if (depth > MAX_JSON_DEPTH) {
 		throw new TypeError(`${label} exceeds ${MAX_JSON_DEPTH} levels of nesting`);
@@ -870,6 +879,13 @@ const MAX_EXTENSION_FIELDS = 8;
 function nonEmptyString(value: unknown, label: string): string {
 	if (typeof value !== 'string' || value.trim() === '') {
 		throw new TypeError(`${label} must be a non-empty string`);
+	}
+	// 统一长度上限：`nonEmptyString` / `optionalString` 是所有字符串字段的入口，
+	// 在这里挡一道就能覆盖全部方法。不设限时 50 MB 的 `submit.text`、
+	// `renameSession.title`、`searchSessions.query` 都能通过校验并跨进程传输。
+	// 1 MiB 远大于任何真实字符串字段（最长的 `submit.text` 也远小于此）。
+	if (value.length > MAX_STRING_CHARS) {
+		throw new TypeError(`${label} exceeds ${MAX_STRING_CHARS} characters`);
 	}
 	return value;
 }
