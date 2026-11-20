@@ -573,7 +573,7 @@ export class DshIdeHostBridge {
 					this._notifyFollowEnded(shared);
 					return;
 				}
-				const message = error && error.message ? error.message : String(error);
+				const message = safeErrorText(error);
 				console.warn(`[dsh-ide] session follow ended: ${message}`);
 				// 异常结束同样要通知：订阅者必须知道这条流不会再来了，
 				// 不能让它一直停在等待上。

@@ -18,6 +18,7 @@ import { dirname, join } from 'node:path';
 import { Service } from '@deepseek-ai/cordis';
 import { bindTypertRemote } from '@deepseek-ai/dsh-typert-protocol';
 import { materializeElectronHome } from './electron-home.js';
+import { safeErrorText } from '../common/dshIdeAuthRedaction.js';
 import { DSH_IDE_HOST_PTY_PATH, DSH_IDE_HOST_RG_PATH, resolveHostNodePty, resolveHostRipgrep } from './host-ripgrep.js';
 import { IdeLaunchQueue, ideWorkspaceArgs } from './ide-launch-queue.js';
 import { projectDshIdeComposer } from '../common/dshIdeComposer.js';
@@ -258,7 +259,7 @@ export class IdeRemoteService extends Service {
           settled = true;
           resolve(value);
         };
-        child.once('error', error => finish(error instanceof Error ? error.message : String(error)));
+        child.once('error', error => finish(safeErrorText(error)));
         child.once('spawn', () => finish(undefined));
         // 已经同步失败的情况：`pid` 缺失说明进程没建起来。
         if (child.pid === undefined) {
@@ -281,7 +282,7 @@ export class IdeRemoteService extends Service {
       });
       return { ok: true };
     } catch (error) {
-      return { ok: false, message: `failed to spawn IDE process: ${error instanceof Error ? error.message : String(error)}` };
+      return { ok: false, message: `failed to spawn IDE process: ${safeErrorText(error)}` };
     }
   }
 
@@ -341,7 +342,7 @@ export class IdeRemoteService extends Service {
       electronVersion: process.versions.electron ?? 'unknown',
     })).catch(error => ({
       ok: false,
-      message: `failed to materialize Electron home: ${error instanceof Error ? error.message : String(error)}`,
+      message: `failed to materialize Electron home: ${safeErrorText(error)}`,
     })).then(result => {
       if (result.ok !== true) {
         // 失败不缓存：DSH 升级或卷变更后下一次点击可重试。
