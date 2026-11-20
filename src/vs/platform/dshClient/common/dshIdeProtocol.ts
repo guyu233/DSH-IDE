@@ -760,6 +760,17 @@ export function jsonValue(value: unknown, label: string, ancestors: Set<object>)
  */
 const MAX_JSON_DEPTH = 32;
 
+/**
+ * JSON 值里单个对象/数组的条目数上限。
+ *
+ * 不设限时十万个键的对象也能通过；校验本身要遍历它们，之后还要序列化。
+ * 10000 远大于任何真实配置。
+ */
+const MAX_JSON_ITEMS = 10000;
+
+/** JSON 对象的单个键名长度上限（完整路径也会随之膨胀，所以键名也要有界）。 */
+const MAX_JSON_KEY_CHARS = 256;
+
 function jsonValueAt(value: unknown, label: string, ancestors: Set<object>, depth: number): void {
 	if (depth > MAX_JSON_DEPTH) {
 		throw new TypeError(`${label} exceeds ${MAX_JSON_DEPTH} levels of nesting`);
@@ -783,13 +794,23 @@ function jsonValueAt(value: unknown, label: string, ancestors: Set<object>, dept
 	ancestors.add(obj);
 	try {
 		if (Array.isArray(value)) {
+			if (value.length > MAX_JSON_ITEMS) {
+				throw new TypeError(`${label} exceeds ${MAX_JSON_ITEMS} array items`);
+			}
 			value.forEach((item, index) => jsonValueAt(item, `${label}[${index}]`, ancestors, depth + 1));
 		} else {
 			const prototype = Object.getPrototypeOf(obj);
 			if (prototype !== Object.prototype && prototype !== null) {
 				throw new TypeError(`${label} must contain only plain objects`);
 			}
-			for (const [key, item] of Object.entries(obj)) {
+			const entries = Object.entries(obj);
+			if (entries.length > MAX_JSON_ITEMS) {
+				throw new TypeError(`${label} exceeds ${MAX_JSON_ITEMS} object keys`);
+			}
+			for (const [key, item] of entries) {
+				if (key.length > MAX_JSON_KEY_CHARS) {
+					throw new TypeError(`${label}.${key.slice(0, 16)}… key exceeds ${MAX_JSON_KEY_CHARS} characters`);
+				}
 				jsonValueAt(item, `${label}.${key}`, ancestors, depth + 1);
 			}
 		}

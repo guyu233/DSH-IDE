@@ -660,3 +660,20 @@ test('the number of x- extension fields is bounded', () => {
 	assert.throws(() => validateDshIdeInput('submit', withExtensions(9)), /at most 8 allowed/);
 	assert.throws(() => validateDshIdeInput('submit', withExtensions(10000)), /at most 8 allowed/);
 });
+
+test('json objects and arrays have bounded item counts and key lengths', () => {
+	// 不设限时十万个键也能通过；校验要遍历、之后还要序列化。
+	const object = (count: number) => {
+		const value: Record<string, unknown> = {};
+		for (let i = 0; i < count; i++) {
+			value[`k${i}`] = i;
+		}
+		return value;
+	};
+	assert.doesNotThrow(() => validateDshIdeInput('newSession', { options: object(10000) }));
+	assert.throws(() => validateDshIdeInput('newSession', { options: object(10001) }), /exceeds 10000 object keys/);
+	assert.doesNotThrow(() => validateDshIdeInput('newSession', { options: { ['k'.repeat(256)]: 1 } }));
+	assert.throws(() => validateDshIdeInput('newSession', { options: { ['k'.repeat(257)]: 1 } }), /key exceeds 256 characters/);
+	assert.doesNotThrow(() => validateDshIdeInput('newSession', { options: Array.from({ length: 10000 }, (_, i) => i) }));
+	assert.throws(() => validateDshIdeInput('newSession', { options: Array.from({ length: 10001 }, (_, i) => i) }), /exceeds 10000 array items/);
+});
