@@ -1642,6 +1642,12 @@ function localeMap(value: unknown, label: string): Readonly<Record<string, strin
 	if (typeof value !== 'object' || value === null || Array.isArray(value)) {
 		throw new TypeError(`${label} must be an object`);
 	}
+	// 同 `exactRecord`：`record['en']` 会沿原型链读，不拒原型对象时
+	// `Object.create({en:'x'})` 能通过「必须含 en」的检查。
+	const prototype = Object.getPrototypeOf(value);
+	if (prototype !== Object.prototype && prototype !== null) {
+		throw new TypeError(`${label} must be a plain object`);
+	}
 	const record = value as Record<string, unknown>;
 	for (const key of Object.keys(record)) {
 		if (record[key] === undefined) {

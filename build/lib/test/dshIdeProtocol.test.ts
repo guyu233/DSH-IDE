@@ -28,6 +28,7 @@ import {
 	resolveDshSessionPin,
 	dshErrorText,
 	validateDshIdeSnapshot,
+	validateDshIdeWaterfallNotice,
 	type DshIdeMethod,
 	type DshIdeSnapshot,
 } from '../../../src/vs/platform/dshClient/common/dshIdeProtocol.ts';
@@ -617,4 +618,16 @@ test('exactRecord rejects objects whose fields come from a prototype', () => {
 	assert.deepEqual(exactRecord({ a: 1 }, ['a'], 't'), { a: 1 });
 	const bare = Object.assign(Object.create(null) as Record<string, unknown>, { a: 1 });
 	assert.equal(exactRecord(bare, ['a'], 't')['a'], 1);
+});
+
+test('a locale map cannot inherit its required en field from a prototype', () => {
+	// localeMap 读 record['en'] 会沿原型链；不拒原型对象时
+	// Object.create({en:'x'}) 能通过「必须含 en」的检查。
+	const request = Object.assign(Object.create({ en: 'pwn' }), { toolName: 'bash' });
+	assert.throws(
+		() => validateDshIdeWaterfallNotice({ kind: 'request', eventId: 'e1', event: 'approval/request', agentId: 'a1', request }),
+		/must be a plain object/,
+	);
+	// 正常对象仍通过。
+	assert.doesNotThrow(() => validateDshIdeWaterfallNotice({ kind: 'request', eventId: 'e1', event: 'approval/request', agentId: 'a1', request: { toolName: 'bash' } }));
 });
