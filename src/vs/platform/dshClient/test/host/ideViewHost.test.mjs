@@ -1684,3 +1684,12 @@ test('close clears every per-bridge collection', async () => {
 	}
 	assert.equal(bridge._modelCatalogCache, undefined, '_modelCatalogCache must be dropped after close');
 });
+
+test('job operations reject a session that is not the bound one', async () => {
+	// 后台作业属于当前绑定的会话。修复前 jobList/jobKill 直接用 args.sessionId
+	// 调官方服务，任意 id 都能读到/终止别的会话的作业。
+	const { bridge } = bridgeWith();
+	bridge.open({ view: 'chat', params: { sessionId: 's-1' } });
+	await assert.rejects(() => bridge.invoke('jobList', { sessionId: 's-2' }), error => error.code === SESSION_SWITCHED);
+	await assert.rejects(() => bridge.invoke('jobKill', { sessionId: 's-2', jobId: 'j-1' }), error => error.code === SESSION_SWITCHED);
+});

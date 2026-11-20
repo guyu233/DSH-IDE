@@ -640,6 +640,8 @@ export const DSH_IDE_VIEW_BOUND_METHODS: readonly DshIdeMethod[] = [
 	'submit', 'interrupt', 'resume', 'rewind', 'loadOlder', 'setModel', 'setEffort',
 	'setPermissionPreset', 'runCommand', 'composerState', 'setTeamEnabled', 'setAgentPreset',
 	'listCommands', 'readAttachment', 'setGoal', 'listSkills',
+	// 后台作业属于当前绑定的会话：IDE 侧传的就是 activeSessionId，Host 侧走 sessionIdOf。
+	'jobList', 'jobKill',
 ];
 
 /** 每个 method 的 exactRecord 允许字段（与 DshIdeMethodArgs 同步；空数组=无字段）。 */

@@ -1514,13 +1514,15 @@ function createMethodHandlers(bridge) {
 			}
 		},
 		async jobList(args) {
+			// 后台作业属于**当前绑定的会话**：必须核对归属，否则任意 id 都能读到别的会话的作业。
+			const sessionId = sessionIdOf(args);
 			// 官方 `jobController.list({ sessionId })` 是流：管理面只需要第一帧名单。
 			const jobs = service(bridge.ctx, 'jobController');
 			if (typeof jobs.list !== 'function') {
 				throw coded(FEATURE_UNAVAILABLE, 'DSH jobController has no list()', { capability: 'jobList' });
 			}
 			const signal = callerAbortSignal(bridge.ctx);
-			for await (const frame of jobs.list({ sessionId: args.sessionId }, signal)) {
+			for await (const frame of jobs.list({ sessionId }, signal)) {
 				if (frame && frame.type === 'rows') {
 					return frame.jobs;
 				}
@@ -1528,11 +1530,13 @@ function createMethodHandlers(bridge) {
 			return [];
 		},
 		async jobKill(args) {
+			// 同 `jobList`：终止作业也是当前绑定会话内的操作，先核对归属。
+			const sessionId = sessionIdOf(args);
 			const jobs = service(bridge.ctx, 'jobController');
 			if (typeof jobs.kill !== 'function') {
 				throw coded(FEATURE_UNAVAILABLE, 'DSH jobController has no kill()', { capability: 'jobKill' });
 			}
-			return jobs.kill({ sessionId: args.sessionId, jobId: args.jobId });
+			return jobs.kill({ sessionId, jobId: args.jobId });
 		},
 		async mcpListServers() {
 			// 官方 `mcpManager.list()`：只读配置与运行时状态，不挂载、不探测。
