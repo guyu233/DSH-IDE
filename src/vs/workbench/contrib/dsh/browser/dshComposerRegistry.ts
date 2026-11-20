@@ -40,7 +40,13 @@ export function setDshComposerSource(source: IDshComposerSource | undefined): vo
 	current = source;
 }
 
-/** 输入框读取当前数据源；DSH 未就绪时返回 undefined，选择器退回 VS Code 自带数据。 */
+/**
+ * 输入框读取当前数据源。
+ *
+ * 窗口恢复阶段（真数据源尚未登记）返回 `PLACEHOLDER`，它的 `state` 是空 DSH 列表，
+ * 保证第一帧不会闪出 VS Code 自带模型；贡献点 dispose 后返回 `undefined`。
+ * 调用方都是可选链（`composer?.setSession(...)`），两种形态都安全。
+ */
 export function getDshComposerSource(): IDshComposerSource | undefined {
 	return current;
 }
