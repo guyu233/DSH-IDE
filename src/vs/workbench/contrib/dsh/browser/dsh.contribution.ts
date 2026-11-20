@@ -237,7 +237,11 @@ class DshClientContribution extends Disposable implements IWorkbenchContribution
 				});
 			}, CAPABILITY_POLL_MS);
 		};
-		startPoll();
+		// 初始也要按可见性决定是否起轮询：窗口可能一启动就是隐藏的（例如在后台标签恢复），
+		// 无条件 startPoll 会在用户根本没看的时候先转一圈。
+		if (document.visibilityState === 'visible') {
+			startPoll();
+		}
 		this._register({ dispose: stopPoll });
 		// `document.visibilityState` 直接反映窗口是否在前台：比自建定时器判定更准，也更省。
 		const onVisibilityChange = (): void => {
