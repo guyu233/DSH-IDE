@@ -15,7 +15,13 @@ import { DSH_IDE_API_VERSION, DSH_IDE_WIRE_REVISION } from './dshIdeProtocol.js'
 /** 经校验、承诺兼容的上游（DSH stable）版本。上游升级时只改此处 + translator/dshEmits 穷举。 */
 export const UPSTREAM_VALIDATED_VERSION = '0.2.2-rc.1';
 
-/** 受信的 DSH 包（升级时比对指纹用）。 */
+/**
+ * 受信的 DSH 包（升级时比对指纹用）。
+ *
+ * 只列**真实存在于已安装 DSH 的 npm 包**。`packages/core/` 与 `packages/adapter/`
+ * 是上游的**目录组**（一组包的家），不是可安装的包名——写进这里会让清单核对时
+ * 找不到对应 version，等于给假数据。`dsh-web-frontend` 是真实发布的包。
+ */
 export interface DshBlessedPackage {
 	readonly name: string;
 	/** 承诺兼容的 semver 范围（人类可读，CI 仅作记录/审计）。 */
@@ -23,8 +29,6 @@ export interface DshBlessedPackage {
 }
 export const BLESSED_PACKAGES = Object.freeze([
 	{ name: '@deepseek-ai/dsh-web-frontend', range: '^0.2.2' },
-	{ name: '@deepseek-ai/dsh-core', range: '^0.2.2' },
-	{ name: '@deepseek-ai/dsh-adapter', range: '^0.2.2' },
 ] as readonly DshBlessedPackage[]);
 
 /** VS Code 侧需保留的注入点占位（上游升级打 patch 时核对）。 */

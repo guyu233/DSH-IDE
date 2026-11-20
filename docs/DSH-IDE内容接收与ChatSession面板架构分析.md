@@ -228,7 +228,7 @@ export interface DshIdeSnapshot {
 文件：`src/vs/platform/dshClient/common/dshIdeContract.ts`。依赖方向**单向**：本文件引用 `dshIdeProtocol.ts` 常量（`:13` `DSH_IDE_API_VERSION`、`DSH_IDE_WIRE_REVISION`），协议文件绝不反向引用它（`:8`）。
 
 - `UPSTREAM_VALIDATED_VERSION = '0.2.2-rc.1'`（`:16`）：经校验承诺兼容的上游 DSH stable 版本；上游升级时只改此处 + translator/dshEmits 穷举。
-- `BLESSED_PACKAGES`（`:24-28`）：受信 DSH 包及 semver 范围（`@deepseek-ai/dsh-web-frontend` / `dsh-core` / `dsh-adapter`，均 `^0.2.2`）。
+- `BLESSED_PACKAGES`（`:24-28`）：受信 DSH 包及 semver 范围。只列真实发布的 npm 包——当前仅 `@deepseek-ai/dsh-web-frontend`（`^0.2.2`）。`packages/core/` 与 `packages/adapter/` 是上游的**目录组**、不是可安装包名，不能写进这里。
 - `VSCODE_PATCH_POINTS`（`:48-77`）：VS Code 侧 4 个注入点（`chat-viewlet`→`ChatViewPane`、`inline-completion`→`InlineCompletionsController`、`terminal`→`ITerminalService`、`command-palette`→`QuickAccessController`），每个带基线文件 sha256 前 16 位。上游升版时 `verify:dsh-ide-contract` 据此做**失败断言**（而非只打印哈希），提示 patch 是否需重放。
 - `parseVersion` / `compareVersion`（`:80-88`）：semver 比较，正式版优先于预发布。
 - 版本策略：优先跟随 DSH stable，不在 rc 迭代期盲目追新；`installedMeetsVersion` / `upstreamDrift` 在插件启动时做 drift 警告，CI 做失败门禁（`:9-10`）。
