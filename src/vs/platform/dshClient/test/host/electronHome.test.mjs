@@ -19,6 +19,7 @@ import {
 	defaultIo,
 	electronHomePaths,
 	materializeElectronHome,
+	resolveElectronHomeDir,
 } from '../../host/electron-home.js';
 
 const windowsOnly = process.platform === 'win32' ? false : 'Windows-only test';
@@ -131,6 +132,20 @@ test('标记匹配时不重复重建（幂等）', { skip: windowsOnly }, () => 
 	} finally {
 		fixture.dispose();
 	}
+});
+
+test('插件和 Electron 不在同一块盘时，主页放到可执行文件所在卷', () => {
+	const io = {
+		stat(target) {
+			if (String(target).includes('plugin')) {
+				return { dev: 2, mtimeMs: 1 };
+			}
+			return { dev: 1, mtimeMs: 1 };
+		},
+	};
+	const home = resolveElectronHomeDir('D:\\plugin', 'C:\\Programs\\DeepSeek Harness\\DeepSeek Harness.exe', io);
+	assert.match(home, /DSH-IDE/);
+	assert.doesNotMatch(home, /^D:\\plugin/);
 });
 
 test('跨卷硬链接失败时明确拒绝，不静默复制', () => {

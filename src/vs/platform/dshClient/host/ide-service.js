@@ -18,6 +18,7 @@ import { dirname, join } from 'node:path';
 import { Service } from '@deepseek-ai/cordis';
 import { bindTypertRemote } from '@deepseek-ai/dsh-typert-protocol';
 import { materializeElectronHome } from './electron-home.js';
+import { publishHostEndpoint, resolveHostEndpoint } from './ide-view-host.js';
 import { safeErrorText } from '../common/dshIdeAuthRedaction.js';
 import { DSH_IDE_HOST_PTY_PATH, DSH_IDE_HOST_RG_PATH, resolveHostNodePty, resolveHostRipgrep } from './host-ripgrep.js';
 import { IdeLaunchQueue, ideWorkspaceArgs } from './ide-launch-queue.js';
@@ -138,11 +139,13 @@ export class IdeRemoteService extends Service {
     }
 
     // 3) 还没有 IDE 报到：这是**首次点击**，由 Host 拉起 IDE 进程（插件载荷，不是独立应用）。
-    const endpoint = this.ideEndpoint();
+    // 端口以当前 webServer 为准，并回写端点文件。不能只读上次落盘的文件：
+    // DSH 重启后端口会变，旧文件会让新窗口连到一个已经不存在的端口。
+    const endpoint = await this.currentEndpoint();
     if (endpoint === undefined) {
       return {
         ok: false,
-        message: `no IDE process has registered yet; endpoint file not found (looked in ${this.endpointCandidates().join(' , ')})`,
+        message: `DSH host endpoint is not ready (webServer has no port, and no endpoint file at ${this.endpointCandidates().join(' , ')})`,
       };
     }
     const spawned = await this.spawnIdeProcess(endpoint, workspace, sessionId);
@@ -183,7 +186,7 @@ export class IdeRemoteService extends Service {
     if (this.launchInFlight !== undefined) {
       return this.launchInFlight;
     }
-    const inFlight = this._spawnIdeProcessOnce(appPath, workspace, sessionId);
+    const inFlight = this._spawnIdeProcessOnce(appPath, workspace, sessionId, endpoint);
     this.launchInFlight = inFlight;
     try {
       return await inFlight;
@@ -202,12 +205,16 @@ export class IdeRemoteService extends Service {
    * @param {string} appPath IDE 载荷目录
    * @param {string | undefined} workspace 要打开的工作区
    * @param {string | undefined} sessionId 要订阅的会话
+   * @param {{ origin: string, launchUrl: string }} endpoint 当前 Host 端点（含端口与 launch token）
    * @returns {Promise<{ ok: boolean, message?: string }>}
    */
-  async _spawnIdeProcessOnce(appPath, workspace, sessionId) {
+  async _spawnIdeProcessOnce(appPath, workspace, sessionId, endpoint) {
     const home = await this.ensureElectronHome(appPath);
     if (home.ok !== true) {
       return { ok: false, message: home.message };
+    }
+    if (typeof endpoint?.origin !== 'string' || endpoint.origin === '' || typeof endpoint?.launchUrl !== 'string' || endpoint.launchUrl === '') {
+      return { ok: false, message: 'DSH host endpoint is missing origin or launchUrl' };
     }
     try {
       // 只把宿主搜索工具路径交给 IDE；不创建链接、不复制文件，避免任何清理动作影响宿主安装。
@@ -242,11 +249,12 @@ export class IdeRemoteService extends Service {
       // 不传载荷目录作为位置参数：主页的 `resources/app` 已经指向插件载荷。
       // 位置参数只承载「要打开的工作区」，与 VS Code CLI 语义一致（首次点击即打开当前工作区）。
       const args = ideWorkspaceArgs(workspace);
-      // DSH-IDE 是 DSH 的插件，IDE 窗口必须随 DSH 进程一起结束。
-      // 因此**不能**用 `detached: true` + `unref()`：那会把子进程从父进程的进程组里摘出去，
-      // DSH 退出后窗口仍留着。这里保持普通子进程，并把句柄登记到插件上下文，
-      // 由 `ctx.effect` 在插件卸载 / Host 退出时显式 kill。
-      const child = spawn(home.exe, args, { stdio: 'ignore', env, cwd: appPath });
+      // DSH-IDE 是 DSH 拉起的子进程，不是独立应用。
+      // `detached: false` 且不 `unref()`：Windows 上 `detached: true` 会带 CREATE_BREAKAWAY_FROM_JOB，
+      // 子进程会离开父进程的 Job，DSH 退出后窗口还在。保持默认子进程，它留在 DSH 的进程树里。
+      // 插件上下文销毁（DSH 正常退出 / 卸载）时由已有的 `ctx.effect` 调用 `killIdeChild()`。
+      // 不另写轮询去探测 DSH 是否还活着。
+      const child = spawn(home.exe, args, { stdio: 'ignore', env, cwd: dirname(home.exe), detached: false, windowsHide: false });
       // `spawn` 只代表「请求已提交」：真正的失败（找不到可执行文件、权限不足）
       // 会以异步 `error` 事件到达，try/catch 覆盖不到。因此这里必须等一次判定，
       // 否则会把「根本没起来」报成「已开窗」。
@@ -272,7 +280,7 @@ export class IdeRemoteService extends Service {
         return { ok: false, message: `failed to spawn IDE process: ${failure}` };
       }
       this.ideChild = child;
-      this.spawnedAt = now;
+      this.spawnedAt = Date.now();
       // 子进程自己退出（用户关窗口）时释放句柄，避免防抖误判仍在运行。
       child.once('exit', () => {
         if (this.ideChild === child) {
@@ -436,6 +444,30 @@ export class IdeRemoteService extends Service {
       const args = validateDshIdeInput(method, payload);
       return bridge.invoke(method, args, validateDshIdeViewBinding(binding));
     });
+  }
+
+  /**
+   * 当前这次点击该连的 Host 端点。
+   *
+   * 先读正在监听的 `webServer.port` 和 `connection.authenticatedUrl`，并把它写回端点文件。
+   * 文件只是 IDE 重启后重新发现端口用的；点击当下不以旧文件为准。
+   * 服务还没报出端口时才退回文件，避免在 Host 刚起来的空窗里完全打不开。
+   * @returns {Promise<{ origin: string, launchUrl: string, port?: number } | undefined>}
+   */
+  async currentEndpoint() {
+    const live = resolveHostEndpoint(this.ctx);
+    if (live !== undefined && typeof live.origin === 'string' && live.origin !== '' && typeof live.launchUrl === 'string' && live.launchUrl !== '') {
+      const written = await publishHostEndpoint(this.ctx, join(this.pluginRoot, 'runtime', 'host-endpoint.json'));
+      if (written !== undefined && typeof written.launchUrl === 'string' && written.launchUrl !== '') {
+        return written;
+      }
+      return live;
+    }
+    const saved = this.ideEndpoint();
+    if (saved !== undefined && typeof saved.origin === 'string' && saved.origin !== '' && typeof saved.launchUrl === 'string' && saved.launchUrl !== '') {
+      return saved;
+    }
+    return undefined;
   }
 
   /** 读取已发布的 IDE 端点（由 host/ide-view-host.js 的 publishHostEndpoint 写入）。 */

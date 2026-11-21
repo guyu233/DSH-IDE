@@ -15,7 +15,7 @@
 // 依赖注入 `io` 只用于测试跨卷等不可构造的文件系统条件。
 
 import { existsSync, linkSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
-import { basename, join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 
 /** 主页目录名（位于插件根 `runtime/` 下）。 */
 export const ELECTRON_HOME_DIR = 'electron-home';
@@ -45,14 +45,49 @@ export function isExcludedEntry(name) {
  * @param {string} pluginRoot 插件根目录（`index.js` 所在目录）
  * @returns {{ home: string, resources: string, resourcesApp: string, marker: string }}
  */
-export function electronHomePaths(pluginRoot) {
-	const home = join(pluginRoot, 'runtime', ELECTRON_HOME_DIR);
+export function electronHomePaths(pluginRoot, homeDir) {
+	const home = homeDir ?? join(pluginRoot, 'runtime', ELECTRON_HOME_DIR);
 	return {
 		home,
 		resources: join(home, 'resources'),
 		resourcesApp: join(home, 'resources', 'app'),
 		marker: join(home, ELECTRON_HOME_MARKER),
 	};
+}
+
+/**
+ * 主页必须和 Electron 可执行文件同一卷，硬链接才能成立。
+ * 插件目录在另一块盘上时，主页改放到该可执行文件所在卷的 LocalAppData。
+ * @param {string} pluginRoot
+ * @param {string} exePath
+ * @param {typeof defaultIo} [io]
+ * @returns {string}
+ */
+export function resolveElectronHomeDir(pluginRoot, exePath, io = defaultIo) {
+	const pluginDev = deviceId(pluginRoot, io);
+	const exeDev = deviceId(exePath, io);
+	if (pluginDev === undefined || exeDev === undefined || pluginDev === exeDev) {
+		return join(pluginRoot, 'runtime', ELECTRON_HOME_DIR);
+	}
+	const local = process.env.LOCALAPPDATA;
+	if (typeof local === 'string' && local !== '' && deviceId(local, io) === exeDev) {
+		return join(local, 'DSH-IDE', ELECTRON_HOME_DIR);
+	}
+	return join(dirname(exePath), 'dsh-ide-electron-home');
+}
+
+/**
+ * @param {string} target
+ * @param {typeof defaultIo} io
+ * @returns {number | undefined}
+ */
+function deviceId(target, io) {
+	try {
+		const dev = io.stat(target).dev;
+		return typeof dev === 'number' ? dev : undefined;
+	} catch {
+		return undefined;
+	}
 }
 
 /** 真实文件系统实现；测试可注入同名函数模拟跨卷失败。 */
@@ -65,6 +100,8 @@ export const defaultIo = {
 	stat: path => statSync(path),
 	link: (from, to) => linkSync(from, to),
 	junction: (from, to) => symlinkSync(from, to, 'junction'),
+	// 目录符号链接可以跨卷；联接（junction）不行。只在载荷和主页不在同一块盘时使用。
+	symlink: (from, to) => symlinkSync(from, to, 'dir'),
 	remove: path => rmSync(path, { recursive: true, force: true }),
 };
 
@@ -113,6 +150,23 @@ function errorMessage(error) {
 }
 
 /**
+ * 把载荷接到 `resources/app`。同卷用联接；跨卷联接会失败，改用目录符号链接。
+ * 两种都是指向，不复制载荷。
+ * @param {string} appPath
+ * @param {string} resourcesApp
+ * @param {typeof defaultIo} io
+ */
+function linkPayload(appPath, resourcesApp, io) {
+	const appDev = deviceId(appPath, io);
+	const homeDev = deviceId(dirname(resourcesApp), io);
+	if (appDev !== undefined && homeDev !== undefined && appDev !== homeDev) {
+		io.symlink(appPath, resourcesApp);
+		return;
+	}
+	io.junction(appPath, resourcesApp);
+}
+
+/**
  * 物化 Electron 主页（幂等）。
  *
  * @param {object} options
@@ -147,7 +201,7 @@ export function materializeElectronHome({
 		return { ok: false, message: `IDE payload is missing: ${appPath}` };
 	}
 
-	const paths = electronHomePaths(pluginRoot);
+	const paths = electronHomePaths(pluginRoot, resolveElectronHomeDir(pluginRoot, exePath, io));
 	const expected = expectedMarker({ installRoot, exePath, electronVersion }, io);
 	const homeExe = join(paths.home, expected.exeName);
 	if (homeIsCurrent(paths, expected, io)) {
@@ -173,7 +227,8 @@ export function materializeElectronHome({
 			}
 		}
 		// `resources/app` 指向插件载荷：exe 从这里加载 DSH-IDE，而不是 DSH 的 app.asar。
-		io.junction(appPath, paths.resourcesApp);
+		// 同卷用联接；载荷在另一块盘时联接会 EXDEV，改用可跨卷的目录符号链接，仍然不复制载荷。
+		linkPayload(appPath, paths.resourcesApp, io);
 		io.write(paths.marker, `${JSON.stringify({ ...expected, materializedAt: new Date().toISOString() }, null, 2)}\n`);
 		return { ok: true, exe: homeExe };
 	} catch (error) {
