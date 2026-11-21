@@ -19,10 +19,34 @@
  *
  * 为什么需要它：IDE 进程被任务管理器结束 / 崩溃时不会调用 `dispose`，登记项会一直
  * `alive: true`，Host 于是把开窗请求投递给一个已死的进程并仍返回 `ok:true`——用户看到
- * 「点了没反应」而 Host 认为成功（2026-11-09 真机踩过）。IDE 侧轮询间隔是 1.5s，
+ * 「点了没反应」而 Host 认为成功（2026-11-09 真机踩过）。IDE 侧一次长轮询最多挂 8s，
  * 超过这个阈值没轮询即视为离线，由 `dispatch` 跳过并清理。
+ *
+ * IDE 侧用长轮询把这次心跳撑满：一次 `poll` 可以挂起，但挂起时间必须短于本阈值，
+ * 否则「正在等请求」会被当成进程已死。
  */
 export const IDE_CLIENT_POLL_TIMEOUT_MS = 15000;
+
+/**
+ * 单次长轮询允许挂起的上限。
+ *
+ * 8s < 15s 心跳：等待期间 `lastPollAt` 仍算活着，用户点击能立刻唤醒，
+ * 而不是每 1.5s 空打一次跨进程调用。调用方传更大的值会被夹到这里。
+ */
+export const IDE_CLIENT_LONG_POLL_MS = 8000;
+
+/**
+ * 把调用方给的等待时间收成「立即返回」或「不超过长轮询上限」的毫秒数。
+ * 非数字、NaN、非正数都视为立即返回，避免把轮询挂死。
+ * @param {unknown} waitMs
+ * @returns {number}
+ */
+export function normalizeLaunchWait(waitMs) {
+	if (typeof waitMs !== 'number' || !Number.isFinite(waitMs) || waitMs <= 0) {
+		return 0;
+	}
+	return Math.min(Math.floor(waitMs), IDE_CLIENT_LONG_POLL_MS);
+}
 
 /**
  * 首次拉起 IDE 时传给 Electron 的位置参数。
@@ -56,6 +80,8 @@ export class IdeLaunchQueue {
 		this.clients = new Map();
 		/** @type {IdeLaunchSpec[]} */
 		this.pending = [];
+		/** @type {Set<{ clientId: string, timer: ReturnType<typeof setTimeout>, resolve: (value: { ok: boolean, requests: IdeLaunchSpec[] }) => void }>} */
+		this._waiters = new Set();
 	}
 
 	/**
@@ -79,15 +105,22 @@ export class IdeLaunchQueue {
 		const pending = [];
 		// 捕获队列的时钟：`client.poll` 是在 client 对象上调用的，`this` 不是队列。
 		const clock = this.now;
+		const queue = this;
 		const client = {
 			alive: true,
 			lastPollAt: clock(),
 			launch(spec) {
 				if (onLaunch === undefined) {
 					pending.push(spec);
+					// 有人正挂在长轮询上：立刻交还，不要干等下一次超时。
+					queue._wake();
 					return;
 				}
 				onLaunch(spec);
+			},
+			/** 本客户端还没被 poll 取走的请求数。长轮询用它判断要不要提前返回。 */
+			pendingCount() {
+				return pending.length;
 			},
 			/** IDE 侧每次轮询取走待处理的开窗请求（长轮询式，不建第二条通道），同时刷新心跳。 */
 			poll() {
@@ -116,6 +149,7 @@ export class IdeLaunchQueue {
 			dispose: () => {
 				client.dispose();
 				this.clients.delete(clientId);
+				this._dropWaiters(clientId);
 			},
 		};
 	}
@@ -134,6 +168,7 @@ export class IdeLaunchQueue {
 			client.dispose();
 			this.clients.delete(clientId);
 		}
+		this._dropWaiters(clientId);
 		return { ok: true };
 	}
 
@@ -149,6 +184,7 @@ export class IdeLaunchQueue {
 		}
 		if (!client.alive || this.now() - client.lastPollAt > IDE_CLIENT_POLL_TIMEOUT_MS) {
 			this.clients.delete(clientId);
+			this._dropWaiters(clientId);
 			return false;
 		}
 		return true;
@@ -187,20 +223,104 @@ export class IdeLaunchQueue {
 	enqueue(spec) {
 		this.pending.length = 0;
 		this.pending.push(spec);
+		this._wake();
 	}
 
 	/**
 	 * IDE 侧轮询待开窗请求：先取报到前暂存的，再取本客户端队列。
+	 *
+	 * `waitMs === 0`（缺省）立刻返回，既有调用与测试保持同步。
+	 * `waitMs > 0` 且当前没有请求时挂起，直到有请求、登记被注销，或到达上限。
+	 * 已经有请求时即使给了 waitMs 也立刻返回，不空等。
 	 * @param {string} clientId
-	 * @returns {{ ok: boolean, requests: IdeLaunchSpec[] }}
+	 * @param {number} [waitMs]
+	 * @returns {{ ok: boolean, requests: IdeLaunchSpec[] } | Promise<{ ok: boolean, requests: IdeLaunchSpec[] }>}
 	 */
-	poll(clientId) {
+	poll(clientId, waitMs = 0) {
 		const client = this.clients.get(clientId);
 		if (client === undefined) {
 			return { ok: false, requests: [] };
 		}
+		const wait = normalizeLaunchWait(waitMs);
+		if (this._hasWork(client) || wait === 0) {
+			return this._collect(client);
+		}
+		// 挂起本身就是一次心跳：否则等到返回时 lastPollAt 已经旧了 8 秒，
+		// 中间插进来的 dispatch 会把还活着的窗口当成崩溃。
+		client.lastPollAt = this.now();
+		return new Promise(resolve => {
+			/** @type {{ clientId: string, timer: ReturnType<typeof setTimeout>, resolve: (value: { ok: boolean, requests: IdeLaunchSpec[] }) => void }} */
+			const entry = {
+				clientId,
+				timer: /** @type {ReturnType<typeof setTimeout>} */ (undefined),
+				resolve: value => {
+					this._waiters.delete(entry);
+					clearTimeout(entry.timer);
+					resolve(value);
+				},
+			};
+			entry.timer = setTimeout(() => {
+				entry.resolve(this._collectIfPresent(clientId));
+			}, wait);
+			this._waiters.add(entry);
+		});
+	}
+
+	/**
+	 * 这个客户端或全局暂存里是否已经有请求。
+	 * @param {{ pendingCount: () => number }} client
+	 */
+	_hasWork(client) {
+		return this.pending.length > 0 || client.pendingCount() > 0;
+	}
+
+	/**
+	 * 取走当前能交还的请求，并刷新心跳。
+	 * @param {{ poll: () => { requests: IdeLaunchSpec[] } }} client
+	 * @returns {{ ok: true, requests: IdeLaunchSpec[] }}
+	 */
+	_collect(client) {
 		const outOfBand = this.pending.splice(0, this.pending.length);
 		const own = client.poll();
 		return { ok: true, requests: [...outOfBand, ...own.requests] };
+	}
+
+	/**
+	 * @param {string} clientId
+	 * @returns {{ ok: boolean, requests: IdeLaunchSpec[] }}
+	 */
+	_collectIfPresent(clientId) {
+		const client = this.clients.get(clientId);
+		if (client === undefined) {
+			return { ok: false, requests: [] };
+		}
+		return this._collect(client);
+	}
+
+	/** 把已经在等的 poll 叫醒。没有请求的等待者继续挂着。 */
+	_wake() {
+		for (const entry of [...this._waiters]) {
+			const client = this.clients.get(entry.clientId);
+			if (client === undefined) {
+				entry.resolve({ ok: false, requests: [] });
+				continue;
+			}
+			if (!this._hasWork(client)) {
+				continue;
+			}
+			entry.resolve(this._collect(client));
+		}
+	}
+
+	/**
+	 * 登记消失时不能把长轮询留到超时：IDE 已经退出，RPC 应立刻结束。
+	 * @param {string} clientId
+	 */
+	_dropWaiters(clientId) {
+		for (const entry of [...this._waiters]) {
+			if (entry.clientId === clientId) {
+				entry.resolve({ ok: false, requests: [] });
+			}
+		}
 	}
 }

@@ -393,6 +393,8 @@ test('the header button draws an official focus ring instead of relying on backg
 	assert.match(focusRule[1], /--dsw-focus-ring-color/, 'focus must use the official ring colour token');
 	assert.ok(!/outline:none/.test(focusRule[1]), 'an icon-only button must not suppress its focus ring');
 	assert.match(client, /dsh-ide-open-failed/, 'a failed launch must leave a visible mark on the icon button');
+	assert.match(client, /dsh-ide-open-queued/, 'a queued launch must leave a visible mark until the confirmation clears');
+	assert.match(client, /queued \? "dsh-ide-open dsh-ide-open-queued"/, 'the queued class must be applied only while the confirmation is showing');
 	assert.match(client, /error !== null \? "dsh-ide-open dsh-ide-open-failed"/, 'the failed class must be applied only while an error is set');
 	assert.match(client, /"aria-invalid": error !== null \? true : undefined/, 'assistive tech must hear that the button failed');
 });

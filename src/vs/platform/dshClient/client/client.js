@@ -278,6 +278,7 @@ window.__ModuleLoader__.load({
 				".dsh-ide-open:active:not(:disabled){background:var(--dsw-alias-interactive-bg-active);}" +
 				".dsh-ide-open:focus-visible{outline:var(--dsw-focus-ring-width) solid var(--dsw-focus-ring-color, var(--dsw-alias-state-business-primary));outline-offset:2px;}" +
 				".dsh-ide-open-failed{outline:var(--dsw-focus-ring-width) solid var(--dsw-alias-state-danger, var(--dsw-alias-state-business-primary));outline-offset:2px;}" +
+				".dsh-ide-open-queued{outline:var(--dsw-focus-ring-width) solid var(--dsw-alias-state-business-primary);outline-offset:2px;}" +
 				".dsh-ide-open:disabled{cursor:not-allowed;opacity:.4;}");
 		}
 
@@ -365,7 +366,7 @@ window.__ModuleLoader__.load({
 				h(ButtonStyles),
 				h("button", {
 					type: "button",
-					className: error !== null ? "dsh-ide-open dsh-ide-open-failed" : "dsh-ide-open",
+					className: error !== null ? "dsh-ide-open dsh-ide-open-failed" : queued ? "dsh-ide-open dsh-ide-open-queued" : "dsh-ide-open",
 					style: BUTTON_STYLE,
 					title: tooltip,
 					"aria-label": accessibleName,

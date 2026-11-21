@@ -10,17 +10,29 @@
 //
 // 方案（不引入私有管道，遵守第 7 章 §3.1 裁定）：
 //   1. IDE 启动后经**官方 Typert Gateway** 调 `ide.registerIdeClient(clientId, wireRevision)` 报到；
-//   2. IDE 定时调 `ide.pollLaunch(clientId, wireRevision)` 取待处理的开窗请求；
+//   2. IDE 调 `ide.pollLaunch(clientId, wireRevision, waitMs)` 取待处理的开窗请求；
 //   3. 取到后在本进程内调用注入的 `onLaunch`（主进程的开窗入口）。
 //
-// 轮询而非推送：官方客户端传输已提供流式能力，但「开窗」是极低频事件（用户点一次），
-// 用长轮询换取实现简单与无需额外订阅登记，属于合理取舍；若将来要改成流，只需换这一层。
+// 已报到之后是长轮询：Host 在没有请求时把这次调用挂住（上限 8s，短于 15s 心跳），
+// 用户一点按钮就唤醒，不再每 1.5s 空打一次跨进程调用。
+// Host 若忽略 waitMs、立刻返回空列表，则退回 1.5s 短间隔，避免忙等。
 
 import { Disposable } from '../../../base/common/lifecycle.js';
 import { DSH_IDE_WIRE_REVISION } from '../common/dshIdeProtocol.js';
 
-/** 轮询间隔：开窗是低频操作，1.5s 足够，且不打扰 Host。 */
+/** 短间隔：报到失败，或 Host 不支持长轮询（立刻返回空列表）时使用。 */
 export const DSH_IDE_LAUNCH_POLL_MS = 1500;
+
+/**
+ * 已报到后的长轮询上限。
+ *
+ * 必须小于 Host 的 `IDE_CLIENT_POLL_TIMEOUT_MS`（15s），否则「正在等请求」会被当成离线。
+ * 与 `IDE_CLIENT_LONG_POLL_MS` 取同一个数：Host 会把更大的值夹到这个上限。
+ */
+export const DSH_IDE_LAUNCH_WAIT_MS = 8000;
+
+/** Host 在这个时间内返回空列表，就认为它没有挂起，退回短间隔。 */
+const DSH_IDE_LAUNCH_FAST_EMPTY_MS = 250;
 
 /**
  * IDE 侧与 Host 的最小调用面（由 `DshIdeTransport` 提供，避免依赖具体实现）。
@@ -119,7 +131,8 @@ export class DshIdeLaunchListener extends Disposable {
 				this.registered = true;
 				this.lastError = undefined;
 			}
-			const result = await this.caller.call('ide', 'pollLaunch', { clientId: this.clientId, wireRevision: DSH_IDE_WIRE_REVISION });
+			const started = Date.now();
+			const result = await this.caller.call('ide', 'pollLaunch', { clientId: this.clientId, wireRevision: DSH_IDE_WIRE_REVISION, waitMs: DSH_IDE_LAUNCH_WAIT_MS });
 			if (this.disposed) {
 				return;
 			}
@@ -133,6 +146,14 @@ export class DshIdeLaunchListener extends Disposable {
 			}
 			this.dispatch(result);
 			this.lastError = undefined;
+			const requests = result !== null && typeof result === 'object' ? (result as { requests?: unknown }).requests : undefined;
+			const empty = !Array.isArray(requests) || requests.length === 0;
+			// 空且很快返回：对端没有挂起。继续按 8s 去打会变成忙等。
+			const nextDelay = empty && Date.now() - started < DSH_IDE_LAUNCH_FAST_EMPTY_MS
+				? DSH_IDE_LAUNCH_POLL_MS
+				: 50;
+			this.schedule(nextDelay);
+			return;
 		} catch (error) {
 			// 报到失败通常是 Host 还没准备好端点：记录一次并继续重试。
 			this.registered = false;

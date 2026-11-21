@@ -497,3 +497,9 @@ B01 先从新旧配对和可信主体的隔离测试进入原子迁移，不重�
 | 已闭环 | B00–B12 全批次已落地：P1 全部（BUG-008–015、SEC-003/005）、BUG-016/018/019/020/021/022/023/024、DOC-001、OPT-002 在隔离用例或实测证据上转绿；契约 revision 5，两半同时拒绝不匹配。 |
 | 仍存在 | 见上方问题表：SEC-004 的 ACL/原子发布/凭据隔离、DOC-002 的 Linux 真机矩阵、OPT-001、SEC-006 的 Mermaid 间接配置与逐项调用图及 CLN-003/004/005（已核引用、维持现状）。全量 Node、Electron、ESLint 基线仍 FAIL；真机与发布验收 PENDING。 |
 | 新引入 | 契约 revision 5 使旧 Host 与旧 IDE 互相拒绝业务调用，这是有意的失配拒绝。 |
+
+## CHK-254
+
+开窗接单改为长轮询：`pollLaunch(clientId, wireRevision, waitMs)`，Host 把等待夹到 8s（小于 15s 心跳）。已报到的 IDE 不再每 1.5s 空打一次跨进程调用；点击会唤醒正在等待的 poll。对端若立刻返回空列表，IDE 退回 1.5s。删除零调用的 `DshIdeHostBridge.answer`。排队确认给按钮加 `dsh-ide-open-queued` 轮廓。
+
+实测：`ideLaunchQueue.test.mjs` 21 pass / 0 fail；`dshIdeLaunchListener.test.ts` 9 pass / 0 fail。`npm run build-dsh-tests` 未跑通：本机没有 `node_modules`（缺 `esbuild`），因此 `test-dsh:all` 与 `verify:dsh-ide-ci` 为 PENDING。真机 GUI 仍 PENDING。

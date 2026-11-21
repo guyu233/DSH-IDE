@@ -20,6 +20,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
 	DSH_IDE_LAUNCH_POLL_MS,
+	DSH_IDE_LAUNCH_WAIT_MS,
 	DshIdeLaunchListener,
 	type DshIdeLaunchRequest,
 } from '../../../out/vs/platform/dshClient/transport/dshIdeLaunchListener.js';
@@ -69,7 +70,7 @@ test('registers once, then polls and dispatches launch requests', async () => {
 	const pollCalls = caller.calls.filter(c => c.method === 'pollLaunch');
 	assert.ok(pollCalls.length >= 1, 'polling must happen');
 	for (const call of pollCalls) {
-		assert.deepEqual(call.args, { clientId: 'ide-1', wireRevision: DSH_IDE_WIRE_REVISION }, 'every poll carries the wire revision');
+		assert.deepEqual(call.args, { clientId: 'ide-1', wireRevision: DSH_IDE_WIRE_REVISION, waitMs: DSH_IDE_LAUNCH_WAIT_MS }, 'every poll carries the wire revision and the long-poll budget');
 	}
 	assert.ok(pollCount >= 2, `polling must continue (got ${pollCount})`);
 	assert.deepEqual(launched, [{ workspace: 'E:\\repo' }], 'the request must reach onLaunch');
@@ -230,10 +231,15 @@ test('the IDE-side call shapes match the Host method parameter names', async () 
 		hostParams.set(match[1], match[2].split(',').map(part => part.trim()).filter(part => part !== 'signal'));
 	}
 	assert.deepEqual(hostParams.get('registerIdeClient'), ['clientId', 'wireRevision']);
-	assert.deepEqual(hostParams.get('pollLaunch'), ['clientId', 'wireRevision']);
+	assert.deepEqual(hostParams.get('pollLaunch'), ['clientId', 'wireRevision', 'waitMs']);
 	assert.deepEqual(hostParams.get('unregisterIdeClient'), ['clientId', 'wireRevision']);
 
 	const listener = fs.readFileSync('src/vs/platform/dshClient/transport/dshIdeLaunchListener.ts', 'utf8');
+	const queueSource = fs.readFileSync('src/vs/platform/dshClient/host/ide-launch-queue.js', 'utf8');
+	const cap = /export const IDE_CLIENT_LONG_POLL_MS = (\d+)/.exec(queueSource);
+	const asked = /export const DSH_IDE_LAUNCH_WAIT_MS = (\d+)/.exec(listener);
+	assert.ok(cap !== null && asked !== null, 'both halves must name the long-poll budget');
+	assert.equal(cap[1], asked[1], 'the IDE must not ask to wait longer than the Host will actually hold the call');
 	for (const method of ['registerIdeClient', 'pollLaunch', 'unregisterIdeClient']) {
 		const call = new RegExp(`call\\('ide', '${method}', \\{([^}]*)\\}\\)`).exec(listener);
 		assert.ok(call !== null, `${method} must be called`);

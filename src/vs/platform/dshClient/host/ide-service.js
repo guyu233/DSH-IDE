@@ -132,7 +132,7 @@ export class IdeRemoteService extends Service {
       ...(sessionId === undefined ? {} : { sessionId }),
     };
     if (this.launchQueue.dispatch(spec)) {
-      // 已报到的 IDE 会在下一次 1.5s 轮询时取走这条请求并自己开窗。
+      // 已报到的 IDE 若正挂在长轮询上，这条请求会立刻唤醒它；否则等它下一次 poll。
       // 这一刻只是「已交给在线的 IDE 进程」，还不能说窗口已经打开——如实标注，不抢跑。
       return { ok: true, via: 'registered-ide', opened: false, queued: true };
     }
@@ -383,11 +383,19 @@ export class IdeRemoteService extends Service {
     return this.launchQueue.unregister(clientId);
   }
 
-  /** IDE 侧轮询待开窗请求（由 `registerIdeClient` 建立的登记项）。 */
-  pollLaunch(clientId, wireRevision) {
+  /**
+   * IDE 侧轮询待开窗请求（由 `registerIdeClient` 建立的登记项）。
+   *
+   * `waitMs` 可选：缺省立刻返回。IDE 传入正数时长轮询，队列会把它夹到心跳超时以内。
+   * 方法是 async：Typert 会等待返回的 Promise，长轮询期间这条 RPC 一直挂着。
+   * @param {string} clientId
+   * @param {number} wireRevision
+   * @param {number} [waitMs]
+   */
+  async pollLaunch(clientId, wireRevision, waitMs) {
     requireDshIdeWireRevision(wireRevision);
     this._requireTrustedCaller('pollLaunch');
-    return this.launchQueue.poll(clientId);
+    return this.launchQueue.poll(clientId, waitMs);
   }
 
   /** 插件入口在会话服务就绪后把 Host 桥接交过来。窗口只调这里，不再自己开 session/follow。 */

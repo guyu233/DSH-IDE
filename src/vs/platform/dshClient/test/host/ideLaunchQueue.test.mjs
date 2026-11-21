@@ -11,7 +11,7 @@
 
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { IDE_CLIENT_POLL_TIMEOUT_MS, IdeLaunchQueue, ideWorkspaceArgs } from '../../host/ide-launch-queue.js';
+import { IDE_CLIENT_LONG_POLL_MS, IDE_CLIENT_POLL_TIMEOUT_MS, IdeLaunchQueue, ideWorkspaceArgs, normalizeLaunchWait } from '../../host/ide-launch-queue.js';
 
 test('ideWorkspaceArgs puts the workspace after -- so a leading dash is not a switch', () => {
 	assert.deepEqual(ideWorkspaceArgs(undefined), []);
@@ -172,4 +172,70 @@ test('a pending request is dropped once a live client takes it', () => {
 	assert.equal(queue.poll('ide-1').requests.length, 1);
 	assert.equal(queue.pending.length, 0, 'the stash must not survive delivery');
 	assert.equal(queue.poll('ide-1').requests.length, 0, 'a second poll must not replay it');
+});
+
+test('launch wait is clamped under the heartbeat window', () => {
+	assert.equal(normalizeLaunchWait(undefined), 0);
+	assert.equal(normalizeLaunchWait(0), 0);
+	assert.equal(normalizeLaunchWait(-5), 0);
+	assert.equal(normalizeLaunchWait(Number.NaN), 0);
+	assert.equal(normalizeLaunchWait('8000'), 0);
+	assert.equal(normalizeLaunchWait(100), 100);
+	assert.equal(normalizeLaunchWait(60_000), IDE_CLIENT_LONG_POLL_MS);
+	assert.ok(IDE_CLIENT_LONG_POLL_MS < IDE_CLIENT_POLL_TIMEOUT_MS, 'a long poll must finish before the client is declared dead');
+});
+
+test('poll does not wait when a request is already queued', () => {
+	const queue = new IdeLaunchQueue();
+	queue.register('ide-1');
+	queue.enqueue({ workspace: '/ready' });
+	const result = queue.poll('ide-1', 5_000);
+	assert.equal(typeof result.then, 'undefined', 'an available request must return synchronously');
+	assert.deepEqual(result.requests, [{ workspace: '/ready' }]);
+});
+
+test('a waiting poll returns as soon as a request is enqueued', async () => {
+	const queue = new IdeLaunchQueue();
+	queue.register('ide-1');
+	const pending = queue.poll('ide-1', 5_000);
+	assert.equal(typeof pending.then, 'function');
+	queue.enqueue({ workspace: '/now' });
+	assert.deepEqual(await pending, { ok: true, requests: [{ workspace: '/now' }] });
+});
+
+test('a waiting poll returns as soon as dispatch queues a request', async () => {
+	const queue = new IdeLaunchQueue();
+	queue.register('ide-1');
+	const pending = queue.poll('ide-1', 5_000);
+	assert.equal(queue.dispatch({ workspace: '/live' }), true);
+	assert.deepEqual(await pending, { ok: true, requests: [{ workspace: '/live' }] });
+});
+
+test('a waiting poll settles empty when nothing arrives before the cap', async () => {
+	const queue = new IdeLaunchQueue();
+	queue.register('ide-1');
+	const started = Date.now();
+	const result = await queue.poll('ide-1', 40);
+	assert.ok(Date.now() - started >= 30, 'the wait must actually elapse');
+	assert.deepEqual(result, { ok: true, requests: [] });
+	assert.deepEqual(queue.poll('ide-1'), { ok: true, requests: [] });
+});
+
+test('unregister settles a waiting poll instead of holding it', async () => {
+	const queue = new IdeLaunchQueue();
+	queue.register('ide-1');
+	const pending = queue.poll('ide-1', 5_000);
+	queue.unregister('ide-1');
+	assert.deepEqual(await pending, { ok: false, requests: [] });
+});
+
+test('an in-flight long poll still counts as a heartbeat', async () => {
+	let now = 1_000;
+	const queue = new IdeLaunchQueue(() => now);
+	queue.register('ide-1');
+	const pending = queue.poll('ide-1', 5_000);
+	now += IDE_CLIENT_POLL_TIMEOUT_MS - 1;
+	assert.equal(queue.isUsable('ide-1'), true, 'the poll that is still waiting refreshed the heartbeat');
+	queue.enqueue({ workspace: '/w' });
+	assert.deepEqual((await pending).requests, [{ workspace: '/w' }]);
 });

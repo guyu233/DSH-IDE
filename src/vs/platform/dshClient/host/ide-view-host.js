@@ -689,32 +689,6 @@ export class DshIdeHostBridge {
 		}
 	}
 
-	/**
-	 * 旧版单视图 answerer，已被 `_share` 取代（`_share` 额外向所有视图广播请求帧）。
-	 *
-	 * 当前没有任何调用点：两个官方事件都接在 `_share` 上。保留是因为它是公开方法，
-	 * 删掉属于破坏性改动；但**不要**用它接新事件——那会让其它窗口看不到请求。
-	 */
-	async answer(kind, request, next) {
-		const requestId = request && request.requestId;
-		if (typeof requestId !== 'string' || requestId === '') {
-			return typeof next === 'function' ? next() : undefined;
-		}
-		const handle = this.pending.register(kind, requestId);
-		this.emitToUi({ type: 'request', kind, requestId, request: describeRequest(kind, request) });
-		const transport = this.transport;
-		if (transport === undefined || typeof transport.post !== 'function') {
-			// 界面未接线：撤销登记并交还给下一个 answerer，绝不伪造决议。
-			this.pending.delegate(requestId, handle.entry);
-			return typeof next === 'function' ? next() : undefined;
-		}
-		const decision = await handle.promise;
-		if (decision === undefined) {
-			return typeof next === 'function' ? next() : undefined;
-		}
-		return decision;
-	}
-
 	emitToUi(message) {
 		if (this.transport !== undefined && typeof this.transport.post === 'function') {
 			this.transport.post(message);
