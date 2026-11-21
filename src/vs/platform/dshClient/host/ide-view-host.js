@@ -1819,21 +1819,70 @@ async function sessionExists(ctx, sessionId) {
  *
  * @returns { origin, launchUrl } 或 undefined（服务缺失时明确返回 undefined，不伪造）。
  */
+/**
+ * 优先用 DSH 自己公布的地址（`webApp.getAdvertisedUrl` / `webServer.getOrigin`），
+ * 没有时才用 port/host 拼。不写死 127.0.0.1 以外的主机名。
+ * @param {object} ctx
+ * @param {object | undefined} webServer
+ * @returns {string | undefined}
+ */
+function advertisedOrigin(ctx, webServer) {
+	const webApp = typeof ctx.get === 'function' ? ctx.get('webApp') : undefined;
+	const candidates = [];
+	if (webApp !== undefined && typeof webApp.getAdvertisedUrl === 'function') {
+		try {
+			const url = webApp.getAdvertisedUrl();
+			if (typeof url === 'string' && url !== '') {
+				candidates.push(url);
+			}
+		} catch {
+			// 公布地址抛错时退回 port/host，不让发现过程本身失败。
+		}
+	}
+	if (webServer !== undefined && typeof webServer.getOrigin === 'function') {
+		try {
+			const url = webServer.getOrigin();
+			if (typeof url === 'string' && url !== '') {
+				candidates.push(url);
+			}
+		} catch {
+			// 同上。
+		}
+	}
+	for (const value of candidates) {
+		try {
+			return new URL(value).origin;
+		} catch {
+			// 不是合法 URL 就试下一个。
+		}
+	}
+	return undefined;
+}
+
 export function resolveHostEndpoint(ctx) {
 	const webServer = typeof ctx.get === 'function' ? ctx.get('webServer') : undefined;
 	const connection = typeof ctx.get === 'function' ? ctx.get('connection') : undefined;
 	if (webServer === undefined || connection === undefined) {
 		return undefined;
 	}
-	const port = typeof webServer.port === 'number' ? webServer.port : undefined;
+	let origin = advertisedOrigin(ctx, webServer);
+	const portFromOrigin = origin === undefined ? undefined : Number(new URL(origin).port);
+	const port = Number.isInteger(portFromOrigin) && portFromOrigin > 0
+		? portFromOrigin
+		: (typeof webServer.port === 'number' ? webServer.port : undefined);
+	if (origin === undefined) {
+		if (port === undefined) {
+			return undefined;
+		}
+		const protocol = typeof webServer.protocol === 'string' ? webServer.protocol : 'http:';
+		const host = typeof webServer.host === 'string' && webServer.host !== '' && webServer.host !== '0.0.0.0'
+			? webServer.host
+			: '127.0.0.1';
+		origin = `${protocol.replace(/:$/, '')}://${host}:${port}`;
+	}
 	if (port === undefined) {
 		return undefined;
 	}
-	const protocol = typeof webServer.protocol === 'string' ? webServer.protocol : 'http:';
-	const host = typeof webServer.host === 'string' && webServer.host !== '' && webServer.host !== '0.0.0.0'
-		? webServer.host
-		: '127.0.0.1';
-	const origin = `${protocol.replace(/:$/, '')}://${host}:${port}`;
 	const launchUrl = typeof connection.authenticatedUrl === 'function'
 		? connection.authenticatedUrl(`${origin}/`)
 		: undefined;

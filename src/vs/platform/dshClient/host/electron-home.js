@@ -16,6 +16,7 @@
 
 import { existsSync, linkSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
+import { electronHomeDir } from '../common/dshLocations.js';
 
 /** 主页目录名（位于插件根 `runtime/` 下）。 */
 export const ELECTRON_HOME_DIR = 'electron-home';
@@ -56,24 +57,15 @@ export function electronHomePaths(pluginRoot, homeDir) {
 }
 
 /**
- * 主页必须和 Electron 可执行文件同一卷，硬链接才能成立。
- * 插件目录在另一块盘上时，主页改放到该可执行文件所在卷的 LocalAppData。
- * @param {string} pluginRoot
+ * 主页跟着本次 DSH 可执行文件和用户数据目录走，不放在插件包被链接到的位置。
+ * 插件包可以在另一块盘（pnpm link），硬链接仍然要求主页和 exe 同卷，这一步由 `dshIdeStateDir` 保证。
+ * @param {string} _pluginRoot 保留参数，调用方仍传入插件根；位置不再由它决定
  * @param {string} exePath
  * @param {typeof defaultIo} [io]
  * @returns {string}
  */
-export function resolveElectronHomeDir(pluginRoot, exePath, io = defaultIo) {
-	const pluginDev = deviceId(pluginRoot, io);
-	const exeDev = deviceId(exePath, io);
-	if (pluginDev === undefined || exeDev === undefined || pluginDev === exeDev) {
-		return join(pluginRoot, 'runtime', ELECTRON_HOME_DIR);
-	}
-	const local = process.env.LOCALAPPDATA;
-	if (typeof local === 'string' && local !== '' && deviceId(local, io) === exeDev) {
-		return join(local, 'DSH-IDE', ELECTRON_HOME_DIR);
-	}
-	return join(dirname(exePath), 'dsh-ide-electron-home');
+export function resolveElectronHomeDir(_pluginRoot, exePath, io = defaultIo) {
+	return electronHomeDir(exePath, target => io.stat(target));
 }
 
 /**
@@ -187,6 +179,7 @@ export function materializeElectronHome({
 	exePath = process.execPath,
 	platform = process.platform,
 	io = defaultIo,
+	stateDir,
 }) {
 	if (platform !== 'win32') {
 		return {
@@ -201,7 +194,10 @@ export function materializeElectronHome({
 		return { ok: false, message: `IDE payload is missing: ${appPath}` };
 	}
 
-	const paths = electronHomePaths(pluginRoot, resolveElectronHomeDir(pluginRoot, exePath, io));
+	const homeDir = typeof stateDir === 'string' && stateDir !== ''
+		? join(stateDir, ELECTRON_HOME_DIR)
+		: resolveElectronHomeDir(pluginRoot, exePath, io);
+	const paths = electronHomePaths(pluginRoot, homeDir);
 	const expected = expectedMarker({ installRoot, exePath, electronVersion }, io);
 	const homeExe = join(paths.home, expected.exeName);
 	if (homeIsCurrent(paths, expected, io)) {

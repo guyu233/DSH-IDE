@@ -7,8 +7,9 @@
 //      会话内容只由桥接调用一次 `sessionController.follow` 得到，窗口不再自己开流。
 //      批准与问卷也由桥接接住，IDE 与桌面都能答，先到的生效。
 
-import { dirname, join } from 'node:path';
+import { dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { hostEndpointFile } from './common/dshLocations.js';
 import { IdeRemoteService } from './host/ide-service.js';
 import { REQUIRED_SERVICES, createDshIdeHostBridge, publishHostEndpointWhenListening, removeHostEndpoint, endpointLogText } from './host/ide-view-host.js';
 
@@ -34,7 +35,8 @@ export function apply(ctx, config = {}) {
 	//
 	// 必须等 `webServer` 真正开始监听：`apply` 时 `webServer.port` 还是 undefined
 	// （端口由 listen 回填），立刻发布只会得到「无从发布」并静默跳过（真机实测踩过）。
-	const endpointFile = join(pluginRoot, 'runtime', 'host-endpoint.json');
+	// 端点文件跟着用户的 DSH 数据目录，不写在插件包被链接到的位置。
+	const endpointFile = hostEndpointFile();
 	// D55：插件卸载 / Host 重启时删除端点文件，让一次性 query token 不再落盘。
 	// ctx.effect 的清理函数在上下文销毁时调用；删除是 fire-and-forget，不阻塞卸载。
 	ctx.effect(() => () => void removeHostEndpoint(endpointFile), 'dsh-ide.host-endpoint-cleanup');

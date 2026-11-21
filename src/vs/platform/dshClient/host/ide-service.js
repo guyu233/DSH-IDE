@@ -19,6 +19,7 @@ import { Service } from '@deepseek-ai/cordis';
 import { bindTypertRemote } from '@deepseek-ai/dsh-typert-protocol';
 import { materializeElectronHome } from './electron-home.js';
 import { publishHostEndpoint, resolveHostEndpoint } from './ide-view-host.js';
+import { hostEndpointFile } from '../common/dshLocations.js';
 import { safeErrorText } from '../common/dshIdeAuthRedaction.js';
 import { DSH_IDE_HOST_PTY_PATH, DSH_IDE_HOST_RG_PATH, resolveHostNodePty, resolveHostRipgrep } from './host-ripgrep.js';
 import { IdeLaunchQueue, ideWorkspaceArgs } from './ide-launch-queue.js';
@@ -230,7 +231,7 @@ export class IdeRemoteService extends Service {
       env.DSH_IDE_LAUNCH_URL = endpoint.launchUrl;
       // 端点文件路径（本插件的 runtime 目录）：IDE 失联后据此重新发现新的 origin。
       // 不传的话，IDE 只能把启动时那一个端口当成永久地址，DSH 一重启换端口就再也连不上。
-      env.DSH_IDE_ENDPOINT_FILE = join(this.pluginRoot, 'runtime', 'host-endpoint.json');
+      env.DSH_IDE_ENDPOINT_FILE = hostEndpointFile();
       // 会话由 DSH 决定（不变量 I4）：把开窗方给的 sessionId 交给子进程，IDE 侧据此
       // `openView({ view:'chat', params:{ sessionId } })`；缺它时后端只订阅 `$events`，
       // Chat 面板拿不到任何会话内容（K5 的缺口）。
@@ -457,7 +458,7 @@ export class IdeRemoteService extends Service {
   async currentEndpoint() {
     const live = resolveHostEndpoint(this.ctx);
     if (live !== undefined && typeof live.origin === 'string' && live.origin !== '' && typeof live.launchUrl === 'string' && live.launchUrl !== '') {
-      const written = await publishHostEndpoint(this.ctx, join(this.pluginRoot, 'runtime', 'host-endpoint.json'));
+      const written = await publishHostEndpoint(this.ctx, hostEndpointFile());
       if (written !== undefined && typeof written.launchUrl === 'string' && written.launchUrl !== '') {
         return written;
       }
@@ -474,6 +475,7 @@ export class IdeRemoteService extends Service {
   /** 端点文件的候选路径（第一个是正确位置，第二个仅为旧布局兼容）。 */
   endpointCandidates() {
     return [
+      hostEndpointFile(),
       join(this.pluginRoot, 'runtime', 'host-endpoint.json'),
       join(this.root, 'runtime', 'host-endpoint.json'),
     ];

@@ -15,6 +15,7 @@
 
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
+import { hostEndpointFile } from '../common/dshLocations.js';
 import { env } from '../../../base/common/process.js';
 import { DSH_IDE_COOKIE_ENV, DSH_IDE_ENDPOINT_ENV, DSH_IDE_ENDPOINT_FILE_ENV, DSH_IDE_LAUNCH_URL_ENV } from '../common/env.js';
 import type { DshIdeViewBinding } from '../common/dshIdeProtocol.js';
@@ -32,6 +33,7 @@ import { UnavailableDshIdeBackend, type DshIdeBackend } from './ide-view-service
 export function defaultDshIdeEndpointFile(): string | undefined {
 	const cwd = process.cwd();
 	const candidates = [
+		hostEndpointFile(),
 		join(cwd, '..', 'host-endpoint.json'),
 		join(cwd, 'runtime', 'host-endpoint.json'),
 	];

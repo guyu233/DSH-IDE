@@ -58,6 +58,7 @@ function build(fixture, extra = {}) {
 		appPath: fixture.appPath,
 		electronVersion: '44.7.0',
 		platform: 'win32',
+		stateDir: path.join(fixture.pluginRoot, 'runtime'),
 		...extra,
 	});
 }
@@ -144,7 +145,7 @@ test('插件和 Electron 不在同一块盘时，主页放到可执行文件所�
 		},
 	};
 	const home = resolveElectronHomeDir('D:\\plugin', 'C:\\Programs\\DeepSeek Harness\\DeepSeek Harness.exe', io);
-	assert.match(home, /DSH-IDE/);
+	assert.match(home, /dsh-ide[\\/]electron-home$/);
 	assert.doesNotMatch(home, /^D:\\plugin/);
 });
 
