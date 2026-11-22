@@ -117,3 +117,49 @@ test('empty conversations get one questionnaire host and existing responses keep
 	assert.equal(items[0].parts[0].questionIds, undefined);
 	assert.equal(dshSlotHostSame(items[0].parts[0], next[0].parts[0]), false);
 });
+
+test('reveal finds an answerable card by its tool callId, not by eventId', () => {
+	// 官方 `userQuestionPanels.reveal(sessionId, callId)`：按被 keyed 的 tool call 找卡片。
+	// eventId 是请求身份、callId 是工具调用身份，两者不能混用。
+	const submit = async () => true;
+	const controller = new DshQuestionCarouselController(submit);
+	controller.sync([
+		{ eventId: 'e1', kind: 'question', questions: [{ id: 'q1', question: 'A', options: [] }], callId: 'call-1' } as never,
+	]);
+	assert.ok(controller.reveal('call-1') !== undefined, 'a live card must be found by callId');
+	assert.equal(controller.reveal('call-2'), undefined, 'an unknown callId must not fabricate a card');
+	assert.equal(controller.reveal(''), undefined, 'an empty callId must not match anything');
+	controller.dispose();
+});
+
+test('review builds a read-only card from the recorded answers and survives the projection sweep', () => {
+	const controller = new DshQuestionCarouselController(async () => true);
+	// 先放一张待决卡片，再建它的只读回看：同一 call 已有活卡片时必须返回活的。
+	controller.sync([{ eventId: 'e1', kind: 'question', questions: [{ id: 'q1', question: 'A', options: [] }], callId: 'call-1' } as never]);
+	const live = controller.reveal('call-1');
+	const same = controller.review('call-1', { questions: [{ id: 'q1', question: 'A' }], answers: [{ id: 'q1', selected: ['yes'] }] });
+	assert.equal(same, live, 'a stale record must not replace the standing live request');
+
+	// 结算后的 call 没有活卡片：review 建只读卡。
+	const review = controller.review('call-9', {
+		questions: [{ id: 'q1', question: 'A' }, { id: 'q2', question: 'B' }],
+		answers: [{ id: 'q1', selected: ['x'] }, { id: 'q2', selected: [], custom: 'typed' }],
+	});
+	assert.ok(review !== undefined);
+	assert.equal(review.readOnly, true);
+	assert.equal(review.eventId, 'review:call-9');
+	// 投影扫描（sync）不能把只读回看卡清掉——它不属于投影。
+	controller.sync([]);
+	assert.ok(controller.get('review:call-9') !== undefined, 'the review card must survive a projection sweep');
+	// 关闭即移除。
+	controller.closeReview('review:call-9');
+	assert.equal(controller.get('review:call-9'), undefined);
+	controller.dispose();
+});
+
+test('review rejects an empty callId or an empty question record', () => {
+	const controller = new DshQuestionCarouselController(async () => true);
+	assert.equal(controller.review('', { questions: [{ id: 'q', question: 'A' }], answers: [] }), undefined);
+	assert.equal(controller.review('call-1', { questions: [], answers: [] }), undefined);
+	controller.dispose();
+});

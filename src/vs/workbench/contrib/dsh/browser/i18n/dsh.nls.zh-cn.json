@@ -236,5 +236,7 @@
 	"dsh.queue.noSession": "还没有绑定 DSH 会话，队列没有改动。",
 	"dsh.queue.rejected": "修改排队消息失败：{0}",
 	"dsh.queue.remove": "删除排队消息",
-	"dsh.queue.steer": "立即发送"
+	"dsh.queue.steer": "立即发送",
+	"dsh.question.viewAnswers": "查看答案",
+	"dsh.question.viewAnswersLabel": "查看已记录的答案"
 }

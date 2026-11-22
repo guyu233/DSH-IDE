@@ -4596,6 +4596,12 @@ export class ChatListItemRenderer extends Disposable implements ITreeRenderer<Ch
 							? this.instantiationService.createInstance(DshQuestionCarouselContentPart, questions, entry)
 							: undefined;
 					},
+					reviewQuestion: (callId, questions, answers) => {
+						// 官方 `userQuestionPanels.review(sessionId, callId, record)`：已结算问卷只读重开。
+						// record 由调用方（`question-reply` 节点）给出——投影只列还能回答的调用。
+						const controller = dshContentStore.get(content.treeId)?.questions;
+						controller?.review(callId, { questions, answers });
+					},
 				});
 			} else if (content.kind === 'multiDiffData') {
 				return this.renderMultiDiffData(content, templateData, context);

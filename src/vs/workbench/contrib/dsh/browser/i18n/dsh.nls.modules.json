@@ -284,5 +284,9 @@
 	"vs/workbench/contrib/dsh/browser/vscode/dshChatSession": [
 		"dsh.queue.noSession",
 		"dsh.queue.rejected"
+	],
+	"vs/workbench/contrib/dsh/browser/vscode/dshSlotHostContentPart": [
+		"dsh.question.viewAnswers",
+		"dsh.question.viewAnswersLabel"
 	]
 }

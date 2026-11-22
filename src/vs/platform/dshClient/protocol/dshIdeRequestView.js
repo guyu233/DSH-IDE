@@ -46,7 +46,12 @@ export function projectQuestionRequest(request) {
 	if (questions.length === 0) {
 		return undefined;
 	}
-	return { questions };
+	// 官方 `AskUserQuestionRequestEvent.wait.callId`：卡片被 keyed 的 tool call。
+	// 官方 `reveal(sessionId, callId)` 靠它重开卡片；丢了它只能拿 eventId 猜，那是请求身份。
+	const callId = isRecord(request.wait) && typeof request.wait.callId === 'string' && request.wait.callId !== ''
+		? request.wait.callId
+		: undefined;
+	return { questions, ...(callId === undefined ? {} : { callId }) };
 }
 
 function projectQuestionItem(item) {

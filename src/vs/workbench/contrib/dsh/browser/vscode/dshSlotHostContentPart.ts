@@ -26,6 +26,11 @@ import { diffDshSlotRows } from './dshSlotHostModel.js';
 export interface DshNativePartRenderer {
 	render(part: DshNativePart): IChatContentPart | undefined;
 	renderQuestion?(eventId: string): (IChatContentPart & { readonly onDidChangeHeight?: Event<void> }) | undefined;
+	/**
+	 * 官方 `userQuestionPanels.review(sessionId, callId, record)`：用已结算的
+	 * questions + answers 开一张只读回看卡片。
+	 */
+	reviewQuestion?(callId: string, questions: readonly { readonly id: string; readonly question?: string; readonly header?: string }[], answers: readonly { readonly id: string; readonly selected: readonly string[]; readonly custom?: string }[]): void;
 	/** 执行插件注册在 `conversation.chat.assistant-actions` 上的命令。 */
 	executeCommand?(command: string, args: readonly unknown[]): void;
 	/**
@@ -492,7 +497,7 @@ export class DshSlotHostContentPart extends Disposable implements IChatContentPa
 					continue;
 				}
 				nativePart?.dispose();
-				row.appendChild(renderAdaptedFallback(item.part));
+				row.appendChild(renderAdaptedFallback(item.part, this.native));
 			}
 			for (const child of binding.tree.childKeysOf(nodeId)) {
 				row.appendChild(this.renderNode(child, binding, true, refs));
@@ -573,7 +578,7 @@ function processSummaryRow(line: string): HTMLElement {
 	return row;
 }
 
-function renderAdaptedFallback(part: DshNativePart): HTMLElement {
+function renderAdaptedFallback(part: DshNativePart, host?: { reviewQuestion?: (callId: string, questions: readonly { readonly id: string; readonly question?: string; readonly header?: string }[], answers: readonly { readonly id: string; readonly selected: readonly string[]; readonly custom?: string }[]) => void }): HTMLElement {
 	const block = document.createElement('div');
 	block.className = `dsh-adapted dsh-adapted-${part.kind}`;
 	block.style.color = 'var(--vscode-foreground)';
@@ -620,6 +625,28 @@ function renderAdaptedFallback(part: DshNativePart): HTMLElement {
 				? question.question : `${question.header} — ${question.question}`;
 			return `${head}\n${values.length === 0 ? localize('dsh.fallback.skipped', "(skipped)") : values.join(', ')}`;
 		}).join('\n\n');
+		// 官方 `userQuestionPanels.review`：已结算问卷可**只读重开**。
+		// 这里只加入口按钮；真正的只读卡片由 `review()` 建出的 entry 渲染，不在回退文本里伪造。
+		if (part.callId !== '' && part.questions.length > 0 && host?.reviewQuestion !== undefined) {
+			const review = document.createElement('button');
+			review.type = 'button';
+			review.className = 'dsh-question-review';
+			review.textContent = localize('dsh.question.viewAnswers', "View answers");
+			review.style.alignSelf = 'flex-start';
+			review.style.border = 'none';
+			review.style.background = 'transparent';
+			review.style.color = 'var(--vscode-textLink-foreground)';
+			review.style.cursor = 'pointer';
+			review.style.font = 'inherit';
+			review.style.padding = '2px 0';
+			review.setAttribute('aria-label', localize('dsh.question.viewAnswersLabel', "View the recorded answers"));
+			const click = (event: MouseEvent) => {
+				event.stopPropagation();
+				host?.reviewQuestion?.(part.callId, part.questions, part.answers);
+			};
+			review.addEventListener('click', click);
+			block.appendChild(review);
+		}
 	} else if (part.kind === 'dshTurnTail') {
 		block.textContent = [part.closing, part.branchUnavailable === true ? localize('dsh.fallback.branchUnavailable', "branch unavailable") : undefined]
 			.filter((line): line is string => line !== undefined && line !== '')

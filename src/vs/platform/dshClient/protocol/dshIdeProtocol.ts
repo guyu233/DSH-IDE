@@ -1552,6 +1552,14 @@ export type DshIdeQuestionIntent =
 /** 问卷请求的中立视图。 */
 export interface DshIdeQuestionRequestView {
 	readonly questions: readonly DshIdeQuestionItemView[];
+	/**
+	 * 这张问卷卡片被 keyed 的那个 tool call（官方 `AskUserQuestionRequestEvent.wait.callId`）。
+	 *
+	 * 官方 `ui-user-questions` 的 `reveal(sessionId, callId)` 靠它把已隐藏的卡片重新发布到
+	 * 输入区；没有它就只能按 `eventId` 找，而 `eventId` 是请求身份、不是工具调用身份。
+	 * 官方类型里 `wait` 是可选（不定长等待没有），所以这里也 optional。
+	 */
+	readonly callId?: string;
 }
 
 /** 快照里的待决议项。形状与 waterfall 的 request 帧相同，但是快照的一部分。 */
@@ -1632,12 +1640,15 @@ function validateApprovalView(value: unknown): DshIdeApprovalRequestView {
 }
 
 function validateQuestionView(value: unknown): DshIdeQuestionRequestView {
-	const request = exactRecord(value, ['questions'], 'DshIdeWaterfallNotice.request');
+	const request = exactRecord(value, ['questions', 'callId'], 'DshIdeWaterfallNotice.request');
 	if (!Array.isArray(request['questions']) || request['questions'].length === 0) {
 		throw new TypeError('DshIdeWaterfallNotice.request.questions must be a non-empty array');
 	}
 	const questions = request['questions'].map((item, index) => validateQuestionItem(item, index));
-	return { questions };
+	if (request['callId'] !== undefined) {
+		optionalString(request['callId'], 'DshIdeWaterfallNotice.request.callId');
+	}
+	return { questions, ...(request['callId'] === undefined ? {} : { callId: request['callId'] as string }) };
 }
 
 function validateQuestionItem(value: unknown, index: number): DshIdeQuestionItemView {

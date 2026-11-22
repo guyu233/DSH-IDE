@@ -236,5 +236,7 @@
 	"dsh.queue.noSession": "No DSH session is bound, so the queue was not changed.",
 	"dsh.queue.rejected": "Could not change the queued message: {0}",
 	"dsh.queue.remove": "Remove queued message",
-	"dsh.queue.steer": "Send now"
+	"dsh.queue.steer": "Send now",
+	"dsh.question.viewAnswers": "View answers",
+	"dsh.question.viewAnswersLabel": "View the recorded answers"
 }

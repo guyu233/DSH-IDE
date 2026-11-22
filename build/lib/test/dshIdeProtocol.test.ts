@@ -719,3 +719,20 @@ test('updateQueue accepts the three official actions and rejects malformed ones'
 		assert.throws(() => validateDshIdeInput('updateQueue', args), `must reject ${JSON.stringify(args)}`);
 	}
 });
+
+test('a question request keeps the tool callId that keys its card', async () => {
+	// 官方 `AskUserQuestionRequestEvent.wait.callId`：`reveal(sessionId, callId)` 靠它定位卡片。
+	// 丢了它只能拿 eventId 猜，而 eventId 是请求身份、不是工具调用身份。
+	const { validateDshIdeWaterfallNotice } = await import('../../../src/vs/platform/dshClient/protocol/dshIdeProtocol.ts');
+	const base = {
+		kind: 'request', eventId: 'e1', event: 'user-questions/request', agentId: 'a1',
+		request: { questions: [{ id: 'q1', question: 'A', options: [{ label: 'yes' }] }], callId: 'call-1' },
+	};
+	const parsed = validateDshIdeWaterfallNotice(base);
+	assert.equal((parsed.request as { callId?: string }).callId, 'call-1');
+	// 不定长等待没有 wait：callId 可省略，不是坏数据。
+	const noCall = { ...base, request: { questions: [{ id: 'q1', question: 'A' }] } };
+	assert.doesNotThrow(() => validateDshIdeWaterfallNotice(noCall));
+	// 空串不是「没有」，是坏数据。
+	assert.throws(() => validateDshIdeWaterfallNotice({ ...base, request: { ...base.request, callId: '' } }), /callId/);
+});
