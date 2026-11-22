@@ -52,7 +52,7 @@ DSH snapshot
 - DSH slot 语义完整实现：5 种基数 × 3 种作用域。
 - Chat renderer 只增加一个稳定扩展点 `dshSlotHost`。
 - DSH 节点树由 DSH content store 持有，history part 只携带引用。
-- **按 key 增量更新**：`get` / `source` / `bottomSource` / `turnDataSource` / `processSource` 语义对齐真源，不做整树重绘。
+- **按 key 增量更新**：`get` / `source` / `turnDataSource` / `processSource` 语义对齐真源，不做整树重绘。（`bottomSource` 于 2026-11-23 删除：官方有其语义，但本仓零消费者，留着只是每次 `accept()` 白算一遍；见 CHK-344。）
 - 旧 `toHistory()` 从最终渲染真源降级为兼容序列化器。
 
 ## 3. 已确认取舍
@@ -526,7 +526,7 @@ DshCompositeContentPart
 |---|---|
 | `nodes.get(key)` | 取当前节点 |
 | `nodes.source(key)` | 该 key 的身份稳定 observable |
-| `nodes.bottomSource(key)` | 是否属于最新已载入 exchange |
+| ~~`nodes.bottomSource(key)`~~ | ~~是否属于最新已载入 exchange~~ 已删除（CHK-344，零消费者） |
 | `nodes.turnDataSource(turn, kind)` | 单 turn 单 kind 的有序数据源，其它 turn/kind 不通知 |
 | `nodes.processSource(key)` | 该节点所属 turn 的过程展示源 |
 | `locations.getTurn(turn)` / `getStep(turn, step)` | 位置索引 |
@@ -774,7 +774,7 @@ PR-04 状态：**部分实现**。
 
 已实现：
 
-- `dshConversationNodeTree.ts`：按 `kind + messageId` / `kind + callId` 索引；`source(key)` 身份稳定；`turnDataSource` 不通知其它 turn；`bottomSource`；`processSource`；`navigationItems`；`getTurn` / `getStep`；`snapshot()` 给出 order、nodes 副本、locations、navigation。没有 timeline / legacy。`subCalls` 记为子 key，不进顶层顺序。
+- `dshConversationNodeTree.ts`：按 `kind + messageId` / `kind + callId` 索引；`source(key)` 身份稳定；`turnDataSource` 不通知其它 turn；`processSource`；`navigationItems`；`getTurn` / `getStep`；`snapshot()` 给出 order、nodes 副本、locations、navigation。没有 timeline / legacy。`subCalls` 记为子 key，不进顶层顺序。
 - `DshChatSessionContent.nodeTree` 随 `session.nodes()` 更新。回复正文收成 `dshSlotHost`（见 PR-05）。
 
 未实现：
@@ -1126,6 +1126,8 @@ Chat 层目标 kind，主机投影到位前不进入节点树：
 
 - 在线核对 DSH HEAD `2e39e70496aa02986ca6a820c5d497e816b69d7e` 的 `packages/client/ui-chat/src/client/contract/snapshot.ts`。
 - DSH 的聊天快照体系是按 key 的 observable store：`get` / `source` / `bottomSource` / `turnDataSource` / `processSource`。
+  **本仓取舍（CHK-344）**：`bottomSource` 未移植——官方 `ChatNodeStore` 有它，但本仓没有任何消费者，
+  移植它只会让每次 `accept()` 多算一遍 O(n²) 的「最新 exchange」标记。`get` / `source` / `turnDataSource` / `processSource` 均已移植并有消费者。
 - DSH 更新语义是局部 patch、按 id 更新、按 slice 通知，不是全局 treeVersion 广播。
 
 #### DSH-IDE 本地证据
@@ -1345,7 +1347,7 @@ reveal 调用点，`revealLastItem` 完全由原生在 `_withPersistedAutoScroll
 1. `DshConversationNodeTree.source(nodeId)`
 2. `turnDataSource(turnId)`
 3. `processSource(nodeId / turnId)`
-4. `bottomSource`
+4. ~~`bottomSource`~~ 已删除（CHK-344：零消费者，且每次 `accept()` 白算 O(n²)）
 5. slot host 按自己 nodeIds 订阅 source，而不是全局 tree change。
 
 验收：
@@ -1565,7 +1567,7 @@ DSH 的槽位有两个**独立轴**：基数（cardinality）与作用域（scop
 |---|---|---|---|---|---|---|
 | `conversation.chat.flow` | single | session | `ChatFlowOwnerProps` | ChatList 里每段回复一个 `dshSlotHost` | flow renderer | 部分实现 |
 | `conversation.chat.node` | keyed | session | `ChatNodeOwnerProps` + 每 kind 的 `{ node }` | 行渲染先问 `dshChatSlotRegistry` 的 keyed occupant（可覆盖 title/detail/icon），没有才用内置 `adaptDshNode` | 节点渲染注册表 | 部分实现 |
-| `conversation.chat.commandview` | keyed | session | `CommandRowOwnerProps` | `dshCommand` 卡，没有 keyed 槽 | command row | 部分实现 |
+| `conversation.chat.commandview` | keyed | session | `CommandRowOwnerProps` | keyed 槽由 `dshCommandRowOverride(name, sessionId)` 消费：插件可按命令名覆盖 `dshCommand` 卡的标题/说明/图标，缺省走内置卡；没有命令名时不查槽位 | command row | 部分实现 |
 | `conversation.chat.reasoning.body` | single | session | `ReasoningBodyOwnerProps` | 复用原生 thinking；single 槽由 `dshReasoningBodyOverride(sessionId)` 消费，occupant 可覆盖正文文本，缺省用节点的 reasoning | 原生 thinking 复用 | 部分实现 |
 | `conversation.chat.turnTail` | list | session | `TurnTailOwnerProps` | `dshTurnTail` + `dshUsage` + `dshDeliverables`；计划卡也按 Turn 收到尾部。list 槽由 `dshTurnTailExtras` 消费：插件按 `order` 追加行（`dshTurnTailExtra`），没有独立席位 DOM | turn 尾部扩展 | 部分实现 |
 | `conversation.chat.assistant-actions` | list | session | `AssistantActionOwnerProps` | list 槽由 `dshAssistantActions(sessionId, messageId)` 消费，按钮条渲染在 **turn tail 内**，owner 是 `turn-tail.closingMessageId`；无该字段（中断冻结的部分回复）时不画条 | 消息动作行 | 部分实现 |

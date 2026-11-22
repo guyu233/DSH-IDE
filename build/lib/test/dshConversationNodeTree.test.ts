@@ -78,25 +78,20 @@ test('turnDataSource ignores other turns and other kinds', () => {
 	assert.equal(tools.get()[0].text, 'read');
 });
 
-test('bottomSource follows the latest turn and navigation lists anchors', () => {
+test('navigation lists anchors and steps after the latest turn grows', () => {
+	// `bottomSource` 曾是「节点是否落在最新 exchange」的观察点，但全仓无消费者
+	// （见 CHK-344：连同 `publishBottoms` / `isBottom` / `FlagState` 一并删除）。
+	// 这条用例保留其余仍然有消费者的断言。
 	const tree = new DshConversationNodeTree<SampleNode>('s1');
 	tree.accept([
 		node({ kind: 'user', seq: 1, messageId: 'u1', turn: 1, text: 'one' }),
 		node({ kind: 'assistant', seq: 2, messageId: 'a1', turn: 1, step: 0, text: 'reply' }),
 	]);
-	const first = tree.bottomSource('user:u1');
-	const second = tree.bottomSource('user:u2');
-	let moves = 0;
-	first.subscribe(() => { moves++; });
-	assert.equal(first.get(), true);
 	tree.accept([
 		node({ kind: 'user', seq: 1, messageId: 'u1', turn: 1, text: 'one' }),
 		node({ kind: 'assistant', seq: 2, messageId: 'a1', turn: 1, step: 0, text: 'reply' }),
 		node({ kind: 'user', seq: 3, messageId: 'u2', turn: 2, text: 'two' }),
 	]);
-	assert.equal(first.get(), false);
-	assert.equal(second.get(), true);
-	assert.equal(moves, 1);
 	assert.deepEqual(tree.navigationItems(), [
 		{ turn: 1, anchorKey: 'user:u1', promptKey: 'user:u1', responseKey: 'assistant:a1' },
 		{ turn: 2, anchorKey: 'user:u2', promptKey: 'user:u2' },

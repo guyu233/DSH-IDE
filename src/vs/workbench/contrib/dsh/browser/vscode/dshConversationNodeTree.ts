@@ -61,12 +61,6 @@ interface ListState<T extends DshIndexedNode> {
 	readonly listeners: Set<() => void>;
 }
 
-interface FlagState {
-	value: boolean;
-	version: number;
-	readonly listeners: Set<() => void>;
-}
-
 const PROMPT_KINDS = new Set(['user', 'steering', 'turn-trigger', 'command-input']);
 const RESPONSE_KINDS = new Set(['assistant', 'assistant-step']);
 
@@ -80,7 +74,6 @@ export class DshConversationNodeTree<T extends DshIndexedNode = DshIndexedNode> 
 	private readonly sources = new Map<string, SourceState<T>>();
 	private readonly slices = new Map<string, ListState<T>>();
 	private readonly processes = new Map<string, ListState<T>>();
-	private readonly bottoms = new Map<string, FlagState>();
 	private order: string[] = [];
 	private parents = new Map<string, string>();
 	private childKeys = new Map<string, readonly string[]>();
@@ -146,7 +139,6 @@ export class DshConversationNodeTree<T extends DshIndexedNode = DshIndexedNode> 
 		this.parents = collected.parents;
 		this.childKeys = collected.children;
 		this.publishSlices();
-		this.publishBottoms();
 		this.publishProcesses(dirtyTurns, removed);
 		if (changed.length > 0 || removed.length > 0 || orderChanged) {
 			this.treeVersion++;
@@ -247,19 +239,6 @@ export class DshConversationNodeTree<T extends DshIndexedNode = DshIndexedNode> 
 		};
 	}
 
-	/**
-	 * 这个节点是不是落在最新一个有 turn 坐标的 exchange 里。
-	 * 没有任何 turn 时全部为 false。
-	 */
-	bottomSource(key: string): { get(): boolean; subscribe(listener: () => void): { dispose(): void }; readonly version: number } {
-		const state = this.bottomState(key);
-		return {
-			get: () => state.value,
-			subscribe: listener => subscribe(state.listeners, listener),
-			get version() { return state.version; },
-		};
-	}
-
 	/** 这个节点所属 turn 的全部节点。节点还没有 turn 时，只包含它自己。 */
 	processSource(key: string): DshNodeListSource<T> {
 		const state = this.processState(key);
@@ -353,15 +332,6 @@ export class DshConversationNodeTree<T extends DshIndexedNode = DshIndexedNode> 
 		return state;
 	}
 
-	private bottomState(key: string): FlagState {
-		let state = this.bottoms.get(key);
-		if (state === undefined) {
-			state = { value: this.isBottom(key), version: 0, listeners: new Set() };
-			this.bottoms.set(key, state);
-		}
-		return state;
-	}
-
 	private touch(key: string, node: T | undefined): void {
 		const state = this.sources.get(key);
 		if (state === undefined) {
@@ -414,28 +384,6 @@ export class DshConversationNodeTree<T extends DshIndexedNode = DshIndexedNode> 
 		}
 	}
 
-	private publishBottoms(): void {
-		const seen = new Set<string>(this.order);
-		for (const key of new Set([...seen, ...this.bottoms.keys()])) {
-			const value = seen.has(key) && this.isBottom(key);
-			const state = this.bottoms.get(key);
-			if (state === undefined) {
-				if (seen.has(key)) {
-					this.bottoms.set(key, { value, version: 1, listeners: new Set() });
-				}
-				continue;
-			}
-			if (state.value === value) {
-				continue;
-			}
-			state.value = value;
-			state.version++;
-			for (const listener of [...state.listeners]) {
-				listener();
-			}
-		}
-	}
-
 	private publishProcesses(dirtyTurns: ReadonlySet<number>, removed: readonly string[]): void {
 		for (const key of removed) {
 			this.replaceProcess(key);
@@ -478,19 +426,6 @@ export class DshConversationNodeTree<T extends DshIndexedNode = DshIndexedNode> 
 		return this.getTurn(node.turn);
 	}
 
-	private isBottom(key: string): boolean {
-		const node = this.nodes.get(key);
-		if (node?.turn === undefined) {
-			return false;
-		}
-		let max = Number.NEGATIVE_INFINITY;
-		for (const current of this.nodes.values()) {
-			if (current.turn !== undefined && current.turn > max) {
-				max = current.turn;
-			}
-		}
-		return node.turn === max;
-	}
 }
 
 /** 节点身份。工具走 callId，有 messageId 走 messageId，否则用 seq 和位置。 */
