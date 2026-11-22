@@ -214,17 +214,21 @@ export function adaptDshNode(node: DshIndexedNode, sessionId?: string): readonly
 
 function adaptBlock(node: DshIndexedNode, block: Block, sessionId?: string): readonly DshNativeAdaptation[] {
 	if (block.kind === 'text' || block.type === 'text') {
-		return block.text ? [markdown(block.text, 'assistant text reuses ChatMarkdownContentPart')] : [];
+		// 官方 `ui-chat/README.md`「Hidden Chat rows」：「Text and reasoning contribute to Assistant
+		// visibility **only when they contain a non-whitespace character**.」
+		// 只判空串会把纯空白的块也画成一个空 markdown——流式中这种块很常见（换行/缩进）。
+		return (block.text ?? '').trim() === '' ? [] : [markdown(block.text ?? '', 'assistant text reuses ChatMarkdownContentPart')];
 	}
 	if (block.kind === 'reasoning' || block.type === 'reasoning') {
 		// `conversation.chat.reasoning.body` 是 single 槽：occupant 可覆盖正文文本。
-		const value = dshReasoningBodyOverride(sessionId) ?? block.text;
-		return value ? [{
+		const value = dshReasoningBodyOverride(sessionId) ?? block.text ?? '';
+		// 同一条官方规则：reasoning 也只有含非空白字符时才产生行。
+		return value.trim() === '' ? [] : [{
 			adapter: 'thinking',
 			reuse: 'ChatThinkingContentPart',
 			reason: '思考块复用原生 thinking，不放进正文 markdown',
 			part: { kind: 'thinking', id: `${dshNodeKey(node)}:reasoning`, value },
-		}] : [];
+		}];
 	}
 	if (block.kind === 'tool-call' || block.type === 'tool-call') {
 		const wire = block as { readonly id?: string; readonly arguments?: string };

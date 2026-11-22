@@ -632,3 +632,21 @@ test('hidden command rows follow the official three-way boundary', async () => {
 	assert.equal(isHiddenCommandRow(row({ commandId: 'compact', name: 'compact' })), false);
 	assert.equal(isHiddenCommandRow(row({ commandId: 'team', name: 'other', args: 'on' })), false, 'the recorded name decides, not the id alone');
 });
+
+test('whitespace-only text and reasoning produce no rows', async () => {
+	// 官方「Hidden Chat rows」：Text and reasoning contribute to Assistant visibility
+	// only when they contain a **non-whitespace character**。
+	// 只判空串会把纯空白块画成空 markdown——流式中换行/缩进很常见。
+	const { adaptDshNode } = await import('../../../src/vs/workbench/contrib/dsh/browser/vscode/dshNativePartAdapters.ts');
+	const assistant = (blocks: readonly { readonly type: string; readonly text?: string }[]) => adaptDshNode({
+		kind: 'assistant', seq: 1, blocks,
+	} as never);
+	// 纯空白（空格 / 换行 / 制表）都不产生行。
+	for (const blank of ['', '   ', '\n', '\n\n  \t ']) {
+		assert.deepEqual(assistant([{ type: 'text', text: blank }]), [], `text ${JSON.stringify(blank)} must not render`);
+		assert.deepEqual(assistant([{ type: 'reasoning', text: blank }]), [], `reasoning ${JSON.stringify(blank)} must not render`);
+	}
+	// 有非空白字符时正常渲染。
+	assert.equal(assistant([{ type: 'text', text: 'x' }]).length, 1);
+	assert.equal(assistant([{ type: 'reasoning', text: 'x' }]).length, 1);
+});
