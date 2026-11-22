@@ -792,7 +792,9 @@ test('assistant-stream end then assistant/message keeps one node for that turn',
 	}
 });
 
-test('an abandoned assistant-stream removes its temporary node', () => {
+test('an abandoned assistant-stream hides its node instead of removing it', () => {
+	// 官方「Hidden Chat rows」：hides its already-published Node **instead of removing its key**。
+	// 节点仍在，但已无可见内容（渲染层对纯空白 assistant 不产生行，见 CHK-382）。
 	const state = createDshIdeConversationState();
 	project(state, { type: 'assistant-stream', frame: { type: 'start', attemptId: 'a2', revision: 1, turn: 2, step: 0 } });
 	project(state, {
@@ -803,7 +805,9 @@ test('an abandoned assistant-stream removes its temporary node', () => {
 		type: 'assistant-stream',
 		frame: { type: 'end', attemptId: 'a2', revision: 3, outcome: { kind: 'abandoned' } },
 	});
-	assert.equal(view.nodes.length, 0);
+	const node = view.nodes.find(candidate => candidate.kind === 'assistant') as { blocks?: readonly unknown[] } | undefined;
+	assert.ok(node !== undefined, 'the key must survive so a same-step retry can reuse it');
+	assert.deepEqual(node?.blocks, [], 'and the node carries no visible content');
 });
 
 test('assistant/message 带 text content 投影为 assistant 节点且 step 为数字', () => {

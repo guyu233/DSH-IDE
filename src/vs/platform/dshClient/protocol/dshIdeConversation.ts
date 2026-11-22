@@ -901,8 +901,17 @@ function applyStream(state: DshIdeConversationState, frame: Record<string, unkno
 		state.attempts.delete(attemptId);
 		state.settledAttempts.add(attemptId);
 		if (outcome['kind'] === 'abandoned') {
-			// 没有落成可见消息：丢弃这次尝试留下的临时节点。
-			state.nodes.delete(attempt.id);
+			// 官方 `ui-chat/README.md`「Hidden Chat rows」：「When an Assistant attempt retires without
+			// a visible message, Chat **hides its already-published Node instead of removing its key**.
+			// A retry in the same Step **reuses that key** when visible content returns.」
+			//
+			// 所以这里**不删 key**，而是把已发布节点变成「无可显示内容」——渲染层对纯空白
+			// 的 assistant 不产生行（CHK-382），于是视觉上等同于隐藏，而节点身份仍在：
+			// 同一 Step 的重试回来时复用同一个 key，虚拟化重绘不会把它当成新行。
+			const published = state.nodes.get(attempt.id);
+			if (published !== undefined && published.kind === 'assistant') {
+				state.nodes.set(attempt.id, { ...published, blocks: [] });
+			}
 			return;
 		}
 		// 正式消息可能晚于 end。先记住节点，等同回合 assistant/message 再删。
