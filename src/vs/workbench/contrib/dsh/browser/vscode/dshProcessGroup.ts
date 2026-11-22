@@ -33,6 +33,14 @@ export interface DshTurnProcess {
 	 */
 	readonly replyKeys: readonly string[];
 	/**
+	 * `answerKeys` 里**不是答复的 `turn` 位置控件**（`turn-tail` / `turn-error` / `turn-max-tokens` 等）。
+	 *
+	 * 官方「Turn Process Folding」：「A Node whose group-tree position is `turn` or outer
+	 * **remains independent of whole-Turn folding**.」——所以整 Turn 折叠时它们**必须保留**，
+	 * 不能被 `foldedReplies === 'final'` 一起折掉。
+	 */
+	readonly controlKeys: readonly string[];
+	/**
 	 * 这个 Turn 里**按边界切开的过程段**（官方「Process grouping」）。
 	 *
 	 * 官方规则：一个 Turn 里相邻的 process 内容归一组，但**答复与输入会结束前一组**：
@@ -105,6 +113,7 @@ export function groupTurnProcesses(nodes: readonly DshGroupableNode[], reasonByT
 			const processKeys: string[] = [];
 			const answerKeys: string[] = [];
 			const replyKeys: string[] = [];
+			const controlKeys: string[] = [];
 			const segments: DshProcessSegment[] = [];
 			let currentSegment: string[] = [];
 			let segmentPrecededBy: string | undefined;
@@ -137,6 +146,10 @@ export function groupTurnProcesses(nodes: readonly DshGroupableNode[], reasonByT
 					currentSegment.push(node.key);
 				} else {
 					answerKeys.push(node.key);
+					if (node.kind !== 'assistant' && node.kind !== 'assistant-step') {
+						// `turn` 位置的非答复控件：独立于整 Turn 折叠（官方原文）。
+						controlKeys.push(node.key);
+					}
 					if (node.kind === 'assistant' || node.kind === 'assistant-step') {
 						replyKeys.push(node.key);
 						sawAnswer = true;
@@ -161,7 +174,7 @@ export function groupTurnProcesses(nodes: readonly DshGroupableNode[], reasonByT
 			const alwaysOpen = spec.hasInterleavedInput || (reason !== undefined
 				? turnProcessAlwaysOpen(reason)
 				: sawSignal || !sawAnswer);
-			return { turn, answerStep, promptKeys, processKeys, answerKeys, replyKeys, segments, alwaysOpen };
+			return { turn, answerStep, promptKeys, processKeys, answerKeys, replyKeys, controlKeys, segments, alwaysOpen };
 		});
 }
 
@@ -322,7 +335,9 @@ export function visibleProcessKeys(group: DshTurnProcess, collapsed: boolean, fo
 	if (foldedReplies === 'final') {
 		// 只在**真正的答复**里取最后一条；`answerKeys` 还含 turn-tail/turn-error 等控件。
 		const finalKey = group.replyKeys.at(-1);
-		return [...group.promptKeys, ...(finalKey === undefined ? [] : [finalKey])];
+		// 官方：「A Node whose group-tree position is `turn` or outer remains **independent of
+		// whole-Turn folding**」——`turn-tail` / `turn-error` 这类控件必须保留，不能被一起折掉。
+		return [...group.promptKeys, ...(finalKey === undefined ? [] : [finalKey]), ...group.controlKeys];
 	}
 	return [...group.promptKeys, ...group.answerKeys];
 }

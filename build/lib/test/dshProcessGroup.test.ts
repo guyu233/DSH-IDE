@@ -231,7 +231,9 @@ test('foldedReplies=final keeps only the final reply, never a tail control', () 
 	// all：答复与控制都在。
 	assert.deepEqual([...visibleProcessKeys(group, true, 'all')], ['u', 'a1', 'a2', 'tail']);
 	// final：只剩输入与最终答复；turn-tail 不能被当成最终答复留下，中间答复 a1 也折起。
-	assert.deepEqual([...visibleProcessKeys(group, true, 'final')], ['u', 'a2']);
+	// final：只剩输入、最终答复与 turn 位置控件——中间答复 a1 折起，
+	// 但 turn-tail 既不能当答复留下、也不能被折掉（官方：turn/outer 位置的节点独立于整 Turn 折叠）。
+	assert.deepEqual([...visibleProcessKeys(group, true, 'final')], ['u', 'a2', 'tail']);
 	// 展开时两种偏好一致。
 	assert.deepEqual([...visibleProcessKeys(group, false, 'final')], ['u', 't', 'a1', 'a2', 'tail']);
 });
@@ -386,4 +388,21 @@ test('the collapsed line ranks by count descending and omits counts', () => {
 	assert.ok(line !== undefined);
 	assert.ok(line.startsWith('Ran commands'), `commands must rank first in "${line}"`);
 	assert.ok(!/\d/.test(line), `counts must not appear in a closed title: "${line}"`);
+});
+
+test('turn-position controls stay independent of whole-turn folding', () => {
+	// 官方「Turn Process Folding」：A Node whose group-tree position is `turn` or outer
+	// remains **independent of whole-Turn folding**。
+	// 所以 foldedReplies='final' 只折中间答复，不能把 turn-tail / turn-error 一起折掉。
+	const [group] = groupTurnProcesses([
+		node({ key: 'u', kind: 'user', seq: 1, turn: 1 }),
+		node({ key: 'a1', kind: 'assistant', seq: 2, turn: 1, step: 0 }),
+		node({ key: 'a2', kind: 'assistant', seq: 3, turn: 1, step: 1 }),
+		node({ key: 'tail', kind: 'turn-tail', seq: 4, turn: 1 }),
+	], new Map([[1, 'completed']]));
+	assert.deepEqual([...group.controlKeys], ['tail'], 'non-reply turn controls are tracked separately');
+	// final：只留最终答复 a2，但 tail 必须保留。
+	assert.deepEqual([...visibleProcessKeys(group, true, 'final')], ['u', 'a2', 'tail']);
+	// all：答复与控件都保留（行为不变）。
+	assert.deepEqual([...visibleProcessKeys(group, true, 'all')], ['u', 'a1', 'a2', 'tail']);
 });
