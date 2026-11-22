@@ -743,7 +743,7 @@ DshCompositeContentPart
 
 **第八处：`conversation.chat.text-interaction`（keyed）。** `dshTextInteractions(sessionId, surface)` 按 surface 取 occupant；助手行在有选中文本时显示手势条，点击把选中文本作为最后一个参数传给插件命令。选中判定用 `selectionchange`，不接管原生选择。
 
-前四处只在有会话 id 时生效（配额链是 root 作用域，不需要会话）。`dshSlotHostModel.test.ts` 10 项、`dshNativePartAdapters.test.ts` 28 项通过。真机未验证。
+前四处只在有会话 id 时生效（配额链是 root 作用域，不需要会话）。`dshSlotHostModel.test.ts`、`dshNativePartAdapters.test.ts` 通过（测试计数随新增用例增长，以 `test-dsh:all` 实跑为准）。真机未验证。
 
 PR-01 已完成，结论见本文附录 A「当前状态矩阵」。核对发现原契约有 6 处与 DSH 真源不符，已在本轮回改：
 
@@ -781,7 +781,7 @@ PR-04 状态：**部分实现**。
 
 - ~~协议里还没有 `assistant-step` / `turn-tail` / `turn-process` / `system-prompt` / `submitted-plan` / `workflow-run` 等官方 kind~~ **已补（2026-11-22）**：这些 kind 全部进了线协议（见 §7 的两张表）。仍缺 `turn-process` 的独立过程组 DOM 与 `snapshot` 的 timeline / legacy 两段。
 
-`node --experimental-strip-types --import ./build/lib/test/strip-ts-resolver.mjs --test build/lib/test/dshConversationNodeTree.test.ts` 8 项通过。`parentCallId` 会把同级工具挂到已存在的父调用下，成环时后一个留在顶层。`dshProcessGroup.test.ts` 8 项通过。
+`node --experimental-strip-types --import ./build/lib/test/strip-ts-resolver.mjs --test build/lib/test/dshConversationNodeTree.test.ts` 通过。`parentCallId` 会把同级工具挂到已存在的父调用下，成环时后一个留在顶层。`dshProcessGroup.test.ts` 通过。
 
 PR-07 折叠：**部分实现**。
 
@@ -792,7 +792,7 @@ PR-07 折叠：**部分实现**。
 
 PR-08 工具视图：**部分实现**。`dshToolViewId` 把 wire 名分到 13 个家族。details 覆盖契约点名的 41 个记录型名字，再加上 `cordis_stop`、`cordis_undefine`、`timeline_tasks`，共 44。`adaptDshNode` 已按家族写不同的 `input`（bash 是命令，read 是路径，search 是 pattern 并附路径树，file-mutation 附 diff 路径，todo 附任务行）。还没有每个家族一份独立 DOM 部件。
 
-`node --experimental-strip-types --test build/lib/test/dshExpansionAndToolView.test.ts` 3 项通过。
+`node --experimental-strip-types --test build/lib/test/dshExpansionAndToolView.test.ts` 通过。
 
 PR-05 状态：**部分实现**。
 
