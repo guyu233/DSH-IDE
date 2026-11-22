@@ -245,3 +245,54 @@ function textOf(blocks: readonly { readonly type?: string; readonly kind?: strin
 	}
 	return lines.join('\n');
 }
+
+/** 一行的身份与显示签名（不含 DOM）。 */
+export interface DshSlotRowSignature {
+	readonly key: string;
+	readonly signature: string;
+}
+
+/**
+ * 增量渲染的行级差异计划（契约 §19 S2）。
+ *
+ * 纯函数：只比较「上一帧的行」与「这一帧的行」，给出要删的行、要重建的行与最终顺序。
+ * DOM 生命周期由 `DshSlotHostContentPart` 执行；把判定抽出来的原因是它必须能单测——
+ * 契约要求的「1 个节点变化只替换 1 行」「无可见变化不重建」只能在这一层证明。
+ */
+export interface DshSlotRowDiff {
+	/** 需要从 DOM 移除并释放的行 key。 */
+	readonly removed: readonly string[];
+	/** 需要重建 DOM 的行 key（新增行或签名变化）。 */
+	readonly rebuild: readonly string[];
+	/** 下一帧的行顺序。 */
+	readonly order: readonly string[];
+	/** 是否有任何可见变化；false 时调用方不得 fire 高度事件。 */
+	readonly changed: boolean;
+}
+
+/** 计算行级差异。签名相同即视为同一行，可原样复用。 */
+export function diffDshSlotRows(previous: readonly DshSlotRowSignature[], next: readonly DshSlotRowSignature[]): DshSlotRowDiff {
+	const previousByKey = new Map(previous.map(row => [row.key, row.signature]));
+	const nextByKey = new Map(next.map(row => [row.key, row.signature]));
+	const removed: string[] = [];
+	const rebuild: string[] = [];
+	for (const key of previousByKey.keys()) {
+		if (!nextByKey.has(key)) {
+			removed.push(key);
+		}
+	}
+	for (const row of next) {
+		const before = previousByKey.get(row.key);
+		if (before === undefined || before !== row.signature) {
+			rebuild.push(row.key);
+		}
+	}
+	const order = next.map(row => row.key);
+	const sameOrder = previous.length === next.length && previous.every((row, index) => row.key === next[index].key);
+	return {
+		removed,
+		rebuild,
+		order,
+		changed: removed.length > 0 || rebuild.length > 0 || !sameOrder,
+	};
+}

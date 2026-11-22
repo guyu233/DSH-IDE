@@ -20,6 +20,8 @@ import { dshContentStore } from './dshContentStore.js';
 import { adaptDshNode, type DshNativePart } from './dshNativePartAdapters.js';
 import { groupTurnProcesses, hiddenProcessLine, processLineFromSnapshot, visibleProcessKeys } from './dshProcessGroup.js';
 import { dshSlotHostSame, planKeysForTurn, presentDshNode, type DshSlotHostRef } from './dshSlotHostModel.js';
+import { dshNodeDisplaySignature } from './dshConversationNodeTree.js';
+import { diffDshSlotRows } from './dshSlotHostModel.js';
 
 export interface DshNativePartRenderer {
 	render(part: DshNativePart): IChatContentPart | undefined;
@@ -35,14 +37,36 @@ export interface DshNativePartRenderer {
 	loadImage?(uri: URI): Promise<Uint8Array | undefined>;
 }
 
+/** 一帧里的一行：`node` 是节点行，其余是过程计数行 / 问卷 / 侧栏这类附加行。 */
+type DshSlotRowSpec =
+	| { readonly key: string; readonly kind: 'node'; readonly nodeKey: string; readonly signature?: string }
+	| { readonly key: string; readonly kind: 'summary'; readonly line: string; readonly signature?: string }
+	| { readonly key: string; readonly kind: 'question'; readonly eventId: string; readonly signature?: string }
+	| { readonly key: string; readonly kind: 'aside'; readonly text: string; readonly signature?: string };
+
 export class DshSlotHostContentPart extends Disposable implements IChatContentPart {
 	readonly domNode: HTMLElement;
 	private readonly body: HTMLElement;
-	private readonly refs: DisposableStore;
 	private readonly _onDidChangeHeight = this._register(new Emitter<void>());
 	readonly onDidChangeHeight = this._onDidChangeHeight.event;
-	/** 每次 render 重建的文本手势同步回调；document 上只挂一个监听。 */
-	private readonly selectionSyncs = new Set<() => void>();
+	/**
+	 * 已经画出来的行，按稳定 key 索引（契约 §19 S2）。
+	 *
+	 * 增量渲染的做法：每帧先算出「这一帧应该有哪些行、每行的显示签名是什么」，
+	 * 再与这张表逐 key 对齐——签名没变就原样保留 DOM（连高度都不重测），
+	 * 只有变了的行才重建。这样单个节点变化不会重建整段 slot host。
+	 */
+	private readonly rows = new Map<string, { signature: string; dom: HTMLElement; refs: DisposableStore }>();
+	/** 文本手势条的同步回调，按行 key 登记；行销毁时一并移除。 */
+	private readonly selectionSyncs = new Map<string, () => void>();
+	/**
+	 * 供单测观察增量渲染的计数器（只读）。
+	 *
+	 * 为什么要有：契约 §19 S2 的验收是「1 个节点变化只替换 1 行」「无可见变化不 fire height」，
+	 * 这两条只能从渲染行为上观察，不能靠断言源码文本。生产环境里这些计数只增不减，
+	 * 不参与逻辑判断。
+	 */
+	readonly renderStats = { renders: 0, rebuiltRows: 0, heightEvents: 0 };
 
 	constructor(private content: IDshSlotHostContent, private readonly native?: DshNativePartRenderer) {
 		super();
@@ -54,11 +78,10 @@ export class DshSlotHostContentPart extends Disposable implements IChatContentPa
 		this.domNode.setAttribute('aria-label', 'DSH');
 		this.body = $('.dsh-slot-host-body');
 		this.domNode.appendChild(this.body);
-		this.refs = this._register(new DisposableStore());
 		// 选区变化只影响手势条显隐，统一在 part 级处理，不为每行各挂一个监听。
 		const doc = this.domNode.ownerDocument;
 		const onSelectionChange = () => {
-			for (const sync of this.selectionSyncs) {
+			for (const sync of this.selectionSyncs.values()) {
 				sync();
 			}
 		};
@@ -82,15 +105,74 @@ export class DshSlotHostContentPart extends Disposable implements IChatContentPa
 		return other.kind === 'dshSlotHost' && dshSlotHostSame(this.content, other as DshSlotHostRef);
 	}
 
+	/**
+	 * 增量渲染入口（契约 §19 S2）。
+	 *
+	 * 每次只重算「哪一行该在哪个位置、显示签名是什么」，然后与已画的 DOM 对齐：
+	 *   - 签名没变 → 保留原来的行（连高度都不重测）；
+	 *   - 签名变了 → 只重建那一行；
+	 *   - 新增/删除 → 只 append / dispose 对应的行；
+	 *   - 顺序变化 → DOM move（`insertBefore`），不重建。
+	 *
+	 * 只有行集合或行内容真的变了才 `fire onDidChangeHeight`；没有可见变化时一次都不发，
+	 * 避免把上游高频增量放大成原生 ChatList 的自动滚动。
+	 */
 	private render(): void {
-		this.refs.clear();
-		// 上一轮的手势条已随 DOM 移除，对应的同步回调不能再指向旧节点。
-		this.selectionSyncs.clear();
-		this.body.replaceChildren();
+		this.renderStats.renders++;
 		const binding = dshContentStore.get(this.content.treeId);
 		if (binding === undefined) {
 			return;
 		}
+		const rowsToRender = this.collectRows(binding).map(row => ({ ...row, signature: this.rowSignature(row, binding) }));
+		const previous = [...this.rows].map(([key, row]) => ({ key, signature: row.signature }));
+		const plan = diffDshSlotRows(previous, rowsToRender);
+		if (!plan.changed) {
+			// 没有可见变化：一次高度事件都不发，避免把上游高频增量放大成自动滚动。
+			return;
+		}
+
+		// 先收掉不再存在的行（含它们持有的原生部件与事件）。
+		for (const key of plan.removed) {
+			const row = this.rows.get(key);
+			if (row === undefined) {
+				continue;
+			}
+			row.refs.dispose();
+			row.dom.remove();
+			this.rows.delete(key);
+			this.selectionSyncs.delete(key);
+		}
+
+		// 再按目标顺序逐行对齐。
+		let cursor: HTMLElement | undefined = this.body.firstElementChild as HTMLElement | undefined;
+		for (const row of rowsToRender) {
+			let entry = this.rows.get(row.key);
+			if (entry === undefined || entry.signature !== row.signature) {
+				const refs = new DisposableStore();
+				const dom = this.renderRow(row, binding, refs);
+				if (entry === undefined) {
+					this.selectionSyncs.delete(row.key);
+				} else {
+					entry.refs.dispose();
+					entry.dom.replaceWith(dom);
+					this.selectionSyncs.delete(row.key);
+				}
+				entry = { signature: row.signature, dom, refs };
+				this.rows.set(row.key, entry);
+				this.renderStats.rebuiltRows++;
+			}
+			if (cursor === entry.dom) {
+				cursor = cursor.nextElementSibling as HTMLElement | undefined;
+			} else {
+				this.body.insertBefore(entry.dom, cursor ?? null);
+			}
+		}
+		this.renderStats.heightEvents++;
+		this._onDidChangeHeight.fire();
+	}
+
+	/** 这一帧应该画哪些行（顺序即 DOM 顺序）以及每行的显示签名。 */
+	private collectRows(binding: NonNullable<ReturnType<typeof dshContentStore.get>>): readonly DshSlotRowSpec[] {
 		const grouped = this.content.nodeIds.flatMap(nodeId => {
 			const node = binding.tree.get(nodeId);
 			if (node === undefined) {
@@ -155,6 +237,7 @@ export class DshSlotHostContentPart extends Disposable implements IChatContentPa
 				summaryBefore.set(anchor, line);
 			}
 		}
+		const rows: DshSlotRowSpec[] = [];
 		for (const nodeId of this.content.nodeIds) {
 			const node = binding.tree.get(nodeId);
 			if (node === undefined || binding.tree.parentKey(nodeId) !== undefined) {
@@ -174,43 +257,78 @@ export class DshSlotHostContentPart extends Disposable implements IChatContentPa
 			}
 			if (node.kind === 'turn-tail') {
 				for (const planKey of planKeysForTurn(grouped, node.turn ?? -1)) {
-					this.body.appendChild(this.renderNode(planKey, binding, false));
+					rows.push({ key: `plan:${planKey}`, kind: 'node', nodeKey: planKey });
 				}
 			}
 			const line = summaryBefore.get(nodeId);
 			if (line !== undefined) {
-				this.body.appendChild(processSummaryRow(line));
+				rows.push({ key: `summary:${nodeId}`, kind: 'summary', line });
 			}
-			this.body.appendChild(this.renderNode(nodeId, binding, false));
+			rows.push({ key: `node:${nodeId}`, kind: 'node', nodeKey: nodeId });
 		}
 		for (const eventId of this.content.questionIds ?? []) {
-			const part = this.native?.renderQuestion?.(eventId);
-			if (part?.domNode !== undefined) {
-				this.refs.add(part);
-				if (part.onDidChangeHeight !== undefined) {
-					this.refs.add(part.onDidChangeHeight(() => this._onDidChangeHeight.fire()));
-				}
-				this.body.appendChild(part.domNode);
-			} else {
-				part?.dispose();
-			}
+			rows.push({ key: `question:${eventId}`, kind: 'question', eventId });
 		}
-		// 侧栏席位：官方 single 槽，插件给一段文本时在尾部渲染。
 		const aside = dshAsideText(this.content.treeId);
 		if (aside !== undefined) {
-			const panel = $('.dsh-aside');
-			panel.textContent = aside;
-			// 官方把 aside 描述为「beside the transcript」的会话级席位，语义上是补充说明。
-			panel.setAttribute('role', 'note');
-			panel.style.color = 'var(--vscode-descriptionForeground)';
-			panel.style.borderLeft = '2px solid var(--vscode-editorWidget-border)';
-			panel.style.paddingLeft = '8px';
-			this.body.appendChild(panel);
+			rows.push({ key: 'aside', kind: 'aside', text: aside });
 		}
-		this._onDidChangeHeight.fire();
+		return rows;
 	}
 
-	private renderActions(actions: readonly DshAssistantAction[]): HTMLElement {
+	/** 一行的显示签名：只由这一行真正画出来的内容决定。 */
+	private rowSignature(row: DshSlotRowSpec, binding: NonNullable<ReturnType<typeof dshContentStore.get>>): string {
+		switch (row.kind) {
+			case 'summary':
+				return `summary\u0000${row.line}`;
+			case 'question':
+				return `question\u0000${binding.questions?.get(row.eventId)?.signature ?? row.eventId}`;
+			case 'aside':
+				return `aside\u0000${row.text}`;
+			case 'node': {
+				const node = binding.tree.get(row.nodeKey);
+				if (node === undefined) {
+					return 'missing';
+				}
+				const expanded = binding.expansion.isDisclosed(node.turn ?? 0, row.nodeKey) ? '1' : '0';
+				return `node\u0000${dshNodeDisplaySignature(node)}\u0000${expanded}`;
+			}
+		}
+	}
+
+	/** 按行类型构造 DOM；每行自己的监听进该行的 `refs`。 */
+	private renderRow(row: DshSlotRowSpec, binding: NonNullable<ReturnType<typeof dshContentStore.get>>, refs: DisposableStore): HTMLElement {
+		switch (row.kind) {
+			case 'summary':
+				return processSummaryRow(row.line);
+			case 'aside': {
+				const panel = $('.dsh-aside');
+				panel.textContent = row.text;
+				// 官方把 aside 描述为「beside the transcript」的会话级席位，语义上是补充说明。
+				panel.setAttribute('role', 'note');
+				panel.style.color = 'var(--vscode-descriptionForeground)';
+				panel.style.borderLeft = '2px solid var(--vscode-editorWidget-border)';
+				panel.style.paddingLeft = '8px';
+				return panel;
+			}
+			case 'question': {
+				const part = this.native?.renderQuestion?.(row.eventId);
+				if (part?.domNode !== undefined) {
+					refs.add(part);
+					if (part.onDidChangeHeight !== undefined) {
+						refs.add(part.onDidChangeHeight(() => this._onDidChangeHeight.fire()));
+					}
+					return part.domNode;
+				}
+				part?.dispose();
+				return document.createElement('div');
+			}
+			case 'node':
+				return this.renderNode(row.nodeKey, binding, false, refs, row.key);
+		}
+	}
+
+	private renderActions(actions: readonly DshAssistantAction[], refs: DisposableStore): HTMLElement {
 		const bar = $('.dsh-assistant-actions');
 		bar.style.display = 'flex';
 		bar.style.gap = '6px';
@@ -230,7 +348,7 @@ export class DshSlotHostContentPart extends Disposable implements IChatContentPa
 			button.style.font = 'inherit';
 			button.style.cursor = 'pointer';
 			button.style.padding = '0';
-			this.refs.add(addClick(button, () => {
+			refs.add(addClick(button, () => {
 				this.native?.executeCommand?.(action.command, action.arguments ?? []);
 			}));
 			bar.appendChild(button);
@@ -243,7 +361,7 @@ export class DshSlotHostContentPart extends Disposable implements IChatContentPa
 	 *
 	 * 选中判定用 `selectionchange`，不接管原生选择行为；点击把选中文本作为最后一个参数传给插件命令。
 	 */
-	private renderTextInteractions(host: HTMLElement, interactions: readonly DshTextInteraction[]): HTMLElement {
+	private renderTextInteractions(host: HTMLElement, interactions: readonly DshTextInteraction[], refs: DisposableStore, rowKey: string): HTMLElement {
 		const bar = $('.dsh-text-interactions');
 		bar.style.display = 'none';
 		bar.style.gap = '6px';
@@ -267,7 +385,7 @@ export class DshSlotHostContentPart extends Disposable implements IChatContentPa
 		};
 		// 每个助手行都往 document 上挂一个 `selectionchange` 的话，长会话里会有 N 个监听
 		// 在每次选区变化时各自重算一遍。这里只登记回调，document 上始终只有本 part 的一个监听。
-		this.selectionSyncs.add(sync);
+		this.selectionSyncs.set(rowKey, sync);
 		for (const interaction of interactions) {
 			const button = $('button.dsh-text-interaction') as HTMLButtonElement;
 			button.type = 'button';
@@ -279,7 +397,7 @@ export class DshSlotHostContentPart extends Disposable implements IChatContentPa
 			button.style.font = 'inherit';
 			button.style.cursor = 'pointer';
 			button.style.padding = '0';
-			this.refs.add(addClick(button, () => {
+			refs.add(addClick(button, () => {
 				const text = selected();
 				if (text === '') {
 					return;
@@ -291,7 +409,7 @@ export class DshSlotHostContentPart extends Disposable implements IChatContentPa
 		return bar;
 	}
 
-	private renderNode(nodeId: string, binding: NonNullable<ReturnType<typeof dshContentStore.get>>, nested: boolean): HTMLElement {
+	private renderNode(nodeId: string, binding: NonNullable<ReturnType<typeof dshContentStore.get>>, nested: boolean, refs: DisposableStore, rowKey = nodeId): HTMLElement {
 		const node = binding.tree.get(nodeId);
 		const row = document.createElement('div');
 		row.className = 'dsh-slot-row';
@@ -318,7 +436,7 @@ export class DshSlotHostContentPart extends Disposable implements IChatContentPa
 			for (const item of adapted) {
 				const nativePart = this.native?.render(item.part);
 				if (nativePart?.domNode !== undefined) {
-					this.refs.add(nativePart);
+					refs.add(nativePart);
 					row.appendChild(nativePart.domNode);
 					continue;
 				}
@@ -326,14 +444,14 @@ export class DshSlotHostContentPart extends Disposable implements IChatContentPa
 				row.appendChild(renderAdaptedFallback(item.part));
 			}
 			for (const child of binding.tree.childKeysOf(nodeId)) {
-				row.appendChild(this.renderNode(child, binding, true));
+				row.appendChild(this.renderNode(child, binding, true, refs));
 			}
 			if (node.kind === 'assistant') {
 				// 文本手势只挂在助手正文上（surface 是 assistant-markdown）：
 				// 放到通用分支会让工具行、用户行也长出同一排按钮。
 				const interactions = dshTextInteractions(this.content.treeId, 'assistant-markdown');
 				if (interactions.length > 0) {
-					row.appendChild(this.renderTextInteractions(row, interactions));
+					row.appendChild(this.renderTextInteractions(row, interactions, refs, rowKey));
 				}
 			}
 			return row;
@@ -373,7 +491,7 @@ export class DshSlotHostContentPart extends Disposable implements IChatContentPa
 		detail.style.fontFamily = 'var(--monaco-monospace-font)';
 		detail.style.color = 'var(--vscode-descriptionForeground)';
 		detail.hidden = !open;
-		this.refs.add(addClick(header, () => {
+		refs.add(addClick(header, () => {
 			if (presented.detail === '') {
 				return;
 			}
@@ -382,14 +500,14 @@ export class DshSlotHostContentPart extends Disposable implements IChatContentPa
 		row.appendChild(header);
 		row.appendChild(detail);
 		for (const child of binding.tree.childKeysOf(nodeId)) {
-			row.appendChild(this.renderNode(child, binding, true));
+			row.appendChild(this.renderNode(child, binding, true, refs));
 		}
 		// 动作行挂在 turn tail 内，owner 是收尾答复的 messageId（官方 `TurnTailNodeView`）：
 		// 中断冻结的部分回复没有 messageId，此时不给动作行。
 		if (node.kind === 'turn-tail') {
 			const actions = dshAssistantActions(this.content.treeId, (node as { readonly closingMessageId?: string }).closingMessageId);
 			if (actions.length > 0) {
-				row.appendChild(this.renderActions(actions));
+				row.appendChild(this.renderActions(actions, refs));
 			}
 		}
 		return row;

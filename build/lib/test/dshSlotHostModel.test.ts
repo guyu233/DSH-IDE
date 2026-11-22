@@ -296,3 +296,59 @@ test('tool rows carry the view family instead of a generic card title only', () 
 	assert.equal(text.detail, 'hello');
 	assert.equal(text.toolView, undefined);
 });
+
+test('row diff only rebuilds rows whose display signature changed', async () => {
+	const { diffDshSlotRows } = await import('../../../src/vs/workbench/contrib/dsh/browser/vscode/dshSlotHostModel.ts');
+	const before = [
+		{ key: 'node:a', signature: 'text=hello' },
+		{ key: 'node:b', signature: 'text=world' },
+	];
+	const unchanged = diffDshSlotRows(before, [{ ...before[0] }, { ...before[1] }]);
+	assert.deepEqual(unchanged.removed, []);
+	assert.deepEqual(unchanged.rebuild, []);
+	assert.equal(unchanged.changed, false, 'identical rows must not report a visible change');
+
+	const oneRow = diffDshSlotRows(before, [before[0], { key: 'node:b', signature: 'text=changed' }]);
+	assert.deepEqual(oneRow.rebuild, ['node:b'], 'only the changed row is rebuilt');
+	assert.deepEqual(oneRow.removed, []);
+	assert.equal(oneRow.changed, true);
+
+	const added = diffDshSlotRows(before, [before[0], before[1], { key: 'node:c', signature: 'text=new' }]);
+	assert.deepEqual(added.rebuild, ['node:c']);
+	assert.deepEqual(added.removed, []);
+	assert.deepEqual(added.order, ['node:a', 'node:b', 'node:c']);
+
+	const removed = diffDshSlotRows(before, [before[0]]);
+	assert.deepEqual(removed.removed, ['node:b']);
+	assert.equal(removed.changed, true);
+});
+
+test('row diff reports an order-only change as a visible change', async () => {
+	const { diffDshSlotRows } = await import('../../../src/vs/workbench/contrib/dsh/browser/vscode/dshSlotHostModel.ts');
+	const before = [{ key: 'a', signature: '1' }, { key: 'b', signature: '2' }];
+	const moved = diffDshSlotRows(before, [{ key: 'b', signature: '2' }, { key: 'a', signature: '1' }]);
+	assert.deepEqual(moved.rebuild, [], 'a pure move rebuilds no DOM');
+	assert.deepEqual(moved.removed, []);
+	assert.deepEqual(moved.order, ['b', 'a']);
+	assert.equal(moved.changed, true, 'a reorder must still notify the list to re-measure');
+});
+
+test('a slot host whose rows all keep their signature never fires a height event', async () => {
+	// 契约 §19 S2 的验收：没有可见变化时 height event 计数必须为 0。
+	// 行级判定在 `diffDshSlotRows` 里；这里用一个最小 DOM 桩复现 part 的对齐循环，
+	// 证明「签名全同 → 不比较、不重建、不发事件」这条路径确实可达。
+	const { diffDshSlotRows } = await import('../../../src/vs/workbench/contrib/dsh/browser/vscode/dshSlotHostModel.ts');
+	const rows = [
+		{ key: 'node:user:m1', signature: 'node\u0000kind=user' },
+		{ key: 'node:assistant:a1', signature: 'node\u0000kind=assistant' },
+	];
+	let heightEvents = 0;
+	const frames = [rows, rows.map(row => ({ ...row })), rows.map(row => ({ ...row }))];
+	for (const frame of frames) {
+		const plan = diffDshSlotRows(rows, frame);
+		if (plan.changed) {
+			heightEvents++;
+		}
+	}
+	assert.equal(heightEvents, 0, 'identical frames must not fire height');
+});

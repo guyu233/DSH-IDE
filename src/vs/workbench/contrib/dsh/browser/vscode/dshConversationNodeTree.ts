@@ -537,7 +537,17 @@ function sameNode(left: DshIndexedNode, right: DshIndexedNode): boolean {
 	if (left === right) {
 		return true;
 	}
-	return displaySignature(left) === displaySignature(right);
+	return dshNodeDisplaySignature(left) === dshNodeDisplaySignature(right);
+}
+
+/**
+ * 一个节点参与显示比较的签名。
+ *
+ * 导出给 slot host 判断「这一行要不要重建」：同一个签名表示这一行的可见内容没变，
+ * 不必替换 DOM（契约 §19 S2）。
+ */
+export function dshNodeDisplaySignature(node: DshIndexedNode): string {
+	return displaySignature(node);
 }
 
 function displaySignature(node: DshIndexedNode): string {
