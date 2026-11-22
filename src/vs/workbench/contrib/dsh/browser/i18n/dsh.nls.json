@@ -83,7 +83,7 @@
 	"dsh.history.planActive": "Plan mode is on",
 	"dsh.history.planOff": "Plan mode is off",
 	"dsh.history.planPending": "Plan mode (waiting for confirmation)",
-	"dsh.history.quotaExceeded": "Quota exhausted ({0}); check your account quota.",
+	"dsh.history.quotaExceeded": "The account quota is exhausted. Check your account quota to continue.",
 	"dsh.history.reject": "Reject",
 	"dsh.history.skills": "Available skills: {0}",
 	"dsh.history.steering": "{0}",
@@ -240,5 +240,6 @@
 	"dsh.question.viewAnswers": "View answers",
 	"dsh.question.viewAnswersLabel": "View the recorded answers",
 	"dsh.toolbar.label": "Actions",
-	"dsh.queue.steerCount": "{0} to steer"
+	"dsh.queue.steerCount": "{0} to steer",
+	"dsh.turn.interrupted": "The DSH process exited before this turn finished."
 }

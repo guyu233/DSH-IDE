@@ -18,6 +18,7 @@
 // 边界：零 `@deepseek-ai/*` import（workbench 层），只按 DSH 的公开类型形状窄化。
 
 import { Emitter, Event } from '../../../../../base/common/event.js';
+import { localize } from '../../../../../nls.js';
 import { isHiddenCommandRow } from './dshCommandRows.js';
 import { Disposable } from '../../../../../base/common/lifecycle.js';
 import { createDshIdeConversationState, projectDshIdeConversation } from '../../../../../platform/dshClient/protocol/dshIdeConversation.js';
@@ -851,8 +852,12 @@ function fromConversationNode(node: DshIdeConversationNode): DshChatNode | undef
 				kind: 'turn-error',
 				turn: node.turn,
 				step: node.step,
-				message: node.message,
-				...(node.code === undefined ? {} : { code: node.code }),
+				// 官方「Command and failure rows」：restart recovery 关闭的 interrupted Turn
+				// 渲染**本地化停止行**（说明 DSH 进程中途退出），且**不带 code chip**。
+				message: node.interrupted === true
+					? localize('dsh.turn.interrupted', "The DSH process exited before this turn finished.")
+					: node.message,
+				...(node.interrupted === true || node.code === undefined ? {} : { code: node.code }),
 			} as DshChatNode;
 		case 'turn-max-tokens':
 			return { ...base, kind: 'turn-max-tokens', turn: node.turn, step: node.step } as DshChatNode;

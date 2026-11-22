@@ -488,7 +488,7 @@ export type DshIdeConversationNode =
 		readonly retryState?: 'scheduled' | 'started' | 'cancelled';
 		readonly failure?: { readonly message: string; readonly code?: string };
 	})
-	| (DshIdeNodeBase & { readonly kind: 'turn-error'; readonly turn: number; readonly step: number; readonly message: string; readonly code?: string })
+	| (DshIdeNodeBase & { readonly kind: 'turn-error'; readonly turn: number; readonly step: number; readonly message: string; readonly code?: string; /** restart recovery 关闭的 interrupted Turn：渲染本地化停止行且**不带 code chip**（官方同款）。 */ readonly interrupted?: true })
 	| (DshIdeNodeBase & { readonly kind: 'turn-max-tokens'; readonly turn: number; readonly step: number })
 	| (DshIdeNodeBase & { readonly kind: 'inherited-history' })
 	// 官方 `turn-trigger`：非人类消息被认领为开启一个 Turn 时的呈现。
@@ -2381,11 +2381,14 @@ function validateConversationNode(value: unknown, label: string, seen: Set<objec
 				return;
 			}
 			case 'turn-error': {
-				const node = exactRecord(value, ['kind', 'seq', 'time', 'messageId', 'turn', 'step', 'message', 'code'], label);
+				const node = exactRecord(value, ['kind', 'seq', 'time', 'messageId', 'turn', 'step', 'message', 'code', 'interrupted'], label);
 				readNodeBase(node, label, true);
 				nonNegativeInteger(node['step'], `${label}.step`);
 				nonEmptyString(node['message'], `${label}.message`);
 				optionalString(node['code'], `${label}.code`);
+				if (node['interrupted'] !== undefined && node['interrupted'] !== true) {
+					throw new TypeError(`${label}.interrupted must be true when present`);
+				}
 				return;
 			}
 			case 'turn-max-tokens': {

@@ -255,7 +255,7 @@ DSH-IDE 的线协议只投影 `ConversationNode`（`src/vs/platform/dshClient/pr
 | `command` | commandId、name、args、outcome |
 | `compaction` | `summary`、`summaryEventSeq`、`shadowedItemCount`、`shadowedTokenCount`。**真源注记（2026-11-23 在线核对 `ac11a30a`「restore compaction summaries by event address」）**：官方 `CompactionSummaryNode` 本身**没有** `summary` 字段，摘要由 `compaction/summary` 事件的 `data.summary`（**内容块数组** `[{type:'text',text}]`）按 seq 读回；本仓线协议保留 `summary` 作为投影结果（从事件里抽文本），不是照抄节点字段。 |
 | `model-retry` | retry、maxRetries、delayMs、mode、retryState、failure |
-| `turn-error` | TurnErrorNode |
+| `turn-error` | `turn/end.reason` 的 error/aborted/interrupted。**interrupted 带结构化 `interrupted?: true` 且不带 code**——渲染层出本地化停止行「DSH 进程在本轮完成前退出」（官方「Command and failure rows」：without a code chip；2026-11-23 CHK-350） |
 | `turn-max-tokens` | TurnMaxTokensNode |
 | `inherited-history` | fork 会话的分界行。官方 `buildViewNode` 取 `context.matches.at(-1)`：**只保留最新** inherited seed 标记处的**一个**分界行；文案 `Inherited history above`，caption 以分支图标起始（2026-11-23 CHK-349 修正：此前每个标记各画一个、文案缺 above、无图标） |
 | `unknown` | UnknownSurfaceNode（未认领的 append-surface 事件） |

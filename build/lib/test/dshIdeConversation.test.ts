@@ -1135,3 +1135,27 @@ test('only the latest inherited seed leaves one divider', () => {
 	const plain = project({ type: 'session/end-seed', seq: 3, time: 3, data: { inherited: false } });
 	assert.equal(plain.nodes.filter(node => node.kind === 'inherited-history').length, 1, 'a plain seed adds no divider');
 });
+
+test('an interrupted turn is marked structurally and carries no failure code', () => {
+	// 官方「Command and failure rows」：restart recovery 关闭的 interrupted Turn 渲染本地化停止行，
+	// 且**不带 code chip**——它不是内核报的错，给错误码只会误导用户去查不存在的失败。
+	// 协议层零运行时依赖，不做本地化：只带结构化 interrupted 标记，由渲染层出文案。
+	const state = createDshIdeConversationState();
+	const project = (event: Record<string, unknown>) => projectDshIdeConversation(state, { type: 'event', event });
+	project({ type: 'turn/start', seq: 1, time: 1, data: { turn: 1 } });
+	const view = project({
+		type: 'turn/end', seq: 2, time: 2,
+		data: { turn: 1, step: 0, reason: { kind: 'interrupted', failure: { message: 'provider said x', code: 'ETIMEDOUT' } } },
+	});
+	const failed = view.nodes.find(node => node.kind === 'turn-error') as { interrupted?: true; code?: string; message?: string } | undefined;
+	assert.equal(failed?.interrupted, true, 'the structural marker must be set');
+	assert.equal(failed?.code, undefined, 'an interrupted turn must not carry a failure code');
+	// 普通的 error 仍保留 code 与原消息。
+	const state2 = createDshIdeConversationState();
+	const project2 = (event: Record<string, unknown>) => projectDshIdeConversation(state2, { type: 'event', event });
+	project2({ type: 'turn/start', seq: 1, time: 1, data: { turn: 1 } });
+	const err = project2({ type: 'turn/end', seq: 2, time: 2, data: { turn: 1, step: 0, reason: { kind: 'error', failure: { message: 'boom', code: 'E1' } } } })
+		.nodes.find(node => node.kind === 'turn-error') as { interrupted?: true; code?: string } | undefined;
+	assert.equal(err?.interrupted, undefined);
+	assert.equal(err?.code, 'E1');
+});

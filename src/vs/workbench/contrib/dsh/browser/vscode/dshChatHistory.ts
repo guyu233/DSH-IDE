@@ -329,7 +329,10 @@ function applyQuotaNotice(quotaNotice: DshHistoryExtras['quotaNotice'], history:
 	if (quotaNotice === undefined) {
 		return;
 	}
-	const message = localize('dsh.history.quotaExceeded', "Quota exhausted ({0}); check your account quota.", quotaNotice.code);
+	// 官方 `ui-chat/README.md`「Command and failure rows」：欠费失败的行使用**中立的
+	// `message.failure.quota` 文案，而不是提供方消息**。内部错误码（QUOTA / ACCOUNT_QUOTA）
+	// 是内核记账用的，暴露给用户既不解决问题也不可行动——文案保持中性、可指导。
+	const message = localize('dsh.history.quotaExceeded', "The account quota is exhausted. Check your account quota to continue.");
 	// 交付物行不带 prompt，这里用「结构上由 appendDeliverables 追加的行」无法区分，
 	// 因此只在末尾 response 没有 errorDetails 时把配额写进去；否则降级为 warning 部件。
 	const last = history[history.length - 1];

@@ -83,7 +83,7 @@
 	"dsh.history.planActive": "计划模式已启用",
 	"dsh.history.planOff": "计划模式未启用",
 	"dsh.history.planPending": "计划模式（等待确认）",
-	"dsh.history.quotaExceeded": "额度不足（{0}），请检查账号额度。",
+	"dsh.history.quotaExceeded": "账户额度已用尽，请检查账户额度后继续。",
 	"dsh.history.reject": "拒绝",
 	"dsh.history.skills": "可用技能：{0}",
 	"dsh.history.steering": "{0}",
@@ -240,5 +240,6 @@
 	"dsh.question.viewAnswers": "查看答案",
 	"dsh.question.viewAnswersLabel": "查看已记录的答案",
 	"dsh.toolbar.label": "操作",
-	"dsh.queue.steerCount": "{0} 条待转向"
+	"dsh.queue.steerCount": "{0} 条待转向",
+	"dsh.turn.interrupted": "DSH 进程在本轮完成前退出。"
 }

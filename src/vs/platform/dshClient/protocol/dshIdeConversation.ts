@@ -669,6 +669,12 @@ function applyDurable(state: DshIdeConversationState, event: Record<string, unkn
 			if (errorCode === 'QUOTA' || errorCode === 'ACCOUNT_QUOTA') {
 				state.quotaNotice = { code: errorCode, seq };
 			}
+			// 官方 `ui-chat/README.md`「Command and failure rows」：restart recovery 关闭的
+			// `interrupted` Turn 渲染一条**本地化的停止行**，说明「DSH 进程在 Turn 中途退出」，
+			// 且**不带 code chip**——它不是内核报的错，给一个错误码只会误导用户去查不存在的失败。
+			const interrupted = kind === 'interrupted';
+			// 协议层零运行时依赖（只有 type import），不在这里做本地化：
+			// 带结构化标记下去，由渲染层出本地化文案（与官方 `message.failure.quota` 同一分工）。
 			const message = typeof failure['message'] === 'string' && failure['message'] !== ''
 				? failure['message']
 				: (typeof reason['message'] === 'string' && reason['message'] !== '' ? reason['message'] : kind);
@@ -679,7 +685,8 @@ function applyDurable(state: DshIdeConversationState, event: Record<string, unkn
 				turn,
 				step,
 				message,
-				...(stringOf(failure['code']) === undefined ? {} : { code: stringOf(failure['code']) }),
+				...(interrupted ? { interrupted: true as const } : {}),
+				...(interrupted || stringOf(failure['code']) === undefined ? {} : { code: stringOf(failure['code']) }),
 			});
 			// 尾部事实先写：错误本身留在 errorDetails / turn-error，尾部只报分支是否可用。
 			putTurnTail(state, turn, seq, time, true);

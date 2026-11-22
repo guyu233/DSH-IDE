@@ -238,7 +238,8 @@ test('a quota notice does not overwrite a real turn error', () => {
 	assert.equal(response.errorDetails?.message, 'boom', 'the real error must win over the quota notice');
 	assert.equal(response.errorDetails?.isQuotaExceeded, undefined);
 	const warnings = response.parts.filter(part => part.kind === 'warning') as { content: { value: string } }[];
-	assert.ok(warnings.some(part => part.content.value.includes('Quota exhausted')), 'the quota notice must still be visible');
+	// 官方「Command and failure rows」：欠费失败用中立的 message.failure.quota 文案，不暴露内部码。
+	assert.ok(warnings.some(part => part.content.value.includes('quota is exhausted')), 'the quota notice must still be visible');
 });
 
 test('rebuilding the same state twice yields identical history', () => {
@@ -393,7 +394,7 @@ test('localized approval and plan texts still render the same words', () => {
 		quotaNotice: { code: 'insufficient' },
 	});
 	const text = JSON.stringify(toHistory(session, session.pending(), extrasOf(session)));
-	for (const expected of ['Plan mode (waiting for confirmation)', 'DSH requests to run bash: 需要执行', 'Quota exhausted (insufficient)', 'Allow', 'Reject']) {
+	for (const expected of ['Plan mode (waiting for confirmation)', 'DSH requests to run bash: 需要执行', 'The account quota is exhausted.', 'Allow', 'Reject']) {
 		assert.ok(text.includes(expected), `history must contain ${expected}`);
 	}
 	assert.ok(!/\{\d+\}/.test(text), 'no placeholder may survive interpolation');

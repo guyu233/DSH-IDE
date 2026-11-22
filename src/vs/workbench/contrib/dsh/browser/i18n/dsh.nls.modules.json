@@ -292,5 +292,8 @@
 	],
 	"vs/workbench/contrib/dsh/browser/vscode/dshButtonChrome": [
 		"dsh.toolbar.label"
+	],
+	"vs/workbench/contrib/dsh/browser/vscode/dshChatModel": [
+		"dsh.turn.interrupted"
 	]
 }
