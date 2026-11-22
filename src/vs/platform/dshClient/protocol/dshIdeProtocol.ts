@@ -262,6 +262,15 @@ export interface DshIdeTurnProcessNode extends DshIdeNodeBase {
 	readonly messageCount: number;
 	readonly toolCallCount: number;
 	readonly subagentCount: number;
+	/**
+	 * `turn/end.reason.kind`（`completed | aborted | interrupted | error | ...`）。
+	 *
+	 * 官方 `turnProcessAlwaysOpen(node)` 读的是 `location.turn.status === 'open'` 与
+	 * `location.turn.end.data.reason.kind`：进行中、被中止、被中断、失败的 Turn
+	 * **不允许整段收起**。本仓的节点层看不到 `turn.status`，因此把已结算的原因带在节点上；
+	 * 没有该字段即表示这个 Turn 还没有 `turn/end`（仍在进行）。
+	 */
+	readonly endReason?: string;
 }
 
 /** 官方 `ui-chat` 的 `manual-compaction`：`/compact` 命令行与它产生的压缩检查点。 */
@@ -2006,7 +2015,7 @@ function validateConversationNode(value: unknown, label: string, seen: Set<objec
 				return;
 			}
 			case 'turn-process': {
-				const node = exactRecord(value, ['kind', 'seq', 'time', 'turn', 'controlAnchorSeq', 'processStartSeq', 'answerAnchorSeq', 'answerStep', 'inlineReasoning', 'messageCount', 'toolCallCount', 'subagentCount'], label);
+				const node = exactRecord(value, ['kind', 'seq', 'time', 'turn', 'controlAnchorSeq', 'processStartSeq', 'answerAnchorSeq', 'answerStep', 'inlineReasoning', 'messageCount', 'toolCallCount', 'subagentCount', 'endReason'], label);
 				readNodeBase(node, label, true);
 				for (const key of ['controlAnchorSeq', 'processStartSeq', 'answerAnchorSeq'] as const) {
 					if (node[key] !== undefined) {
@@ -2019,6 +2028,9 @@ function validateConversationNode(value: unknown, label: string, seen: Set<objec
 				}
 				for (const key of ['messageCount', 'toolCallCount', 'subagentCount'] as const) {
 					nonNegativeInteger(node[key], `${label}.${key}`);
+				}
+				if (node['endReason'] !== undefined) {
+					nonEmptyString(node['endReason'], `${label}.endReason`);
 				}
 				return;
 			}

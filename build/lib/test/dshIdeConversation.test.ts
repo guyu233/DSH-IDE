@@ -1015,3 +1015,46 @@ test('usage is shown when turn/start is present and every attempt reports usage'
 	assert.equal(tail?.tokenUsage?.input, 15);
 	assert.equal(tail?.tokenUsage?.output, 3);
 });
+
+test('turn/end reason reaches the turn-process node so folding can use it', () => {
+	// 折叠判定要用官方 `turn.end.data.reason.kind`（`turnProcessAlwaysOpen` 的判据）。
+	// 投影层必须把它带到 `turn-process` 节点上，否则渲染层只能猜（旧实现就是永远走 fallback）。
+	const state = createDshIdeConversationState();
+	const project = (event: Record<string, unknown>) => projectDshIdeConversation(state, { type: 'event', event });
+	project({ type: 'turn/start', seq: 1, time: 1, data: { turn: 1 } });
+	project({ type: 'tool/call', seq: 2, time: 2, data: { turn: 1, step: 0, callId: 'c1', name: 'read' } });
+	// `turn-process` 只在有答复锚点时成形（官方同样以最终答复为界），所以这里要有 assistant。
+	project({ type: 'assistant/message', seq: 3, time: 3, data: { turn: 1, step: 0, message: { content: [{ type: 'text', text: 'done' }] } } });
+	const ended = project({ type: 'turn/end', seq: 4, time: 4, data: { turn: 1, reason: { kind: 'completed' } } });
+	const turnProcess = ended.nodes.find(node => node.kind === 'turn-process') as { endReason?: string } | undefined;
+	assert.equal(turnProcess?.endReason, 'completed', 'the settled reason must ride on the turn-process node');
+
+	// 仍在进行（没有 turn/end）的 Turn 不带该字段——渲染层据此判「不可收起」。
+	const running = createDshIdeConversationState();
+	const projectRunning = (event: Record<string, unknown>) => projectDshIdeConversation(running, { type: 'event', event });
+	projectRunning({ type: 'turn/start', seq: 1, time: 1, data: { turn: 1 } });
+	projectRunning({ type: 'assistant/message', seq: 2, time: 2, data: { turn: 1, step: 0, message: { content: [{ type: 'text', text: 'partial' }] } } });
+	const live = projectRunning({ type: 'assistant/attempt', seq: 3, time: 3, data: { turn: 1, step: 1, stream: [] } });
+	assert.equal((live.nodes.find(node => node.kind === 'turn-process') as { endReason?: string } | undefined)?.endReason, undefined,
+		'a running turn must not carry an end reason');
+});
+
+test('protocol rejects an empty endReason on turn-process', async () => {
+	// 新字段必须和协议其它字符串一样 fail-closed：空串不是「没有」，而是坏数据。
+	// 用真实投影产出做基底，避免手写 snapshot 缺字段导致「因别的原因抛错」的假绿。
+	const { validateDshIdeSnapshot } = await import('../../../src/vs/platform/dshClient/protocol/dshIdeProtocol.ts');
+	const state = createDshIdeConversationState();
+	const project = (event: Record<string, unknown>) => projectDshIdeConversation(state, { type: 'event', event });
+	project({ type: 'turn/start', seq: 1, time: 1, data: { turn: 1 } });
+	project({ type: 'assistant/message', seq: 2, time: 2, data: { turn: 1, step: 0, message: { content: [{ type: 'text', text: 'done' }] } } });
+	const view = project({ type: 'turn/end', seq: 3, time: 3, data: { turn: 1, reason: { kind: 'completed' } } });
+	const node = view.nodes.find(entry => entry.kind === 'turn-process');
+	assert.ok(node !== undefined, 'the projection must produce a turn-process node');
+	const snapshot = (endReason: string | undefined) => ({
+		wireRevision: 5, channelId: 'c1', version: 1,
+		binding: { viewId: 'c1', generation: 1, sessionId: 's1' },
+		state: { state: 'ready', view: { frame: { type: 'snapshot' }, conversation: { ...view, nodes: [{ ...node, ...(endReason === undefined ? {} : { endReason }) }] } } },
+	});
+	assert.doesNotThrow(() => validateDshIdeSnapshot(snapshot('completed')), 'a non-empty endReason must be accepted');
+	assert.throws(() => validateDshIdeSnapshot(snapshot('')), /endReason/, 'an empty endReason must be rejected');
+});

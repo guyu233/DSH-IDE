@@ -105,6 +105,12 @@ interface DshIdeTurnTailState {
 	 * 累计值可能缺头部样本；此时整份用量必须隐藏，而不是给一个偏小的数字。
 	 */
 	turnStarted?: true;
+	/**
+	 * `turn/end.reason.kind`（官方 `turnProcessAlwaysOpen` 的判据之一）。
+	 *
+	 * 进行中（无该字段）、`aborted`、`interrupted`、`error` 的 Turn 不允许整段收起。
+	 */
+	endReason?: string;
 	/** 已计入用量的 attempt 数（官方「every started model attempt reports safe, exact usage」的分子）。 */
 	usageAttempts: number;
 	/**
@@ -635,6 +641,10 @@ function applyDurable(state: DshIdeConversationState, event: Record<string, unkn
 		const reason = isRecord(data['reason']) ? data['reason'] : {};
 		const kind = stringOf(reason['kind']);
 		const step = numberOf(data['step']) ?? 0;
+		if (kind !== undefined) {
+			// 折叠判定要用官方的结算原因：进行中 / aborted / interrupted / error 的 Turn 不允许收起。
+			turnTailOf(state, turn).endReason = kind;
+		}
 		// 官方 `turnAbandoned`：Turn 中断 / fork 时，没有 run-end 的工作流算中断。
 		noteTurnAbandoned(state, turn, kind);
 		if (kind === 'error' || kind === 'aborted' || kind === 'interrupted') {
@@ -1118,6 +1128,7 @@ function putTurnProcess(state: DshIdeConversationState, turn: number, seq: numbe
 		messageCount: tail.assistantCount === 0 ? 0 : tail.assistantCount - 1,
 		toolCallCount: tail.toolCallCount,
 		subagentCount: tail.subagentCount,
+		...(tail.endReason === undefined ? {} : { endReason: tail.endReason }),
 	} as DshIdeConversationNode);
 }
 

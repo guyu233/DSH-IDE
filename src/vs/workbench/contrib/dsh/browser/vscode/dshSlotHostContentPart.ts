@@ -233,7 +233,19 @@ export class DshSlotHostContentPart extends Disposable implements IChatContentPa
 				turnsWithTail.add(node.turn);
 			}
 		}
-		for (const group of groupTurnProcesses(grouped)) {
+		// 折叠判定要用官方的结算原因（`turn/end.reason.kind`）。旧写法不传 `reasonByTurn`，
+		// `groupTurnProcesses` 永远走 fallback（`sawSignal || !sawAnswer`）——已正常结束、
+		// 但过程中有信号节点的 Turn 会被误判成不可收起；反过来「已出答复但仍在跑」的 Turn
+		// 又可能被当成可收起。这里从每个 Turn 的 `turn-process` 节点取权威原因。
+		const reasonByTurn = new Map<number, string>();
+		for (const nodeId of this.content.nodeIds) {
+			const node = binding.tree.get(nodeId) as { readonly turn?: number; readonly kind?: string; readonly endReason?: string } | undefined;
+			if (node?.kind !== 'turn-process' || node.turn === undefined || node.endReason === undefined) {
+				continue;
+			}
+			reasonByTurn.set(node.turn, node.endReason);
+		}
+		for (const group of groupTurnProcesses(grouped, reasonByTurn)) {
 			const collapsed = binding.expansion.isTurnCollapsed(group.turn, group.answerStep);
 			for (const key of visibleProcessKeys(group, collapsed)) {
 				visible.add(key);

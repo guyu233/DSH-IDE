@@ -183,7 +183,11 @@ export function describeTurnProcess(nodes: readonly (DshGroupableNode & { readon
 		subagentCount,
 		inlineReasoning: false,
 		turnStarted: ordered.length > 0,
-		turnClosed: answerAnchorSeq !== undefined,
+		// 官方 `turnProcessAlwaysOpen(node)` 用 `location.turn.status === 'open'` 判「还在进行」，
+		// 有答复**不等于** Turn 结束（工具可能还在跑、Turn 还没 `turn/end`）。
+		// 旧写法 `answerAnchorSeq !== undefined` 会把「已出答复但仍在运行」的 Turn 判成已关闭，
+		// 从而允许收起正在跑的 Turn。
+		turnClosed: nodes.some(node => (node as { readonly endReason?: string }).endReason !== undefined),
 		hasExternalProcess: processStartSeq !== undefined,
 		hasNonReplyProcess: processStartSeq !== undefined,
 		hasInterleavedInput: interleaved,

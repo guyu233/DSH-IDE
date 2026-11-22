@@ -172,9 +172,24 @@ test('a turn spec records anchors and counts an input that arrives after tools',
 	assert.equal(spec.subagentCount, 1);
 	assert.equal(spec.inlineReasoning, false);
 	assert.equal(spec.turnStarted, true);
-	assert.equal(spec.turnClosed, true);
+	// 官方 `turnProcessAlwaysOpen(node)` 用 `location.turn.status === 'open'` 判「还在进行」：
+	// 有答复**不等于** Turn 结束。这里既没有 `endReason`（没有 `turn/end`），
+	// 就应按「仍在进行」处理——旧断言 `turnClosed === true` 是错的判据，已改。
+	assert.equal(spec.turnClosed, false);
 	assert.equal(spec.hasExternalProcess, true);
 	assert.equal(spec.hasInterleavedInput, true);
+});
+
+test('turnClosed only becomes true once the turn has an end reason', () => {
+	// 官方判据：`turn.end.data.reason.kind` 存在才算结算；`aborted` / `interrupted` / `error`
+	// 仍然不允许整段收起（由 `turnProcessAlwaysOpen` 的另一半负责），但「已结算」这件事本身要看它。
+	const base = [
+		node({ key: 'u', kind: 'user', seq: 1, turn: 1 }),
+		node({ key: 'a', kind: 'assistant', seq: 2, turn: 1, step: 0 }),
+	];
+	assert.equal(describeTurnProcess(base).turnClosed, false, 'a reply alone does not close the turn');
+	const closed = [...base, node({ key: 'p', kind: 'turn-process', seq: 3, turn: 1, endReason: 'completed' } as DshGroupableNode & { endReason: string })];
+	assert.equal(describeTurnProcess(closed).turnClosed, true, 'an end reason closes it');
 });
 
 test('the collapsed line prefers the turn-process snapshot counts', () => {
