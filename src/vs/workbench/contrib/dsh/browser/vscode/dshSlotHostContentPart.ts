@@ -14,14 +14,14 @@ import type { IChatContentPart } from '../../../chat/browser/widget/chatContentP
 import type { IChatRendererContent } from '../../../chat/common/model/chatViewModel.js';
 import type { ChatTreeItem } from '../../../chat/browser/chat.js';
 import type { IDshSlotHostContent } from '../../../chat/common/chatService/chatService.js';
-import { formatTokens, workflowStatusText } from './dshTokenFormat.js';
+import { formatTokens } from './dshTokenFormat.js';
 import { dshAsideText, dshAssistantActions, dshTextInteractions, dshUserBeforeDecoration, type DshAssistantAction, type DshTextInteraction } from './dshChatSlots.js';
 import { dshContentStore } from './dshContentStore.js';
 import { adaptDshNode, type DshNativePart } from './dshNativePartAdapters.js';
 import { groupTurnProcesses, hiddenProcessLine, processLineFromSnapshot, visibleProcessKeys } from './dshProcessGroup.js';
-import { dshSlotHostSame, planKeysForTurn, presentDshNode, turnProcessCounts, type DshSlotHostRef } from './dshSlotHostModel.js';
+import { diffDshSlotRows, dshSlotHostSame, planKeysForTurn, presentDshNode, turnProcessCounts, type DshSlotHostRef } from './dshSlotHostModel.js';
 import { dshNodeDisplaySignature } from './dshConversationNodeTree.js';
-import { diffDshSlotRows } from './dshSlotHostModel.js';
+import { dshCardSpec, type DshCardSpec } from './dshCardSpec.js';
 
 export interface DshNativePartRenderer {
 	render(part: DshNativePart): IChatContentPart | undefined;
@@ -579,6 +579,12 @@ function processSummaryRow(line: string): HTMLElement {
 }
 
 function renderAdaptedFallback(part: DshNativePart, host?: { reviewQuestion?: (callId: string, questions: readonly { readonly id: string; readonly question?: string; readonly header?: string }[], answers: readonly { readonly id: string; readonly selected: readonly string[]; readonly custom?: string }[]) => void }): HTMLElement {
+	// 先把「确实需要自研」的部件交给结构化卡片（契约 §16 退出条件 4）。
+	// 这一步必须在文本拼接之前：否则 compaction / system prompt 会又退回一串 textContent。
+	const card = dshCardSpec(part);
+	if (card !== undefined) {
+		return renderDshCard(part.kind, card);
+	}
 	const block = document.createElement('div');
 	block.className = `dsh-adapted dsh-adapted-${part.kind}`;
 	block.style.color = 'var(--vscode-foreground)';
@@ -595,23 +601,12 @@ function renderAdaptedFallback(part: DshNativePart, host?: { reviewQuestion?: (c
 		block.textContent = part.labels.join('\n');
 	} else if (part.kind === 'multiDiffData') {
 		block.textContent = part.files.map(file => file.path).join('\n');
-	} else if (part.kind === 'dshFileCard') {
-		block.textContent = part.files.map(file => file.bytes === undefined ? file.name : `${file.name} (${file.bytes})`).join('\n');
-	} else if (part.kind === 'dshCompaction') {
-		const counts = [part.shadowedItemCount, part.shadowedTokenCount].filter((value): value is number => typeof value === 'number');
-		block.textContent = [part.summary ?? '', ...counts.map(value => String(value))].filter(line => line !== '').join('\n');
+
 	} else if (part.kind === 'dshCommand') {
 		block.textContent = ['/' + (part.name || part.commandId), part.args ?? '', part.outcome ?? ''].filter(line => line !== '').join(' ');
 	} else if (part.kind === 'dshTurnTailExtra') {
 		block.textContent = part.lines.join('\n');
-	} else if (part.kind === 'dshWorkflowRun') {
-		block.textContent = [
-			`${part.name} (${workflowStatusText(part.status)})`,
-			...part.phases.map(phase => {
-				const head = phase.phase === null ? phase.key : phase.phase;
-				return [`${head}:`, ...phase.members.map(member => `  ${member.label} (${workflowStatusText(member.status)})`)].join('\n');
-			}),
-		].join('\n');
+
 	} else if (part.kind === 'dshSubmittedPlan') {
 		block.textContent = `# ${part.title}\n${part.markdown}`;
 	} else if (part.kind === 'dshCommandInput') {
@@ -658,10 +653,6 @@ function renderAdaptedFallback(part: DshNativePart, host?: { reviewQuestion?: (c
 			part.cacheWrite === undefined ? '' : localize('dsh.usage.cacheWrite', "cache-write {0}", formatTokens(part.cacheWrite)),
 			part.reasoning === undefined ? '' : localize('dsh.usage.reasoning', "reasoning {0}", formatTokens(part.reasoning)),
 		].filter(line => line !== '').join(' ');
-	} else if (part.kind === 'dshDeliverables') {
-		block.textContent = part.files.map(file => file.description === undefined ? file.path : `${file.path} ${file.description}`).join('\n');
-	} else if (part.kind === 'dshSystemPrompt') {
-		block.textContent = part.update === undefined || part.update === '' ? part.text : `${part.text}\n${part.update}`;
 	} else if (part.kind === 'dshTurnTrigger') {
 		block.textContent = part.title;
 	} else if (part.kind === 'dshMaxTokens') {
@@ -688,4 +679,53 @@ function addClick(element: HTMLElement, run: () => void): { dispose(): void } {
 	const listener = () => run();
 	element.addEventListener('click', listener);
 	return { dispose: () => element.removeEventListener('click', listener) };
+}
+
+/**
+ * 把结构化描述画成卡片。
+ *
+ * 用原生 `<details>` / `<summary>`：折叠、键盘（Enter/Space）、高对比度、读屏全部由浏览器
+ * 与 VS Code 主题接管，不自绘折叠箭头、不自己管 aria-expanded。
+ * 不可折叠时改为静态标题行（没有 `details` 就没有「点了没反应」的入口）。
+ */
+function renderDshCard(kind: string, spec: DshCardSpec): HTMLElement {
+	const card = document.createElement('div');
+	card.className = `dsh-card dsh-card-${kind}`;
+	card.style.color = 'var(--vscode-foreground)';
+	card.style.borderLeft = '2px solid var(--vscode-editorWidget-border)';
+	card.style.paddingLeft = '8px';
+	if (!spec.collapsible) {
+		const title = document.createElement('div');
+		title.textContent = spec.title;
+		title.style.color = 'var(--vscode-descriptionForeground)';
+		card.appendChild(title);
+		for (const line of spec.lines) {
+			card.appendChild(cardLine(line));
+		}
+		return card;
+	}
+	const details = document.createElement('details');
+	details.open = spec.open;
+	const summary = document.createElement('summary');
+	summary.textContent = spec.title;
+	summary.style.cursor = 'pointer';
+	summary.style.color = 'var(--vscode-descriptionForeground)';
+	details.appendChild(summary);
+	for (const line of spec.lines) {
+		details.appendChild(cardLine(line));
+	}
+	card.appendChild(details);
+	return card;
+}
+
+/** 一行卡片内容：用 `white-space: pre-wrap` 保留换行，不丢正文格式。 */
+function cardLine(line: DshCardSpec['lines'][number]): HTMLElement {
+	const element = document.createElement(line.role === 'body' ? 'div' : 'div');
+	element.textContent = line.text;
+	element.style.whiteSpace = 'pre-wrap';
+	if (line.role !== 'body') {
+		element.style.color = 'var(--vscode-descriptionForeground)';
+		element.style.fontSize = '0.9em';
+	}
+	return element;
 }

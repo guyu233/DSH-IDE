@@ -408,3 +408,52 @@ test('turn process counts come from the whole turn, not from this response\'s no
 	// 别的 Turn 没有计数行时返回 undefined（调用方据此退化成现算，不编造 0）。
 	assert.equal(turnProcessCounts(tree.turnDataSource(2, 'turn-process').get()), undefined);
 });
+
+test('a compaction card is a collapsible structure, not a text blob', async () => {
+	// 契约 §16 退出条件 4：不得用 info/warning/markdown 文本模拟结构化节点。
+	// compaction 原来被拼成「摘要 + 两个数字」的 textContent，没有可折叠结构。
+	const { dshCardSpec } = await import('../../../src/vs/workbench/contrib/dsh/browser/vscode/dshCardSpec.ts');
+	const spec = dshCardSpec({ kind: 'dshCompaction', summary: 'summary text', shadowedItemCount: 3, shadowedTokenCount: 40 });
+	assert.ok(spec !== undefined);
+	assert.equal(spec.title, 'Compaction');
+	assert.equal(spec.collapsible, true, 'a summary must be collapsible');
+	assert.equal(spec.open, false, 'background material starts collapsed');
+	assert.deepEqual(spec.lines, [
+		{ role: 'body', text: 'summary text' },
+		{ role: 'meta', text: '3 items · 40 tokens' },
+	]);
+	// 没有摘要也没有计数时不画一个点了没反应的折叠头。
+	const empty = dshCardSpec({ kind: 'dshCompaction', summary: null });
+	assert.equal(empty?.collapsible, false);
+});
+
+test('a system prompt card is collapsible and keeps its update line', async () => {
+	const { dshCardSpec } = await import('../../../src/vs/workbench/contrib/dsh/browser/vscode/dshCardSpec.ts');
+	const spec = dshCardSpec({ kind: 'dshSystemPrompt', text: 'full prompt', update: 'delta' });
+	assert.equal(spec?.title, 'System prompt');
+	assert.equal(spec?.collapsible, true);
+	assert.equal(spec?.open, false);
+	assert.deepEqual(spec?.lines, [{ role: 'body', text: 'full prompt' }, { role: 'meta', text: 'delta' }]);
+});
+
+test('result cards are expanded and non-collapsible; native parts are not taken over', async () => {
+	const { dshCardSpec } = await import('../../../src/vs/workbench/contrib/dsh/browser/vscode/dshCardSpec.ts');
+	const deliverables = dshCardSpec({ kind: 'dshDeliverables', files: [{ path: 'a.ts' }, { path: 'b.ts', description: 'why' }] });
+	assert.equal(deliverables?.open, true);
+	assert.equal(deliverables?.collapsible, false, 'a short list has nothing to fold');
+	assert.deepEqual(deliverables?.lines.map(line => line.text), ['a.ts', 'b.ts — why']);
+	// markdown / thinking / toolInvocation 有原生等价物，不该被这张表接管。
+	assert.equal(dshCardSpec({ kind: 'markdownContent', content: { value: 'x' } }), undefined);
+	assert.equal(dshCardSpec({ kind: 'thinking', id: 't', value: 'x' }), undefined);
+});
+
+test('a workflow card localizes its status through the shared token formatter', async () => {
+	const { dshCardSpec } = await import('../../../src/vs/workbench/contrib/dsh/browser/vscode/dshCardSpec.ts');
+	const spec = dshCardSpec({
+		kind: 'dshWorkflowRun', runId: 'r1', name: 'flow', status: 'completed',
+		phases: [{ key: 'p1', phase: 'Phase 1', members: [{ label: 'm', status: 'done' }] }],
+	});
+	assert.equal(spec?.title, 'flow');
+	assert.equal(spec?.lines[0].text, workflowStatusText('completed'));
+	assert.equal(spec?.collapsible, true);
+});
