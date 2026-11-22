@@ -506,3 +506,25 @@ test('a disclosure header points aria-controls at a real, uniquely named region'
 	assert.match(source, /detail\.id = `\$\{this\.domIdPrefix\}/, 'the controlled region needs a stable id');
 	assert.match(source, /domIdPrefix = `dsh-slot-\$\{generateUuid\(\)\}`/, 'the prefix must be per-part, not per-row-index');
 });
+
+test('commandview is a keyed slot and only the named command is overridden', async () => {
+	const { DSH_COMMAND_VIEW_SLOT, dshChatSlotRegistry, dshCommandRowOverride } = await import('../../../src/vs/workbench/contrib/dsh/browser/vscode/dshChatSlots.ts');
+	const catalog = new Map(dshChatSlotRegistry.catalog().slots.map(entry => [entry.name, entry]));
+	const declared = catalog.get(DSH_COMMAND_VIEW_SLOT);
+	assert.equal(declared?.cardinality, 'keyed');
+	assert.deepEqual(declared?.ownerProps, ['node', 'compaction']);
+
+	const entry = dshChatSlotRegistry.register(DSH_COMMAND_VIEW_SLOT, { key: 'goal', props: { title: 'Goal command', detail: 'creates a goal' } });
+	try {
+		assert.equal(dshCommandRowOverride('other', 's1'), undefined, 'a different command key must not be overridden');
+		const override = dshCommandRowOverride('goal', 's1');
+		assert.equal(override?.title, 'Goal command');
+		assert.equal(override?.detail, 'creates a goal');
+		// 没有命令名时不查 keyed 槽（没有 key 可查）。
+		assert.equal(dshCommandRowOverride(null), undefined);
+		assert.equal(dshCommandRowOverride(''), undefined);
+	} finally {
+		entry.dispose();
+	}
+	assert.equal(dshCommandRowOverride('goal', 's1'), undefined, 'disposing the occupant restores the built-in card');
+});

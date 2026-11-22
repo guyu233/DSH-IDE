@@ -8,12 +8,12 @@
 // 基数与作用域必须与官方 SlotMap 一致，否则接入 occupant 时选出规则会错
 // （list 排序、chain 选举、hoc 包层）。声明幂等：重复登记同一份清单不会抛错。
 //
-// 全部 12 个槽都已有生产消费点（2026-11-23）：`conversation.chat.node`、
+// 全部 13 个槽都已有生产消费点（2026-11-23）：`conversation.chat.node`、
 // `tool.call.toolview`、`conversation.chat.turnTail`、`shell.quota-notice`、
 // `conversation.chat.reasoning.body`、`conversation.chat.assistant-actions`、
 // `conversation.chat.user.before`、`conversation.chat.text-interaction`、
 // `conversation.chat.aside`、`conversation.chat.markdown.fence`、
-// `conversation.input.dock`、`conversation.composer.dock`。
+// `conversation.input.dock`、`conversation.composer.dock`、`conversation.chat.commandview`。
 // `DshSlotRegistry.onDidChange` 已由输入区两个 dock 宿主消费（插件热插拔重画）。
 
 import { DshSlotRegistry } from './dshSlotRegistry.js';
@@ -107,6 +107,9 @@ export const DSH_INPUT_DOCK_SLOT = 'conversation.input.dock';
 /** 输入卡下方环境区的槽位名（官方 list / session，无 owner props）。 */
 export const DSH_COMPOSER_DOCK_SLOT = 'conversation.composer.dock';
 
+/** 命令行卡片扩展点的槽位名（官方 keyed / session，key 是命令名）。 */
+export const DSH_COMMAND_VIEW_SLOT = 'conversation.chat.commandview';
+
 /**
  * 取某个围栏语言的插件包装（官方 hoc 槽：key 是围栏 info，缺省走通配层）。
  *
@@ -132,10 +135,11 @@ export const DSH_USER_BEFORE_SLOT = 'conversation.chat.user.before';
 /** 节点渲染扩展点的槽位名（官方 keyed / session，key 是 node kind）。 */
 export const DSH_NODE_SLOT = 'conversation.chat.node';
 
-/** Chat 层全部槽位声明（12 个，与官方 SlotMap 的基数/作用域逐项对齐）。 */
+/** Chat 层全部槽位声明（13 个，与官方 SlotMap 的基数/作用域逐项对齐）。 */
 export const DSH_CHAT_SLOT_DECLARATIONS: readonly DshSlotDeclaration[] = [
 	{ name: DSH_NODE_SLOT, cardinality: 'keyed', scope: 'session', ownerProps: ['node'] },
 	{ name: DSH_TOOL_VIEW_SLOT, cardinality: 'keyed', scope: 'session', ownerProps: ['toolCall'] },
+	{ name: DSH_COMMAND_VIEW_SLOT, cardinality: 'keyed', scope: 'session', ownerProps: ['node', 'compaction'] },
 	{ name: DSH_TURN_TAIL_SLOT, cardinality: 'list', scope: 'session', ownerProps: ['turn', 'seq'] },
 	{ name: DSH_QUOTA_NOTICE_SLOT, cardinality: 'chain', scope: 'root', ownerProps: ['code', 'seq'] },
 	{ name: DSH_REASONING_BODY_SLOT, cardinality: 'single', scope: 'session' },
@@ -295,6 +299,35 @@ export function dshToolViewOverride(toolName: string, sessionId?: string): strin
 	}) as { readonly occupants?: readonly { readonly props?: Readonly<Record<string, unknown>> }[] } | undefined;
 	const view = resolved?.occupants?.[0]?.props?.['view'];
 	return typeof view === 'string' && view !== '' ? view : undefined;
+}
+
+/**
+ * 命令行卡片的覆盖（官方 keyed 槽，key 是命令名）。
+ *
+ * 官方 `CommandRowOwnerProps = { node, compaction? }`；插件可给 `title` / `detail` /
+ * `icon` 覆盖默认卡片。缺命令名（`name` 为 null）时不查槽位——keyed 槽没有 key。
+ * 返回 undefined 表示用内置的 `dshCommand` 卡。
+ */
+export function dshCommandRowOverride(name: string | null | undefined, sessionId?: string): DshNodeRowOverride | undefined {
+	if (name === null || name === undefined || name === '') {
+		return undefined;
+	}
+	const resolved = dshChatSlotRegistry.resolve(DSH_COMMAND_VIEW_SLOT, {
+		sessionId,
+		entryKey: name,
+		props: { node: name },
+	}) as { readonly occupants?: readonly { readonly props?: Readonly<Record<string, unknown>> }[] } | undefined;
+	const props = resolved?.occupants?.[0]?.props;
+	if (props === undefined) {
+		return undefined;
+	}
+	const pick = (key: string): string | undefined => typeof props[key] === 'string' && props[key] !== '' ? props[key] as string : undefined;
+	const title = pick('title');
+	const detail = pick('detail');
+	const icon = pick('icon');
+	return title === undefined && detail === undefined && icon === undefined
+		? undefined
+		: { ...(title === undefined ? {} : { title }), ...(detail === undefined ? {} : { detail }), ...(icon === undefined ? {} : { icon }) };
 }
 
 /**

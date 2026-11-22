@@ -11,7 +11,7 @@
 import type { DshIndexedNode } from './dshConversationNodeTree.js';
 import { dshNodeKey } from './dshConversationNodeTree.js';
 import { dshToolViewId, type DshToolViewId } from './dshToolViewRegistry.js';
-import { dshQuotaNoticeOverride, dshReasoningBodyOverride, dshToolViewOverride, dshTurnTailExtras } from './dshChatSlots.js';
+import { dshCommandRowOverride, dshQuotaNoticeOverride, dshReasoningBodyOverride, dshToolViewOverride, dshTurnTailExtras } from './dshChatSlots.js';
 
 export type DshNativeAdapterId = 'markdown' | 'thinking' | 'tool' | 'task' | 'reference' | 'error' | 'quota' | 'diff' | 'tree' | 'image' | 'file' | 'compaction' | 'command' | 'usage' | 'deliverable' | 'system-prompt' | 'turn-trigger' | 'unknown' | 'context' | 'assistant-meta' | 'model-retry' | 'inherited-history' | 'max-tokens' | 'turn-tail' | 'question-reply' | 'command-input' | 'submitted-plan' | 'workflow-run' | 'manual-compaction';
 
@@ -43,7 +43,7 @@ export type DshNativePart =
 	| { readonly kind: 'dshImageGallery'; readonly images: readonly DshImageRef[] }
 	| { readonly kind: 'dshFileCard'; readonly files: readonly DshFileRef[] }
 	| { readonly kind: 'dshCompaction'; readonly summary: string | null; readonly shadowedItemCount?: number | null; readonly shadowedTokenCount?: number | null }
-	| { readonly kind: 'dshCommand'; readonly commandId: string; readonly name: string | null; readonly args: string | null; readonly outcome: 'success' | 'error' | null; readonly text?: string }
+	| { readonly kind: 'dshCommand'; readonly commandId: string; readonly name: string | null; readonly args: string | null; readonly outcome: 'success' | 'error' | null; readonly text?: string; /** `conversation.chat.commandview` occupant 覆盖的标题。 */ readonly title?: string; readonly detail?: string; readonly icon?: string }
 	| { readonly kind: 'dshUsage'; readonly input?: number; readonly output?: number; readonly total?: number; readonly cacheRead?: number; readonly cacheWrite?: number; readonly reasoning?: number }
 	| { readonly kind: 'dshDeliverables'; readonly files: readonly { readonly path: string; readonly description?: string }[] }
 	| { readonly kind: 'dshSystemPrompt'; readonly text: string; readonly update?: string }
@@ -148,7 +148,7 @@ export function adaptDshNode(node: DshIndexedNode, sessionId?: string): readonly
 		return [compactionCard(record)];
 	}
 	if (node.kind === 'command') {
-		return [commandCard(record)];
+		return [commandCard(record, 'command', sessionId)];
 	}
 	if (node.kind === 'system-prompt') {
 		return [systemPromptCard(record.text || '', record.update)];
@@ -160,7 +160,7 @@ export function adaptDshNode(node: DshIndexedNode, sessionId?: string): readonly
 		return [unknownCard(record.type || 'unknown', record.data)];
 	}
 	if (node.kind === 'manual-compaction') {
-		return [commandCard(record.command ?? {}), compactionCard(record.compaction ?? {})];
+		return [commandCard(record.command ?? {}, 'manual-compaction', sessionId), compactionCard(record.compaction ?? {})];
 	}
 	if (node.kind === 'workflow-run') {
 		return [workflowRunCard(record)];
@@ -459,14 +459,23 @@ function compactionCard(record: { readonly summary?: string | null; readonly sha
 	};
 }
 
-function commandCard(record: { readonly commandId?: string; readonly name?: string | null; readonly args?: unknown; readonly outcome?: { readonly kind?: string; readonly text?: string } | null }): DshNativeAdaptation {
+function commandCard(
+	record: { readonly commandId?: string; readonly name?: string | null; readonly args?: unknown; readonly outcome?: { readonly kind?: string; readonly text?: string } | null },
+	kind: 'command' | 'manual-compaction',
+	sessionId?: string,
+): DshNativeAdaptation {
 	const outcome = record.outcome?.kind === 'success' || record.outcome?.kind === 'error' ? record.outcome.kind : null;
+	// 官方 keyed 槽 `conversation.chat.commandview`：插件可按命令名覆盖命令行卡。
+	const override = dshCommandRowOverride(record.name, sessionId);
 	return {
 		adapter: 'command',
 		reuse: 'dshSlotHostContentPart:renderAdaptedFallback',
 		reason: '斜杠命令用命令行，不用反引号 markdown',
 		part: {
 			kind: 'dshCommand',
+			...(override?.title === undefined ? {} : { title: override.title }),
+			...(override?.detail === undefined ? {} : { detail: override.detail }),
+			...(override?.icon === undefined ? {} : { icon: override.icon }),
 			commandId: record.commandId || '',
 			name: record.name ?? null,
 			args: typeof record.args === 'string' ? record.args : null,

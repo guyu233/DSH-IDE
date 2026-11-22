@@ -610,7 +610,15 @@ function renderAdaptedFallback(part: DshNativePart, host?: { reviewQuestion?: (c
 		block.textContent = part.files.map(file => file.path).join('\n');
 
 	} else if (part.kind === 'dshCommand') {
-		block.textContent = ['/' + (part.name || part.commandId), part.args ?? '', part.outcome ?? ''].filter(line => line !== '').join(' ');
+		// `conversation.chat.commandview` 的 occupant 可覆盖标题/说明/图标；
+		// 没有 occupant 时保持原样（命令名 + 参数 + 结果）。
+		const line = ['/' + (part.name || part.commandId), part.args ?? '', part.outcome ?? ''].filter(text => text !== '').join(' ');
+		block.textContent = part.detail ?? line;
+		if (part.title !== undefined) {
+			const title = document.createElement('div');
+			title.textContent = part.title;
+			block.prepend(title);
+		}
 	} else if (part.kind === 'dshTurnTailExtra') {
 		block.textContent = part.lines.join('\n');
 
