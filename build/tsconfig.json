@@ -4,9 +4,7 @@
 		"lib": [
 			"ES2024"
 		],
-		"types": [
-			"node"
-		],
+		"types": [],
 		"module": "nodenext",
 		"noEmit": true,
 		"erasableSyntaxOnly": true,
@@ -20,13 +18,16 @@
 		"noUnusedLocals": true,
 		"noUnusedParameters": true
 	},
-	"include": [
-		"./**/*.ts",
-		"./../src/typings/**/*.d.ts"
-	],
 	"exclude": [
 		"node_modules/**",
 		"monaco-editor-playground/**",
-		"builtin/**"
+		"builtin/**",
+		"vite/**",
+		// `node --test` 运行时测试不参与类型检查：它们有的直接 import `src/**`
+		// （经 `build/lib/test/strip-ts-resolver.mjs` 解析 `.js` → `.ts`），会把
+		// `src/vs/nls.ts` 这类上游文件拉进 build 的编译图，产生与构建脚本无关的
+		// TS7017；有的 import `out/**`（gitignore 的生成目录，没有 `.d.ts`），
+		// 产生 TS7016。这两类都不是「构建脚本的类型错误」。
+		"lib/test/**"
 	]
 }
