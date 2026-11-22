@@ -11,6 +11,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
 	DSH_SCROLL_FOLLOW_INITIAL,
+	dshScrollDeltaSource,
 	dshScrollFollowAfterScroll,
 	dshScrollFollowAfterSend,
 	dshScrollFollowFromViewState,
@@ -59,4 +60,19 @@ test('a restored view state only follows when it explicitly says it is at the bo
 	assert.equal(dshScrollFollowFromViewState({ scrollTop: 10, isAtBottom: true }).mode, 'following');
 	assert.equal(dshScrollFollowFromViewState({ scrollTop: 10, isAtBottom: false }).mode, 'reading');
 	assert.equal(dshScrollFollowFromViewState({ scrollTop: 10 }).mode, 'reading');
+});
+
+test('a layout-driven scroll must not flip following into reading', () => {
+	// 官方「Scroll ownership」：Pinned scroll deliveries without reader movement update follow
+	// ownership immediately，other reader movement remains pending——两者必须区分。
+	// 判据是滚动容器自己的位移，不是「距底部的距离」：布局增长会让 atBottom 从 true 变 false，
+	// 但 scrollTop 没变，那不是用户行为。
+	// scrollTop 未变 = 布局推走；不能改归属，否则流式每帧都把用户锁进阅读态。
+	assert.equal(dshScrollDeltaSource(100, 100), 'layout');
+	// 亚像素抖动也不算用户移动（官方 subpixel rounding）。
+	assert.equal(dshScrollDeltaSource(100, 100.4), 'layout');
+	// 真的滚了，哪怕很小（官方：小滚动意图不能被布局增长抹掉）。
+	assert.equal(dshScrollDeltaSource(100, 99), 'reader');
+	assert.equal(dshScrollDeltaSource(100, 101), 'reader');
+	assert.equal(dshScrollDeltaSource(100, 100.5), 'reader');
 });

@@ -84,3 +84,34 @@ export function dshScrollFollowShouldHold(state: DshScrollFollowState): boolean 
 export function dshScrollFollowFromViewState(state: { readonly isAtBottom?: boolean }): DshScrollFollowState {
 	return state.isAtBottom === true ? { mode: 'following' } : { mode: 'reading' };
 }
+
+/**
+ * 一次滚动事件的**来源**（官方「Scroll ownership」的 `Pinned scroll deliveries` 区分）。
+ *
+ * 官方原文：「**Pinned scroll deliveries without reader movement**, and reader input that
+ * reaches the floor within subpixel rounding, **update follow ownership immediately**, before
+ * subsequent layout changes can invalidate their floor. **Other reader movement remains
+ * pending** until the sampling interval or `scrollend`, even inside the follow threshold,
+ * so layout growth cannot erase small scroll gestures.」
+ *
+ * 含义：滚动事件有两种来源，不能一视同仁——
+ *   - `layout`：内容长高/变矮把视口推走（**读屏者没动**）。它**不能**把「跟随」改成「阅读」，
+ *     否则流式输出每一帧都会把用户锁在阅读态；
+ *   - `reader`：用户真的滚了。它**必须**改归属，哪怕位移很小（否则小的滚动意图会被布局增长抹掉）。
+ */
+export type DshScrollDeltaSource = 'layout' | 'reader';
+
+/**
+ * 判定一次滚动事件是否应改变归属。
+ *
+ * 判据是「滚动容器自己的位移」而不是「距底部的距离」：布局增长会让 `atBottom` 从 true 变
+ * false，但 `scrollTop` 没变——那不是用户行为。
+ *
+ * @param previousScrollTop 上一次采样到的 scrollTop
+ * @param currentScrollTop 本次 scrollTop
+ * @returns `reader` = 用户真的滚了；`layout` = 只是布局变化
+ */
+export function dshScrollDeltaSource(previousScrollTop: number, currentScrollTop: number): DshScrollDeltaSource {
+	// 亚像素抖动不算用户移动（官方：subpixel rounding 不构成 reader movement）。
+	return Math.abs(currentScrollTop - previousScrollTop) < 0.5 ? 'layout' : 'reader';
+}

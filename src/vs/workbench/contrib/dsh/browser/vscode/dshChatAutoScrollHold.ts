@@ -19,6 +19,7 @@ import { Disposable, DisposableStore, IDisposable, toDisposable } from '../../..
 import { IChatWidget, IChatWidgetService } from '../../../chat/browser/chat.js';
 import {
 	DSH_SCROLL_FOLLOW_INITIAL,
+	dshScrollDeltaSource,
 	dshScrollFollowAfterScroll,
 	dshScrollFollowAfterSend,
 	dshScrollFollowFromViewState,
@@ -31,6 +32,8 @@ interface MountedWidget {
 	hold: IDisposable | undefined;
 	state: DshScrollFollowState;
 	readonly store: DisposableStore;
+	/** 上一次采样到的 scrollTop：用来区分「布局推走」与「用户真的滚了」。 */
+	lastScrollTop: number;
 }
 
 /**
@@ -65,12 +68,22 @@ export class DshChatAutoScrollHoldContribution extends Disposable {
 			return;
 		}
 		const store = new DisposableStore();
-		const mounted: MountedWidget = { hold: undefined, state: DSH_SCROLL_FOLLOW_INITIAL, store };
+		const mounted: MountedWidget = { hold: undefined, state: DSH_SCROLL_FOLLOW_INITIAL, store, lastScrollTop: widget.getViewState().scrollTop ?? 0 };
 		this.mounted.set(widget, mounted);
 		// 初始归属取原生 view state：已恢复的阅读位置不能被当成「在底部」。
 		mounted.state = dshScrollFollowFromViewState(widget.getViewState());
 		this.sync(widget, mounted);
 		store.add(widget.onDidScroll(() => {
+			// 区分「布局增长把视口推走」与「用户真的滚了」：前者不能改归属，
+			// 否则流式输出的每一帧都会把用户锁进阅读态（见 `dshScrollDeltaSource` 的注释）。
+			const scrollTop = widget.getViewState().scrollTop ?? mounted.lastScrollTop;
+			const source = dshScrollDeltaSource(mounted.lastScrollTop, scrollTop);
+			mounted.lastScrollTop = scrollTop;
+			if (source === 'layout') {
+				// 布局引起的滚动只同步 hold（视口离底部的距离可能变了），不改归属。
+				this.sync(widget, mounted);
+				return;
+			}
 			mounted.state = dshScrollFollowAfterScroll(mounted.state, this.isAtBottom(widget));
 			this.sync(widget, mounted);
 		}));

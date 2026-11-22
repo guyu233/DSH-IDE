@@ -703,7 +703,9 @@ Host 侧 `presentationSettings()` 早已实现（读 `ui-chat` 设置段，含�
 缺的只有 IDE 侧——`src/vs/workbench` 零调用。现已补 `DshIdePresentationSettings` 类型、`DshChatSession.presentationSettings()`
 与 `dshChatSessionContent` 的应用点，四档模式由 Host 设置驱动。~~`collapseTiming`~~ **已消费（2026-11-23，CHK-354）**：`latestExchangeTurns()` 按官方「从第一个接纳人类输入的 Turn 起、
 包含其后每个 Turn 直到下一个这样的 Turn」算最新 exchange，`next-input` 时这些 Turn 不折叠（手动开合仍优先）；
-通知唤醒的 Turn 没有 promptKeys，不会开新 exchange。**仍未消费**：`developerTools`。
+通知唤醒的 Turn 没有 promptKeys，不会开新 exchange。**`developerTools` 核实为不需要消费（CHK-355）**：官方 `apps/web/tests/developer-tools-settings.e2e.ts` 证明它是
+Settings 里的「Show coding view」开关（`ui-settings.enabled`），只控制 agent preset 菜单是否显示 `PTC mode` / `Minimal mode`——
+本仓不渲染 preset 菜单，无需消费。
 ~~`foldedReplies`~~ **已消费（2026-11-23，CHK-353）**：`visibleProcessKeys(group, collapsed, foldedReplies)` 在 `final` 时只留最终答复；
 **并修掉一个真实 bug**——最终答复不能取 `answerKeys.at(-1)`（那里含 `turn-tail` 等控件），改为分组时单独收集的 `replyKeys`（只含 `assistant` / `assistant-step`）。
 6. 快照刷新、会话切换、虚拟化重绘不丢失折叠状态、草稿、pending 入口和节点身份。
