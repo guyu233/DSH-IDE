@@ -1119,3 +1119,19 @@ test('protocol rejects a queued message without content blocks or with a duplica
 		],
 	})), /duplicates/, 'a duplicate queued id must be rejected');
 });
+
+test('only the latest inherited seed leaves one divider', () => {
+	// 官方 `inheritedHistoryDefinition.buildViewNode` 取 `context.matches.at(-1)`：
+	// 只在**最新**的 inherited seed 标记处放一个分界行，不是每个标记各放一个。
+	// 历史分页会把更早的标记也载入；每个都画会在长 fork 历史里叠出一串重复分界。
+	const state = createDshIdeConversationState();
+	const project = (event: Record<string, unknown>) => projectDshIdeConversation(state, { type: 'event', event });
+	project({ type: 'session/end-seed', seq: 1, time: 1, data: { inherited: true } });
+	const second = project({ type: 'session/end-seed', seq: 2, time: 2, data: { inherited: true } });
+	const dividers = second.nodes.filter(node => node.kind === 'inherited-history');
+	assert.equal(dividers.length, 1, 'only one divider must survive');
+	assert.equal(dividers[0].seq, 2, 'and it is the latest marker');
+	// 非 inherited 的 seed 不产生分界行。
+	const plain = project({ type: 'session/end-seed', seq: 3, time: 3, data: { inherited: false } });
+	assert.equal(plain.nodes.filter(node => node.kind === 'inherited-history').length, 1, 'a plain seed adds no divider');
+});

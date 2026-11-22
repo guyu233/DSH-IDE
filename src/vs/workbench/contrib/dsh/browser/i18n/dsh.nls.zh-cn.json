@@ -30,7 +30,7 @@
 	"dsh.fallback.skipped": "（已跳过）",
 	"dsh.fallback.branchUnavailable": "分支不可用",
 	"dsh.fallback.maxTokens": "输出上限",
-	"dsh.fallback.inheritedHistory": "继承的历史",
+	"dsh.fallback.inheritedHistory": "以上为继承的历史",
 	"dsh.usage.inputOutput": "输入 {0} 输出 {1}",
 	"dsh.usage.cacheRead": "缓存读取 {0}",
 	"dsh.usage.cacheWrite": "缓存写入 {0}",

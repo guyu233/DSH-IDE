@@ -667,7 +667,16 @@ function renderAdaptedFallback(part: DshNativePart, host?: { reviewQuestion?: (c
 	} else if (part.kind === 'dshMaxTokens') {
 		block.textContent = [localize('dsh.fallback.maxTokens', "output limit"), part.turn, part.step].filter(line => line !== undefined).join(' ');
 	} else if (part.kind === 'dshInheritedHistory') {
-		block.textContent = localize('dsh.fallback.inheritedHistory', "Inherited history");
+		// 官方 `ui-chat/README.md`「Inherited history divider」：文案是 "Inherited history above"，
+		// 且「The caption starts with the **branch glyph that the branch action uses**」。
+		// 用 codicon 的 `git-branch`（与 VS Code 分支动作同一图标族），不自绘 SVG。
+		block.textContent = '';
+		const glyph = document.createElement('span');
+		glyph.className = 'codicon codicon-git-branch';
+		glyph.setAttribute('aria-hidden', 'true');
+		glyph.style.marginRight = '4px';
+		block.appendChild(glyph);
+		block.appendChild(document.createTextNode(localize('dsh.fallback.inheritedHistory', "Inherited history above")));
 	} else if (part.kind === 'dshModelRetry') {
 		block.textContent = [part.retry, part.maxRetries, part.delayMs, part.mode, part.retryState, part.code, part.message]
 			.filter(line => line !== undefined && line !== '')

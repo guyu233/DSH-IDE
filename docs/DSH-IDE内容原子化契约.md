@@ -257,7 +257,7 @@ DSH-IDE 的线协议只投影 `ConversationNode`（`src/vs/platform/dshClient/pr
 | `model-retry` | retry、maxRetries、delayMs、mode、retryState、failure |
 | `turn-error` | TurnErrorNode |
 | `turn-max-tokens` | TurnMaxTokensNode |
-| `inherited-history` | 无载荷，锚点为标记 seq（`session/end-seed` 合成） |
+| `inherited-history` | fork 会话的分界行。官方 `buildViewNode` 取 `context.matches.at(-1)`：**只保留最新** inherited seed 标记处的**一个**分界行；文案 `Inherited history above`，caption 以分支图标起始（2026-11-23 CHK-349 修正：此前每个标记各画一个、文案缺 above、无图标） |
 | `unknown` | UnknownSurfaceNode（未认领的 append-surface 事件） |
 
 Chat 层目标 kind（Host 投影到位前不进入节点树）：

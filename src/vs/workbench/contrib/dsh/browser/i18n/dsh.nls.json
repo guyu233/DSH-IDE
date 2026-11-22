@@ -30,7 +30,7 @@
 	"dsh.fallback.skipped": "(skipped)",
 	"dsh.fallback.branchUnavailable": "branch unavailable",
 	"dsh.fallback.maxTokens": "output limit",
-	"dsh.fallback.inheritedHistory": "Inherited history",
+	"dsh.fallback.inheritedHistory": "Inherited history above",
 	"dsh.usage.inputOutput": "in {0} out {1}",
 	"dsh.usage.cacheRead": "cache-read {0}",
 	"dsh.usage.cacheWrite": "cache-write {0}",

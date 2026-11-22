@@ -56,6 +56,8 @@ export interface DshIdeConversationState {
 	 * `currentClaimed` 里的人类消息是 `steering`，不是新的 `user`。
 	 */
 	inboxNextStep: DshIdeInboxClaim;
+	/** 上一个 `inherited-history` 分界行的 key：官方只保留最新一个标记处的分界。 */
+	lastInheritedHistoryKey?: string;
 	/**
 	 * 官方 `inbox-next-turn`。被它认领的非人类消息是 `waking`，投影成 `turn-trigger`。
 	 */
@@ -837,7 +839,15 @@ function applyDurable(state: DshIdeConversationState, event: Record<string, unkn
 	}
 
 	if (type === 'session/end-seed' && data['inherited'] === true) {
-		put(state, `seq:${seq}`, { kind: 'inherited-history', seq, time, turn });
+		// 官方 `inheritedHistoryDefinition.buildViewNode` 取 `context.matches.at(-1)`：
+		// **只在最新的 inherited seed 标记处放一个分界行**，不是每个标记各放一个。
+		// 历史分页会把更早的标记也载入；每个都画会在长 fork 历史里叠出一串重复分界。
+		if (state.lastInheritedHistoryKey !== undefined) {
+			state.nodes.delete(state.lastInheritedHistoryKey);
+		}
+		const key = `seq:${seq}`;
+		put(state, key, { kind: 'inherited-history', seq, time, turn });
+		state.lastInheritedHistoryKey = key;
 	}
 }
 
