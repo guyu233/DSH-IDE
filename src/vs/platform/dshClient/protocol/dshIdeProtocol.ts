@@ -873,7 +873,7 @@ export type DshIdeMethod = keyof DshIdeMethodArgs;
 
 /** 必须匹配发起视图的会话；带显式可见行 ID 的操作不在这组。 */
 export const DSH_IDE_VIEW_BOUND_METHODS: readonly DshIdeMethod[] = [
-	'submit', 'interrupt', 'resume', 'rewind', 'loadOlder', 'setModel', 'setEffort',
+	'submit', 'interrupt', 'updateQueue', 'resume', 'rewind', 'loadOlder', 'setModel', 'setEffort',
 	'setPermissionPreset', 'runCommand', 'composerState', 'setTeamEnabled', 'setAgentPreset',
 	'readAttachment',
 ];
