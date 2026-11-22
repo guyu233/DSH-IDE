@@ -29,7 +29,6 @@ interface MountedWidget {
 	readonly input: DshChatInputDock;
 	readonly composer: DshChatInputDock;
 	readonly store: DisposableStore;
-	readonly parent: HTMLElement;
 }
 
 /**
@@ -85,7 +84,7 @@ export class DshChatInputDockContribution extends Disposable {
 		// 上方：输入卡之前；下方：输入卡之后。都用原生容器做锚点，不另外包一层。
 		stack.insertBefore(input.domNode, inputContainer);
 		stack.insertBefore(composer.domNode, inputContainer.nextSibling);
-		this.mounted.set(widget, { input, composer, store, parent: stack });
+		this.mounted.set(widget, { input, composer, store });
 		const sync = () => {
 			const sessionId = widget.viewModel?.sessionResource === undefined
 				? undefined
