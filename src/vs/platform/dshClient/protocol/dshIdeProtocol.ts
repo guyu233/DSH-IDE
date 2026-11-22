@@ -127,6 +127,8 @@ export interface DshIdeViewSnapshot {
 	/** 本会话记录的工作树（官方 `worktree` 投影）；缺席表示本帧没带。 */
 	readonly worktrees?: readonly DshIdeWorktreeView[];
 	readonly tokenUsageDelta?: DshIdeTokenUsageDelta;
+	/** 官方 `tokenUsage` 投影：整会话累加用量（composer 统计控件的数据源）。 */
+	readonly tokenUsageTotal?: DshIdeTokenUsageTotal;
 	readonly quotaNotice?: DshIdeQuotaNotice;
 	readonly composer?: DshIdeComposerView;
 	readonly pending?: readonly DshIdePendingItem[];
@@ -626,6 +628,21 @@ export interface DshIdeTokenUsageDelta {
 	readonly cacheReadTokens?: number;
 	readonly cacheWriteTokens?: number;
 	readonly reasoningTokens?: number;
+}
+
+/**
+ * 官方 `tokenUsage` 投影：**整个会话日志的累加用量**（`llm/token-meter/src/projection.ts`）。
+ *
+ * 四个桶**互不相交**：`reasoningTokens` 已含在 `outputTokens` 里，不重复累加。
+ * 这与 `DshIdeTokenUsageDelta`（单次调用的增量）语义不同，**不能互相顶替**。
+ *
+ * 用在 composer 的统计控件上（官方 `conversation.composer.dock` 的 `usage` 项，order 1）。
+ */
+export interface DshIdeTokenUsageTotal {
+	readonly uncachedInputTokens: number;
+	readonly outputTokens: number;
+	readonly cacheReadTokens: number;
+	readonly cacheWriteTokens: number;
 }
 
 /** 官方 `QuotaNoticeState`。`message` 由 Host 填好当前语言的句子，缺省时界面自己用 code。 */
@@ -1744,7 +1761,7 @@ export function validateDshIdeSnapshot(value: unknown): DshIdeSnapshot {
 
 const DSH_IDE_VIEW_KEYS = [
 	'frame', 'conversation', 'deliverables', 'attachments', 'plan', 'goal', 'todos', 'skills', 'team', 'worktrees',
-	'tokenUsageDelta', 'quotaNotice', 'composer', 'pending',
+	'tokenUsageDelta', 'tokenUsageTotal', 'quotaNotice', 'composer', 'pending',
 ] as const;
 
 /** 跟会话帧校验：`frame` 必填，typed 字段出现时按官方形状 fail-closed。 */
@@ -1786,6 +1803,9 @@ function validateDshIdeView(value: unknown): asserts value is DshIdeViewSnapshot
 	}
 	if (view['tokenUsageDelta'] !== undefined) {
 		validateTokenUsage(view['tokenUsageDelta'], 'DshIdeSnapshot.state.view.tokenUsageDelta');
+	}
+	if (view['tokenUsageTotal'] !== undefined) {
+		validateTokenUsageTotal(view['tokenUsageTotal'], 'DshIdeSnapshot.state.view.tokenUsageTotal');
 	}
 	if (view['quotaNotice'] !== undefined) {
 		validateQuotaNotice(view['quotaNotice']);
@@ -2549,6 +2569,14 @@ function validateCommandOutcome(value: unknown, label: string): void {
 	}
 	if (outcome['text'] !== undefined) {
 		anyString(outcome['text'], `${label}.text`);
+	}
+}
+
+/** 官方 `tokenUsage` 投影：四桶**全必填**且非负（它们互不相交，缺一桶就是坏数据）。 */
+function validateTokenUsageTotal(value: unknown, label: string): void {
+	const usage = exactRecord(value, ['uncachedInputTokens', 'outputTokens', 'cacheReadTokens', 'cacheWriteTokens'], label);
+	for (const key of ['uncachedInputTokens', 'outputTokens', 'cacheReadTokens', 'cacheWriteTokens'] as const) {
+		nonNegativeInteger(usage[key], `${label}.${key}`);
 	}
 }
 

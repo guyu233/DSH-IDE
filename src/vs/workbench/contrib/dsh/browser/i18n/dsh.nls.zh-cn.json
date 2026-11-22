@@ -274,5 +274,7 @@
 	"dsh.card.deliverables": "交付物",
 	"dsh.card.files": "文件",
 	"dsh.card.plan": "计划",
-	"dsh.card.usage": "用量"
+	"dsh.card.usage": "用量",
+	"dsh.composer.tokens": "{0} tokens",
+	"dsh.composer.tokensCacheHit": "{0} tokens · 缓存命中 {1}%"
 }

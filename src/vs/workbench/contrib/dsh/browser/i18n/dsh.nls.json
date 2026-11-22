@@ -274,5 +274,7 @@
 	"dsh.card.deliverables": "Deliverables",
 	"dsh.card.files": "Files",
 	"dsh.card.plan": "Plan",
-	"dsh.card.usage": "Usage"
+	"dsh.card.usage": "Usage",
+	"dsh.composer.tokens": "{0} tokens",
+	"dsh.composer.tokensCacheHit": "{0} tokens · {1}% cache hit"
 }

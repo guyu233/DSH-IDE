@@ -18,6 +18,7 @@
 import { $ } from '../../../../../base/browser/dom.js';
 import { Disposable } from '../../../../../base/common/lifecycle.js';
 import { localize } from '../../../../../nls.js';
+import type { DshIdeTokenUsageTotal } from '../../../../../platform/dshClient/protocol/dshIdeProtocol.js';
 import { dshChatSlotRegistry } from './dshChatSlots.js';
 import { dshComposerDockRows, dshInputDockRows, dshQueueDockRows, type DshInputDockRow, type DshInputZoneOwner, type DshQueueRowAction } from './dshInputDock.js';
 import type { DshIdeInboxMessage } from '../../../../../platform/dshClient/protocol/dshIdeProtocol.js';
@@ -71,12 +72,13 @@ export class DshChatInputDock extends Disposable {
 	 * `owner` 只对 `conversation.input.dock` 有意义（官方 owner 是 `InputZone`）；
 	 * `composer.dock` 只用会话 id。两者都允许缺省，表示「当前没有会话」。
 	 */
-	update(sessionId: string | undefined, owner?: DshInputZoneOwner, inbox?: readonly DshIdeInboxMessage[], inboxStep?: readonly DshIdeInboxMessage[], turnNav?: readonly DshInputDockRow[]): void {
+	update(sessionId: string | undefined, owner?: DshInputZoneOwner, inbox?: readonly DshIdeInboxMessage[], inboxStep?: readonly DshIdeInboxMessage[], turnNav?: readonly DshInputDockRow[], usage?: DshIdeTokenUsageTotal): void {
 		this.sessionId = sessionId;
 		this.owner = owner;
 		this.inbox = inbox;
 		this.inboxStep = inboxStep;
 		this.turnNav = turnNav ?? [];
+		this.usage = usage;
 		this.render();
 	}
 
@@ -85,6 +87,8 @@ export class DshChatInputDock extends Disposable {
 	private inboxStep: readonly DshIdeInboxMessage[] | undefined;
 	/** Turn 导航行（由 content 层投影后传入；空数组表示没有 Turn）。 */
 	private turnNav: readonly DshInputDockRow[] = [];
+	/** 官方 `tokenUsage` 投影（composer 统计控件的数据源）。 */
+	private usage: DshIdeTokenUsageTotal | undefined;
 
 	private render(): void {
 		for (const ref of this.rowRefs) {
@@ -107,7 +111,7 @@ export class DshChatInputDock extends Disposable {
 					...this.turnNav,
 				],
 			)
-			: dshComposerDockRows(this.sessionId);
+			: dshComposerDockRows(this.sessionId, this.usage);
 		if (rows.length === 0) {
 			this.domNode.style.display = 'none';
 			return;

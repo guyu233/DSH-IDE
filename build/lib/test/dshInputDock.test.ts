@@ -133,3 +133,24 @@ test('multiple next-step messages show a steer-specific count, not the queued wo
 	// `next-turn` 的多条仍是 queued 措辞：两个队列的计数文案不能互换。
 	assert.doesNotMatch(dshQueueDockRows(messages, 'next-turn')[0].label, /steer/i);
 });
+
+test('the composer usage row shows total tokens and cache hit rate', async () => {
+	// 官方「Turn token usage」：The composer statistics are two conversation.composer.dock list
+	// entries: activity (order 0 …) and **usage (order 1, token total and cache hit)**。
+	const { dshComposerUsageRows } = await import('../../../src/vs/workbench/contrib/dsh/browser/vscode/dshInputDock.ts');
+	// 四桶相加；cacheRead 占「可缓存输入」（uncached + cacheRead）的比例。
+	const rows = dshComposerUsageRows({ uncachedInputTokens: 300, outputTokens: 100, cacheReadTokens: 100, cacheWriteTokens: 0 });
+	assert.equal(rows.length, 1);
+	assert.equal(rows[0].order, 1, 'the usage entry is order 1');
+	assert.equal(rows[0].id, 'composer-usage');
+	assert.ok(rows[0].label.includes('500'), `total is 300+100+100+0: "${rows[0].label}"`);
+	assert.ok(rows[0].label.includes('25'), `cache hit is 100/(300+100)=25%: "${rows[0].label}"`);
+	// 全零不画（那是「还没有用量」，不是「用量为 0」）。
+	assert.deepEqual(dshComposerUsageRows({ uncachedInputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 }), []);
+	// 没有数据源时不画。
+	assert.deepEqual(dshComposerUsageRows(undefined), []);
+	// 没有可缓存输入时不报命中率（不除以 0，也不伪造 0%）。
+	const noCache = dshComposerUsageRows({ uncachedInputTokens: 0, outputTokens: 10, cacheReadTokens: 0, cacheWriteTokens: 5 });
+	assert.equal(noCache.length, 1);
+	assert.ok(!noCache[0].label.includes('cache hit'), `must omit the rate: "${noCache[0].label}"`);
+});

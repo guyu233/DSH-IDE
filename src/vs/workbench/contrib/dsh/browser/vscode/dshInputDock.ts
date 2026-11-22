@@ -17,7 +17,8 @@
 // 「画成什么」混在一起。
 
 import { localize } from '../../../../../nls.js';
-import type { DshIdeInboxMessage } from '../../../../../platform/dshClient/protocol/dshIdeProtocol.js';
+import { formatTokens } from './dshTokenFormat.js';
+import type { DshIdeInboxMessage, DshIdeTokenUsageTotal } from '../../../../../platform/dshClient/protocol/dshIdeProtocol.js';
 import { dshChatSlotRegistry, DSH_COMPOSER_DOCK_SLOT, DSH_INPUT_DOCK_SLOT } from './dshChatSlots.js';
 
 /** 一个 dock occupant 投影出来的一行。 */
@@ -83,11 +84,45 @@ export function dshInputDockRows(sessionId: string | undefined, zone: DshInputZo
  *
  * 这个槽没有 owner props，只按会话解析；没有会话时不解析。
  */
-export function dshComposerDockRows(sessionId: string | undefined): readonly DshInputDockRow[] {
+export function dshComposerDockRows(sessionId: string | undefined, usage?: DshIdeTokenUsageTotal): readonly DshInputDockRow[] {
 	if (sessionId === undefined || sessionId === '') {
 		return [];
 	}
-	return projectDockRows(DSH_COMPOSER_DOCK_SLOT, sessionId, undefined);
+	// 官方 `ui-chat` 的 composer 统计控件是 `conversation.composer.dock` 的**两个内置项**：
+	// `activity`（order 0）与 `usage`（order 1）。本仓没有 activity 的权威数据源
+	// （turn/step 计数在 `turn-process` 节点上、按 Turn 分散），所以只实现 `usage`——
+	// 有数据才画，没有就不占位（不伪造 0）。
+	return [...projectDockRows(DSH_COMPOSER_DOCK_SLOT, sessionId, undefined), ...dshComposerUsageRows(usage)];
+}
+
+/**
+ * composer 的用量统计行（官方 `usage` 项，order 1）。
+ *
+ * 官方「Turn token usage」：「The composer statistics are two `conversation.composer.dock` list entries:
+ * `activity` (order 0 …) and **`usage` (order 1, token total and cache hit)**。」
+ *
+ * @param usage 官方 `tokenUsage` 投影（整会话累加）；缺省表示还没有任何用量
+ * @returns 至多一行；没有用量时不画
+ */
+export function dshComposerUsageRows(usage: DshIdeTokenUsageTotal | undefined): readonly DshInputDockRow[] {
+	if (usage === undefined) {
+		return [];
+	}
+	const total = usage.uncachedInputTokens + usage.outputTokens + usage.cacheReadTokens + usage.cacheWriteTokens;
+	if (total <= 0) {
+		// 全零不画：那是「还没有用量」，不是「用量为 0」。
+		return [];
+	}
+	// 缓存命中率：cacheRead 占「可缓存输入」的比例（uncached + cacheRead）。
+	const cacheable = usage.uncachedInputTokens + usage.cacheReadTokens;
+	const hitRate = cacheable <= 0 ? undefined : Math.round((usage.cacheReadTokens / cacheable) * 100);
+	return [{
+		id: 'composer-usage',
+		label: hitRate === undefined
+			? localize('dsh.composer.tokens', "{0} tokens", formatTokens(total))
+			: localize('dsh.composer.tokensCacheHit', "{0} tokens · {1}% cache hit", formatTokens(total), hitRate),
+		order: 1,
+	}];
 }
 
 function projectDockRows(slot: string, sessionId: string | undefined, props: Readonly<Record<string, unknown>> | undefined): readonly DshInputDockRow[] {

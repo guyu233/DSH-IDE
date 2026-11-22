@@ -25,7 +25,7 @@ import type {
 /** `projectDshIdeProjections` 的返回值：只含本次真的读到的字段。 */
 export type DshIdeProjectionFields = Pick<
 	DshIdeViewSnapshot,
-	'plan' | 'goal' | 'todos' | 'team' | 'worktrees' | 'tokenUsageDelta' | 'skills' | 'deliverables' | 'attachments' | 'quotaNotice' | 'composer' | 'pending'
+	'plan' | 'goal' | 'todos' | 'team' | 'worktrees' | 'tokenUsageDelta' | 'tokenUsageTotal' | 'skills' | 'deliverables' | 'attachments' | 'quotaNotice' | 'composer' | 'pending'
 >;
 
 /**
@@ -51,8 +51,17 @@ export function projectDshIdeProjections(baseline: unknown): DshIdeProjectionFie
 	const todos = todosOf(values['todos']);
 	const team = teamOf(values['agentTeam']);
 	const worktrees = worktreesOf(values['worktree']);
+	// 官方 `tokenUsage` 投影：整会话累加用量，四桶互不相交（reasoning 已含在 outputTokens）。
+	const usage = isRecord(values['tokenUsage']) ? values['tokenUsage'] : undefined;
+	const tokenUsageTotal = usage === undefined ? undefined : {
+		uncachedInputTokens: typeof usage['uncachedInputTokens'] === 'number' ? usage['uncachedInputTokens'] : 0,
+		outputTokens: typeof usage['outputTokens'] === 'number' ? usage['outputTokens'] : 0,
+		cacheReadTokens: typeof usage['cacheReadTokens'] === 'number' ? usage['cacheReadTokens'] : 0,
+		cacheWriteTokens: typeof usage['cacheWriteTokens'] === 'number' ? usage['cacheWriteTokens'] : 0,
+	};
 	// 只把真的读到的字段放进返回值；字段就缺席，不写 undefined。
 	return {
+		...(tokenUsageTotal === undefined ? {} : { tokenUsageTotal }),
 		...(plan === undefined ? {} : { plan }),
 		...(goal === undefined ? {} : { goal }),
 		...(todos === undefined ? {} : { todos }),
