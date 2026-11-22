@@ -1682,7 +1682,7 @@ DSH 的槽位有两个**独立轴**：基数（cardinality）与作用域（scop
 
 | 契约项 | DSH 语义 | 当前 DSH-IDE | 实现状态 |
 |---|---|---|---|
-| 待处理提交 | `PendingSubmission`、`InboxState['next-step']` 与 `conversation.chat.flow` 的 `pendingInputs` 一起渲染 | 无队列 dock。**阻塞原因**：线协议 inbox 的 `pending` 只有 `id` + `sourceKind`（`DshIdeInboxIdentity`），没有正文与附件；原生 Chat 也无队列机制。仅凭身份渲染等于空壳 | 未实现 |
+| 待处理提交 | `PendingSubmission`、`InboxState['next-step']` 与 `conversation.chat.flow` 的 `pendingInputs` 一起渲染 | `agent/inbox/spliced` 的 `inserted` 本来就是完整 `UserMessage[]`（含 text/image/file 的 `content`），原先只投影成 `DshIdeInboxIdentity` 是**本仓丢弃了 content**。2026-11-23（CHK-337）已在协议补 `DshIdeInboxMessage` / `DshIdeInboxBlock` 与 `inboxNextTurn` / `inboxNextStep`，投影保留内容块，`dshInputDock` 把它投影成 `conversation.input.dock` 的队列行（按会话、可点击定位，不伪造发送）。真机 PENDING | 部分实现 |
 | 审批详情 | `conversation.approval.detail` 席位 | `settleApproval` 可带 reason；标题是任务行，允许/拒绝仍是 command，因为原生 confirmation 会另发一条请求 | 部分实现 |
 | 计划审阅 | `submitted-plan` 节点 + `conversation.plan-review.actions` 席位 | 计划题目的选项按钮之外再给 `Discuss`：`dsh.discussQuestion` 调 `cancelRequest` 结束审阅（Host 结算，不是本地隐藏卡片），成功才移除卡片；在途互斥、终态记录。尚无独立动作行 DOM | 部分实现 |
 | 问答记录 | `UserQuestionRecord { questions, answers }`；答案可来自 call result 或 `userQuestions` 投影 | 作答走 `dshQuestionCarousel`（整份提交）；作答后线协议产出 `question-reply` 回执，按题面回显答案 | 部分实现 |
