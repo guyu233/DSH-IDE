@@ -8,7 +8,7 @@
 
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { describeTurnProcess, groupPositionOf, groupTurnProcesses, hiddenProcessLine, isSubagentDelegationTool, latestExchangeTurns, processActivityLabel, processActivityOf, processActivityText, processLineFromSnapshot, summarizeProcess, turnProcessAlwaysOpen, visibleProcessKeys, type DshGroupableNode, type DshProcessActivity } from '../../../src/vs/workbench/contrib/dsh/browser/vscode/dshProcessGroup.ts';
+import { describeTurnProcess, groupPositionOf, groupTurnProcesses, hiddenProcessLine, isSubagentDelegationTool, latestExchangeTurns, processActivityLabel, processActivityOf, processLineFromSnapshot, summarizeProcess, turnProcessAlwaysOpen, visibleProcessKeys, type DshGroupableNode, type DshProcessActivity } from '../../../src/vs/workbench/contrib/dsh/browser/vscode/dshProcessGroup.ts';
 
 function node(partial: DshGroupableNode): DshGroupableNode {
 	return partial;
@@ -53,7 +53,7 @@ test('tool names map to the official 14 process activities', () => {
 	// 14 类都有本地化文案。
 	const all = ['read', 'readImage', 'search', 'write', 'edit', 'commands', 'code', 'webSearch', 'webFetch', 'subagents', 'plan', 'questions', 'tools', 'context'] as const;
 	for (const activity of all) {
-		assert.equal(processActivityText(activity).length > 0, true, activity);
+		assert.equal(processActivityLabel(activity, 'closed').length > 0, true, activity);
 	}
 });
 
@@ -64,7 +64,7 @@ test('the hidden process line uses localized activity names, not enum values', (
 	assert.equal(line?.includes('webSearch'), false);
 	const webLine = hiddenProcessLine([{ kind: 'tool-call', name: 'web_search', callId: 'c2' }, { kind: 'tool-result', callId: 'c2' }]);
 	assert.equal(webLine?.includes('webSearch'), false);
-	assert.equal(processActivityText('webSearch').length > 0, true);
+	assert.equal(processActivityLabel('webSearch', 'closed').length > 0, true);
 });
 
 test('a turn-process node lands in the answer keys and must be skipped when anchoring', () => {

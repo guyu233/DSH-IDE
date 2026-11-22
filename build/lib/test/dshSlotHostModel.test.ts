@@ -668,3 +668,14 @@ test('process rows use the official spacing scale', async () => {
 	assert.ok(source.includes("row.style.marginTop = '12px'"), 'assistant replies: 12px');
 	assert.ok(source.includes("row.style.marginTop = '16px'"), 'turn tail controls: 16px');
 });
+
+test('expanded group bodies use the official 4px row spacing', async () => {
+	// 官方「Grouped rendering」：Manually expanded group bodies use 4px row spacing。
+	// 高度上限（min(400px,50vh)）与 24px 渐变**刻意未做**：它们作用于整组窗口，
+	// 而本仓过程行是扁平列表、没有组体容器——逐行套 max-height 会切碎内容。
+	const { readFileSync } = await import('node:fs');
+	const source = readFileSync(new URL('../../../src/vs/workbench/contrib/dsh/browser/vscode/dshSlotHostContentPart.ts', import.meta.url), 'utf8');
+	assert.ok(source.includes("row.style.marginBottom = '4px'"), 'process rows use 4px spacing');
+	// 确认没有把 max-height 套到单行上。
+	assert.ok(!source.includes("row.style.maxHeight"), 'a per-row max-height would truncate each row');
+});

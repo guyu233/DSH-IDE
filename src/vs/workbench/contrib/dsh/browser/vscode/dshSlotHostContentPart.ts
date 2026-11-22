@@ -618,6 +618,12 @@ export class DshSlotHostContentPart extends Disposable implements IChatContentPa
 			row.style.marginTop = '12px';
 		} else if (node.kind === 'turn-tail') {
 			row.style.marginTop = '16px';
+		} else if (node.kind === 'tool-call' || node.kind === 'tool-result' || node.kind === 'context') {
+			// 官方「Grouped rendering」：Manually expanded group bodies use **4px row spacing**。
+			// 这里只实现 4px——**高度上限与 24px 渐变暂不做**：官方那两项作用于「整个组体」的
+			// 滚动窗口，而本仓的过程行是扁平列表、没有组体容器；把 `max-height` 加到每一行上
+			// 会逐行截断内容，比不做更糟。等组体有独立容器后再一起补（与 CHK-368 的 aria 同一处理方式）。
+			row.style.marginBottom = '4px';
 		}
 		const adapted = adaptDshNode(node, this.content.treeId);
 		// 用户消息上方的装饰：官方 chain 槽，首个认领的 occupant 生效。
@@ -963,3 +969,4 @@ function parsedArgsOf(raw: string | undefined): unknown {
 		return undefined;
 	}
 }
+

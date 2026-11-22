@@ -428,10 +428,6 @@ export function summarizeProcess(nodes: readonly DshActivityNode[], hasAnswer: b
 }
 
 /** 活动名的用户可见文案。未列出的活动原样显示枚举名，不猜中文。 */
-export function processActivityText(activity: DshProcessActivity): string {
-	return processActivityLabel(activity, 'closed');
-}
-
 /**
  * 组头文案（官方 `conversation-nodes/README.md`「Group-title rules」的类别表）。
  *
