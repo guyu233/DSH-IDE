@@ -609,6 +609,16 @@ export class DshSlotHostContentPart extends Disposable implements IChatContentPa
 		if (node === undefined) {
 			return row;
 		}
+		// 官方「Grouped rendering」的间距：
+		//   - Assistant responses have **12px** from adjacent process rows；
+		//   - completed-Turn duration/status controls（`turn-tail`）have **16px** from their input
+		//     and from a directly following visible row。
+		// 普通流行本身是 4px（组头负责自己的下边距）；这里只给这两类加额外间距。
+		if (node.kind === 'assistant' || node.kind === 'assistant-step') {
+			row.style.marginTop = '12px';
+		} else if (node.kind === 'turn-tail') {
+			row.style.marginTop = '16px';
+		}
 		const adapted = adaptDshNode(node, this.content.treeId);
 		// 用户消息上方的装饰：官方 chain 槽，首个认领的 occupant 生效。
 		// 官方 `slots.ts` 明确「steering and pending rows do not render this slot」，因此只认 `user`。
@@ -745,6 +755,10 @@ function processSummaryRow(line: string, expanded: boolean): HTMLButtonElement {
 	row.appendChild(icon);
 	row.appendChild(text);
 	row.style.color = 'var(--vscode-descriptionForeground)';
+	// 官方「Grouped rendering」的间距：Ordinary flow rows sit **4px apart**；
+	// An expanded group title has **8px before its content**——展开时把下边距加到 8px，
+	// 收起时保持普通流间距。
+	row.style.marginBottom = expanded ? '8px' : '4px';
 	return row;
 }
 

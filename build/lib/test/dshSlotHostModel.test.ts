@@ -657,3 +657,14 @@ test('toggling a group header actually reveals its process content', async () =>
 	// 展开状态必须参与显示签名（否则切换不重绘）。
 	assert.ok(source.includes("row.expanded === true ? '1' : '0'"), 'the expanded state must be part of the row signature');
 });
+
+test('process rows use the official spacing scale', async () => {
+	// 官方「Grouped rendering」：ordinary flow rows 4px apart；an expanded group title has 8px
+	// before its content；Assistant responses have 12px from adjacent process rows；
+	// completed-Turn controls（turn-tail）have 16px from their input。
+	const { readFileSync } = await import('node:fs');
+	const source = readFileSync(new URL('../../../src/vs/workbench/contrib/dsh/browser/vscode/dshSlotHostContentPart.ts', import.meta.url), 'utf8');
+	assert.ok(source.includes("row.style.marginBottom = expanded ? '8px' : '4px'"), 'group title: 8px expanded, 4px ordinary');
+	assert.ok(source.includes("row.style.marginTop = '12px'"), 'assistant replies: 12px');
+	assert.ok(source.includes("row.style.marginTop = '16px'"), 'turn tail controls: 16px');
+});
