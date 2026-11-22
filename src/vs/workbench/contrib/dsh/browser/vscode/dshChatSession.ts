@@ -13,7 +13,7 @@ import { Emitter, Event } from '../../../../../base/common/event.js';
 import { Disposable } from '../../../../../base/common/lifecycle.js';
 import { VSBuffer, encodeBase64 } from '../../../../../base/common/buffer.js';
 import { IDshClientService } from '../../../../../platform/dshClient/common/dshClientService.js';
-import { dshErrorText, DSH_IDE_FEATURE_UNAVAILABLE, DSH_IDE_HISTORY_MAX_MESSAGES, DSH_IDE_HISTORY_TURN_WINDOW, validateDshIdeLoadOlderResult, type DshIdeConversationView, type DshIdeDeliverableView, type DshIdeGoalView, type DshIdeImageAttachmentRef, type DshIdeInboxMessage, type DshIdeLoadOlderResult, type DshIdePendingItem, type DshIdePlanView, type DshIdeQuotaNotice, type DshIdeSkillView, type DshIdeTeamView, type DshIdeTodoView, type DshIdeWorktreeView, type DshIdeViewSnapshot, type DshIdeWaterfallNotice } from '../../../../../platform/dshClient/protocol/dshIdeProtocol.js';
+import { dshErrorText, DSH_IDE_FEATURE_UNAVAILABLE, DSH_IDE_HISTORY_MAX_MESSAGES, DSH_IDE_HISTORY_TURN_WINDOW, validateDshIdeLoadOlderResult, type DshIdeConversationView, type DshIdeDeliverableView, type DshIdeGoalView, type DshIdeImageAttachmentRef, type DshIdeInboxMessage, type DshIdeQueueAction, type DshIdeLoadOlderResult, type DshIdePendingItem, type DshIdePlanView, type DshIdeQuotaNotice, type DshIdeSkillView, type DshIdeTeamView, type DshIdeTodoView, type DshIdeWorktreeView, type DshIdeViewSnapshot, type DshIdeWaterfallNotice } from '../../../../../platform/dshClient/protocol/dshIdeProtocol.js';
 import { DshChatModel, type DshChatNode, type DshHistoryStatus } from './dshChatModel.js';
 import { settleApproval, settleQuestion, type DshQuestionDraft, type DshSettlementIntent } from './dshPendingSettlement.js';
 import { retainQuotaNotice } from './dshQuotaNotice.js';
@@ -106,6 +106,13 @@ export interface IDshChatSession {
 	selectModel(provider: string, model: string): Promise<void>;
 	/** 切换推理档；未绑定时是空操作。 */
 	selectEffort(effort: string): Promise<void>;
+	/**
+	 * 修改一条仍在排队的输入（官方 `session.updateQueue`）。
+	 *
+	 * 返回 `true` 表示 Host 已接受；失败原因经 `dshErrorText` 保留官方码
+	 * （`session/queue-item-not-found` 等），调用方据此给出可区分的提示。
+	 */
+	updateQueue(itemId: string, action: DshIdeQueueAction): Promise<boolean>;
 	cancel(): Promise<boolean>;
 	answerApproval(eventId: string, decision: 'approve' | 'reject'): Promise<void>;
 	answerQuestion(eventId: string, label: string): Promise<void>;
@@ -767,6 +774,23 @@ export class DshChatSession extends Disposable implements IDshChatSession {
 			this.fail(localize('dsh.cancel.rejected', "Stop failed: {0}", detail));
 			return false;
 		}
+		return true;
+	}
+
+	async updateQueue(itemId: string, action: DshIdeQueueAction): Promise<boolean> {
+		const sessionId = this.boundSessionId;
+		if (sessionId === undefined) {
+			this.fail(localize('dsh.queue.noSession', "No DSH session is bound, so the queue was not changed."));
+			return false;
+		}
+		const result = await this.client.call('updateQueue', { sessionId, itemId, action });
+		if (!result.ok) {
+			// 官方码原样带出：`queue-item-not-found`（已经不在队列）与
+			// `steer-unavailable`（当前不能转向）对用户的处置完全不同。
+			this.fail(localize('dsh.queue.rejected', "Could not change the queued message: {0}", dshErrorText(result.error, result.error.code)));
+			return false;
+		}
+		// 队列本身由 Host 的 `inbox` 投影下一帧带来；这里不本地改列表，避免与真源分叉。
 		return true;
 	}
 

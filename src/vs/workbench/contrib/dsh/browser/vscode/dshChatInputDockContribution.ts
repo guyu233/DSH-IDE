@@ -18,10 +18,13 @@
 // 插件卸载时随 `DisposableStore` 一起摘掉，上游零改动。
 
 import { Disposable, DisposableStore } from '../../../../../base/common/lifecycle.js';
+import { localize } from '../../../../../nls.js';
+import { IQuickInputService } from '../../../../../platform/quickinput/common/quickInput.js';
 import { ICommandService } from '../../../../../platform/commands/common/commands.js';
 import { IChatWidget, IChatWidgetService } from '../../../chat/browser/chat.js';
 import { ChatAgentLocation } from '../../../chat/common/constants.js';
 import { DshChatInputDock } from './dshChatInputDock.js';
+import type { DshQueueRowAction } from './dshInputDock.js';
 import { dshSessionIdFromResource } from './dshAgentSessionsController.js';
 import { dshChatSessionFor, type DshChatSession } from './dshChatSession.js';
 import { IDshClientService } from '../../../../../platform/dshClient/common/dshClientService.js';
@@ -47,6 +50,7 @@ export class DshChatInputDockContribution extends Disposable {
 		@IChatWidgetService private readonly chatWidgetService: IChatWidgetService,
 		@ICommandService private readonly commandService: ICommandService,
 		@IDshClientService client: IDshClientService,
+		@IQuickInputService private readonly quickInputService: IQuickInputService,
 	) {
 		super();
 		// 队列的事实来源：DSH 会话本身（官方 `inbox` 投影），不在 IDE 侧自建。
@@ -81,6 +85,15 @@ export class DshChatInputDockContribution extends Disposable {
 			executeCommand: (command: string, args: readonly unknown[]): void => {
 				void this.commandService.executeCommand(command, ...args);
 			},
+			// 队列动作只发请求：结果由 Host 的 `inbox` 投影下一帧带回（见 `DshChatSession.updateQueue`）。
+			// `edit` 需要新文本，走单独的输入框入口；行内按钮只承载 remove / steer。
+			updateQueue: (itemId: string, action: DshQueueRowAction): void => {
+				if (action === 'edit') {
+					void this.promptQueueEdit(itemId);
+					return;
+				}
+				void this.chat.updateQueue(itemId, { kind: action });
+			},
 		};
 		const store = new DisposableStore();
 		const input = store.add(new DshChatInputDock('input', host));
@@ -107,6 +120,25 @@ export class DshChatInputDockContribution extends Disposable {
 		};
 		sync();
 		store.add(widget.onDidChangeViewModel(() => sync()));
+	}
+
+	/**
+	 * 编辑一条排队输入：弹输入框收新文本，再调官方 `updateQueue`。
+	 *
+	 * 官方 `QueueAction.edit.content` 只接受非空纯文本，所以这里只收文本；
+	 * 用户取消或留空都不发请求（留空会被 Host 拒绝，没必要打一次来回）。
+	 */
+	private async promptQueueEdit(itemId: string): Promise<void> {
+		const value = await this.quickInputService.input({
+			title: localize('dsh.queue.editTitle', "Edit queued message"),
+			prompt: localize('dsh.queue.editPrompt', "The new text replaces the queued message."),
+			placeHolder: localize('dsh.queue.editPlaceholder', "Message text"),
+			ignoreFocusLost: true,
+		});
+		if (value === undefined || value.trim() === '') {
+			return;
+		}
+		await this.chat.updateQueue(itemId, { kind: 'edit', text: value });
 	}
 
 	private unmount(widget: IChatWidget): void {

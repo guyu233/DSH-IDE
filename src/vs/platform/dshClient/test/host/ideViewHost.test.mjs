@@ -1519,3 +1519,41 @@ test('close clears every per-bridge collection', async () => {
 	assert.equal(bridge._modelCatalogCache, undefined, '_modelCatalogCache must be dropped after close');
 });
 
+// ---------------------------------------------------------------------------
+// 队列动作：官方 `sessionController.updateQueue`（`@Remote('updateQueue')`）
+// 形状 `{ sessionId, itemId, action }`，action 为 edit|remove|steer。
+// ---------------------------------------------------------------------------
+
+test('updateQueue maps the three actions onto the official QueueAction shape', async () => {
+	const calls = [];
+	const controller = sessionControllerStub({
+		updateQueue: async request => { calls.push(request); return { accepted: true }; },
+	});
+	const { bridge } = bridgeWith({ sessionController: controller });
+	bridge.open({ view: 'chat', params: { sessionId: 's-1' } });
+	assert.deepEqual(await bridge.invoke('updateQueue', { sessionId: 's-1', itemId: 'm1', action: { kind: 'remove' } }), { accepted: true });
+	assert.deepEqual(await bridge.invoke('updateQueue', { sessionId: 's-1', itemId: 'm2', action: { kind: 'steer' } }), { accepted: true });
+	assert.deepEqual(await bridge.invoke('updateQueue', { sessionId: 's-1', itemId: 'm3', action: { kind: 'edit', text: 'new text' } }), { accepted: true });
+	assert.deepEqual(calls, [
+		{ sessionId: 's-1', itemId: 'm1', action: { kind: 'remove' } },
+		{ sessionId: 's-1', itemId: 'm2', action: { kind: 'steer' } },
+		// 官方 `QueueAction.edit.content` 是 `readonly TextBlock[]`：一个 text 块。
+		{ sessionId: 's-1', itemId: 'm3', action: { kind: 'edit', content: [{ type: 'text', text: 'new text' }] } },
+	]);
+});
+
+test('updateQueue fails closed on an empty itemId, empty edit text, or unknown action', async () => {
+	let called = 0;
+	const controller = sessionControllerStub({ updateQueue: async () => { called++; return { accepted: true }; } });
+	const { bridge } = bridgeWith({ sessionController: controller });
+	bridge.open({ view: 'chat', params: { sessionId: 's-1' } });
+	for (const args of [
+		{ sessionId: 's-1', itemId: '', action: { kind: 'remove' } },
+		{ sessionId: 's-1', itemId: 'm1', action: { kind: 'edit', text: '   ' } },
+		{ sessionId: 's-1', itemId: 'm1', action: { kind: 'nope' } },
+		{ sessionId: 's-1', itemId: 'm1', action: null },
+	]) {
+		await assert.rejects(() => bridge.invoke('updateQueue', args), `must reject ${JSON.stringify(args)}`);
+	}
+	assert.equal(called, 0, 'no malformed request may reach the kernel');
+});

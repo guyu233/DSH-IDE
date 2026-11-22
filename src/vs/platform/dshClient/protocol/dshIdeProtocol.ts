@@ -267,6 +267,17 @@ export interface DshIdeInboxMessage {
  */
 export type DshIdeInboxBlock = Readonly<Record<string, unknown>> & { readonly type: string };
 
+/**
+ * 修改排队输入的动作（官方 `QueueAction` 的线协议投影）。
+ *
+ * `edit` 只接受**非空纯文本**：官方类型就是 `readonly TextBlock[]`，
+ * 附件不参与编辑——把它们塞进编辑会造出官方没有的形状。
+ */
+export type DshIdeQueueAction =
+	| { readonly kind: 'edit'; readonly text: string }
+	| { readonly kind: 'remove' }
+	| { readonly kind: 'steer' };
+
 /** 官方 `ui-user-questions` 的 `QuestionReplyQuestion`：回答回执里被问到的题。 */
 export interface DshIdeQuestionReplyQuestion {
 	readonly id: string;
@@ -639,6 +650,15 @@ export interface DshIdeMethodArgs {
 	submit: { text: string; sessionId: string; requestId?: string; attachments?: readonly DshIdeImageAttachmentRef[] };
 	/** 中断点击时绑定的那条会话，不跟随之后换上的会话。 */
 	interrupt: { sessionId: string };
+	/**
+	 * 修改一条**仍在排队**的输入（官方 `session.updateQueue`，`@Remote('updateQueue')`）。
+	 *
+	 * 对齐官方 `SessionUpdateQueueRequest`（`api/session-controller/src/types.ts`）：
+	 * `itemId` 是排队消息的 `MessageId`，`action` 是三选一——
+	 * `edit`（**非空纯文本**替换内容）、`remove`、`steer`（立刻插队到当前 Turn）。
+	 * 官方失败码：`session/queue-item-not-found`、`session/steer-unavailable`。
+	 */
+	updateQueue: { sessionId: string; itemId: string; action: DshIdeQueueAction };
 	/** 恢复点击时绑定的会话。 */
 	resume: { sessionId: string };
 	/** 开新会话。 */
@@ -842,6 +862,7 @@ export const DSH_IDE_HISTORY_TURN_WINDOW = { minMessages: 50, minTurns: 2 } as c
 const DSH_IDE_METHOD_KEYS: Record<DshIdeMethod, readonly string[]> = {
 	submit: ['text', 'sessionId', 'requestId', 'attachments'],
 	interrupt: ['sessionId'],
+	updateQueue: ['sessionId', 'itemId', 'action'],
 	resume: ['sessionId'],
 	newSession: ['workspace', 'options'],
 	fork: ['sessionId', 'point'],
@@ -1392,6 +1413,22 @@ export function validateDshIdeInput<K extends DshIdeMethod>(command: K, args: un
 		case 'interrupt':
 			nonEmptyString(record['sessionId'], 'DshIdeInput.interrupt.sessionId');
 			break;
+		case 'updateQueue': {
+			nonEmptyString(record['sessionId'], 'DshIdeInput.updateQueue.sessionId');
+			nonEmptyString(record['itemId'], 'DshIdeInput.updateQueue.itemId');
+			const action = asRecord(record['action'], 'DshIdeInput.updateQueue.action');
+			const kind = nonEmptyString(action['kind'], 'DshIdeInput.updateQueue.action.kind');
+			if (kind === 'edit') {
+				// 官方 `QueueAction.edit` 只接受非空纯文本（`readonly TextBlock[]`）。
+				nonEmptyString(action['text'], 'DshIdeInput.updateQueue.action.text');
+				exactRecord(action, ['kind', 'text'], 'DshIdeInput.updateQueue.action');
+			} else if (kind === 'remove' || kind === 'steer') {
+				exactRecord(action, ['kind'], 'DshIdeInput.updateQueue.action');
+			} else {
+				throw new TypeError(`DshIdeInput.updateQueue.action.kind must be edit|remove|steer (got ${String(kind)})`);
+			}
+			break;
+		}
 		case 'composerState':
 		case 'presentationSettings':
 		case 'refreshSnapshot':

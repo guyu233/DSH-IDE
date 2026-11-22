@@ -227,5 +227,14 @@
 	"dshSpeech.outOfRange": "Recording is unavailable or exceeds the duration and size limits DSH allows.",
 	"dsh.inputDock.label": "Composer extensions",
 	"dsh.composerDock.label": "Composer notes",
-	"dsh.queue.count": "{0} queued"
+	"dsh.queue.count": "{0} queued",
+	"dsh.queue.actions": "Queued message actions",
+	"dsh.queue.edit": "Edit queued message",
+	"dsh.queue.editPlaceholder": "Message text",
+	"dsh.queue.editPrompt": "The new text replaces the queued message.",
+	"dsh.queue.editTitle": "Edit queued message",
+	"dsh.queue.noSession": "No DSH session is bound, so the queue was not changed.",
+	"dsh.queue.rejected": "Could not change the queued message: {0}",
+	"dsh.queue.remove": "Remove queued message",
+	"dsh.queue.steer": "Send now"
 }

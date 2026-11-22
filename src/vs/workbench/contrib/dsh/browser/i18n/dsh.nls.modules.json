@@ -267,9 +267,22 @@
 	],
 	"vs/workbench/contrib/dsh/browser/vscode/dshChatInputDock": [
 		"dsh.inputDock.label",
-		"dsh.composerDock.label"
+		"dsh.composerDock.label",
+		"dsh.queue.actions",
+		"dsh.queue.edit",
+		"dsh.queue.remove",
+		"dsh.queue.steer"
 	],
 	"vs/workbench/contrib/dsh/browser/vscode/dshInputDock": [
 		"dsh.queue.count"
+	],
+	"vs/workbench/contrib/dsh/browser/vscode/dshChatInputDockContribution": [
+		"dsh.queue.editTitle",
+		"dsh.queue.editPrompt",
+		"dsh.queue.editPlaceholder"
+	],
+	"vs/workbench/contrib/dsh/browser/vscode/dshChatSession": [
+		"dsh.queue.noSession",
+		"dsh.queue.rejected"
 	]
 }

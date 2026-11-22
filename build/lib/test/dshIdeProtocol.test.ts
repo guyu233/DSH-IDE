@@ -40,6 +40,7 @@ import {
 const VALID_ARGS: Record<DshIdeMethod, unknown> = {
 	submit: { text: 'hello', sessionId: 's1' },
 	interrupt: { sessionId: 's1' },
+	updateQueue: { sessionId: 's1', itemId: 'm1', action: { kind: 'remove' } },
 	resume: { sessionId: 's1' },
 	newSession: { workspace: 'w1', options: { theme: 'dark' } },
 	fork: { sessionId: 's1', point: 'p1' },
@@ -693,4 +694,28 @@ test('every string field shares one length ceiling', () => {
 	// 其它方法的字符串字段同样受这一道闸保护。
 	assert.throws(() => validateDshIdeInput('renameSession', { sessionId: 's', title: 'A'.repeat(50 * 1024 * 1024) }), /exceeds 1048576 characters/);
 	assert.throws(() => validateDshIdeInput('searchSessions', { query: 'A'.repeat(50 * 1024 * 1024) }), /exceeds 1048576 characters/);
+});
+
+test('updateQueue accepts the three official actions and rejects malformed ones', async () => {
+	const { validateDshIdeInput } = await import('../../../src/vs/platform/dshClient/protocol/dshIdeProtocol.ts');
+	const ok = [
+		{ sessionId: 's', itemId: 'm', action: { kind: 'remove' } },
+		{ sessionId: 's', itemId: 'm', action: { kind: 'steer' } },
+		{ sessionId: 's', itemId: 'm', action: { kind: 'edit', text: 'hello' } },
+	];
+	for (const args of ok) {
+		assert.doesNotThrow(() => validateDshIdeInput('updateQueue', args));
+	}
+	// 官方 `QueueAction.edit` 只接受非空纯文本；空串、非字符串、缺字段都必须拒绝。
+	for (const args of [
+		{ sessionId: '', itemId: 'm', action: { kind: 'remove' } },
+		{ sessionId: 's', itemId: '', action: { kind: 'remove' } },
+		{ sessionId: 's', itemId: 'm', action: { kind: 'edit', text: '' } },
+		{ sessionId: 's', itemId: 'm', action: { kind: 'edit', text: '   ' } },
+		{ sessionId: 's', itemId: 'm', action: { kind: 'edit' } },
+		{ sessionId: 's', itemId: 'm', action: { kind: 'nope' } },
+		{ sessionId: 's', itemId: 'm', action: { kind: 'remove', extra: 1 } },
+	]) {
+		assert.throws(() => validateDshIdeInput('updateQueue', args), `must reject ${JSON.stringify(args)}`);
+	}
 });

@@ -227,5 +227,14 @@
 	"dshSpeech.outOfRange": "录音不可用或超出 DSH 允许的时长与大小上限。",
 	"dsh.inputDock.label": "输入区扩展",
 	"dsh.composerDock.label": "输入区提示",
-	"dsh.queue.count": "{0} 条排队"
+	"dsh.queue.count": "{0} 条排队",
+	"dsh.queue.actions": "排队消息操作",
+	"dsh.queue.edit": "编辑排队消息",
+	"dsh.queue.editPlaceholder": "消息正文",
+	"dsh.queue.editPrompt": "新文本会替换这条排队消息。",
+	"dsh.queue.editTitle": "编辑排队消息",
+	"dsh.queue.noSession": "还没有绑定 DSH 会话，队列没有改动。",
+	"dsh.queue.rejected": "修改排队消息失败：{0}",
+	"dsh.queue.remove": "删除排队消息",
+	"dsh.queue.steer": "立即发送"
 }

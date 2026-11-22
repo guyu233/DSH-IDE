@@ -11,7 +11,7 @@
 //
 // 已核对的服务与方法（https://github.com/deepseek-ai/deepseek-harness，0.2.2-rc.1）：
 //   sessions: get(id) / list()
-//   sessionController: list / create / selectModel / modelCatalog / prompt / cancel / fork / state
+//   sessionController: list / create / selectModel / modelCatalog / prompt / cancel / fork / state / updateQueue
 //   approval/request 结果值：'allowed-once' | 'rejected' | 'cancelled' | 'unavailable'
 
 import { randomUUID } from 'node:crypto';
@@ -1028,6 +1028,38 @@ function createMethodHandlers(bridge) {
 			}
 			// 取消也是终态：其余视图必须一起收卡，否则旧窗会一直显示一条已经结束的请求。
 			bridge._fanout({ type: 'waterfall', kind: 'cancel', eventId: args.requestId });
+			return { accepted: true };
+		},
+		async updateQueue(args) {
+			// 官方 `sessionController.updateQueue`（`@Remote('updateQueue')`）：
+			// `{ sessionId, itemId, action }`，action 是 `edit|remove|steer`。
+			// 官方错误码 `session/queue-item-not-found` 与 `session/steer-unavailable` 原样透传，
+			// 让界面能区分「这条已经不在队列」与「当前不能转向」，不合并成一句通用失败。
+			const sessionId = sessionIdOf(args);
+			const itemId = typeof args.itemId === 'string' ? args.itemId : '';
+			if (itemId === '') {
+				throw coded(INVALID_ARGUMENT, 'updateQueue.itemId must be a non-empty string');
+			}
+			const action = args.action;
+			if (action === null || typeof action !== 'object' || Array.isArray(action)) {
+				throw coded(INVALID_ARGUMENT, 'updateQueue.action must be an object');
+			}
+			let queueAction;
+			if (action.kind === 'edit') {
+				const text = typeof action.text === 'string' ? action.text : '';
+				if (text.trim() === '') {
+					throw coded(INVALID_ARGUMENT, 'updateQueue.action.text must be non-empty');
+				}
+				// 官方 `QueueAction.edit.content` 是 `readonly TextBlock[]`：一个 text 块。
+				queueAction = { kind: 'edit', content: [{ type: 'text', text }] };
+			} else if (action.kind === 'remove') {
+				queueAction = { kind: 'remove' };
+			} else if (action.kind === 'steer') {
+				queueAction = { kind: 'steer' };
+			} else {
+				throw coded(INVALID_ARGUMENT, 'updateQueue.action.kind must be edit|remove|steer');
+			}
+			await controller().updateQueue({ sessionId, itemId, action: queueAction });
 			return { accepted: true };
 		},
 		async setModel(args) {

@@ -32,7 +32,17 @@ export interface DshInputDockRow {
 	readonly arguments?: readonly unknown[];
 	/** 低值更靠前（官方 list 的 order）。 */
 	readonly order: number;
+	/**
+	 * 队列行的行内动作（官方 `QueueDock` 的 edit/remove/steer）。
+	 *
+	 * 只对队列行有意义：插件 occupant 的动作走 `command`，两者互补不混用。
+	 * 动作不在这里执行——由渲染层回调到 `DshChatSession.updateQueue`。
+	 */
+	readonly queueActions?: readonly DshQueueRowAction[];
 }
+
+/** 一条队列行可以执行的动作（与官方 `QueueAction` 的三种一一对应）。 */
+export type DshQueueRowAction = 'edit' | 'remove' | 'steer';
 
 /**
  * 官方 `conversation.input.dock` 的 owner（`InputZone`）。
@@ -119,6 +129,9 @@ function projectDockRows(slot: string, sessionId: string | undefined, props: Rea
  * （是否展开由调用方的折叠态决定）；预览取 text 块，没有则退回附件名，绝不画空行；
  * 队列为空返回空数组。
  */
+/** 官方 `QueueDock` 在可变更时提供的三种动作，顺序与官方按钮一致。 */
+const QUEUE_ACTIONS: readonly DshQueueRowAction[] = ['steer', 'edit', 'remove'];
+
 export function dshQueueDockRows(messages: readonly DshIdeInboxMessage[] | undefined): readonly DshInputDockRow[] {
 	const rows = (messages ?? []).filter(message => message !== null && typeof message === 'object');
 	if (rows.length === 0) {
@@ -139,7 +152,7 @@ export function dshQueueDockRows(messages: readonly DshIdeInboxMessage[] | undef
 	if (rows.length === 1) {
 		const preview = previewOf(rows[0]);
 		// 一条时也必须是非空行：正文与附件都没有就不画（与官方 `textOf`/`queueAttachments` 的容忍一致）。
-		return preview === '' ? [] : [{ id: 'queue', label: preview, order: 20 }];
+		return preview === '' ? [] : [{ id: 'queue', label: preview, order: 20, queueActions: QUEUE_ACTIONS }];
 	}
 	const first = previewOf(rows[0]);
 	return [{
@@ -147,5 +160,6 @@ export function dshQueueDockRows(messages: readonly DshIdeInboxMessage[] | undef
 		label: localize('dsh.queue.count', "{0} queued", rows.length),
 		...(first === '' ? {} : { description: first }),
 		order: 20,
+		queueActions: QUEUE_ACTIONS,
 	}];
 }

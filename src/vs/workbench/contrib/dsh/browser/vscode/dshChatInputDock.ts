@@ -19,12 +19,18 @@ import { $ } from '../../../../../base/browser/dom.js';
 import { Disposable } from '../../../../../base/common/lifecycle.js';
 import { localize } from '../../../../../nls.js';
 import { dshChatSlotRegistry } from './dshChatSlots.js';
-import { dshComposerDockRows, dshInputDockRows, dshQueueDockRows, type DshInputDockRow, type DshInputZoneOwner } from './dshInputDock.js';
+import { dshComposerDockRows, dshInputDockRows, dshQueueDockRows, type DshInputDockRow, type DshInputZoneOwner, type DshQueueRowAction } from './dshInputDock.js';
 import type { DshIdeInboxMessage } from '../../../../../platform/dshClient/protocol/dshIdeProtocol.js';
 
 /** 宿主需要的宿主能力：只执行命令，不读也不写会话事实。 */
 export interface DshInputDockHost {
 	executeCommand(command: string, args: readonly unknown[]): void;
+	/**
+	 * 修改队列里的一条（官方 `session.updateQueue`）。
+	 *
+	 * 队列是 Host `inbox` 投影的事实：这里只发请求，不本地改列表。
+	 */
+	updateQueue?(itemId: string, action: DshQueueRowAction): void;
 }
 
 /** 两个 dock 在输入区里的位置。 */
@@ -125,7 +131,48 @@ export class DshChatInputDock extends Disposable {
 			line.addEventListener('click', click);
 			this.rowRefs.add({ dispose: () => line.removeEventListener('click', click) });
 		}
+		if (row.queueActions !== undefined && row.queueActions.length > 0) {
+			line.appendChild(this.renderQueueActions(row));
+		}
 		return line;
+	}
+
+	/**
+	 * 队列行的行内动作条（官方 `QueueDock` 的转向/编辑/删除）。
+	 *
+	 * 只画图标按钮 + `aria-label`，与原生 chat 的次按钮同高同色；动作回调给宿主，
+	 * 不在本地改队列（队列是 Host `inbox` 投影的事实，本地改会与真源分叉）。
+	 */
+	private renderQueueActions(row: DshInputDockRow): HTMLElement {
+		const bar = $('span.dsh-input-dock-actions');
+		bar.setAttribute('role', 'toolbar');
+		bar.setAttribute('aria-label', localize('dsh.queue.actions', "Queued message actions"));
+		bar.style.display = 'inline-flex';
+		bar.style.gap = '4px';
+		bar.style.marginLeft = 'auto';
+		for (const action of row.queueActions ?? []) {
+			const button = document.createElement('button');
+			button.type = 'button';
+			button.className = 'dsh-input-dock-action';
+			button.setAttribute('aria-label', queueActionLabel(action));
+			button.title = queueActionLabel(action);
+			button.style.border = 'none';
+			button.style.background = 'transparent';
+			button.style.color = 'var(--vscode-descriptionForeground)';
+			button.style.cursor = 'pointer';
+			button.style.font = 'inherit';
+			button.style.padding = '0 2px';
+			button.textContent = queueActionGlyph(action);
+			const click = (event: MouseEvent) => {
+				// 行本身可能是按钮：动作点击不能冒泡成「打开/确认」。
+				event.stopPropagation();
+				this.host.updateQueue?.(row.id, action);
+			};
+			button.addEventListener('click', click);
+			this.rowRefs.add({ dispose: () => button.removeEventListener('click', click) });
+			bar.appendChild(button);
+		}
+		return bar;
 	}
 }
 
@@ -141,4 +188,22 @@ function mergeDockRows(left: readonly DshInputDockRow[], right: readonly DshInpu
 		}
 	}
 	return [...byId.values()].sort((a, b) => a.order - b.order || a.id.localeCompare(b.id));
+}
+
+/** 动作的可访问名（用户可见文案，走 NLS）。 */
+function queueActionLabel(action: DshQueueRowAction): string {
+	switch (action) {
+		case 'steer': return localize('dsh.queue.steer', "Send now");
+		case 'edit': return localize('dsh.queue.edit', "Edit queued message");
+		case 'remove': return localize('dsh.queue.remove', "Remove queued message");
+	}
+}
+
+/** 动作字形：复用 codicon，不新增图标资源。 */
+function queueActionGlyph(action: DshQueueRowAction): string {
+	switch (action) {
+		case 'steer': return '\u2191';
+		case 'edit': return '\u270E';
+		case 'remove': return '\u00D7';
+	}
 }
