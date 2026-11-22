@@ -289,7 +289,7 @@ test('an evolving conversation grows without duplicating earlier content', () =>
 test('history labels go through localize instead of being hardcoded', () => {
 	// 上游生成聊天描述文本时一律走 `localize`（见 `chatSessionDescription.ts`）。
 	// 本文件此前 7 处界面标签是裸字符串：换语言时它们不会跟着变，
-	// 而同一层其它文件（`dshGoalCommands` / `dshSessionMenu` …）都用 `localize`。
+	// 而同一层其它文件（`dshSessionMenu` / `dshTeamCommands` …）都用 `localize`。
 	const source = readFileSync(new URL('../../../src/vs/workbench/contrib/dsh/browser/vscode/dshChatHistory.ts', import.meta.url), 'utf8');
 	assert.match(source, /import \{ localize \} from '(?:\.\.\/)+nls\.js';/, 'the history module must import localize');
 	for (const key of ['dsh.history.goal', 'dsh.history.todos', 'dsh.history.skills', 'dsh.history.worktrees', 'dsh.history.teamTasks']) {
