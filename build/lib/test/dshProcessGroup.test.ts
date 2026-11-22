@@ -247,3 +247,24 @@ test('latestExchangeTurns starts at the last turn that admitted human input', ()
 	// 只有第一个 Turn 有输入时，整个列表都属于同一个 exchange。
 	assert.deepEqual([...latestExchangeTurns([mk(1, ['u']), mk(2, []), mk(3, [])])], [1, 2, 3]);
 });
+
+test('a repeated callId counts once, so call+result does not double the number', () => {
+	// 官方「Activity summaries → Category counts」：Repeated callId —— Count only the first
+	// occurrence, including when it appears both as a root and as a nested call.
+	// 本仓最容易踩的形态就是 tool-call 与 tool-result：它们是同一次调用的两条节点，都带 name。
+	const call = { kind: 'tool-call', name: 'read', callId: 'c1' };
+	const result = { kind: 'tool-result', name: 'read', callId: 'c1' };
+	const one = summarizeProcess([call, result], true);
+	assert.deepEqual(one.counts, { read: 1 }, 'one call must not be counted twice');
+	// 不同 callId 的同名工具各自计数。
+	const two = summarizeProcess([
+		{ kind: 'tool-call', name: 'read', callId: 'c1' },
+		{ kind: 'tool-call', name: 'read', callId: 'c2' },
+	], true);
+	assert.deepEqual(two.counts, { read: 2 });
+	// 没有 callId 的节点不去重（无法判定身份时按原样各计一次）。
+	const anonymous = summarizeProcess([{ kind: 'tool-call', name: 'read' }, { kind: 'tool-call', name: 'read' }], true);
+	assert.deepEqual(anonymous.counts, { read: 2 });
+	// 去重是**组内**的：另一个组的同名 callId 不受影响。
+	assert.deepEqual(summarizeProcess([{ kind: 'tool-call', name: 'bash', callId: 'c1' }], true).counts, { commands: 1 });
+});

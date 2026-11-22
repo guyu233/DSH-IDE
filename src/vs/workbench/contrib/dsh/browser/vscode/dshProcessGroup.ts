@@ -224,6 +224,14 @@ export interface DshActivityNode {
 	readonly kind: string;
 	readonly name?: string;
 	readonly running?: boolean;
+	/**
+	 * 工具调用身份。**计数去重靠它**：官方「Repeated `callId` | Count only the first occurrence,
+	 * including when it appears both as a root and as a nested call」。
+	 *
+	 * 为什么必须去重：`tool-call` 与 `tool-result` 是一次调用的两条节点，两者都带 `name`；
+	 * 不去重就会把**一次调用数成两次**，折叠行显示的数字直接翻倍。
+	 */
+	readonly callId?: string;
 }
 
 export interface DshProcessActivitySummary {
@@ -328,9 +336,19 @@ export function summarizeProcess(nodes: readonly DshActivityNode[], hasAnswer: b
 	// context 与其它成员混在一起时不计数。逐个节点都记 context 会把「工具里夹了一条上下文」
 	// 也算成一条独立活动。
 	const allContext = nodes.length > 0 && nodes.every(node => node.kind === 'context');
+	// 官方「Repeated callId」：同一个 callId 只计第一次出现（含 root 与 nested 重复的情况）。
+	// 没有 callId 的节点（context / 无身份的节点）不去重，按原样各计一次。
+	const seenCallIds = new Set<string>();
 	for (const node of nodes) {
 		if (allContext) {
 			continue;
+		}
+		const callId = node.callId;
+		if (callId !== undefined && callId !== '') {
+			if (seenCallIds.has(callId)) {
+				continue;
+			}
+			seenCallIds.add(callId);
 		}
 		const activity = processActivityOf(node.kind, node.name);
 		if (activity === undefined || activity === 'context') {
