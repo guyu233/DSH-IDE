@@ -623,3 +623,16 @@ test('the paging anchor is wired end to end, not just declared', async () => {
 	assert.ok(tree.includes('this.view.firstVisibleIndex'), 'the anchor must start from the first visible row');
 	assert.ok(tree.includes('this.getRelativeTop(element)'), 'and measure its viewport offset');
 });
+
+test('the renderer consumes multi-segment groups instead of one line per turn', async () => {
+	// CHK-364 建了 segments 模型但没消费。这条不变量保证渲染层真的按段分行：
+	// ① 必须调用 segmentAnchors；② 单段时退回整 Turn 锚点（不产生重复行）；
+	// ③ 一个锚点前允许挂多行（同 Turn 多段）。
+	const { readFileSync } = await import('node:fs');
+	const source = readFileSync(new URL('../../../src/vs/workbench/contrib/dsh/browser/vscode/dshSlotHostContentPart.ts', import.meta.url), 'utf8');
+	assert.ok(source.includes('this.segmentAnchors(group, binding)'), 'the renderer must consult segment anchors');
+	assert.ok(source.includes('group.segments.length <= 1'), 'a single segment must fall back to the turn anchor');
+	assert.ok(source.includes("rows.push({ key: `summary:${nodeId}:${index}`"), 'multiple summaries per anchor must be rendered');
+	// summaryBefore 必须能存多行（否则多段会被覆盖成一行）。
+	assert.ok(source.includes('const summaryBefore = new Map<string, string[]>();'), 'the summary map must hold arrays');
+});

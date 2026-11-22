@@ -18,7 +18,7 @@ import { formatTokens } from './dshTokenFormat.js';
 import { dshAsideText, dshAssistantActions, dshTextInteractions, dshUserBeforeDecoration, type DshAssistantAction, type DshTextInteraction } from './dshChatSlots.js';
 import { dshContentStore } from './dshContentStore.js';
 import { adaptDshNode, type DshNativePart } from './dshNativePartAdapters.js';
-import { groupTurnProcesses, hiddenProcessLine, latestExchangeTurns, processLineFromSnapshot, visibleProcessKeys } from './dshProcessGroup.js';
+import { groupTurnProcesses, hiddenProcessLine, latestExchangeTurns, processLineFromSnapshot, visibleProcessKeys, type DshTurnProcess } from './dshProcessGroup.js';
 import { diffDshSlotRows, dshSlotHostSame, planKeysForTurn, presentDshNode, turnProcessCounts, type DshSlotHostRef } from './dshSlotHostModel.js';
 import { dshNodeDisplaySignature } from './dshConversationNodeTree.js';
 import { dshCardSpec, type DshCardSpec } from './dshCardSpec.js';
@@ -239,7 +239,7 @@ export class DshSlotHostContentPart extends Disposable implements IChatContentPa
 			}];
 		});
 		const visible = new Set<string>();
-		const summaryBefore = new Map<string, string>();
+		const summaryBefore = new Map<string, string[]>();
 		// 计划卡正常随 turn tail 画；但 Turn 还没结束（没有 `turn-tail`）时它也会被跳过，
 		// 于是整张卡消失。这里记下「哪些 Turn 已有 tail」，剩下的计划卡就地画在原位。
 		const turnsWithTail = new Set<number>();
@@ -303,14 +303,29 @@ export class DshSlotHostContentPart extends Disposable implements IChatContentPa
 					...(parsed === undefined ? {} : { args: parsed }),
 				}];
 			}));
-			// 锚点必须是真正会画出来的那一行：`turn-process` 也被算进 answerKeys（位置是 turn），
-			// 但它在渲染时会被跳过，挂到它上面的计数行就永远不显示。
-			const anchor = group.answerKeys.find(key => {
-				const node = binding.tree.get(key) as { readonly kind?: string } | undefined;
-				return node !== undefined && node.kind !== 'turn-process';
-			});
-			if (line !== undefined && anchor !== undefined) {
-				summaryBefore.set(anchor, line);
+			if (line === undefined) {
+				continue;
+			}
+			// 官方「Process grouping」：一个 Turn 内按边界切成多个组，**每组有自己的组头**。
+			// 所以不能只在整个 Turn 的收尾处挂一行——要按段找各自的锚点。
+			// 锚点规则：段内最后一个节点之后、下一个边界之前会画出来的那一行；
+			// 整 Turn 折叠时若段后没有可见行，就挂在 Turn 的收尾答复前。
+			//
+			// 注意 `turn-process` 也被算进 answerKeys（位置是 turn），但它在渲染时会被跳过，
+			// 挂到它上面的计数行永远不显示——所以锚点必须过滤掉它。
+			const anchors = this.segmentAnchors(group, binding);
+			if (anchors.length === 0) {
+				const fallback = group.answerKeys.find(key => {
+					const node = binding.tree.get(key) as { readonly kind?: string } | undefined;
+					return node !== undefined && node.kind !== 'turn-process';
+				});
+				if (fallback !== undefined) {
+					summaryBefore.set(fallback, [...(summaryBefore.get(fallback) ?? []), line]);
+				}
+				continue;
+			}
+			for (const anchor of anchors) {
+				summaryBefore.set(anchor, [...(summaryBefore.get(anchor) ?? []), line]);
 			}
 		}
 		const rows: DshSlotRowSpec[] = [];
@@ -336,10 +351,11 @@ export class DshSlotHostContentPart extends Disposable implements IChatContentPa
 					rows.push({ key: `plan:${planKey}`, kind: 'node', nodeKey: planKey });
 				}
 			}
-			const line = summaryBefore.get(nodeId);
-			if (line !== undefined) {
-				rows.push({ key: `summary:${nodeId}`, kind: 'summary', line });
-			}
+			const lines = summaryBefore.get(nodeId);
+			// 一个锚点前可能有多段各自的组头（同 Turn 多段时），按序各画一行。
+			lines?.forEach((text, index) => {
+				rows.push({ key: `summary:${nodeId}:${index}`, kind: 'summary', line: text });
+			});
 			rows.push({ key: `node:${nodeId}`, kind: 'node', nodeKey: nodeId });
 		}
 		for (const eventId of this.content.questionIds ?? []) {
@@ -472,6 +488,43 @@ export class DshSlotHostContentPart extends Disposable implements IChatContentPa
 			bar.appendChild(button);
 		}
 		return bar;
+	}
+
+	/**
+	 * 一个 Turn 里各过程段的「组头锚点」（官方：每个组有自己的组头）。
+	 *
+	 * 段的组头挂在**该段之后**会画出来的那一行前：这样读者看到的是「一堆工具 → [N 个工具] → 答复」。
+	 * 找不到后续可见行时返回空数组，调用方退回「挂在 Turn 收尾答复前」。
+	 *
+	 * @param group 该 Turn 的过程组（含 `segments`）
+	 * @param binding 当前内容绑定
+	 * @returns 每段一个锚点 key（按段序；段内无可见锚点的段被跳过）
+	 */
+	private segmentAnchors(group: DshTurnProcess, binding: NonNullable<ReturnType<typeof dshContentStore.get>>): readonly string[] {
+		if (group.segments.length <= 1) {
+			// 单段没有「按段分行」的意义：交给调用方走原来的整 Turn 锚点路径。
+			return [];
+		}
+		const anchors: string[] = [];
+		for (const segment of group.segments) {
+			const lastKey = segment.processKeys.at(-1);
+			if (lastKey === undefined) {
+				continue;
+			}
+			// 段后第一个「会画出来」的节点：优先答复，其次 turn-tail（收尾行），最后任意非 turn-process 的 answerKey。
+			const after = group.answerKeys.find(key => {
+				const node = binding.tree.get(key) as { readonly kind?: string; readonly seq?: number } | undefined;
+				if (node === undefined || node.kind === 'turn-process') {
+					return false;
+				}
+				const lastNode = binding.tree.get(lastKey) as { readonly seq?: number } | undefined;
+				return (node.seq ?? 0) > (lastNode?.seq ?? 0);
+			});
+			if (after !== undefined) {
+				anchors.push(after);
+			}
+		}
+		return anchors;
 	}
 
 	private renderNode(nodeId: string, binding: NonNullable<ReturnType<typeof dshContentStore.get>>, nested: boolean, refs: DisposableStore, rowKey = nodeId): HTMLElement {
