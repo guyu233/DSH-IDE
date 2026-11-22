@@ -281,6 +281,7 @@ export interface IListView<T> extends ISpliceable<T>, IDisposable {
 	delegateVerticalScrollbarPointerDown(browserEvent: PointerEvent): void;
 	updateWidth(index: number): void;
 	updateElementHeight(index: number, size: number | undefined, anchorIndex: number | null): void;
+	withScrollAnchorAtBottom(fn: () => void): void;
 	rerender(): void;
 	layout(height?: number, width?: number): void;
 }
@@ -323,6 +324,7 @@ export class ListView<T> implements IListView<T> {
 	private setRowLineHeight: boolean;
 	private setRowHeight: boolean;
 	private supportDynamicHeights: boolean;
+	private scrollAnchorAtBottom = false;
 	private paddingBottom: number;
 	private accessibilityProvider: ListViewAccessibilityProvider<T>;
 	private scrollWidth: number | undefined;
@@ -605,7 +607,16 @@ export class ListView<T> implements IListView<T> {
 		this.rangeMap.splice(index, 1, [{ size: size }]);
 		this.items[index].size = size;
 
-		this.render(lastRenderRange, Math.max(0, this.lastRenderTop + heightDiff), this.lastRenderHeight, undefined, undefined, true);
+		// 锚定底部时：行高变化不应改变「视口离内容底部的距离」。
+		// 这与 chat 自动跟随是两个层次——这里只保证高度重测期间视口不跳。
+		if (this.scrollAnchorAtBottom) {
+			this.eventuallyUpdateScrollDimensions();
+		}
+		const renderTop = this.scrollAnchorAtBottom
+			? this.getBottomScrollTop(this.lastRenderHeight)
+			: Math.max(0, this.lastRenderTop + heightDiff);
+
+		this.render(lastRenderRange, renderTop, this.lastRenderHeight, undefined, undefined, true);
 		this.setScrollTop(this.lastRenderTop);
 
 		this.eventuallyUpdateScrollDimensions();
@@ -615,6 +626,22 @@ export class ListView<T> implements IListView<T> {
 		} else {
 			this._onDidChangeContentHeight.fire(this.contentHeight); // otherwise fired in _rerender()
 		}
+	}
+
+	/** Keeps the viewport at the bottom while row heights are updated or measured. */
+	withScrollAnchorAtBottom(fn: () => void): void {
+		const previous = this.scrollAnchorAtBottom;
+		this.scrollAnchorAtBottom = true;
+		try {
+			fn();
+		} finally {
+			this.scrollAnchorAtBottom = previous;
+		}
+	}
+
+	/** The scroll position that aligns the bottom of the content, including bottom padding, with the bottom of the viewport. */
+	private getBottomScrollTop(renderHeight: number): number {
+		return Math.max(0, this.contentHeight + this.paddingBottom + (this.horizontalScrolling ? 10 : 0) - renderHeight);
 	}
 
 	protected createRangeMap(paddingTop: number): IRangeMap {

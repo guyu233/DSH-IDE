@@ -73,6 +73,15 @@ export class ObjectTree<T, TFilterData = void> extends AbstractTree<T | null, TF
 		this.view.updateElementHeight(elementIndex, height);
 	}
 
+	/**
+	 * Keeps the viewport at the bottom while row heights are updated or measured.
+	 *
+	 * 直接透传 `List`：锚定是渲染引擎行为，树层不多记一份状态。
+	 */
+	withScrollAnchorAtBottom(fn: () => void): void {
+		this.view.withScrollAnchorAtBottom(fn);
+	}
+
 	getListRenderCount(element: T | null): number {
 		return this.model.getListRenderCount(element);
 	}

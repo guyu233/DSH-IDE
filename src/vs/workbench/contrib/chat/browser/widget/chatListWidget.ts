@@ -1106,7 +1106,12 @@ export class ChatListWidget extends Disposable {
 				return;
 			}
 			this._withPersistedAutoScroll(() => {
-				this._tree.updateElementHeight(element, height);
+				// 高度重测期间把视口锚在底部：一行长高不该让「离底部的距离」变化。
+				// 没有这层锚定时，流式行的每次重测都会把视口往上顶一截，看起来像快速滚动。
+				// `withScrollAnchorAtBottom` 由 `ListView` 提供（1.145+ 上游同款机制）。
+				this._tree.withScrollAnchorAtBottom(() => {
+					this._tree.updateElementHeight(element, height);
+				});
 			});
 		}
 	}

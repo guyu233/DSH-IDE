@@ -1632,6 +1632,15 @@ export class List<T> implements ISpliceable<T>, IDisposable {
 		this.view.updateElementHeight(index, size, null);
 	}
 
+	/**
+	 * Keeps the viewport at the bottom while row heights are updated or measured.
+	 *
+	 * 直接透传 `ListView`：滚动锚定是渲染引擎行为，`ListWidget` 不再自己记一份状态。
+	 */
+	withScrollAnchorAtBottom(fn: () => void): void {
+		this.view.withScrollAnchorAtBottom(fn);
+	}
+
 	rerender(): void {
 		this.view.rerender();
 	}
