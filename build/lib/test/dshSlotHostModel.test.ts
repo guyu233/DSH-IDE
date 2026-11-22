@@ -581,3 +581,23 @@ test('presentationSettings carries the four preference fields and applies transc
 	assert.equal(store.transcriptView(), 'verbose');
 	assert.equal(store.isTurnCollapsed(1, 0), false, 'verbose from Host must stop folding');
 });
+
+test('collapseTiming=next-input exempts the latest exchange from folding', async () => {
+	// 官方 ui-chat.collapseTiming：On next message 时最新 exchange 保持运行中的呈现。
+	const { DshExpansionStateStore } = await import('../../../src/vs/workbench/contrib/dsh/browser/vscode/dshExpansionStateStore.ts');
+	const store = new DshExpansionStateStore('s1');
+	store.setCollapseTiming('next-input');
+	assert.equal(store.collapseTiming(), 'next-input');
+	store.setExemptTurns([3, 4]);
+	// 豁免集合里的 Turn 不折叠。
+	assert.equal(store.isTurnCollapsed(3, 0), false);
+	assert.equal(store.isTurnCollapsed(4, 0), false);
+	// 更早的 exchange 照常折叠。
+	assert.equal(store.isTurnCollapsed(1, 0), true);
+	// 用户手动收起压过豁免（手动优先）。
+	store.setTurnCollapsed(3, 0, true);
+	assert.equal(store.isTurnCollapsed(3, 0), true, 'a manual collapse wins even inside the exempt exchange');
+	// 回到 completion 时机：豁免不再生效。
+	store.setCollapseTiming('completion');
+	assert.equal(store.isTurnCollapsed(4, 0), true, 'completion timing ignores the exemption');
+});

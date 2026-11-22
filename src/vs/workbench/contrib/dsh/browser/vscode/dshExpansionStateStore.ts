@@ -60,6 +60,16 @@ export class DshExpansionStateStore {
 	private view: DshIdeTranscriptView = 'standard';
 	/** 官方 `ui-chat.foldedReplies`：折叠时保留所有答复（默认）还是只留最终答复。 */
 	private folded: 'all' | 'final' = 'all';
+	/** 官方 `ui-chat.collapseTiming`：完成即折叠（默认）还是等下一条输入再折叠。 */
+	private timing: 'completion' | 'next-input' = 'completion';
+	/**
+	 * 当前「最新 exchange」的 Turn 集合（仅 `next-input` 时机用）。
+	 *
+	 * 官方定义：一个 exchange 从「第一个 Step 接纳人类输入的 Turn」开始，包含其后每个 Turn，
+	 * 直到下一个这样的 Turn。这些 Turn 在 `next-input` 下**保持运行中的呈现**（不折叠），
+	 * 直到用户提交新输入或出现更新 exchange 的 Turn。
+	 */
+	private exemptTurns = new Set<number>();
 
 	constructor(sessionId: string) {
 		this.sessionId = sessionId;
@@ -80,6 +90,34 @@ export class DshExpansionStateStore {
 			return;
 		}
 		this.folded = folded;
+		this.emit();
+	}
+
+	/** 官方 `ui-chat.collapseTiming`。 */
+	collapseTiming(): 'completion' | 'next-input' {
+		return this.timing;
+	}
+
+	setCollapseTiming(timing: 'completion' | 'next-input'): void {
+		if (this.timing === timing) {
+			return;
+		}
+		this.timing = timing;
+		this.emit();
+	}
+
+	/**
+	 * 标记「最新 exchange」包含哪些 Turn（由会话层按官方 exchange 定义算出）。
+	 *
+	 * 只在 `next-input` 时机生效：这些 Turn 不因模式默认而折叠。
+	 * 传空集合即清除豁免（例如用户提交了新输入）。
+	 */
+	setExemptTurns(turns: readonly number[]): void {
+		const next = new Set(turns);
+		if (next.size === this.exemptTurns.size && [...next].every(turn => this.exemptTurns.has(turn))) {
+			return;
+		}
+		this.exemptTurns = next;
 		this.emit();
 	}
 
@@ -111,6 +149,10 @@ export class DshExpansionStateStore {
 			return manual.collapsed;
 		}
 		if (!eligible || turnFoldingPolicy(this.view) === 'never') {
+			return false;
+		}
+		// `next-input`：最新 exchange 的 Turn 保持运行中的呈现，不按模式默认折叠。
+		if (this.timing === 'next-input' && this.exemptTurns.has(turn)) {
 			return false;
 		}
 		return true;

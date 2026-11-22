@@ -18,7 +18,7 @@ import { formatTokens } from './dshTokenFormat.js';
 import { dshAsideText, dshAssistantActions, dshTextInteractions, dshUserBeforeDecoration, type DshAssistantAction, type DshTextInteraction } from './dshChatSlots.js';
 import { dshContentStore } from './dshContentStore.js';
 import { adaptDshNode, type DshNativePart } from './dshNativePartAdapters.js';
-import { groupTurnProcesses, hiddenProcessLine, processLineFromSnapshot, visibleProcessKeys } from './dshProcessGroup.js';
+import { groupTurnProcesses, hiddenProcessLine, latestExchangeTurns, processLineFromSnapshot, visibleProcessKeys } from './dshProcessGroup.js';
 import { diffDshSlotRows, dshSlotHostSame, planKeysForTurn, presentDshNode, turnProcessCounts, type DshSlotHostRef } from './dshSlotHostModel.js';
 import { dshNodeDisplaySignature } from './dshConversationNodeTree.js';
 import { dshCardSpec, type DshCardSpec } from './dshCardSpec.js';
@@ -260,7 +260,11 @@ export class DshSlotHostContentPart extends Disposable implements IChatContentPa
 			}
 			reasonByTurn.set(node.turn, node.endReason);
 		}
-		for (const group of groupTurnProcesses(grouped, reasonByTurn)) {
+		const groups = groupTurnProcesses(grouped, reasonByTurn);
+		// `next-input` 时机：把「最新 exchange」的 Turn 标成豁免，让它们保持运行中的呈现。
+		// 官方定义见 `latestExchangeTurns`；`completion` 时机下传空集合即无豁免。
+		binding.expansion.setExemptTurns(binding.expansion.collapseTiming() === 'next-input' ? latestExchangeTurns(groups) : []);
+		for (const group of groups) {
 			// `eligible` = 官方可折叠条件：`alwaysOpen` 为真（未结束 / 失败 / 有可见输入）
 			// 时该 Turn 不允许整段收起，模式默认不能覆盖这条。
 			const collapsed = binding.expansion.isTurnCollapsed(group.turn, group.answerStep, !group.alwaysOpen);

@@ -415,3 +415,33 @@ export function processLineFromSnapshot(snapshot: {
 	return parts.length === 0 ? undefined : parts.join(', ');
 }
 
+/**
+ * 算「最新 exchange」包含哪些 Turn（官方「Collapse timing」）。
+ *
+ * 官方定义：**一个 exchange 从「第一个 Step 接纳人类输入的 Turn」开始，包含其后每个 Turn，
+ * 直到下一个这样的 Turn**。只有这些 Turn 在 `next-input` 时机下保持运行中的呈现；
+ * 更早的 exchange 已经结束，照常折叠。
+ *
+ * 「接纳人类输入」= 该 Turn 有 `promptKeys`（user / steering / command-input）。
+ * 注意：被通知唤醒的 Turn（settled subagent、goal round、schedule）**不开新 exchange**，
+ * 所以它不会结束前一个 exchange 的豁免——这与官方「a Turn woken by a notice leaves the
+ * preceding Turns of its exchange expanded」一致。
+ *
+ * @param groups 全部 Turn 的过程组（顺序无关，内部按 turn 排序）
+ * @returns 最新 exchange 的 turn 号集合；没有人类输入时返回空集合
+ */
+export function latestExchangeTurns(groups: readonly DshTurnProcess[]): readonly number[] {
+	const ordered = [...groups].sort((left, right) => left.turn - right.turn);
+	// 从后往前找第一个「有人类输入」的 Turn，那就是当前 exchange 的起点。
+	let startIndex = -1;
+	for (let index = ordered.length - 1; index >= 0; index -= 1) {
+		if (ordered[index].promptKeys.length > 0) {
+			startIndex = index;
+			break;
+		}
+	}
+	if (startIndex === -1) {
+		return [];
+	}
+	return ordered.slice(startIndex).map(group => group.turn);
+}

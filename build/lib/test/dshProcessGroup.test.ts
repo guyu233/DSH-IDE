@@ -8,7 +8,7 @@
 
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { describeTurnProcess, groupPositionOf, groupTurnProcesses, hiddenProcessLine, isSubagentDelegationTool, processActivityOf, processActivityText, processLineFromSnapshot, summarizeProcess, turnProcessAlwaysOpen, visibleProcessKeys, type DshGroupableNode } from '../../../src/vs/workbench/contrib/dsh/browser/vscode/dshProcessGroup.ts';
+import { describeTurnProcess, groupPositionOf, groupTurnProcesses, hiddenProcessLine, isSubagentDelegationTool, latestExchangeTurns, processActivityOf, processActivityText, processLineFromSnapshot, summarizeProcess, turnProcessAlwaysOpen, visibleProcessKeys, type DshGroupableNode } from '../../../src/vs/workbench/contrib/dsh/browser/vscode/dshProcessGroup.ts';
 
 function node(partial: DshGroupableNode): DshGroupableNode {
 	return partial;
@@ -232,4 +232,18 @@ test('foldedReplies=final keeps only the final reply, never a tail control', () 
 	assert.deepEqual([...visibleProcessKeys(group, true, 'final')], ['u', 'a2']);
 	// 展开时两种偏好一致。
 	assert.deepEqual([...visibleProcessKeys(group, false, 'final')], ['u', 't', 'a1', 'a2', 'tail']);
+});
+
+test('latestExchangeTurns starts at the last turn that admitted human input', () => {
+	// 官方「Collapse timing」：一个 exchange 从「第一个 Step 接纳人类输入的 Turn」开始，
+	// 包含其后每个 Turn，直到下一个这样的 Turn。
+	// 关键：被通知唤醒的 Turn（无 promptKeys）不开新 exchange，不结束前一个的豁免。
+	const mk = (turn: number, prompts: string[]) => ({ turn, answerStep: 0, promptKeys: prompts, processKeys: [], answerKeys: [], replyKeys: [], alwaysOpen: false });
+	const groups = [mk(1, ['u1']), mk(2, []), mk(3, ['u3']), mk(4, []), mk(5, [])];
+	// 最后一个有人类输入的是 turn 3 → exchange 是 [3,4,5]。
+	assert.deepEqual([...latestExchangeTurns(groups)], [3, 4, 5]);
+	// 没有人类输入时没有 exchange（豁免为空）。
+	assert.deepEqual([...latestExchangeTurns([mk(1, []), mk(2, [])])], []);
+	// 只有第一个 Turn 有输入时，整个列表都属于同一个 exchange。
+	assert.deepEqual([...latestExchangeTurns([mk(1, ['u']), mk(2, []), mk(3, [])])], [1, 2, 3]);
 });
