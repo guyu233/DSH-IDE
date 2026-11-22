@@ -373,7 +373,9 @@ test('/compact 命令行与压缩检查点合成 manual-compaction，先到后�
 		const send = (event: Record<string, unknown>) => project(state, { type: 'event', event });
 		const commandRun = { type: 'command/run', seq: 80, time: 80, data: { commandId: 'cmd-1', name: 'compact', rawInput: '' } };
 		const commandDone = { type: 'command/done', seq: 81, time: 81, data: { commandId: 'cmd-1', ok: true, sourceEventSeq: 79 } };
-		const compaction = { type: 'compaction/summary', seq: 79, time: 79, data: { summary: '摘要', shadowedItemCount: 3, shadowedTokenCount: 40 } };
+		// 官方 `compaction/summary` 的 `summary` 是内容块数组（master `records.ts:CompactionSummaryNode`
+		// 已无 summary 字段，摘要改由 `compaction/summary` 事件的 `data.summary` 按 seq 读回）。
+		const compaction = { type: 'compaction/summary', seq: 79, time: 79, data: { summary: [{ type: 'text', text: '摘要' }], shadowedItemCount: 3, shadowedTokenCount: 40 } };
 		let view = order === 'command-first' ? send(commandRun) : send(compaction);
 		if (order === 'command-first') { send(compaction); view = send(commandDone); } else { send(commandRun); view = send(commandDone); }
 		return view;
@@ -890,4 +892,22 @@ test('llm/retry 的 delayMs 可以是小数，整帧仍能通过校验', () => {
 	if (node.kind === 'model-retry') {
 		assert.equal(node.delayMs, 459.98018830311815);
 	}
+});
+
+test('a compaction summary given as content blocks is not dropped', () => {
+	// 官方 `compaction/summary` 的 `data.summary` 是 `[{type:'text',text}]`。
+	// 旧实现只认字符串，导致压缩卡永远没有摘要（`typeof data.summary === 'string'` 恒假）。
+	const state = createDshIdeConversationState();
+	const project = (event: Record<string, unknown>) => projectDshIdeConversation(state, { type: 'event', event });
+	const view = project({
+		type: 'compaction/summary', seq: 5, time: 5,
+		data: { summary: [{ type: 'text', text: '第一段' }, { type: 'image' }, { type: 'text', text: '第二段' }], shadowedItemCount: 2 },
+	});
+	const node = view.nodes.find(entry => entry.kind === 'compaction') as { summary: string | null } | undefined;
+	assert.ok(node !== undefined, 'the compaction node must exist');
+	assert.equal(node.summary, '第一段\n第二段', 'block text must be joined, non-text blocks skipped');
+	// 缺 summary 时仍是 null，不编造空字符串。
+	const second = project({ type: 'compaction/summary', seq: 6, time: 6, data: { shadowedItemCount: 1 } });
+	const empty = second.nodes.find(entry => entry.kind === 'compaction' && entry.seq === 6) as { summary: string | null } | undefined;
+	assert.equal(empty?.summary, null);
 });

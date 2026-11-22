@@ -253,7 +253,7 @@ DSH-IDE 的线协议只投影 `ConversationNode`（`src/vs/platform/dshClient/pr
 | `assistant` | messageId、turn、step、blocks、time、usage、providerMetadata、requestConfig、timing、interrupted |
 | `tool-call` | root: ToolCallBlock（含递归 subCalls） |
 | `command` | commandId、name、args、outcome |
-| `compaction` | summary、summaryEventSeq、shadowedItemCount、shadowedTokenCount |
+| `compaction` | `summary`、`summaryEventSeq`、`shadowedItemCount`、`shadowedTokenCount`。**真源注记（2026-11-23 在线核对 `ac11a30a`「restore compaction summaries by event address」）**：官方 `CompactionSummaryNode` 本身**没有** `summary` 字段，摘要由 `compaction/summary` 事件的 `data.summary`（**内容块数组** `[{type:'text',text}]`）按 seq 读回；本仓线协议保留 `summary` 作为投影结果（从事件里抽文本），不是照抄节点字段。 |
 | `model-retry` | retry、maxRetries、delayMs、mode、retryState、failure |
 | `turn-error` | TurnErrorNode |
 | `turn-max-tokens` | TurnMaxTokensNode |

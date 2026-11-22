@@ -695,7 +695,10 @@ function applyDurable(state: DshIdeConversationState, event: Record<string, unkn
 			kind: 'compaction',
 			seq,
 			time,
-			summary: typeof data['summary'] === 'string' ? data['summary'] : null,
+			// 官方 `compaction/summary` 的 `data.summary` 是**内容块数组**（`[{type:'text',text}]`），
+			// 不是字符串：只认字符串会让每张压缩卡都变成空摘要（TypeError 被吞成 null）。
+			// 这里按同一套内容块抽取；两种形状都接受，缺字段才是 null。
+			summary: typeof data['summary'] === 'string' ? data['summary'] : textOfContent(data['summary']) ?? null,
 			...(numberOf(data['summaryEventSeq']) === undefined ? {} : { summaryEventSeq: numberOf(data['summaryEventSeq']) }),
 			...(numberOf(data['shadowedItemCount']) === undefined ? {} : { shadowedItemCount: numberOf(data['shadowedItemCount']) }),
 			...(numberOf(data['shadowedTokenCount']) === undefined ? {} : { shadowedTokenCount: numberOf(data['shadowedTokenCount']) }),
