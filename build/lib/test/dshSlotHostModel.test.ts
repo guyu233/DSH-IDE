@@ -727,3 +727,20 @@ test('card titles are localized, not hardcoded English', async () => {
 		assert.ok(source.includes(`localize('${key}'`), `${key} must go through localize`);
 	}
 });
+
+test('the completed-turn footer follows the official reveal rules', async () => {
+	// 官方「Completed-turn footer」：
+	//   Its action row starts 20px below preceding prose or extension content；
+	//   Actions remain visible only on the latest Turn when its final visible content is a reply；
+	//   other endings and historical Turns reveal actions on hover or keyboard focus；
+	//   Devices without hover keep actions visible。
+	const { readFileSync } = await import('node:fs');
+	const source = readFileSync(new URL('../../../src/vs/workbench/contrib/dsh/browser/vscode/dshSlotHostContentPart.ts', import.meta.url), 'utf8');
+	assert.ok(source.includes("bar.style.marginTop = '20px'"), 'the footer keeps 20px from preceding content');
+	assert.ok(source.includes('dsh-actions-always-visible'), 'the latest reply turn keeps its actions visible');
+	assert.ok(source.includes('dsh-actions-reveal'), 'other turns reveal on interaction');
+	assert.ok(source.includes(':focus-within'), 'keyboard focus must reveal too');
+	assert.ok(source.includes('@media (hover: none)'), 'hoverless devices keep actions visible');
+	// 常显必须同时要求「最新 Turn」与「末条是答复」。
+	assert.ok(source.includes('node.turn === latestTurn && '), 'both conditions are required');
+});

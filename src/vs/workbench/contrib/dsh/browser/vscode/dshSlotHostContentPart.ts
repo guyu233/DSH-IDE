@@ -813,7 +813,20 @@ export class DshSlotHostContentPart extends Disposable implements IChatContentPa
 		if (node.kind === 'turn-tail') {
 			const actions = dshAssistantActions(this.content.treeId, (node as { readonly closingMessageId?: string }).closingMessageId);
 			if (actions.length > 0) {
-				row.appendChild(this.renderActions(actions, refs));
+				// 官方「Completed-turn footer」：动作行与上面的正文/扩展内容之间留 **20px**。
+				const bar = this.renderActions(actions, refs);
+				bar.style.marginTop = '20px';
+				// 官方：Actions remain visible **only on the latest Turn when its final visible content is a reply**；
+				// other endings and historical Turns reveal actions **on hover or keyboard focus**；
+				// **Devices without hover keep actions visible**。
+				//
+				// 「最新 Turn」用 `isLatestTurn` 判定（由 collect 阶段按已载入的最大 turn 给出）；
+				// 「末条可见内容是答复」用 `closingMessageId` 存在来近似——官方把它定义为
+				// 「最新 Step 的已结算 Assistant 答复，且有可见回复内容」。
+				const latestTurn = Math.max(...this.content.nodeIds.map(key => binding.tree.get(key)?.turn ?? -1));
+				const alwaysVisible = node.turn !== undefined && node.turn === latestTurn && (node as { readonly closingMessageId?: string }).closingMessageId !== undefined;
+				applyActionFooterVisibility(bar, alwaysVisible);
+				row.appendChild(bar);
 			}
 		}
 		return row;
@@ -1086,6 +1099,48 @@ function ensureGroupBodyStyles(): void {
 				overflow-y: auto;
 				mask-image: linear-gradient(to bottom, transparent 0, black 24px, black calc(100% - 24px), transparent 100%);
 			}
+		`;
+	});
+}
+
+/**
+ * 动作行的显隐策略（官方「Completed-turn footer」）。
+ *
+ * 官方三条：
+ *   - Actions remain visible **only on the latest Turn when its final visible content is a reply**；
+ *   - other endings and historical Turns reveal actions **on hover or keyboard focus**；
+ *   - **Devices without hover keep actions visible**。
+ *
+ * 实现用 CSS 的 `opacity` + `:hover` / `:focus-within`，并对无 hover 的设备用
+ * `@media (hover: none)` 强制可见——**不监听鼠标事件**：显隐是纯呈现，
+ * 交给 CSS 更可靠（也不会给每个动作行挂两个监听）。
+ *
+ * @param bar 动作行
+ * @param alwaysVisible 是否属于「最新 Turn 且末条是答复」（官方要求常显）
+ */
+function applyActionFooterVisibility(bar: HTMLElement, alwaysVisible: boolean): void {
+	ensureActionFooterStyles();
+	if (alwaysVisible) {
+		bar.classList.add('dsh-actions-always-visible');
+	}
+	bar.classList.add('dsh-actions-reveal');
+}
+
+let actionFooterStyles: HTMLStyleElement | undefined;
+
+/** 动作行显隐的共享样式表（一次性注入）。 */
+function ensureActionFooterStyles(): void {
+	if (actionFooterStyles !== undefined && actionFooterStyles.isConnected) {
+		return;
+	}
+	actionFooterStyles = createStyleSheet(undefined, style => {
+		style.textContent = `
+			.dsh-actions-reveal { opacity: 0; transition: opacity 120ms ease-out; }
+			.dsh-actions-reveal:hover,
+			.dsh-actions-reveal:focus-within { opacity: 1; }
+			.dsh-actions-always-visible { opacity: 1; }
+			/* 无 hover 的设备（触摸）没有「悬停」这回事：保持可见，否则永远看不到动作。 */
+			@media (hover: none) { .dsh-actions-reveal { opacity: 1; } }
 		`;
 	});
 }
