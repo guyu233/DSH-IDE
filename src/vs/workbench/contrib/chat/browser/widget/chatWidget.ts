@@ -1194,6 +1194,14 @@ export class ChatWidget extends Disposable implements IChatWidget {
 		this.listWidget.scrollTop = value;
 	}
 
+	captureScrollAnchor(): { readonly element: unknown; readonly offset: number } | undefined {
+		return this.listWidget.captureScrollAnchor();
+	}
+
+	restoreScrollAnchor(anchor: { readonly element: unknown; readonly offset: number }): void {
+		this.listWidget.restoreScrollAnchor(anchor as Parameters<typeof this.listWidget.restoreScrollAnchor>[0]);
+	}
+
 	getViewState(): IChatWidgetViewState {
 		return {
 			scrollTop: this.listWidget.scrollTop,

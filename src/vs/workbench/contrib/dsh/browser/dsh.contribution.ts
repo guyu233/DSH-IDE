@@ -11,6 +11,7 @@
 // 聊天主路径是开窗、跟随、发送和停止。目标、作业、MCP、斜杠命令和行内补全不在这条路径上。
 
 import { localize } from '../../../../nls.js';
+import { IChatWidgetService } from '../../chat/browser/chat.js';
 import { dshDone, dshFail, dshLink } from './dshNotice.js';
 import { registerSingleton, InstantiationType } from '../../../../platform/instantiation/common/extensions.js';
 import { INotificationService } from '../../../../platform/notification/common/notification.js';
@@ -81,6 +82,7 @@ class DshClientContribution extends Disposable implements IWorkbenchContribution
 		@INotificationService private readonly notifications: INotificationService,
 		@ILanguageModelsService languageModels: ILanguageModelsService,
 		@IChatSessionsService chatSessionsService: IChatSessionsService,
+		@IChatWidgetService chatWidgetService: IChatWidgetService,
 		@IDshIdeSessionsService private readonly _sessions: IDshIdeSessionsService,
 		@IQuickInputService private readonly quickInputService: IQuickInputService,
 		@IInstantiationService private readonly instantiationService: IInstantiationService,
@@ -97,7 +99,7 @@ class DshClientContribution extends Disposable implements IWorkbenchContribution
 		this._register({ dispose: modelProvider.dispose });
 		// `dsh:/<id>` 会话的聊天内容：没有这个 content provider，原生 ChatWidget
 		// 打开 DSH 会话时拿不到任何 history（「选中会话后消息不显示」的根因）。
-		this._register(registerDshChatSessionContent(client, chatSessionsService));
+		this._register(registerDshChatSessionContent(client, chatSessionsService, chatWidgetService));
 		// 会话类型声明：原生 Chat 只在 `getChatSessionContribution(type)` 非空时才锁到该代理、
 		// 才显示会话级选择器（模型/权限/预设）。缺这条声明，DSH 会话被当成「本地会话」，
 		// 三个选择器全部不渲染——这不是样式问题，是注册缺失。

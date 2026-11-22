@@ -562,6 +562,15 @@ export interface IChatWidget {
 	getInputState(): IChatModelInputState | undefined;
 	getViewState(): IChatWidgetViewState;
 	restoreViewState(state: IChatWidgetViewState): void;
+	/**
+	 * 采样「首个可见行」作为分页锚点（官方 `ui-chat` 的 paging anchor）。
+	 *
+	 * 历史前插会把已有内容整体下移；虚拟列表里浏览器 scroll anchoring 不可靠，
+	 * 需要语义锚点。返回 `undefined` 表示当前没有可靠锚点（空列表/行不完全可见）。
+	 */
+	captureScrollAnchor?(): { readonly element: unknown; readonly offset: number } | undefined;
+	/** 把 `captureScrollAnchor` 的结果放回原屏幕位置；锚点失效时是空操作。 */
+	restoreScrollAnchor?(anchor: { readonly element: unknown; readonly offset: number }): void;
 	lockToCodingAgent(name: string, displayName: string, agentId?: string, agentHostProviderId?: string): void;
 	unlockFromCodingAgent(): void;
 	handleDelegationExitIfNeeded(sourceAgent: Pick<IChatAgentData, 'id' | 'name'> | undefined, targetAgent: IChatAgentData | undefined): Promise<void>;

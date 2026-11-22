@@ -21,6 +21,7 @@ import { URI } from '../../../../../base/common/uri.js';
 import { CancellationToken } from '../../../../../base/common/cancellation.js';
 import { CancellationError } from '../../../../../base/common/errors.js';
 import { CommandsRegistry } from '../../../../../platform/commands/common/commands.js';
+import { IChatWidgetService } from '../../../chat/browser/chat.js';
 import { IChatSession, IChatSessionContentProvider, IChatSessionHistoryItem, IChatSessionProviderOptionItem, IChatSessionsService } from '../../../chat/common/chatSessionsService.js';
 import { DshChatSession, dshChatSessionFor } from './dshChatSession.js';
 import { toHistory, extrasOf, extrasFingerprint, type DshHistoryExtras } from './dshChatHistory.js';
@@ -58,6 +59,8 @@ export class DshChatSessionContent extends Disposable implements IChatSession {
 	constructor(
 		readonly sessionResource: URI,
 		session: DshChatSession,
+		/** 分页锚点钩子（由 provider 注入；单元测试可省略）。 */
+		private readonly pagingAnchor?: { begin(): (() => void) | undefined },
 	) {
 		super();
 		this._session = session;
@@ -86,7 +89,12 @@ export class DshChatSessionContent extends Disposable implements IChatSession {
 		});
 		this.nodeTree.accept(session.nodes());
 		if (this._sessionId !== undefined) {
-			const binding = { tree: this.nodeTree, expansion: this.expansion, questions: this._questions };
+			const binding = {
+				tree: this.nodeTree, expansion: this.expansion, questions: this._questions,
+				// 官方「Scroll ownership」的 paging anchor：历史前插前后保持读者位置。
+				// 渲染层才看得到滚动容器，所以这里把「按 treeId 找 widget」的查找推迟到调用时。
+				...(this.pagingAnchor === undefined ? {} : { pagingAnchor: this.pagingAnchor }),
+			};
 			dshContentStore.bind(this._sessionId, binding);
 			this._register(toDisposable(() => {
 				if (this._sessionId !== undefined) {
@@ -394,6 +402,7 @@ export class DshChatSessionContentProvider implements IChatSessionContentProvide
 	constructor(
 		private readonly client: IDshClientService,
 		private readonly chatSessionsService: IChatSessionsService,
+		private readonly chatWidgetService: IChatWidgetService,
 	) { }
 
 	register(): { dispose(): void } {
@@ -463,7 +472,20 @@ export class DshChatSessionContentProvider implements IChatSessionContentProvide
 		}
 		// 原生 chat 的 `IChatSession` 只有 `historyStatus`，没有「加载更多」回调，
 		// 不会自己翻页。先交出首屏内容，再在后台把更早历史拉齐并推送。
-		const content = new DshChatSessionContent(sessionResource, session);
+		const content = new DshChatSessionContent(sessionResource, session, {
+			// 官方「Scroll ownership」的 paging anchor：历史前插前后保持读者位置。
+			// 渲染层才看得到滚动容器，所以这里把「按会话资源找 widget」推迟到调用时。
+			begin: (): (() => void) | undefined => {
+				const target = sessionResource.toString();
+				const widget = this.chatWidgetService.getAllWidgets()
+					.find(candidate => candidate.viewModel?.sessionResource?.toString() === target);
+				const anchor = widget?.captureScrollAnchor?.();
+				if (anchor === undefined) {
+					return undefined;
+				}
+				return () => widget?.restoreScrollAnchor?.(anchor);
+			},
+		});
 		void this.fillOlderHistory(session, content, token);
 		return content;
 	}
@@ -517,7 +539,11 @@ export class DshChatSessionContentProvider implements IChatSessionContentProvide
 			// 用分页游标判断有没有前进，不用「这一页有没有画出新节点」。
 			// 一页里可以全是内部事件；只看可见节点会把后面的人类消息停在第一页。
 			const before = session.pagingCursor();
+			// 官方「Scroll ownership」：Load older anchors the first visible content item。
+			// 渲染层注册了补偿钩子就前后各用一次；没注册（无挂载 widget）就跳过，不影响拉页。
+			const restoreAnchor = dshContentStore.get(dshSessionIdFromResource(content.sessionResource) ?? '')?.pagingAnchor?.begin();
 			await session.loadOlder();
+			restoreAnchor?.();
 			if (token.isCancellationRequested || content.isDisposed) {
 				return;
 			}
@@ -534,8 +560,8 @@ export class DshChatSessionContentProvider implements IChatSessionContentProvide
 }
 
 /** 供 `dsh.contribution.ts` 注册用。 */
-export function registerDshChatSessionContent(client: IDshClientService, chatSessionsService: IChatSessionsService): { dispose(): void } {
-	return new DshChatSessionContentProvider(client, chatSessionsService).register();
+export function registerDshChatSessionContent(client: IDshClientService, chatSessionsService: IChatSessionsService, chatWidgetService: IChatWidgetService): { dispose(): void } {
+	return new DshChatSessionContentProvider(client, chatSessionsService, chatWidgetService).register();
 }
 
 /**

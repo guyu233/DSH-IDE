@@ -601,3 +601,25 @@ test('collapseTiming=next-input exempts the latest exchange from folding', async
 	store.setCollapseTiming('completion');
 	assert.equal(store.isTurnCollapsed(4, 0), true, 'completion timing ignores the exemption');
 });
+
+test('the paging anchor is wired end to end, not just declared', async () => {
+	// CHK-357 只做了基础设施、没有接线。这条不变量保证接线不退回「声明了但没人调」：
+	// ① fillOlderHistory 必须在 loadOlder 前后成对调用；② 钩子必须真的被 content 带进 binding；
+	// ③ IChatWidget 必须把 capture/restore 转发到 listWidget。
+	const { readFileSync } = await import('node:fs');
+	const read = (rel: string) => readFileSync(new URL('../../../src/vs/workbench/contrib/' + rel, import.meta.url), 'utf8');
+
+	const content = read('dsh/browser/vscode/dshChatSessionContent.ts');
+	assert.ok(content.includes('pagingAnchor?.begin()'), 'fillOlderHistory must capture an anchor before loading');
+	assert.ok(content.includes('restoreAnchor?.();'), 'and restore right after the page lands');
+	assert.match(content, /pagingAnchor: this\.pagingAnchor/, 'the binding must carry the injected hook');
+
+	const chatWidget = read('chat/browser/widget/chatWidget.ts');
+	assert.ok(chatWidget.includes('return this.listWidget.captureScrollAnchor();'), 'the widget must forward capture');
+	assert.ok(chatWidget.includes('this.listWidget.restoreScrollAnchor('), 'the widget must forward restore');
+
+	// 基础设施本身：ObjectTree 用 firstVisibleIndex + getRelativeTop 采样。
+	const tree = readFileSync(new URL('../../../src/vs/base/browser/ui/tree/objectTree.ts', import.meta.url), 'utf8');
+	assert.ok(tree.includes('this.view.firstVisibleIndex'), 'the anchor must start from the first visible row');
+	assert.ok(tree.includes('this.getRelativeTop(element)'), 'and measure its viewport offset');
+});
