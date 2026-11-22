@@ -457,3 +457,37 @@ test('a workflow card localizes its status through the shared token formatter', 
 	assert.equal(spec?.lines[0].text, workflowStatusText('completed'));
 	assert.equal(spec?.collapsible, true);
 });
+
+test('every custom button goes through the shared focus-visible chrome', async () => {
+	// 契约 §11.2：Tab/Shift+Tab 可达、focus-visible。`border: none` 会抹掉浏览器默认焦点环，
+	// 所以每个自研按钮都必须经过 `applyDshButtonChrome`（或静态行头的 `applyDshStaticRowChrome`）。
+	// 这是一条源码级不变量：新增按钮绕过它就会在这里失败。
+	const { readFileSync } = await import('node:fs');
+	const { readdirSync } = await import('node:fs');
+	const dir = new URL('../../../src/vs/workbench/contrib/dsh/browser/vscode/', import.meta.url);
+	const offenders: string[] = [];
+	for (const name of readdirSync(dir)) {
+		if (!name.endsWith('.ts')) {
+			continue;
+		}
+		const source = readFileSync(new URL(name, dir), 'utf8');
+		for (const pattern of [/\$\('button[^']*'\)/g, /createElement\('button'\)/g]) {
+			for (const match of source.matchAll(pattern)) {
+				const context = source.slice(match.index, match.index + 600);
+				if (!context.includes('applyDshButtonChrome') && !context.includes('applyDshStaticRowChrome')) {
+					offenders.push(`${name}: ${match[0]}`);
+				}
+			}
+		}
+	}
+	assert.deepEqual(offenders, [], 'a custom button bypasses the shared focus-visible chrome');
+});
+
+test('the shared chrome stylesheet uses the theme focus variable, not a literal color', async () => {
+	// 高对比度主题下焦点环必须跟随 `--vscode-focusBorder`；写死颜色会在 HC 下不可见。
+	const { readFileSync } = await import('node:fs');
+	const source = readFileSync(new URL('../../../src/vs/workbench/contrib/dsh/browser/vscode/dshButtonChrome.ts', import.meta.url), 'utf8');
+	assert.match(source, /:focus-visible/, 'the sheet must define :focus-visible, not :focus (mouse clicks would show a ring)');
+	assert.match(source, /var\(--vscode-focusBorder\)/, 'the ring must use the theme variable');
+	assert.doesNotMatch(source, /outline:\s*1px solid #[0-9a-fA-F]{3,6}/, 'no literal hex color for the ring');
+});

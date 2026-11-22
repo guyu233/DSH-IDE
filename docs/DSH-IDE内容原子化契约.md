@@ -698,7 +698,12 @@ DshCompositeContentPart
 把 20 种 `dsh*` 部件全部拼成 `textContent`，没有可折叠结构。已新增 `dshCardSpec.ts` 作为纯数据结构描述，
 `renderDshCard()` 用原生 `<details>`/`<summary>` 承载折叠（键盘、高对比度、读屏由浏览器与主题接管，
 不自绘箭头、不自管 `aria-expanded`）；compaction / system prompt 默认收起，deliverables / file card / usage 默认展开。
-第 1/2/3/5/6 条此前各轮已逐项落地（见 §13 PR 与 §19）；第 7 条：`tsc --noEmit` PASS、`test-dsh:all` 全绿、
+**2026-11-23 第 3 条核对（CHK-342）**：发现 §11.2 的「focus-visible」**实际未满足**——全仓自研组件零 `focus-visible` 样式。
+5 个自研按钮都设了 `border: none`（会连同浏览器默认焦点环一起抹掉）却没有替代焦点样式，键盘用户 Tab 时看不到焦点。
+已新增 `dshButtonChrome.ts` 作为唯一入口：`applyDshButtonChrome()` 统一外观，`createStyleSheet()` 注入一张共享样式表定义
+`:focus-visible`（不是 `:focus`），焦点环用 `var(--vscode-focusBorder)`（浅色/深色/高对比度自动跟随，不写死颜色），
+用 `outline` 而非 `border`（不参与布局，聚焦不推挤相邻元素）。并加了一条**源码级不变量测试**：新增按钮绕过统一入口会立刻失败。
+第 1/2/5/6 条此前各轮已逐项落地（见 §13 PR 与 §19）；第 7 条：`tsc --noEmit` PASS、`test-dsh:all` 全绿、
 真机项按本附录 B 由用户执行并标 PENDING。
 
 ## 17. 当前立刻开始项

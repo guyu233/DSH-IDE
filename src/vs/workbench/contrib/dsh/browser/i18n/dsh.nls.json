@@ -238,5 +238,6 @@
 	"dsh.queue.remove": "Remove queued message",
 	"dsh.queue.steer": "Send now",
 	"dsh.question.viewAnswers": "View answers",
-	"dsh.question.viewAnswersLabel": "View the recorded answers"
+	"dsh.question.viewAnswersLabel": "View the recorded answers",
+	"dsh.toolbar.label": "Actions"
 }

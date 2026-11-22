@@ -22,6 +22,7 @@ import { groupTurnProcesses, hiddenProcessLine, processLineFromSnapshot, visible
 import { diffDshSlotRows, dshSlotHostSame, planKeysForTurn, presentDshNode, turnProcessCounts, type DshSlotHostRef } from './dshSlotHostModel.js';
 import { dshNodeDisplaySignature } from './dshConversationNodeTree.js';
 import { dshCardSpec, type DshCardSpec } from './dshCardSpec.js';
+import { applyDshButtonChrome, applyDshStaticRowChrome } from './dshButtonChrome.js';
 
 export interface DshNativePartRenderer {
 	render(part: DshNativePart): IChatContentPart | undefined;
@@ -394,16 +395,11 @@ export class DshSlotHostContentPart extends Disposable implements IChatContentPa
 		bar.setAttribute('aria-label', localize('dsh.actions.label', "Message actions"));
 		for (const action of actions) {
 			const button = $('button.dsh-assistant-action') as HTMLButtonElement;
-			button.type = 'button';
+			// 统一走 `applyDshButtonChrome`：`border: none` 会抹掉默认焦点环，
+			// 必须由共享样式表补回 `:focus-visible`（§11.2），否则键盘用户看不到焦点。
+			applyDshButtonChrome(button, 'link');
 			button.textContent = action.title;
 			button.title = action.title;
-			// 与原生 chat 的次按钮一致：无边框、无背景，靠主题色与焦点环。
-			button.style.border = 'none';
-			button.style.background = 'transparent';
-			button.style.color = 'var(--vscode-textLink-foreground)';
-			button.style.font = 'inherit';
-			button.style.cursor = 'pointer';
-			button.style.padding = '0';
 			refs.add(addClick(button, () => {
 				this.native?.executeCommand?.(action.command, action.arguments ?? []);
 			}));
@@ -444,15 +440,9 @@ export class DshSlotHostContentPart extends Disposable implements IChatContentPa
 		this.selectionSyncs.set(rowKey, sync);
 		for (const interaction of interactions) {
 			const button = $('button.dsh-text-interaction') as HTMLButtonElement;
-			button.type = 'button';
+			applyDshButtonChrome(button, 'link');
 			button.textContent = interaction.title;
 			button.title = interaction.title;
-			button.style.border = 'none';
-			button.style.background = 'transparent';
-			button.style.color = 'var(--vscode-textLink-foreground)';
-			button.style.font = 'inherit';
-			button.style.cursor = 'pointer';
-			button.style.padding = '0';
 			refs.add(addClick(button, () => {
 				const text = selected();
 				if (text === '') {
@@ -518,12 +508,15 @@ export class DshSlotHostContentPart extends Disposable implements IChatContentPa
 		header.style.alignItems = 'center';
 		header.style.gap = '6px';
 		header.style.padding = '2px 0';
-		header.style.border = 'none';
 		header.style.background = 'transparent';
 		header.style.color = 'var(--vscode-foreground)';
-		header.style.font = 'inherit';
 		header.style.textAlign = 'left';
-		header.style.cursor = 'pointer';
+		// 行头是链接式按钮：同样要有 `:focus-visible`，否则 Tab 上来只剩一片空白。
+		applyDshButtonChrome(header, 'link');
+		header.style.display = 'flex';
+		header.style.alignItems = 'center';
+		header.style.gap = '6px';
+		header.style.padding = '2px 0';
 		const icon = $('span');
 		icon.className = `codicon codicon-${presented.icon}`;
 		const title = $('span');
@@ -534,9 +527,7 @@ export class DshSlotHostContentPart extends Disposable implements IChatContentPa
 		const open = presented.detail !== '' && binding.expansion.isDisclosed(node.turn ?? 0, nodeId);
 		// 没有 detail 时这行不可展开：不要再留一个可聚焦、点了没反应的按钮。
 		if (presented.detail === '') {
-			header.disabled = true;
-			header.style.cursor = 'default';
-			header.removeAttribute('aria-expanded');
+			applyDshStaticRowChrome(header);
 		} else {
 			header.setAttribute('aria-expanded', open ? 'true' : 'false');
 		}
@@ -624,16 +615,10 @@ function renderAdaptedFallback(part: DshNativePart, host?: { reviewQuestion?: (c
 		// 这里只加入口按钮；真正的只读卡片由 `review()` 建出的 entry 渲染，不在回退文本里伪造。
 		if (part.callId !== '' && part.questions.length > 0 && host?.reviewQuestion !== undefined) {
 			const review = document.createElement('button');
-			review.type = 'button';
+			applyDshButtonChrome(review, 'link');
 			review.className = 'dsh-question-review';
 			review.textContent = localize('dsh.question.viewAnswers', "View answers");
 			review.style.alignSelf = 'flex-start';
-			review.style.border = 'none';
-			review.style.background = 'transparent';
-			review.style.color = 'var(--vscode-textLink-foreground)';
-			review.style.cursor = 'pointer';
-			review.style.font = 'inherit';
-			review.style.padding = '2px 0';
 			review.setAttribute('aria-label', localize('dsh.question.viewAnswersLabel', "View the recorded answers"));
 			const click = (event: MouseEvent) => {
 				event.stopPropagation();

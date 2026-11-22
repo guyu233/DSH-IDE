@@ -288,5 +288,8 @@
 	"vs/workbench/contrib/dsh/browser/vscode/dshSlotHostContentPart": [
 		"dsh.question.viewAnswers",
 		"dsh.question.viewAnswersLabel"
+	],
+	"vs/workbench/contrib/dsh/browser/vscode/dshButtonChrome": [
+		"dsh.toolbar.label"
 	]
 }

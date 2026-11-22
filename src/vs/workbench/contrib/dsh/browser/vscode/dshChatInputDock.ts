@@ -21,6 +21,7 @@ import { localize } from '../../../../../nls.js';
 import { dshChatSlotRegistry } from './dshChatSlots.js';
 import { dshComposerDockRows, dshInputDockRows, dshQueueDockRows, type DshInputDockRow, type DshInputZoneOwner, type DshQueueRowAction } from './dshInputDock.js';
 import type { DshIdeInboxMessage } from '../../../../../platform/dshClient/protocol/dshIdeProtocol.js';
+import { applyDshButtonChrome } from './dshButtonChrome.js';
 
 /** 宿主需要的宿主能力：只执行命令，不读也不写会话事实。 */
 export interface DshInputDockHost {
@@ -152,16 +153,12 @@ export class DshChatInputDock extends Disposable {
 		bar.style.marginLeft = 'auto';
 		for (const action of row.queueActions ?? []) {
 			const button = document.createElement('button');
-			button.type = 'button';
+			// 队列动作按钮：`border: none` 会抹掉默认焦点环，统一由共享样式表补 `:focus-visible`。
+			applyDshButtonChrome(button, 'link');
 			button.className = 'dsh-input-dock-action';
 			button.setAttribute('aria-label', queueActionLabel(action));
 			button.title = queueActionLabel(action);
-			button.style.border = 'none';
-			button.style.background = 'transparent';
 			button.style.color = 'var(--vscode-descriptionForeground)';
-			button.style.cursor = 'pointer';
-			button.style.font = 'inherit';
-			button.style.padding = '0 2px';
 			button.textContent = queueActionGlyph(action);
 			const click = (event: MouseEvent) => {
 				// 行本身可能是按钮：动作点击不能冒泡成「打开/确认」。
