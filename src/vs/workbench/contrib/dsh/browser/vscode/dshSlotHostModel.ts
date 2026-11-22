@@ -308,3 +308,34 @@ export function diffDshSlotRows(previous: readonly DshSlotRowSignature[], next: 
 		changed: removed.length > 0 || rebuild.length > 0 || !sameOrder,
 	};
 }
+
+/**
+ * 从「该 Turn 的 turn-process 节点列表」里取过程计数（契约 §19 S6 的消费面）。
+ *
+ * 为什么抽成纯函数：槽位渲染在 DOM 里跑、`node --test` 起不来，而这条判定
+ * 「计数行到底用 Host 给的权威值还是退化成现算」只能靠单测钉住。
+ *
+ * 语义（对齐官方 `ChatNodeStore.turnDataSource(turn, 'turn-process')`）：
+ * 数据源是**整个 Turn** 的该 kind 节点，不是本段 response 的 `nodeIds`——
+ * 计数行属于 Turn，不属于某一段引用。空列表返回 undefined，由调用方退化成现算。
+ */
+export interface DshTurnProcessCountSnapshot {
+	readonly toolCallCount: number;
+	readonly subagentCount: number;
+	readonly messageCount: number;
+}
+
+export function turnProcessCounts(rows: readonly unknown[]): DshTurnProcessCountSnapshot | undefined {
+	const first = rows[0];
+	if (first === null || typeof first !== 'object') {
+		return undefined;
+	}
+	// 节点来自线协议，字段可选；不猜缺失值为非零，缺就当 0（与 `processLineFromSnapshot` 同口径）。
+	const record = first as { readonly toolCallCount?: unknown; readonly subagentCount?: unknown; readonly messageCount?: unknown };
+	const count = (value: unknown): number => typeof value === 'number' && Number.isFinite(value) ? value : 0;
+	return {
+		toolCallCount: count(record.toolCallCount),
+		subagentCount: count(record.subagentCount),
+		messageCount: count(record.messageCount),
+	};
+}

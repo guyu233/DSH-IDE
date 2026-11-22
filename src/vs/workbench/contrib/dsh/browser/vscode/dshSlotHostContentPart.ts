@@ -19,7 +19,7 @@ import { dshAsideText, dshAssistantActions, dshTextInteractions, dshUserBeforeDe
 import { dshContentStore } from './dshContentStore.js';
 import { adaptDshNode, type DshNativePart } from './dshNativePartAdapters.js';
 import { groupTurnProcesses, hiddenProcessLine, processLineFromSnapshot, visibleProcessKeys } from './dshProcessGroup.js';
-import { dshSlotHostSame, planKeysForTurn, presentDshNode, type DshSlotHostRef } from './dshSlotHostModel.js';
+import { dshSlotHostSame, planKeysForTurn, presentDshNode, turnProcessCounts, type DshSlotHostRef } from './dshSlotHostModel.js';
 import { dshNodeDisplaySignature } from './dshConversationNodeTree.js';
 import { diffDshSlotRows } from './dshSlotHostModel.js';
 
@@ -98,7 +98,43 @@ export class DshSlotHostContentPart extends Disposable implements IChatContentPa
 			// 段内新增/删除节点会改变 `nodeIds` 本身，那由外层 `hasSameContent` 触发重建；
 			// 这里只兜「引用没变但成员内容变了」。折叠状态仍走会话 store。
 			this._register(binding.expansion.onDidChange(() => this.render()));
+
+			// 契约 §19 S6 的消费面（一）：本段涉及的 Turn 各自订阅 `processSource`。
+			//
+			// 为什么需要它：过程分组（`groupTurnProcesses`）会读同一 Turn 内**不在
+			// `nodeIds` 里**的节点（例如已收起的过程行、`turn-process` 计数行）。
+			// 只订阅 `source(nodeId)` 的话，这些节点变化不会触发重画，计数行会停在旧值。
+			// 而订阅整棵树的 `onDidChange` 又会让别的 Turn 的变化也重画本段。
+			// `processSource(key)` 恰好是「该节点所属 Turn 的全部节点」的按 Turn 观察点：
+			// 别的 Turn 变化不通知这里。
+			for (const turn of this.processTurns(binding)) {
+				const anchor = this.processAnchorOf(binding, turn);
+				if (anchor === undefined) {
+					continue;
+				}
+				this._register(binding.tree.processSource(anchor).subscribe(() => this.render()));
+			}
 		}
+	}
+
+	/** 本段 nodeIds 覆盖到的 Turn 集合（按首次出现顺序；无 turn 的节点不参与）。 */
+	private processTurns(binding: NonNullable<ReturnType<typeof dshContentStore.get>>): readonly number[] {
+		const turns: number[] = [];
+		const seen = new Set<number>();
+		for (const nodeId of this.content.nodeIds) {
+			const turn = binding.tree.get(nodeId)?.turn;
+			if (turn === undefined || seen.has(turn)) {
+				continue;
+			}
+			seen.add(turn);
+			turns.push(turn);
+		}
+		return turns;
+	}
+
+	/** 一个 Turn 里用来取 `processSource` 的任一节点 key；该 Turn 没有任何本段节点时返回 undefined。 */
+	private processAnchorOf(binding: NonNullable<ReturnType<typeof dshContentStore.get>>, turn: number): string | undefined {
+		return this.content.nodeIds.find(nodeId => binding.tree.get(nodeId)?.turn === turn);
 	}
 
 	hasSameContent(other: IChatRendererContent, _followingContent: IChatRendererContent[], _element: ChatTreeItem): boolean {
@@ -207,10 +243,13 @@ export class DshSlotHostContentPart extends Disposable implements IChatContentPa
 			}
 			const byKey = new Map(grouped.map(node => [node.key, node]));
 			// 优先用线协议里的 turn-process 计数（官方过程组行的数据）；缺失时才现算。
-			const snapshotKey = grouped.find(node => node.kind === 'turn-process' && node.turn === group.turn)?.key;
-			const snapshot = snapshotKey === undefined ? undefined : binding.tree.get(snapshotKey) as {
-				readonly toolCallCount?: number; readonly subagentCount?: number; readonly messageCount?: number;
-			} | undefined;
+			//
+			// 契约 §19 S6 的消费面（二）：改用 `turnDataSource(turn, 'turn-process')` 而不是
+			// 在 `grouped` 里找。`grouped` 只有本段 `nodeIds` 的成员，而计数行属于整个 Turn——
+			// 当 turn-process 节点不在本段引用里时，旧写法会静默退化成现算，
+			// 页面上的「N 个工具」与 Host 给的权威计数不一致。
+			// `turnDataSource` 是「该 Turn 该 kind 的全部节点」的按 Turn 观察点，正好是这份数据的真源。
+			const snapshot = turnProcessCounts(binding.tree.turnDataSource(group.turn, 'turn-process').get());
 			const line = (snapshot === undefined ? undefined : processLineFromSnapshot({
 				toolCallCount: snapshot.toolCallCount ?? 0,
 				subagentCount: snapshot.subagentCount ?? 0,

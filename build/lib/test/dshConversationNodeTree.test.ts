@@ -258,3 +258,39 @@ test('revisionFor is order-sensitive and per-key', () => {
 	assert.equal(tree.revisionOf('user:u1'), tree.source('user:u1').version);
 	assert.equal(tree.revisionOf('missing'), 0, 'a key that was never seen has revision 0');
 });
+
+test('turnDataSource finds a turn-process node that is not in the caller node list', () => {
+	// 契约 §19 S6 的消费面：槽位渲染只用本段 nodeIds，但过程计数行属于整个 Turn。
+	// `turnDataSource(turn, 'turn-process')` 必须能取到不在本段引用里的那个节点——
+	// 否则渲染层只能退化成现算，页面上的计数与 Host 给的权威计数不一致。
+	const tree = new DshConversationNodeTree<SampleNode>('s1');
+	tree.accept([
+		node({ kind: 'tool-call', seq: 1, turn: 1, callId: 'c1' }),
+		node({ kind: 'turn-process', seq: 2, turn: 1 }),
+	]);
+	const own = ['tool-call:c1'];
+	assert.equal(own.includes('turn-process:2:1:'), false, 'the count row is deliberately outside the caller list');
+	const counts = tree.turnDataSource(1, 'turn-process').get();
+	assert.equal(counts.length, 1);
+	assert.equal(dshNodeKey(counts[0]), 'turn-process:2:1:');
+	// 别的 Turn 的同 kind 节点不进来。
+	tree.accept([
+		node({ kind: 'tool-call', seq: 1, turn: 1, callId: 'c1' }),
+		node({ kind: 'turn-process', seq: 2, turn: 1 }),
+		node({ kind: 'turn-process', seq: 9, turn: 2 }),
+	]);
+	assert.equal(tree.turnDataSource(1, 'turn-process').get().length, 1);
+	assert.equal(tree.turnDataSource(2, 'turn-process').get().length, 1);
+});
+
+test('processSource notifies only for its own turn', () => {
+	// 槽位对每个 Turn 订阅 processSource；别的 Turn 变化不得触发本 Turn 的订阅者。
+	const tree = new DshConversationNodeTree<SampleNode>('s1');
+	tree.accept([node({ kind: 'tool-call', seq: 1, turn: 1, callId: 'c1' }), node({ kind: 'tool-call', seq: 2, turn: 2, callId: 'c2' })]);
+	let turn1 = 0;
+	tree.processSource('tool-call:c1').subscribe(() => { turn1++; });
+	tree.accept([node({ kind: 'tool-call', seq: 1, turn: 1, callId: 'c1' }), node({ kind: 'tool-call', seq: 2, turn: 2, callId: 'c2', text: 'changed' })]);
+	assert.equal(turn1, 0, 'a turn 2 change must not notify the turn 1 process source');
+	tree.accept([node({ kind: 'tool-call', seq: 1, turn: 1, callId: 'c1', text: 'changed' }), node({ kind: 'tool-call', seq: 2, turn: 2, callId: 'c2', text: 'changed' })]);
+	assert.equal(turn1, 1, 'a turn 1 change must notify it');
+});

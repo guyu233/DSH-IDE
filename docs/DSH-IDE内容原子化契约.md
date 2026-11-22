@@ -1162,7 +1162,7 @@ DSH-IDE 当前把上游高频增量流实现成了：
 
 ### 19.3 修复计划
 
-> **2026-11-23 落地状态（CHK-320/321/322/324/327）**：S0（局部 revision）、S1（display signature）、S2（slot host 行级增量渲染）、S3（稳定 request 身份）、S4（fingerprint 精确化）、S5（自动滚动 hold）已实现并有单测；S6 的剩余消费面仍为 PENDING。S0 的落地方式：`DshConversationNodeTree.revisionOf(nodeId)` 取该 key 自己的 `source().version`，`revisionFor(nodeIds)` 按成员顺序拼稳定串，`dshSlotHostRef` 带上 `revision`、`dshSlotHostSame` 在双方都有时比较它；整棵树的 `treeVersion` 只留作 diagnostics。S5 的落地方式：`dshScrollFollow.ts` 是纯状态机（following / reading），`dshChatAutoScrollHold.ts` 在阅读锁期间持有原生 `IChatWidget.holdAutoScroll()`（= `ChatListWidget.acquireAutoScrollHold()` 的引用计数暂停），发送与「回到底部」是两条显式出口；不改上游文件。下面各小节保留原始计划原文，不再逐段改写成完成报告。
+> **2026-11-23 落地状态（CHK-320/321/322/324/327/334）**：S0（局部 revision）、S1（display signature）、S2（slot host 行级增量渲染）、S3（稳定 request 身份）、S4（fingerprint 精确化）、S5（自动滚动 hold）、S6（按 key observable store 的消费面）已实现并有单测。S0 的落地方式：`DshConversationNodeTree.revisionOf(nodeId)` 取该 key 自己的 `source().version`，`revisionFor(nodeIds)` 按成员顺序拼稳定串，`dshSlotHostRef` 带上 `revision`、`dshSlotHostSame` 在双方都有时比较它；整棵树的 `treeVersion` 只留作 diagnostics。S5 的落地方式：`dshScrollFollow.ts` 是纯状态机（following / reading），`dshChatAutoScrollHold.ts` 在阅读锁期间持有原生 `IChatWidget.holdAutoScroll()`（= `ChatListWidget.acquireAutoScrollHold()` 的引用计数暂停），发送与「回到底部」是两条显式出口；不改上游文件。下面各小节保留原始计划原文，不再逐段改写成完成报告。
 
 #### S0：局部 revision 替代全局 treeVersion
 
@@ -1336,6 +1336,27 @@ reveal 调用点，`revealLastItem` 完全由原生在 `_withPersistedAutoScroll
 - 一个 turn 更新不影响其它 turn 的订阅计数；
 - 无订阅的旧节点不计算 display signature；
 - 虚拟化重绘只读取当前可见 key。
+
+**落地（2026-11-23，CHK-334）**：五项能力（`source` / `turnDataSource` / `processSource` / `bottomSource`
++ slot host 按 nodeIds 订阅）此前**代码都在、但 `turnDataSource` / `processSource` / `bottomSource`
+零生产消费点**，属「有实现没接线」的死代码。本轮补上两处真实消费面，都落在
+`DshSlotHostContentPart`：
+1. **`processSource`**：构造时对本段涉及的每个 Turn 订阅 `processSource(anchor)`。
+   过程分组（`groupTurnProcesses`）会读同一 Turn 内**不在本段 `nodeIds` 里**的节点
+   （已收起的过程行、`turn-process` 计数行）；只订阅 `source(nodeId)` 时这些变化不触发重画，
+   计数行会停在旧值。`processSource` 恰好是「该 Turn 全部节点」的按 Turn 观察点，
+   别的 Turn 变化不通知这里（对应验收第一条）。
+2. **`turnDataSource`**：`collectRows` 取过程计数行改用
+   `turnDataSource(turn, 'turn-process')`，不再在 `grouped`（只有本段 nodeIds）里找。
+   旧写法在「计数行不在本段引用里」时会**静默退化成现算**，页面上的「N 个工具」与
+   Host 给的权威计数不一致。
+辅助判定抽成纯函数 `turnProcessCounts(rows)`（放在 `dshSlotHostModel.ts`，因为槽位渲染
+在 DOM 里跑、`node --test` 起不来），并有单测 + 变异验证（把 `subagentCount`/`messageCount`
+置 0 → 测试 fail 1；恢复后 23/23 绿）。
+**`bottomSource` 仍是契约保留项、没有生产消费点**：官方语义是「该可见节点是否属于
+最新已加载 exchange」，与本仓渲染层已有的 `isAtBottom`（滚动位置在底部）**不是同一件事**，
+强行拼用会引入判据混淆；如实标注而不是为了「消掉死代码」而错接。
+真机 PENDING。
 
 ### 19.4 测试与度量
 

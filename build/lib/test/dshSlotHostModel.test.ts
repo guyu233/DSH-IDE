@@ -386,3 +386,25 @@ test('a revision participates only when both sides carry one', () => {
 	assert.equal(dshSlotHostSame(legacy, { ...legacy, revision: 'r1' }), true);
 	assert.equal(dshSlotHostSame({ ...legacy, revision: 'r1' }, { ...legacy, revision: 'r2' }), false);
 });
+
+test('turn process counts come from the whole turn, not from this response\'s node list', async () => {
+	// 契约 §19 S6 的消费面：槽位用 turnDataSource(turn,'turn-process') 取计数，
+	// 数据源是整个 Turn 的该 kind 节点——不是本段 response 的 nodeIds。
+	// 这条测试钉住「计数行优先用 Host 权威值」，防止退回「在 grouped 里找、找不到就现算」。
+	const { turnProcessCounts } = await import('../../../src/vs/workbench/contrib/dsh/browser/vscode/dshSlotHostModel.ts');
+	const { DshConversationNodeTree } = await import('../../../src/vs/workbench/contrib/dsh/browser/vscode/dshConversationNodeTree.ts');
+	const tree = new DshConversationNodeTree('s1');
+	// turn-process 节点**不在**本段 nodeIds 里（本段只有 tool-call），但它属于同一个 Turn。
+	tree.accept([
+		{ kind: 'tool-call', seq: 1, turn: 1, callId: 'c1' },
+		{ kind: 'turn-process', seq: 2, turn: 1, toolCallCount: 7, subagentCount: 2, messageCount: 1 },
+	]);
+	const ownNodeIds = ['tool-call:c1'];
+	assert.equal(ownNodeIds.some(id => id.startsWith('turn-process:')), false, 'the count row is outside this response');
+	// 旧写法（在 ownNodeIds 对应的 grouped 里找）会得到 undefined → 退化成现算；
+	// 新写法从 turnDataSource 拿到 Host 的权威计数。
+	const counts = turnProcessCounts(tree.turnDataSource(1, 'turn-process').get());
+	assert.deepEqual(counts, { toolCallCount: 7, subagentCount: 2, messageCount: 1 });
+	// 别的 Turn 没有计数行时返回 undefined（调用方据此退化成现算，不编造 0）。
+	assert.equal(turnProcessCounts(tree.turnDataSource(2, 'turn-process').get()), undefined);
+});
