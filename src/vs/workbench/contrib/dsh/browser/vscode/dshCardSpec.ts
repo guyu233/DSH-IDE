@@ -17,6 +17,7 @@
 //   - 新增部件只要补一份描述，不会又落回 `textContent` 拼接。
 
 import type { DshNativePart } from './dshNativePartAdapters.js';
+import { localize } from '../../../../../nls.js';
 import { workflowStatusText } from './dshTokenFormat.js';
 
 /** 一行内容的角色：标题 / 正文 / 次要说明（决定字号与颜色，不决定内容）。 */
@@ -72,21 +73,21 @@ export function dshCardSpec(part: DshNativePart): DshCardSpec | undefined {
 			if (counts.length > 0) {
 				lines.push({ role: 'meta', text: counts.join(' · ') });
 			}
-			return { title: 'Compaction', lines, open: false, collapsible: lines.length > 0 };
+			return { title: localize('dsh.card.compaction', "Compaction"), lines, open: false, collapsible: lines.length > 0 };
 		}
 		case 'dshDeliverables': {
 			const lines = part.files.map(file => ({
 				role: 'body' as const,
 				text: file.description === undefined ? file.path : `${file.path} — ${file.description}`,
 			}));
-			return { title: 'Deliverables', lines, open: true, collapsible: false };
+			return { title: localize('dsh.card.deliverables', "Deliverables"), lines, open: true, collapsible: false };
 		}
 		case 'dshFileCard': {
 			const lines = part.files.map(file => ({
 				role: 'body' as const,
 				text: file.bytes === undefined ? file.name : `${file.name} (${file.bytes} bytes)`,
 			}));
-			return { title: 'Files', lines, open: true, collapsible: false };
+			return { title: localize('dsh.card.files', "Files"), lines, open: true, collapsible: false };
 		}
 		case 'dshWorkflowRun': {
 			// 状态走 `workflowStatusText`：线协议里的是稳定的英文枚举，界面要跟 DSH 语言走。
@@ -101,7 +102,7 @@ export function dshCardSpec(part: DshNativePart): DshCardSpec | undefined {
 		}
 		case 'dshSubmittedPlan': {
 			const lines = part.markdown === '' ? [] : [{ role: 'body' as const, text: part.markdown }];
-			return { title: part.title || 'Plan', lines, open: false, collapsible: lines.length > 0 };
+			return { title: part.title || localize('dsh.card.plan', "Plan"), lines, open: false, collapsible: lines.length > 0 };
 		}
 		case 'dshUsage': {
 			// 用量是数字，不是正文：拆成 meta 行，避免和正文混在一起。
@@ -109,7 +110,7 @@ export function dshCardSpec(part: DshNativePart): DshCardSpec | undefined {
 			if (typeof part.input === 'number' || typeof part.output === 'number') {
 				lines.push({ role: 'meta', text: `in ${part.input ?? 0} · out ${part.output ?? 0}` });
 			}
-			return { title: 'Usage', lines, open: true, collapsible: false };
+			return { title: localize('dsh.card.usage', "Usage"), lines, open: true, collapsible: false };
 		}
 		default:
 			return undefined;

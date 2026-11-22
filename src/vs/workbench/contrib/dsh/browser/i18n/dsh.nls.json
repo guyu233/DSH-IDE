@@ -269,5 +269,10 @@
 	"dsh.activity.tools.running": "Calling tools",
 	"dsh.activity.tools.closed": "Called tools",
 	"dsh.activity.context.running": "Analyzing the request",
-	"dsh.activity.context.closed": "Injected context"
+	"dsh.activity.context.closed": "Injected context",
+	"dsh.card.compaction": "Compaction",
+	"dsh.card.deliverables": "Deliverables",
+	"dsh.card.files": "Files",
+	"dsh.card.plan": "Plan",
+	"dsh.card.usage": "Usage"
 }

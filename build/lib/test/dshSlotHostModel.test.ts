@@ -709,3 +709,21 @@ test('a following group scrolls to the bottom when its content grows', async () 
 	// `observe` 返回独立 disposable，必须登记，否则 observer 泄漏。
 	assert.ok(source.includes('refs.add(observer.observe(container))'), 'the observation must be disposed with the row');
 });
+
+test('card titles are localized, not hardcoded English', async () => {
+	// AGENTS §7：用户可见字符串必须走 NLS。卡片标题此前是硬编码英文（'Compaction' 等），
+	// 中文界面下永远显示英文——localization 门禁只查裸**中文**字符串，抓不到这一类。
+	const { dshCardSpec } = await import('../../../src/vs/workbench/contrib/dsh/browser/vscode/dshCardSpec.ts');
+	// 英文界面下仍是英文（source 即出厂文案）。
+	assert.equal(dshCardSpec({ kind: 'dshCompaction', summary: 's' })?.title, 'Compaction');
+	assert.equal(dshCardSpec({ kind: 'dshDeliverables', files: [] })?.title, 'Deliverables');
+	assert.equal(dshCardSpec({ kind: 'dshFileCard', files: [] })?.title, 'Files');
+	assert.equal(dshCardSpec({ kind: 'dshUsage' })?.title, 'Usage');
+	assert.equal(dshCardSpec({ kind: 'dshSubmittedPlan', markdown: 'x' })?.title, 'Plan');
+	// 且源码里这些标题必须走 localize（不是裸字符串）。
+	const { readFileSync } = await import('node:fs');
+	const source = readFileSync(new URL('../../../src/vs/workbench/contrib/dsh/browser/vscode/dshCardSpec.ts', import.meta.url), 'utf8');
+	for (const key of ['dsh.card.compaction', 'dsh.card.deliverables', 'dsh.card.files', 'dsh.card.usage', 'dsh.card.plan']) {
+		assert.ok(source.includes(`localize('${key}'`), `${key} must go through localize`);
+	}
+});

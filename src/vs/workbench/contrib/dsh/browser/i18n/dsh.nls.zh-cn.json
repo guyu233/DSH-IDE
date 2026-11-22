@@ -269,5 +269,10 @@
 	"dsh.activity.tools.running": "正在调用工具",
 	"dsh.activity.tools.closed": "已调用工具",
 	"dsh.activity.context.running": "正在分析请求",
-	"dsh.activity.context.closed": "已注入上下文"
+	"dsh.activity.context.closed": "已注入上下文",
+	"dsh.card.compaction": "压缩摘要",
+	"dsh.card.deliverables": "交付物",
+	"dsh.card.files": "文件",
+	"dsh.card.plan": "计划",
+	"dsh.card.usage": "用量"
 }

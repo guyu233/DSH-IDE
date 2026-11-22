@@ -325,5 +325,12 @@
 		"dsh.activity.tools.closed",
 		"dsh.activity.context.running",
 		"dsh.activity.context.closed"
+	],
+	"vs/workbench/contrib/dsh/browser/vscode/dshCardSpec": [
+		"dsh.card.compaction",
+		"dsh.card.deliverables",
+		"dsh.card.files",
+		"dsh.card.plan",
+		"dsh.card.usage"
 	]
 }
