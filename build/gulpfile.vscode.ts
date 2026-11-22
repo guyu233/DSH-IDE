@@ -668,14 +668,16 @@ BUILD_TARGETS.forEach(buildTarget => {
 			// 插件载荷固定按 minified 口径剔除 source map：`dsh-ide-pack` 只产出发布形态。
 			packageTask(platform, arch, sourceFolderName, appDestination, { ...opts, appOnly: true, stripSourceMaps: true })
 		);
-		const appTaskCI = task.define(`dsh-ide-${platform}-${arch}${dashed(minified)}-ci`, task.series(
-			prepareDshBuildProvenance,
-			prepareDshChatRenderTask,
-			packageAppTask,
-			() => verifyDshBuildProvenance(appStagingPath)
-		));
-		task.task(appTaskCI);
-		const appTask = task.define(`dsh-ide-${platform}-${arch}${dashed(minified)}`, task.series(
+		// 两条构建入口（发布用 `appTask` 与 CI 用 `appTaskCI`）必须完全同源。
+		//
+		// 曾经 CI 那条只有「provenance → chat-render → packageApp → verify」四步，**漏了**
+		// `compileDshPluginLayerTask` 与 `util.rimraf(appStagingPath)`：
+		//   - 漏编译插件层 → `out/vs/platform/dshClient` 不存在时直接 ENOENT（干净检出必挂），
+		//     存在旧 `out/` 时把上一版插件层静默打进 CI 产物；
+		//   - 漏清 staging → `appTask` 已经把 staging 建成「只有 runtime/」时，CI 复用同一个目录，
+		//     插件层文件根本不落盘（本机实测：staging 只剩 runtime/，install-drift 报 51 项缺失）。
+		// 现在把「前置步骤」提成一份常量，两条入口都引用它，新增步骤不会再只加到一边。
+		const dshIdeBuildPrerequisites = [
 			prepareDshBuildProvenance,
 			// 插件层（index.js / client.js / host/**）是从 `out/vs/platform/dshClient` 拷的，
 			// 而 `out/` 是 gitignore 的生成目录：不先编译，干净检出会 ENOENT；有旧 `out/` 时
@@ -683,6 +685,8 @@ BUILD_TARGETS.forEach(buildTarget => {
 			// 这里显式把 `src → out` 作为打包的前置步骤，产物永远与源码同源。
 			compileDshPluginLayerTask,
 			util.rimraf(appStagingPath),
+		];
+		const dshIdePackageTail: task.Task[] = [
 			copyCodiconsTask,
 			cleanExtensionsBuildTask,
 			compileNonNativeExtensionsBuildTask,
@@ -691,7 +695,16 @@ BUILD_TARGETS.forEach(buildTarget => {
 			esbuildBundleTask,
 			prepareDshChatRenderTask,
 			packageAppTask,
-			() => verifyDshBuildProvenance(appStagingPath)
+			() => verifyDshBuildProvenance(appStagingPath),
+		];
+		const appTaskCI = task.define(`dsh-ide-${platform}-${arch}${dashed(minified)}-ci`, task.series(
+			...dshIdeBuildPrerequisites,
+			...dshIdePackageTail
+		));
+		task.task(appTaskCI);
+		const appTask = task.define(`dsh-ide-${platform}-${arch}${dashed(minified)}`, task.series(
+			...dshIdeBuildPrerequisites,
+			...dshIdePackageTail
 		));
 		task.task(appTask);
 		// 只产出 minified 载荷：标准构建（保留 *.js.map）已移除——source map 占安装后体积的 41%，
