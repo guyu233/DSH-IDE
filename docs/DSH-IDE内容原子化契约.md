@@ -1162,7 +1162,7 @@ DSH-IDE 当前把上游高频增量流实现成了：
 
 ### 19.3 修复计划
 
-> **2026-11-23 落地状态（CHK-320/321/322/324）**：S0（局部 revision）、S1（display signature）、S2（slot host 行级增量渲染）、S3（稳定 request 身份）、S4（fingerprint 精确化）已实现并有单测；S5（自动滚动 hold）、S6 的剩余消费面仍为 PENDING。S0 的落地方式：`DshConversationNodeTree.revisionOf(nodeId)` 取该 key 自己的 `source().version`，`revisionFor(nodeIds)` 按成员顺序拼稳定串，`dshSlotHostRef` 带上 `revision`、`dshSlotHostSame` 在双方都有时比较它；整棵树的 `treeVersion` 只留作 diagnostics。下面各小节保留原始计划原文，不再逐段改写成完成报告。
+> **2026-11-23 落地状态（CHK-320/321/322/324/327）**：S0（局部 revision）、S1（display signature）、S2（slot host 行级增量渲染）、S3（稳定 request 身份）、S4（fingerprint 精确化）、S5（自动滚动 hold）已实现并有单测；S6 的剩余消费面仍为 PENDING。S0 的落地方式：`DshConversationNodeTree.revisionOf(nodeId)` 取该 key 自己的 `source().version`，`revisionFor(nodeIds)` 按成员顺序拼稳定串，`dshSlotHostRef` 带上 `revision`、`dshSlotHostSame` 在双方都有时比较它；整棵树的 `treeVersion` 只留作 diagnostics。S5 的落地方式：`dshScrollFollow.ts` 是纯状态机（following / reading），`dshChatAutoScrollHold.ts` 在阅读锁期间持有原生 `IChatWidget.holdAutoScroll()`（= `ChatListWidget.acquireAutoScrollHold()` 的引用计数暂停），发送与「回到底部」是两条显式出口；不改上游文件。下面各小节保留原始计划原文，不再逐段改写成完成报告。
 
 #### S0：局部 revision 替代全局 treeVersion
 
@@ -1307,6 +1307,15 @@ DSH-IDE 当前把上游高频增量流实现成了：
 - 用户上滚后，流式高度变化不把视口拉回底部；
 - 新用户消息发送后可恢复一次跟随；
 - 点回到底部后恢复自动跟随。
+
+**落地（2026-11-23，CHK-327）**：`dshScrollFollow.ts` 是纯状态机（`following` / `reading`），
+`dshChatAutoScrollHold.ts` 在 `reading` 期间持有原生 `IChatWidget.holdAutoScroll()`
+（即 `ChatListWidget.acquireAutoScrollHold()` 的引用计数暂停），在 `onDidAcceptInput`
+与「滚动回到底部」两个出口释放。**不改上游 `ChatListWidget` / `chatWidget`**。
+三条验收各有单测（`dshScrollFollow.test.ts` 5 项）。**一处与原始计划的偏差**：计划写的是
+「当用户不在底部时，不因 DSH 内部节点高度变化强制 revealLastItem」——本仓没有自己的
+reveal 调用点，`revealLastItem` 完全由原生在 `_withPersistedAutoScroll` 里做，因此实现手段是
+**让原生 `isAutoScrollHeld` 为真**，而不是去改 DSH 的渲染代码。真机 PENDING。
 
 #### S6：按 key observable store
 

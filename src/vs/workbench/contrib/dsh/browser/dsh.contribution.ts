@@ -45,6 +45,7 @@ import { IInstantiationService } from '../../../../platform/instantiation/common
 import { IFileService } from '../../../../platform/files/common/files.js';
 import { DshAttachmentFileSystemProvider } from './vscode/dshAttachmentFileSystem.js';
 import { DshChatInputDockContribution } from './vscode/dshChatInputDockContribution.js';
+import { DshChatAutoScrollHoldContribution } from './vscode/dshChatAutoScrollHold.js';
 import { CommandsRegistry } from '../../../../platform/commands/common/commands.js';
 import './vscode/dshAgentSessionsController.js';
 
@@ -118,6 +119,9 @@ class DshClientContribution extends Disposable implements IWorkbenchContribution
 		// 它们是 DSH 输入区的一部分，但本仓的输入区是原生 ChatInputPart，没有消费点。
 		// 由贡献点挂在每个原生 chat widget 的输入卡上下方，无 occupant 时不占位。
 		this._register(instantiationService.createInstance(DshChatInputDockContribution));
+		// 自动滚动归属（契约 §19 S5）：用户上滚阅读时持有原生 `holdAutoScroll()`，
+		// 流式高度变化不再把视口拉回底部；发送或点回到底部时释放。
+		this._register(instantiationService.createInstance(DshChatAutoScrollHoldContribution));
 		// 会话附件的只读 URI 方案：原生 Chat 没有图片进度部件，附件以 `dsh-attachment:` 引用
 		// 出现，由 VS Code 自己的查看器经 Host 官方附件服务读字节。
 		this._register(new DshAttachmentFileSystemProvider(client, fileService));
