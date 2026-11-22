@@ -911,3 +911,44 @@ test('a compaction summary given as content blocks is not dropped', () => {
 	const empty = second.nodes.find(entry => entry.kind === 'compaction' && entry.seq === 6) as { summary: string | null } | undefined;
 	assert.equal(empty?.summary, null);
 });
+
+test('assistant/attempt usage chunks are counted, not only assistant/message', () => {
+	// 官方 `usageOf()` 同时对 `assistant/attempt` 生效：读 `data.stream` 里最后一个 usage chunk。
+	// 漏接时，只有 attempt 的用量（重试链里被覆盖的那次）会整个丢掉。
+	const state = createDshIdeConversationState();
+	const project = (event: Record<string, unknown>) => projectDshIdeConversation(state, { type: 'event', event });
+	project({ type: 'turn/start', seq: 1, time: 1, data: { turn: 1 } });
+	project({
+		type: 'assistant/attempt', seq: 2, time: 2, data: {
+			turn: 1, step: 0,
+			stream: [
+				{ chunk: { type: 'text', text: 'x' } },
+				// 最后一个 usage 才是最终样本；前面的中途样本不能算总量。
+				{ chunk: { type: 'usage', usage: { inputTokens: 3, outputTokens: 1 } } },
+				{ chunk: { type: 'usage', usage: { inputTokens: 7, outputTokens: 2, cacheReadTokens: 5 } } },
+			],
+		},
+	});
+	project({ type: 'turn/end', seq: 3, time: 3, data: { turn: 1, reason: { kind: 'completed' } } });
+	const tail = project({ type: 'turn/end', seq: 3, time: 3, data: { turn: 1, reason: { kind: 'completed' } } })
+		.nodes.find(node => node.kind === 'turn-tail') as { tokenUsage?: { input?: number; output?: number; cacheRead?: number } } | undefined;
+	assert.equal(tail?.tokenUsage?.input, 7, 'the last usage chunk must win, not the first');
+	assert.equal(tail?.tokenUsage?.output, 2);
+	assert.equal(tail?.tokenUsage?.cacheRead, 5);
+});
+
+test('llm/retry-started clears the replacement slot so the retried attempt counts again', () => {
+	// 官方：`llm/retry-started` 清空同 (turn, step) 的 last 槽；否则「同 step 重试」会被当成
+	// 「同一 step 再报一次」而替换掉，总量比官方偏小。
+	const state = createDshIdeConversationState();
+	const project = (event: Record<string, unknown>) => projectDshIdeConversation(state, { type: 'event', event });
+	project({ type: 'turn/start', seq: 1, time: 1, data: { turn: 1 } });
+	project({ type: 'assistant/message', seq: 2, time: 2, data: { turn: 1, step: 0, message: { content: [{ type: 'text', text: 'first' }] }, usage: { inputTokens: 10, outputTokens: 1 } } });
+	// 同 step 的 retry-started：槽清空，下一次样本应「新增」而不是「替换」。
+	project({ type: 'llm/retry-started', seq: 3, time: 3, data: { turn: 1, step: 0 } });
+	project({ type: 'assistant/message', seq: 4, time: 4, data: { turn: 1, step: 0, message: { content: [{ type: 'text', text: 'second' }] }, usage: { inputTokens: 20, outputTokens: 2 } } });
+	const tail = project({ type: 'turn/end', seq: 5, time: 5, data: { turn: 1, reason: { kind: 'completed' } } })
+		.nodes.find(node => node.kind === 'turn-tail') as { tokenUsage?: { input?: number; output?: number } } | undefined;
+	assert.equal(tail?.tokenUsage?.input, 30, 'after a retry-started, both attempts count');
+	assert.equal(tail?.tokenUsage?.output, 3);
+});

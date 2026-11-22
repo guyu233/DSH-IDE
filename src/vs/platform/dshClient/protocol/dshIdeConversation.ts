@@ -465,6 +465,31 @@ function applyDurable(state: DshIdeConversationState, event: Record<string, unkn
 		return;
 	}
 
+	if (type === 'assistant/attempt') {
+		// 官方 `usageOf()` 对 `assistant/attempt` 同样生效：它读 `data.stream` 里最后一个 `usage`
+		// chunk（`lastAssistantStreamChunk(stream, 'usage')`）。重试链里被覆盖的那次 attempt 只有这个
+		// 入口，漏接会让「重试的同一 step」少算一次、总数比官方偏小。
+		const step = numberOf(data['step']) ?? 0;
+		const usage = streamUsageOf(data['stream']);
+		if (usage !== undefined) {
+			const tail = turnTailOf(state, turn);
+			const value = (input: unknown): number => typeof input === 'number' && Number.isFinite(input) ? input : 0;
+			const maybe = (input: unknown): number | undefined => typeof input === 'number' && Number.isFinite(input) ? input : undefined;
+			const delta = {
+				input: value(usage.input ?? usage.inputTokens),
+				output: value(usage.output ?? usage.outputTokens),
+				cacheRead: maybe(usage.cacheRead ?? usage.cacheReadTokens),
+				cacheWrite: maybe(usage.cacheWrite ?? usage.cacheWriteTokens),
+				reasoning: maybe(usage.reasoning ?? usage.reasoningTokens),
+			};
+			if (delta.input + delta.output + (delta.cacheRead ?? 0) + (delta.cacheWrite ?? 0) + (delta.reasoning ?? 0) > 0) {
+				noteTurnUsage(tail, step, delta);
+			}
+		}
+		noteTurnStep(state, turn, step);
+		return;
+	}
+
 	if (type === 'assistant/message') {
 		const message = isRecord(data['message']) ? data['message'] : {};
 		const step = numberOf(data['step']) ?? numberOf(message['step']) ?? 0;
@@ -604,6 +629,19 @@ function applyDurable(state: DshIdeConversationState, event: Record<string, unkn
 			put(state, `seq:${seq}`, { kind: 'turn-max-tokens', seq, time, turn, step });
 		}
 		putTurnTail(state, turn, seq, time, false);
+		return;
+	}
+
+	if (type === 'llm/retry-started') {
+		// 官方 `tokenUsageProjectionDefinition.apply`：`llm/retry-started` 把**同 (turn, step)** 的
+		// 替换槽清空，使重试的 attempt 重新计入总量（而不是被当成「同一 step 再报一次」替换掉）。
+		// 漏接这一步时，「同 step 重试」会先扣掉旧样本再加新样本，总量比官方偏小。
+		const step = numberOf(data['step']) ?? 0;
+		const tail = turnTailOf(state, turn);
+		if (tail.lastUsageStep === step) {
+			tail.lastUsageStep = undefined;
+			tail.lastUsageSample = undefined;
+		}
 		return;
 	}
 
@@ -931,6 +969,27 @@ function noteTurnAssistant(state: DshIdeConversationState, turn: number, seq: nu
 		reasoning: optional(usage?.reasoning ?? usage?.reasoningTokens),
 	};
 	if (delta.input + delta.output + (delta.cacheRead ?? 0) + (delta.cacheWrite ?? 0) + (delta.reasoning ?? 0) > 0) {
+		noteTurnUsage(tail, step, delta);
+	}
+	state.turnTails.set(turn, tail);
+}
+
+
+/**
+ * 把一次用量样本计入该 Turn 的总量（官方 `tokenUsageProjectionDefinition.apply`）。
+ *
+ * 官方 `usageOf()` 对 **`assistant/message` 与 `assistant/attempt` 都生效**：前者读 `data.usage`，
+ * 后者读 `data.stream` 里最后一个 `usage` chunk。两者必须共用这一套 `addReplacing` 语义，
+ * 否则「重试的同一 step」会被算两遍。抽取成函数正是为了让两条入口不可能走偏。
+ */
+function noteTurnUsage(tail: DshIdeTurnTailState, step: number, delta: {
+	readonly input: number;
+	readonly output: number;
+	readonly cacheRead?: number;
+	readonly cacheWrite?: number;
+	readonly reasoning?: number;
+}): void {
+	if (delta.input + delta.output + (delta.cacheRead ?? 0) + (delta.cacheWrite ?? 0) + (delta.reasoning ?? 0) > 0) {
 		const current = tail.usage ?? { input: 0, output: 0, cacheReadComplete: true, cacheWriteComplete: true, reasoningComplete: true };
 		// 官方 `tokenUsageProjectionDefinition`：同一 `(turn, step)` 再来一个样本时用 `addReplacing`
 		// 先扣掉上一次，再计入新样本；`llm/retry-started` 会清掉那个槽，使重试的 attempt 重新计入。
@@ -970,7 +1029,6 @@ function noteTurnAssistant(state: DshIdeConversationState, turn: number, seq: nu
 			reasoningComplete: reasoning.complete,
 		};
 	}
-	state.turnTails.set(turn, tail);
 }
 
 /** 记录该 Turn 的 answerStep（过程组要用最大 step）。 */
@@ -1590,6 +1648,32 @@ function tokenUsageOf(value: Record<string, unknown>): DshIdeTokenUsageDelta | u
 		...(numberOf(value['cacheWriteTokens']) === undefined ? {} : { cacheWriteTokens: numberOf(value['cacheWriteTokens']) }),
 		...(numberOf(value['reasoningTokens']) === undefined ? {} : { reasoningTokens: numberOf(value['reasoningTokens']) }),
 	};
+}
+
+/**
+ * 官方 `lastAssistantStreamChunk(stream, 'usage')?.usage`：取流里**最后**一个 usage chunk。
+ *
+ * 为什么必须是最后一个：`assistant/attempt` 的 stream 会带若干 sampling 片段，用量只随
+ * 最终 settlement 更新；取第一个会把中途样本当成总量。
+ * 形状（官方 `AssistantStreamChunk`）：`[{ type: 'usage', usage: {...} }, ...]`；
+ * 也接受已被包成 `{ chunk: {...} }` 的变体，两种都在 `stream` 数组里见到过。
+ */
+function streamUsageOf(stream: unknown): Record<string, unknown> | undefined {
+	if (!Array.isArray(stream)) {
+		return undefined;
+	}
+	for (let index = stream.length - 1; index >= 0; index--) {
+		const chunk = stream[index];
+		const candidate = isRecord(chunk) && isRecord(chunk['chunk']) ? chunk['chunk'] : chunk;
+		if (!isRecord(candidate) || candidate['type'] !== 'usage') {
+			continue;
+		}
+		const usage = candidate['usage'];
+		if (isRecord(usage)) {
+			return usage;
+		}
+	}
+	return undefined;
 }
 
 function providerMetadataOf(value: unknown): { provider: string; model: string } | undefined {
