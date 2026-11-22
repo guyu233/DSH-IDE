@@ -8,12 +8,13 @@
 // 基数与作用域必须与官方 SlotMap 一致，否则接入 occupant 时选出规则会错
 // （list 排序、chain 选举、hoc 包层）。声明幂等：重复登记同一份清单不会抛错。
 //
-// 已有消费点的槽：`conversation.chat.node`、`tool.call.toolview`、
-// `conversation.chat.turnTail`、`shell.quota-notice`、`conversation.chat.reasoning.body`、
-// `conversation.chat.assistant-actions`、`conversation.chat.user.before`、
-// `conversation.chat.text-interaction`、`conversation.chat.aside`。
-// 仍只声明、尚无消费点的槽：`conversation.chat.markdown.fence`、
+// 全部 12 个槽都已有生产消费点（2026-11-23）：`conversation.chat.node`、
+// `tool.call.toolview`、`conversation.chat.turnTail`、`shell.quota-notice`、
+// `conversation.chat.reasoning.body`、`conversation.chat.assistant-actions`、
+// `conversation.chat.user.before`、`conversation.chat.text-interaction`、
+// `conversation.chat.aside`、`conversation.chat.markdown.fence`、
 // `conversation.input.dock`、`conversation.composer.dock`。
+// `DshSlotRegistry.onDidChange` 已由输入区两个 dock 宿主消费（插件热插拔重画）。
 
 import { DshSlotRegistry } from './dshSlotRegistry.js';
 import type { DshSlotDeclaration } from './dshSlotTypes.js';
@@ -131,7 +132,7 @@ export const DSH_USER_BEFORE_SLOT = 'conversation.chat.user.before';
 /** 节点渲染扩展点的槽位名（官方 keyed / session，key 是 node kind）。 */
 export const DSH_NODE_SLOT = 'conversation.chat.node';
 
-/** 差异表 §2 里仍无 occupant 的 Chat 槽位。 */
+/** Chat 层全部槽位声明（12 个，与官方 SlotMap 的基数/作用域逐项对齐）。 */
 export const DSH_CHAT_SLOT_DECLARATIONS: readonly DshSlotDeclaration[] = [
 	{ name: DSH_NODE_SLOT, cardinality: 'keyed', scope: 'session', ownerProps: ['node'] },
 	{ name: DSH_TOOL_VIEW_SLOT, cardinality: 'keyed', scope: 'session', ownerProps: ['toolCall'] },
@@ -163,8 +164,8 @@ export function declareDshChatSlots(registry: DshSlotDeclarer): void {
 /**
  * 插件内共用的 Chat 槽位注册表。
  *
- * 现在还没有 occupant 与 ChatList 接线；先让声明活在运行期对象上，
- * 后续接第一个 occupant 时不用再把清单复制到别处。
+ * 声明与消费点共用同一个运行期对象：`dshSlotHostContentPart` 等在生产路径上
+ * 直接 `resolve` 它，测试也用它注册临时 occupant。
  */
 export const dshChatSlotRegistry = new DshSlotRegistry();
 declareDshChatSlots(dshChatSlotRegistry);
