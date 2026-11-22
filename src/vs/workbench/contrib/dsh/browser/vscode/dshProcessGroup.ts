@@ -429,21 +429,36 @@ export function summarizeProcess(nodes: readonly DshActivityNode[], hasAnswer: b
 
 /** 活动名的用户可见文案。未列出的活动原样显示枚举名，不猜中文。 */
 export function processActivityText(activity: DshProcessActivity): string {
+	return processActivityLabel(activity, 'closed');
+}
+
+/**
+ * 组头文案（官方 `conversation-nodes/README.md`「Group-title rules」的类别表）。
+ *
+ * 官方给的是**两套**标签：`Running label` 与 `Closed label`——
+ * 运行中的组用「正在做什么」（Reading files / Running commands），
+ * 已结束的组用「做过什么」（Read files / Ran commands）。
+ * 历史实现只有一套小写单词（`read` / `commands`），两套都没有落地。
+ *
+ * @param activity 类别
+ * @param state `running` = 组仍在跑；`closed` = 组已结束
+ */
+export function processActivityLabel(activity: DshProcessActivity, state: 'running' | 'closed'): string {
 	switch (activity) {
-		case 'read': return localize('dsh.activity.read', "read");
-		case 'readImage': return localize('dsh.activity.readImage', "read image");
-		case 'search': return localize('dsh.activity.search', "search");
-		case 'write': return localize('dsh.activity.write', "write");
-		case 'edit': return localize('dsh.activity.edit', "edit");
-		case 'commands': return localize('dsh.activity.commands', "commands");
-		case 'code': return localize('dsh.activity.code', "code");
-		case 'webSearch': return localize('dsh.activity.webSearch', "web search");
-		case 'webFetch': return localize('dsh.activity.webFetch', "web fetch");
-		case 'subagents': return localize('dsh.activity.subagents', "subagents");
-		case 'plan': return localize('dsh.activity.plan', "plan");
-		case 'questions': return localize('dsh.activity.questions', "questions");
-		case 'tools': return localize('dsh.activity.tools', "tools");
-		case 'context': return localize('dsh.activity.context', "context");
+		case 'read': return state === 'running' ? localize('dsh.activity.read.running', "Reading files") : localize('dsh.activity.read.closed', "Read files");
+		case 'readImage': return state === 'running' ? localize('dsh.activity.readImage.running', "Reading images") : localize('dsh.activity.readImage.closed', "Read images");
+		case 'search': return state === 'running' ? localize('dsh.activity.search.running', "Searching code") : localize('dsh.activity.search.closed', "Searched code");
+		case 'write': return state === 'running' ? localize('dsh.activity.write.running', "Writing files") : localize('dsh.activity.write.closed', "Wrote files");
+		case 'edit': return state === 'running' ? localize('dsh.activity.edit.running', "Editing files") : localize('dsh.activity.edit.closed', "Edited files");
+		case 'commands': return state === 'running' ? localize('dsh.activity.commands.running', "Running commands") : localize('dsh.activity.commands.closed', "Ran commands");
+		case 'code': return state === 'running' ? localize('dsh.activity.code.running', "Running code") : localize('dsh.activity.code.closed', "Ran code");
+		case 'webSearch': return state === 'running' ? localize('dsh.activity.webSearch.running', "Searching the web") : localize('dsh.activity.webSearch.closed', "Searched the web");
+		case 'webFetch': return state === 'running' ? localize('dsh.activity.webFetch.running', "Visiting web pages") : localize('dsh.activity.webFetch.closed', "Visited web pages");
+		case 'subagents': return state === 'running' ? localize('dsh.activity.subagents.running', "Coordinating subagents") : localize('dsh.activity.subagents.closed', "Coordinated subagents");
+		case 'plan': return state === 'running' ? localize('dsh.activity.plan.running', "Updating the plan") : localize('dsh.activity.plan.closed', "Updated the plan");
+		case 'questions': return state === 'running' ? localize('dsh.activity.questions.running', "Waiting for your action") : localize('dsh.activity.questions.closed', "Asked questions");
+		case 'tools': return state === 'running' ? localize('dsh.activity.tools.running', "Calling tools") : localize('dsh.activity.tools.closed', "Called tools");
+		case 'context': return state === 'running' ? localize('dsh.activity.context.running', "Analyzing the request") : localize('dsh.activity.context.closed', "Injected context");
 	}
 }
 
@@ -457,8 +472,10 @@ export function hiddenProcessLine(nodes: readonly { readonly kind: string; reado
 		running: node.kind === 'tool-call' && node.callId !== undefined && node.callId !== '' && !settled.has(node.callId),
 	})), true);
 	// 活动名是内部枚举（`read` / `webSearch`），直接拼给用户等于没本地化。
+	// 该行只在过程被收起时画：有正在跑的就用 running 标签，否则用 closed 标签。
+	const state = summary.running > 0 ? 'running' : 'closed';
 	const counts = Object.entries(summary.counts).flatMap(([name, count]) => typeof count === 'number'
-		? [`${processActivityText(name as DshProcessActivity)} ${count}`]
+		? [`${processActivityLabel(name as DshProcessActivity, state)} ${count}`]
 		: []);
 	if (counts.length === 0) {
 		return undefined;

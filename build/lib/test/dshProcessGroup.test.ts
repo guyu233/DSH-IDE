@@ -8,7 +8,7 @@
 
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { describeTurnProcess, groupPositionOf, groupTurnProcesses, hiddenProcessLine, isSubagentDelegationTool, latestExchangeTurns, processActivityOf, processActivityText, processLineFromSnapshot, summarizeProcess, turnProcessAlwaysOpen, visibleProcessKeys, type DshGroupableNode } from '../../../src/vs/workbench/contrib/dsh/browser/vscode/dshProcessGroup.ts';
+import { describeTurnProcess, groupPositionOf, groupTurnProcesses, hiddenProcessLine, isSubagentDelegationTool, latestExchangeTurns, processActivityLabel, processActivityOf, processActivityText, processLineFromSnapshot, summarizeProcess, turnProcessAlwaysOpen, visibleProcessKeys, type DshGroupableNode, type DshProcessActivity } from '../../../src/vs/workbench/contrib/dsh/browser/vscode/dshProcessGroup.ts';
 
 function node(partial: DshGroupableNode): DshGroupableNode {
 	return partial;
@@ -208,7 +208,8 @@ test('a hidden process becomes one count line and an open call stays marked', ()
 		{ kind: 'tool-call', name: 'read', callId: 'a' },
 		{ kind: 'tool-result', name: 'bash', callId: 'b' },
 		{ kind: 'tool-call', name: 'grep', callId: 'c' },
-	]), 'read 1, commands 1, search 1 · read, grep');
+	// 有未结算的 tool-call（read / grep）→ 用 running 标签；bash 已结算但仍计数。
+	]), 'Reading files 1, Running commands 1, Searching code 1 · read, grep');
 	assert.equal(hiddenProcessLine([{ kind: 'assistant' }]), undefined);
 });
 
@@ -315,4 +316,42 @@ test('a reply or steering splits the turn into separate process segments', () =>
 	], new Map([[1, 'completed']]));
 	assert.equal(noBoundary.segments.length, 1, 'adjacent tools stay in one segment');
 	assert.deepEqual([...noBoundary.segments[0].processKeys], ['t1', 't2']);
+});
+
+test('activity labels have distinct running and closed forms', () => {
+	// 官方「Group-title rules」的类别表给的是**两套**标签：
+	// Running label（Reading files / Running commands）与 Closed label（Read files / Ran commands）。
+	// 历史实现只有一套小写单词，两套都没落地。
+	const pairs: readonly [DshProcessActivity, string, string][] = [
+		['read', 'Reading files', 'Read files'],
+		['readImage', 'Reading images', 'Read images'],
+		['search', 'Searching code', 'Searched code'],
+		['write', 'Writing files', 'Wrote files'],
+		['edit', 'Editing files', 'Edited files'],
+		['commands', 'Running commands', 'Ran commands'],
+		['code', 'Running code', 'Ran code'],
+		['webSearch', 'Searching the web', 'Searched the web'],
+		['webFetch', 'Visiting web pages', 'Visited web pages'],
+		['subagents', 'Coordinating subagents', 'Coordinated subagents'],
+		['plan', 'Updating the plan', 'Updated the plan'],
+		['questions', 'Waiting for your action', 'Asked questions'],
+		['tools', 'Calling tools', 'Called tools'],
+		['context', 'Analyzing the request', 'Injected context'],
+	];
+	for (const [activity, running, closed] of pairs) {
+		assert.equal(processActivityLabel(activity, 'running'), running, `${activity} running label`);
+		assert.equal(processActivityLabel(activity, 'closed'), closed, `${activity} closed label`);
+		assert.notEqual(running, closed, `${activity} must have two distinct labels`);
+	}
+});
+
+test('the collapsed line picks the label set from whether the group is still running', () => {
+	// 有未结算的 tool-call → running 文案；全部结算 → closed 文案。
+	const runningLine = hiddenProcessLine([{ kind: 'tool-call', name: 'bash', callId: 'c1' }]);
+	assert.ok(runningLine !== undefined && runningLine.includes('Running commands'), `expected running label in "${runningLine}"`);
+	const closedLine = hiddenProcessLine([
+		{ kind: 'tool-call', name: 'bash', callId: 'c1' },
+		{ kind: 'tool-result', name: 'bash', callId: 'c1' },
+	]);
+	assert.ok(closedLine !== undefined && closedLine.includes('Ran commands'), `expected closed label in "${closedLine}"`);
 });

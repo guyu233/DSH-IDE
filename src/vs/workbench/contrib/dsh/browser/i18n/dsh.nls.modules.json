@@ -295,5 +295,35 @@
 	],
 	"vs/workbench/contrib/dsh/browser/vscode/dshChatModel": [
 		"dsh.turn.interrupted"
+	],
+	"vs/workbench/contrib/dsh/browser/vscode/dshProcessGroup": [
+		"dsh.activity.read.running",
+		"dsh.activity.read.closed",
+		"dsh.activity.readImage.running",
+		"dsh.activity.readImage.closed",
+		"dsh.activity.search.running",
+		"dsh.activity.search.closed",
+		"dsh.activity.write.running",
+		"dsh.activity.write.closed",
+		"dsh.activity.edit.running",
+		"dsh.activity.edit.closed",
+		"dsh.activity.commands.running",
+		"dsh.activity.commands.closed",
+		"dsh.activity.code.running",
+		"dsh.activity.code.closed",
+		"dsh.activity.webSearch.running",
+		"dsh.activity.webSearch.closed",
+		"dsh.activity.webFetch.running",
+		"dsh.activity.webFetch.closed",
+		"dsh.activity.subagents.running",
+		"dsh.activity.subagents.closed",
+		"dsh.activity.plan.running",
+		"dsh.activity.plan.closed",
+		"dsh.activity.questions.running",
+		"dsh.activity.questions.closed",
+		"dsh.activity.tools.running",
+		"dsh.activity.tools.closed",
+		"dsh.activity.context.running",
+		"dsh.activity.context.closed"
 	]
 }
