@@ -76,3 +76,33 @@ test('the two docks are independent projections of their own slot', () => {
 		composer.dispose();
 	}
 });
+
+test('a single queued message renders its text preview on the queue row', async () => {
+	const { dshQueueDockRows } = await import('../../../src/vs/workbench/contrib/dsh/browser/vscode/dshInputDock.ts');
+	const rows = dshQueueDockRows([{ id: 'm1', sourceKind: 'user', content: [{ type: 'text', text: '排队的问题' }] }]);
+	assert.equal(rows.length, 1);
+	assert.equal(rows[0].id, 'queue');
+	assert.equal(rows[0].label, '排队的问题');
+	assert.equal(rows[0].order, 20, 'the official queue dock registers at order 20');
+});
+
+test('multiple queued messages collapse into a count row with the first preview', async () => {
+	const { dshQueueDockRows } = await import('../../../src/vs/workbench/contrib/dsh/browser/vscode/dshInputDock.ts');
+	const rows = dshQueueDockRows([
+		{ id: 'm1', sourceKind: 'user', content: [{ type: 'text', text: 'first' }] },
+		{ id: 'm2', sourceKind: 'user', content: [{ type: 'text', text: 'second' }] },
+	]);
+	assert.equal(rows.length, 1);
+	assert.equal(rows[0].description, 'first', 'the header keeps the first preview');
+	assert.match(rows[0].label, /2/);
+});
+
+test('a queued message with only attachments previews the attachment names', async () => {
+	const { dshQueueDockRows } = await import('../../../src/vs/workbench/contrib/dsh/browser/vscode/dshInputDock.ts');
+	const rows = dshQueueDockRows([{ id: 'm1', sourceKind: 'user', content: [{ type: 'image', name: 'shot.png' }, { type: 'file', name: 'notes.md' }] }]);
+	assert.equal(rows.length, 1);
+	assert.equal(rows[0].label, 'shot.png, notes.md');
+	// 正文与附件都没有时不画空行。
+	assert.deepEqual(dshQueueDockRows([{ id: 'm2', sourceKind: 'user', content: [] }]), []);
+	assert.deepEqual(dshQueueDockRows(undefined), []);
+});

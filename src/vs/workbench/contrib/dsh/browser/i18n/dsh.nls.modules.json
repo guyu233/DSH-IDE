@@ -268,5 +268,8 @@
 	"vs/workbench/contrib/dsh/browser/vscode/dshChatInputDock": [
 		"dsh.inputDock.label",
 		"dsh.composerDock.label"
+	],
+	"vs/workbench/contrib/dsh/browser/vscode/dshInputDock": [
+		"dsh.queue.count"
 	]
 }

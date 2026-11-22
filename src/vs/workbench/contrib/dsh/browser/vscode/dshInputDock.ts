@@ -16,6 +16,8 @@
 // `DshChatInputDock` 负责；投影本身零 DOM、可单测，避免把「有没有 occupant」与
 // 「画成什么」混在一起。
 
+import { localize } from '../../../../../nls.js';
+import type { DshIdeInboxMessage } from '../../../../../platform/dshClient/protocol/dshIdeProtocol.js';
 import { dshChatSlotRegistry, DSH_COMPOSER_DOCK_SLOT, DSH_INPUT_DOCK_SLOT } from './dshChatSlots.js';
 
 /** 一个 dock occupant 投影出来的一行。 */
@@ -104,4 +106,46 @@ function projectDockRows(slot: string, sessionId: string | undefined, props: Rea
 	// 官方 list 按 order 升序；同 order 用 id 稳定排序，保证多次渲染顺序一致（不靠注册顺序）。
 	rows.sort((left, right) => left.order - right.order || left.id.localeCompare(right.id));
 	return rows;
+}
+
+/**
+ * 排队消息 → `conversation.input.dock` 的一行（官方 `QueueDock` 的等价投影）。
+ *
+ * 官方 `queueDockEntry` 注册在 `conversation.input.dock`，`id: 'queue'`、`order: 20`；
+ * 数据源是 `inbox` 投影的 `next-turn`。本仓把「排队行」也投影成 dock 行，
+ * 因此队列与其它 dock occupant 共用同一套 list 语义（order 排序、无 occupant 不占位）。
+ *
+ * 与官方一致的行为：一条时直接显示该条预览；多条时显示「N 条排队」的计数头
+ * （是否展开由调用方的折叠态决定）；预览取 text 块，没有则退回附件名，绝不画空行；
+ * 队列为空返回空数组。
+ */
+export function dshQueueDockRows(messages: readonly DshIdeInboxMessage[] | undefined): readonly DshInputDockRow[] {
+	const rows = (messages ?? []).filter(message => message !== null && typeof message === 'object');
+	if (rows.length === 0) {
+		return [];
+	}
+	const attachments = (message: DshIdeInboxMessage): readonly string[] => message.content.flatMap(block => {
+		if (block['type'] !== 'image' && block['type'] !== 'file') {
+			return [];
+		}
+		const name = typeof block['name'] === 'string' && block['name'] !== '' ? block['name'] : undefined;
+		return name === undefined ? [] : [name];
+	});
+	const textOf = (message: DshIdeInboxMessage): string | undefined => {
+		const texts = message.content.flatMap(block => block['type'] === 'text' && typeof block['text'] === 'string' && block['text'] !== '' ? [block['text']] : []);
+		return texts.length === 0 ? undefined : texts.join('\n');
+	};
+	const previewOf = (message: DshIdeInboxMessage): string => textOf(message) ?? attachments(message).join(', ');
+	if (rows.length === 1) {
+		const preview = previewOf(rows[0]);
+		// 一条时也必须是非空行：正文与附件都没有就不画（与官方 `textOf`/`queueAttachments` 的容忍一致）。
+		return preview === '' ? [] : [{ id: 'queue', label: preview, order: 20 }];
+	}
+	const first = previewOf(rows[0]);
+	return [{
+		id: 'queue',
+		label: localize('dsh.queue.count', "{0} queued", rows.length),
+		...(first === '' ? {} : { description: first }),
+		order: 20,
+	}];
 }

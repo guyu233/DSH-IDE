@@ -19,7 +19,8 @@ import { $ } from '../../../../../base/browser/dom.js';
 import { Disposable } from '../../../../../base/common/lifecycle.js';
 import { localize } from '../../../../../nls.js';
 import { dshChatSlotRegistry } from './dshChatSlots.js';
-import { dshComposerDockRows, dshInputDockRows, type DshInputDockRow, type DshInputZoneOwner } from './dshInputDock.js';
+import { dshComposerDockRows, dshInputDockRows, dshQueueDockRows, type DshInputDockRow, type DshInputZoneOwner } from './dshInputDock.js';
+import type { DshIdeInboxMessage } from '../../../../../platform/dshClient/protocol/dshIdeProtocol.js';
 
 /** 宿主需要的宿主能力：只执行命令，不读也不写会话事实。 */
 export interface DshInputDockHost {
@@ -63,13 +64,15 @@ export class DshChatInputDock extends Disposable {
 	 * `owner` 只对 `conversation.input.dock` 有意义（官方 owner 是 `InputZone`）；
 	 * `composer.dock` 只用会话 id。两者都允许缺省，表示「当前没有会话」。
 	 */
-	update(sessionId: string | undefined, owner?: DshInputZoneOwner): void {
+	update(sessionId: string | undefined, owner?: DshInputZoneOwner, inbox?: readonly DshIdeInboxMessage[]): void {
 		this.sessionId = sessionId;
 		this.owner = owner;
+		this.inbox = inbox;
 		this.render();
 	}
 
 	private sessionId: string | undefined;
+	private inbox: readonly DshIdeInboxMessage[] | undefined;
 
 	private render(): void {
 		for (const ref of this.rowRefs) {
@@ -77,8 +80,11 @@ export class DshChatInputDock extends Disposable {
 		}
 		this.rowRefs.clear();
 		this.domNode.replaceChildren();
+		// `conversation.input.dock` 除了插件 occupant，还内置一条「排队队列」行：
+		// 官方把 `QueueDock` 注册成该槽的 `id: 'queue'` / `order: 20` occupant，
+		// 这里用同一套 list 语义把它并进去（同 order 时按 id 稳定排序）。
 		const rows = this.side === 'input'
-			? dshInputDockRows(this.sessionId, this.owner)
+			? mergeDockRows(dshInputDockRows(this.sessionId, this.owner), dshQueueDockRows(this.inbox))
 			: dshComposerDockRows(this.sessionId);
 		if (rows.length === 0) {
 			this.domNode.style.display = 'none';
@@ -121,4 +127,18 @@ export class DshChatInputDock extends Disposable {
 		}
 		return line;
 	}
+}
+
+/**
+ * 合并两组 dock 行：按官方 list 语义排序（`order` 升序，同 order 用 id 稳定），
+ * 同 id 只留一行（内置队列行先出现，插件再注册同名 id 时不重复画）。
+ */
+function mergeDockRows(left: readonly DshInputDockRow[], right: readonly DshInputDockRow[]): readonly DshInputDockRow[] {
+	const byId = new Map<string, DshInputDockRow>();
+	for (const row of [...left, ...right]) {
+		if (!byId.has(row.id)) {
+			byId.set(row.id, row);
+		}
+	}
+	return [...byId.values()].sort((a, b) => a.order - b.order || a.id.localeCompare(b.id));
 }

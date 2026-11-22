@@ -20,7 +20,7 @@
 import { Emitter, Event } from '../../../../../base/common/event.js';
 import { Disposable } from '../../../../../base/common/lifecycle.js';
 import { createDshIdeConversationState, projectDshIdeConversation } from '../../../../../platform/dshClient/protocol/dshIdeConversation.js';
-import type { DshIdeConversationNode, DshIdeConversationView, DshIdeLoadOlderPage } from '../../../../../platform/dshClient/protocol/dshIdeProtocol.js';
+import type { DshIdeConversationNode, DshIdeConversationView, DshIdeInboxMessage, DshIdeLoadOlderPage } from '../../../../../platform/dshClient/protocol/dshIdeProtocol.js';
 
 /**
  * DSH 的全部会话节点与内容块。
@@ -392,6 +392,8 @@ export class DshChatModel extends Disposable {
 	 * 不会因为后续实时帧自称还有更多而重新开始翻页。换绑（`clear`）才复位。
 	 */
 	private _hasMore = true;
+	/** 官方 `inbox` 投影的 `next-turn`：排队等下一个 Turn 的输入（含内容块）。 */
+	private _inboxNextTurn: readonly DshIdeInboxMessage[] = [];
 	/**
 	 * 已读到的最早 durable seq（含已被实时窗口替换掉的旧页）。
 	 *
@@ -525,6 +527,8 @@ export class DshChatModel extends Disposable {
 		this._nodesVersion++;
 		// 已经读到日志开头就不再翻页：实时帧自称「还有更多」不能把它翻回 true。
 		this._hasMore = this._hasMore && conversation.hasMore;
+		// 队列随每次会话帧整体替换（官方 `inbox` 是 fold 出来的完整值，不是增量）。
+		this._inboxNextTurn = conversation.inboxNextTurn ?? [];
 		// 分页边界只前进：实时窗口把旧页挤出画面时，游标仍停在已读到的最早 seq。
 		if (liveMin !== undefined && (this.durableFloor === undefined || liveMin < this.durableFloor)) {
 			this.durableFloor = liveMin;
@@ -587,6 +591,11 @@ export class DshChatModel extends Disposable {
 	}
 
 	/** 官方分页是否还有更早的记录。 */
+	/** 当前排队等下一个 Turn 的输入（官方 `inbox['next-turn']`）。 */
+	inboxNextTurn(): readonly DshIdeInboxMessage[] {
+		return this._inboxNextTurn;
+	}
+
 	hasMore(): boolean {
 		return this._hasMore;
 	}

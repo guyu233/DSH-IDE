@@ -226,5 +226,6 @@
 	"dshSpeech.transcribeFailed": "DSH 语音转写失败：{0}",
 	"dshSpeech.outOfRange": "录音不可用或超出 DSH 允许的时长与大小上限。",
 	"dsh.inputDock.label": "输入区扩展",
-	"dsh.composerDock.label": "输入区提示"
+	"dsh.composerDock.label": "输入区提示",
+	"dsh.queue.count": "{0} 条排队"
 }

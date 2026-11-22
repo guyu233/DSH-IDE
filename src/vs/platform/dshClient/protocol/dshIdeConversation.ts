@@ -143,6 +143,15 @@ interface DshIdeWorkflowState {
 interface DshIdeInboxIdentity {
 	readonly id: string;
 	readonly sourceKind: string;
+	/**
+	 * 官方 `UserMessage.content` 原样保留。
+	 *
+	 * 历史实现只取 `id` + `sourceKind`，把 `agent/inbox/spliced` 里**已经带下来的**
+	 * 完整 `UserMessage[]` 丢掉了——于是「排队队列」看起来像「数据源没给正文」，
+	 * 实际是本仓自己丢的。这里按官方形状留住内容块，渲染层才可能画出与官方
+	 * `QueueDock` 同形的行。
+	 */
+	readonly content: readonly unknown[];
 }
 
 /** 官方 `InboxState` 里投影要用的部分。pending 始终是物化后的队列。 */
@@ -215,6 +224,8 @@ function viewOf(state: DshIdeConversationState): DshIdeConversationView {
 	return {
 		nodes,
 		hasMore: state.hasMore,
+		...(state.inboxNextTurn.pending.length === 0 ? {} : { inboxNextTurn: state.inboxNextTurn.pending.map(inboxMessageView) }),
+		...(state.inboxNextStep.pending.length === 0 ? {} : { inboxNextStep: state.inboxNextStep.pending.map(inboxMessageView) }),
 		...(subagentCatalog.length === 0 ? {} : { subagentCatalog }),
 	};
 }
@@ -387,7 +398,7 @@ function inboxIdentities(value: unknown): DshIdeInboxIdentity[] {
 		if (id === undefined || source === undefined) {
 			continue;
 		}
-		identities.push({ id, sourceKind: source });
+		identities.push({ id, sourceKind: source, content: Array.isArray(item['content']) ? item['content'] : [] });
 	}
 	return identities;
 }
@@ -1223,6 +1234,20 @@ function usageDisclosureOf(tail: DshIdeTurnTailState | undefined): DshIdeTurnTai
 		return undefined;
 	}
 	return tail.usage;
+}
+
+/**
+ * 排队消息 → 线协议形状。
+ *
+ * `content` 只保留可 JSON 化的块；非对象块丢弃（线协议必须 JSON 安全）。
+ * 不认识的 `type` 原样带上，避免把官方新增的块类型悄悄吃掉。
+ */
+function inboxMessageView(message: DshIdeInboxIdentity): { readonly id: string; readonly sourceKind: string; readonly content: readonly (Readonly<Record<string, unknown>> & { readonly type: string })[] } {
+	// 只留「有非空 type 的对象」：块类型是渲染分派的唯一依据，缺它就不是可用块。
+	const content = message.content.flatMap(block => isRecord(block) && typeof block['type'] === 'string' && block['type'] !== ''
+		? [block as Readonly<Record<string, unknown>> & { readonly type: string }]
+		: []);
+	return { id: message.id, sourceKind: message.sourceKind, content };
 }
 
 /** 官方 `submittedPlan`：只认 `exit_plan_mode` 的参数里带标题的完整 plan。 */

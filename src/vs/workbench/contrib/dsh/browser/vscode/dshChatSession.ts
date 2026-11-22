@@ -13,7 +13,7 @@ import { Emitter, Event } from '../../../../../base/common/event.js';
 import { Disposable } from '../../../../../base/common/lifecycle.js';
 import { VSBuffer, encodeBase64 } from '../../../../../base/common/buffer.js';
 import { IDshClientService } from '../../../../../platform/dshClient/common/dshClientService.js';
-import { dshErrorText, DSH_IDE_FEATURE_UNAVAILABLE, DSH_IDE_HISTORY_MAX_MESSAGES, DSH_IDE_HISTORY_TURN_WINDOW, validateDshIdeLoadOlderResult, type DshIdeConversationView, type DshIdeDeliverableView, type DshIdeGoalView, type DshIdeImageAttachmentRef, type DshIdeLoadOlderResult, type DshIdePendingItem, type DshIdePlanView, type DshIdeQuotaNotice, type DshIdeSkillView, type DshIdeTeamView, type DshIdeTodoView, type DshIdeWorktreeView, type DshIdeViewSnapshot, type DshIdeWaterfallNotice } from '../../../../../platform/dshClient/protocol/dshIdeProtocol.js';
+import { dshErrorText, DSH_IDE_FEATURE_UNAVAILABLE, DSH_IDE_HISTORY_MAX_MESSAGES, DSH_IDE_HISTORY_TURN_WINDOW, validateDshIdeLoadOlderResult, type DshIdeConversationView, type DshIdeDeliverableView, type DshIdeGoalView, type DshIdeImageAttachmentRef, type DshIdeInboxMessage, type DshIdeLoadOlderResult, type DshIdePendingItem, type DshIdePlanView, type DshIdeQuotaNotice, type DshIdeSkillView, type DshIdeTeamView, type DshIdeTodoView, type DshIdeWorktreeView, type DshIdeViewSnapshot, type DshIdeWaterfallNotice } from '../../../../../platform/dshClient/protocol/dshIdeProtocol.js';
 import { DshChatModel, type DshChatNode, type DshHistoryStatus } from './dshChatModel.js';
 import { settleApproval, settleQuestion, type DshQuestionDraft, type DshSettlementIntent } from './dshPendingSettlement.js';
 import { retainQuotaNotice } from './dshQuotaNotice.js';
@@ -99,6 +99,8 @@ export interface IDshChatSession {
 	/** 向更早的历史要一页。true 表示这次真的插入了新节点。 */
 	loadOlder(): Promise<boolean>;
 	hasMore(): boolean;
+	/** 排队等下一个 Turn 的输入（官方 `inbox['next-turn']`，含内容块）。 */
+	inboxNextTurn(): readonly DshIdeInboxMessage[];
 	firstSeq(): number | undefined;
 	historyStatus(): DshHistoryStatus;
 	selectModel(provider: string, model: string): Promise<void>;
@@ -564,6 +566,10 @@ export class DshChatSession extends Disposable implements IDshChatSession {
 			this.pendingItems.set(notice.eventId, next);
 		}
 		this._onDidChangePending.fire(this.pending());
+	}
+
+	inboxNextTurn(): readonly DshIdeInboxMessage[] {
+		return this.model.inboxNextTurn();
 	}
 
 	hasMore(): boolean {

@@ -226,5 +226,6 @@
 	"dshSpeech.transcribeFailed": "DSH transcription failed: {0}",
 	"dshSpeech.outOfRange": "Recording is unavailable or exceeds the duration and size limits DSH allows.",
 	"dsh.inputDock.label": "Composer extensions",
-	"dsh.composerDock.label": "Composer notes"
+	"dsh.composerDock.label": "Composer notes",
+	"dsh.queue.count": "{0} queued"
 }

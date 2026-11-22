@@ -233,7 +233,39 @@ export interface DshIdeConversationView {
 	readonly nodes: readonly DshIdeConversationNode[];
 	readonly hasMore: boolean;
 	readonly subagentCatalog?: readonly DshIdeSubagentCatalogEntry[];
+	/**
+	 * 官方 `inbox` 投影里的 `next-turn`（排队等下一个 Turn 的输入）。
+	 *
+	 * 数据来自 `agent/inbox/spliced` 的 `inserted`——官方类型是 `UserMessage[]`，
+	 * 每项带完整 `content`（text / image / file 块），不是只有 id。
+	 * 顺序即排队顺序；空数组省略。
+	 */
+	readonly inboxNextTurn?: readonly DshIdeInboxMessage[];
+	/** 官方 `inbox` 投影里的 `next-step`（排队等下一个 step 的转向输入）。 */
+	readonly inboxNextStep?: readonly DshIdeInboxMessage[];
 }
+
+/**
+ * 排队中的一条输入（官方 `UserMessage` 的投影）。
+ *
+ * 只保留渲染需要的字段：稳定 `id`、来源 kind、以及**内容块**。
+ * 内容块原样保留（text / image / file），渲染层据此画出与官方 `QueueDock` 同形的行；
+ * 不在这里翻译成某种本地结构，避免丢失官方块类型。
+ */
+export interface DshIdeInboxMessage {
+	readonly id: string;
+	readonly sourceKind: string;
+	readonly content: readonly DshIdeInboxBlock[];
+}
+
+/**
+ * 排队消息里的一个内容块（官方 `ContentBlock` 的 JSON 面）。
+ *
+ * **不做本地联合收窄**：官方块类型是运行时开放的（`text` / `image` / `file` / 其它），
+ * 收窄会让官方新增类型被静默丢掉，也会让「原样透传」变成一句空话。
+ * 只要求是可 JSON 化的对象且 `type` 非空——这正是渲染层分派所需的最小事实。
+ */
+export type DshIdeInboxBlock = Readonly<Record<string, unknown>> & { readonly type: string };
 
 /** 官方 `ui-user-questions` 的 `QuestionReplyQuestion`：回答回执里被问到的题。 */
 export interface DshIdeQuestionReplyQuestion {
@@ -1898,7 +1930,7 @@ function asRecord(value: unknown, label: string): Record<string, unknown> {
 }
 
 function validateConversation(value: unknown): void {
-	const view = exactRecord(value, ['nodes', 'hasMore', 'subagentCatalog'], 'DshIdeSnapshot.state.view.conversation');
+	const view = exactRecord(value, ['nodes', 'hasMore', 'subagentCatalog', 'inboxNextTurn', 'inboxNextStep'], 'DshIdeSnapshot.state.view.conversation');
 	if (!Array.isArray(view['nodes'])) {
 		throw new TypeError('DshIdeSnapshot.state.view.conversation.nodes must be an array');
 	}
@@ -1906,6 +1938,9 @@ function validateConversation(value: unknown): void {
 	view['nodes'].forEach((node, index) => validateConversationNode(node, `DshIdeSnapshot.state.view.conversation.nodes[${index}]`, seen));
 	if (typeof view['hasMore'] !== 'boolean') {
 		throw new TypeError('DshIdeSnapshot.state.view.conversation.hasMore must be a boolean');
+	}
+	for (const key of ['inboxNextTurn', 'inboxNextStep'] as const) {
+		validateInboxMessages(view[key], `DshIdeSnapshot.state.view.conversation.${key}`);
 	}
 	if (view['subagentCatalog'] !== undefined) {
 		if (!Array.isArray(view['subagentCatalog'])) {
@@ -1933,6 +1968,40 @@ function workflowStatus(value: unknown, label: string): void {
 	if (value !== 'running' && value !== 'completed' && value !== 'failed' && value !== 'cancelled' && value !== 'interrupted') {
 		throw new TypeError(`${label} must be a workflow status`);
 	}
+}
+
+/**
+ * 排队消息列表：`id` 非空、`sourceKind` 非空、`content` 是块数组。
+ *
+ * 块只要求「有非空 `type` 的对象」——官方块类型运行时开放，收窄等于替上游做决定。
+ * 重复 `id` 拒绝：同一条消息不能在一个队列里出现两次（官方 inbox fold 同样拒绝）。
+ */
+function validateInboxMessages(value: unknown, label: string): void {
+	if (value === undefined) {
+		return;
+	}
+	if (!Array.isArray(value)) {
+		throw new TypeError(`${label} must be an array`);
+	}
+	const ids = new Set<string>();
+	value.forEach((entry, index) => {
+		const itemLabel = `${label}[${index}]`;
+		const record = exactRecord(entry, ['id', 'sourceKind', 'content'], itemLabel);
+		const id = nonEmptyString(record['id'], `${itemLabel}.id`);
+		nonEmptyString(record['sourceKind'], `${itemLabel}.sourceKind`);
+		if (ids.has(id)) {
+			throw new TypeError(`${itemLabel}.id duplicates an earlier queued message`);
+		}
+		ids.add(id);
+		if (!Array.isArray(record['content'])) {
+			throw new TypeError(`${itemLabel}.content must be an array`);
+		}
+		record['content'].forEach((block, blockIndex) => {
+			const blockLabel = `${itemLabel}.content[${blockIndex}]`;
+			const blockRecord = asRecord(block, blockLabel);
+			nonEmptyString(blockRecord['type'], `${blockLabel}.type`);
+		});
+	});
 }
 
 function validateConversationNode(value: unknown, label: string, seen: Set<object>): void {

@@ -1058,3 +1058,64 @@ test('protocol rejects an empty endReason on turn-process', async () => {
 	assert.doesNotThrow(() => validateDshIdeSnapshot(snapshot('completed')), 'a non-empty endReason must be accepted');
 	assert.throws(() => validateDshIdeSnapshot(snapshot('')), /endReason/, 'an empty endReason must be rejected');
 });
+
+test('queued inbox messages keep their content blocks, not just ids', () => {
+	// 官方 `agent/inbox/spliced` 的 `inserted` 是完整 `UserMessage[]`（`packages/core/agent/src/types.ts`
+	// 的 `SessionEventMap['agent/inbox/spliced']`），每项带 `content`。历史实现只取 `id` + `sourceKind`，
+	// 把已经拿到的正文/附件丢掉，于是「排队队列」看起来像数据源不足。
+	const state = createDshIdeConversationState();
+	const project = (event: Record<string, unknown>) => projectDshIdeConversation(state, { type: 'event', event });
+	const view = project({
+		type: 'agent/inbox/spliced', seq: 1, time: 1,
+		data: {
+			target: 'next-turn', start: 0, inserted: [
+				{ id: 'm1', content: [{ type: 'text', text: '排队的问题' }], source: { kind: 'user' } },
+				{ id: 'm2', content: [{ type: 'image', attachment: { attachmentId: 'a1', mediaType: 'image/png', name: 'shot.png' } }], source: { kind: 'user' } },
+			],
+		},
+	});
+	assert.equal(view.inboxNextTurn?.length, 2);
+	assert.equal(view.inboxNextTurn?.[0].id, 'm1');
+	assert.deepEqual(view.inboxNextTurn?.[0].content, [{ type: 'text', text: '排队的问题' }]);
+	// 图片块原样保留（含 attachment 结构），不在投影层翻译成字符串。
+	assert.equal(view.inboxNextTurn?.[1].content[0]['type'], 'image');
+	assert.deepEqual((view.inboxNextTurn?.[1].content[0] as { attachment: unknown }).attachment,
+		{ attachmentId: 'a1', mediaType: 'image/png', name: 'shot.png' });
+	// 空队列省略字段，不写空数组。
+	assert.equal(view.inboxNextStep, undefined);
+});
+
+test('a canceled splice does not invent queued rows, and next-step stays separate', () => {
+	const state = createDshIdeConversationState();
+	const project = (event: Record<string, unknown>) => projectDshIdeConversation(state, { type: 'event', event });
+	project({ type: 'agent/inbox/spliced', seq: 1, time: 1, data: { target: 'next-turn', start: 0, inserted: [{ id: 'm1', content: [{ type: 'text', text: 'a' }], source: { kind: 'user' } }] } });
+	const afterCancel = project({ type: 'agent/inbox/spliced', seq: 2, time: 2, data: { target: 'next-turn', start: 0, removedCount: 1, inserted: [], outcome: 'canceled' } });
+	assert.equal(afterCancel.inboxNextTurn, undefined, 'a canceled removal must not leave a phantom row');
+	const step = project({ type: 'agent/inbox/spliced', seq: 3, time: 3, data: { target: 'next-step', start: 0, inserted: [{ id: 'm2', content: [{ type: 'text', text: 'steer' }], source: { kind: 'user' } }] } });
+	assert.equal(step.inboxNextStep?.length, 1);
+	assert.equal(step.inboxNextTurn, undefined, 'the two queues stay separate');
+});
+
+test('protocol rejects a queued message without content blocks or with a duplicate id', async () => {
+	const { validateDshIdeSnapshot } = await import('../../../src/vs/platform/dshClient/protocol/dshIdeProtocol.ts');
+	const state = createDshIdeConversationState();
+	const project = (event: Record<string, unknown>) => projectDshIdeConversation(state, { type: 'event', event });
+	const view = project({ type: 'agent/inbox/spliced', seq: 1, time: 1, data: { target: 'next-turn', start: 0, inserted: [{ id: 'm1', content: [{ type: 'text', text: 'a' }], source: { kind: 'user' } }] } });
+	const snapshot = (conversation: unknown) => ({
+		wireRevision: 5, channelId: 'c1', version: 1,
+		binding: { viewId: 'c1', generation: 1, sessionId: 's1' },
+		state: { state: 'ready', view: { frame: { type: 'snapshot' }, conversation } },
+	});
+	assert.doesNotThrow(() => validateDshIdeSnapshot(snapshot(view)));
+	// 块缺 type：拒绝。
+	assert.throws(() => validateDshIdeSnapshot(snapshot({
+		...view, inboxNextTurn: [{ id: 'm2', sourceKind: 'user', content: [{ text: 'no type' }] }],
+	})), /type/, 'a block without a type must be rejected');
+	// 重复 id：拒绝。
+	assert.throws(() => validateDshIdeSnapshot(snapshot({
+		...view, inboxNextTurn: [
+			{ id: 'dup', sourceKind: 'user', content: [{ type: 'text', text: 'a' }] },
+			{ id: 'dup', sourceKind: 'user', content: [{ type: 'text', text: 'b' }] },
+		],
+	})), /duplicates/, 'a duplicate queued id must be rejected');
+});

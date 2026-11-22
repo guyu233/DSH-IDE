@@ -23,6 +23,8 @@ import { IChatWidget, IChatWidgetService } from '../../../chat/browser/chat.js';
 import { ChatAgentLocation } from '../../../chat/common/constants.js';
 import { DshChatInputDock } from './dshChatInputDock.js';
 import { dshSessionIdFromResource } from './dshAgentSessionsController.js';
+import { dshChatSessionFor, type DshChatSession } from './dshChatSession.js';
+import { IDshClientService } from '../../../../../platform/dshClient/common/dshClientService.js';
 
 /** 一个已挂载的 widget：两个 dock 宿主 + 会话监听。 */
 interface MountedWidget {
@@ -39,12 +41,16 @@ interface MountedWidget {
  */
 export class DshChatInputDockContribution extends Disposable {
 	private readonly mounted = new Map<IChatWidget, MountedWidget>();
+	private readonly chat: DshChatSession;
 
 	constructor(
 		@IChatWidgetService private readonly chatWidgetService: IChatWidgetService,
 		@ICommandService private readonly commandService: ICommandService,
+		@IDshClientService client: IDshClientService,
 	) {
 		super();
+		// 队列的事实来源：DSH 会话本身（官方 `inbox` 投影），不在 IDE 侧自建。
+		this.chat = dshChatSessionFor(client);
 		for (const widget of this.chatWidgetService.getAllWidgets()) {
 			this.mount(widget);
 		}
@@ -93,7 +99,10 @@ export class DshChatInputDockContribution extends Disposable {
 			// 只把「这是哪个会话」这个已有身份交给 occupant；`input`（输入机状态）
 			// 不在本仓建模，如实留空而不是伪造一个假值。
 			const session = sessionId === undefined ? undefined : { sessionId };
-			input.update(sessionId, session === undefined ? undefined : { session });
+			// 队列来自 DSH 会话的 `inbox` 投影（官方 `QueueDock` 的数据源）。
+			// 没有会话时没有队列；`DshChatSession` 是本贡献点唯一的事实来源，不在 IDE 侧自建。
+			const inbox = sessionId === undefined ? undefined : this.chat.inboxNextTurn();
+			input.update(sessionId, session === undefined ? undefined : { session }, inbox);
 			composer.update(sessionId);
 		};
 		sync();
