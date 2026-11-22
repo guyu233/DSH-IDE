@@ -697,3 +697,15 @@ test('an expanded group wraps its process rows in one scroll container', async (
 	// 只有展开态的 Turn 才包容器。
 	assert.ok(source.includes('expandedGroupTurns.has(node.turn)'), 'only expanded groups get a container');
 });
+
+test('a following group scrolls to the bottom when its content grows', async () => {
+	// CHK-375 只建了状态机与滚动监听，没在「内容增长」时执行跟随——组会停在原位。
+	// 官方①：An open capped group follows content growth only while its own scroll position is at the bottom。
+	const { readFileSync } = await import('node:fs');
+	const source = readFileSync(new URL('../../../src/vs/workbench/contrib/dsh/browser/vscode/dshSlotHostContentPart.ts', import.meta.url), 'utf8');
+	assert.ok(source.includes("new DisposableResizeObserver('DshProcessGroupFollow'"), 'growth must be observed');
+	assert.ok(source.includes('if (dshGroupShouldFollow(follow))'), 'only a following group scrolls');
+	assert.ok(source.includes('container.scrollTop = container.scrollHeight'), 'and it lands on the bottom');
+	// `observe` 返回独立 disposable，必须登记，否则 observer 泄漏。
+	assert.ok(source.includes('refs.add(observer.observe(container))'), 'the observation must be disposed with the row');
+});

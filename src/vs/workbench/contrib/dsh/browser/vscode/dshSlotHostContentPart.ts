@@ -19,13 +19,14 @@ import { dshAsideText, dshAssistantActions, dshTextInteractions, dshUserBeforeDe
 import { dshContentStore } from './dshContentStore.js';
 import { adaptDshNode, type DshNativePart } from './dshNativePartAdapters.js';
 import { groupTurnProcesses, hiddenProcessLine, latestExchangeTurns, processLineFromSnapshot, visibleProcessKeys, type DshTurnProcess } from './dshProcessGroup.js';
-import { dshGroupFollowAfterScroll, dshGroupFollowOnOpen } from './dshGroupScrollFollow.js';
+import { dshGroupFollowAfterScroll, dshGroupFollowOnOpen, dshGroupShouldFollow } from './dshGroupScrollFollow.js';
 import { diffDshSlotRows, dshSlotHostSame, planKeysForTurn, presentDshNode, turnProcessCounts, type DshSlotHostRef } from './dshSlotHostModel.js';
 import { dshNodeDisplaySignature } from './dshConversationNodeTree.js';
 import { dshCardSpec, type DshCardSpec } from './dshCardSpec.js';
 import { applyDshButtonChrome, applyDshStaticRowChrome } from './dshButtonChrome.js';
 import { generateUuid } from '../../../../../base/common/uuid.js';
 import { createStyleSheet } from '../../../../../base/browser/domStylesheets.js';
+import { DisposableResizeObserver } from '../../../../../base/browser/dom.js';
 
 export interface DshNativePartRenderer {
 	render(part: DshNativePart): IChatContentPart | undefined;
@@ -505,6 +506,17 @@ export class DshSlotHostContentPart extends Disposable implements IChatContentPa
 					};
 					container.addEventListener('scroll', onScroll);
 					refs.add({ dispose: () => container.removeEventListener('scroll', onScroll) });
+					// **内容增长时真的跟随**（官方①）：只在跟随态把组滚到底。
+					// 用 ResizeObserver 而不是 MutationObserver：`scrollHeight` 的变化可能来自
+					// 布局（图片加载、字体回流），不一定是 DOM 结构变化。
+					const observer = new DisposableResizeObserver('DshProcessGroupFollow', () => {
+						if (dshGroupShouldFollow(follow)) {
+							container.scrollTop = container.scrollHeight;
+						}
+					});
+					// `observe` 返回独立 disposable（不自动进 store），两件都要登记。
+					refs.add(observer.observe(container));
+					refs.add(observer);
 				}
 				return container;
 			}
