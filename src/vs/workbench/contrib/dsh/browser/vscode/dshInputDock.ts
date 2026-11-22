@@ -3,6 +3,7 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
+
 // 输入区两个 dock 槽的投影（官方 `conversation.input.dock` / `conversation.composer.dock`）。
 //
 // 官方语义（`ui-conversation/src/client/contract/slots.ts`）：
@@ -85,13 +86,13 @@ function projectDockRows(slot: string, sessionId: string | undefined, props: Rea
 	const rows: DshInputDockRow[] = [];
 	for (const occupant of resolved?.occupants ?? []) {
 		const id = occupant.id;
-		const label = occupant.props['label'];
+		const label = occupant.props.label;
 		if (id === undefined || typeof label !== 'string' || label.trim() === '') {
 			continue;
 		}
-		const description = occupant.props['description'];
-		const command = occupant.props['command'];
-		const args = occupant.props['arguments'];
+		const description = occupant.props.description;
+		const command = occupant.props.command;
+		const args = occupant.props.arguments;
 		rows.push({
 			id,
 			label,

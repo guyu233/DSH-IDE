@@ -3,6 +3,7 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
+
 // 输入区两个 dock 槽的 DOM 宿主。
 //
 // 官方把这两个槽放在输入卡的上方（`conversation.input.dock`）与下方
@@ -90,7 +91,7 @@ export class DshChatInputDock extends Disposable {
 	}
 
 	private renderRow(row: DshInputDockRow): HTMLElement {
-		const line = document.createElement(row.command === undefined ? 'div' : 'button');
+		const line: HTMLDivElement | HTMLButtonElement = document.createElement(row.command === undefined ? 'div' : 'button');
 		line.className = 'dsh-input-dock-row';
 		line.style.display = 'flex';
 		line.style.alignItems = 'baseline';
@@ -109,8 +110,8 @@ export class DshChatInputDock extends Disposable {
 			detail.style.fontSize = '0.9em';
 			line.appendChild(detail);
 		}
-		if (line instanceof HTMLButtonElement) {
-			line.type = 'button';
+		if (row.command !== undefined) {
+			(line as HTMLButtonElement).type = 'button';
 			line.style.cursor = 'pointer';
 			line.title = row.description ?? row.label;
 			// 纯展示行不可聚焦；有命令才表现为按钮（与原生 chat 次按钮一致）。
