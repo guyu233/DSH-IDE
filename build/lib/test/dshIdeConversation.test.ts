@@ -13,14 +13,14 @@ import {
 	DSH_IDE_WIRE_REVISION,
 	validateDshIdeSnapshot,
 	type DshIdeConversationView,
-} from '../../../src/vs/platform/dshClient/common/dshIdeProtocol.ts';
+} from '../../../src/vs/platform/dshClient/protocol/dshIdeProtocol.ts';
 import {
 	attachmentsOf,
 	createDshIdeConversationState,
 	deliverablesOf,
 	projectDshIdeConversation,
 	quotaNoticeOf,
-} from '../../../src/vs/platform/dshClient/common/dshIdeConversation.ts';
+} from '../../../src/vs/platform/dshClient/protocol/dshIdeConversation.ts';
 
 type ConversationState = ReturnType<typeof createDshIdeConversationState>;
 
@@ -69,11 +69,76 @@ test('snapshot 帧投影 user 消息，hasMore false 透传到视图', () => {
 	const user = view.nodes[0];
 	if (user.kind === 'user') {
 		assert.deepEqual(user.content, [{ type: 'text', text: 'hi' }]);
+		// 官方 UserMessageNode.source（records.ts）。缺了渲染层无法区分真人消息和注入。
+		assert.deepEqual(user.source, { kind: 'user' });
 	}
 	assertNoRaw(view);
 });
 
-test('subagent/catalog version 3 投影为 catalog 节点且保留 name', () => {
+test('next-step 认领过的人类消息投影为 steering', () => {
+	const state = createDshIdeConversationState();
+	const claim = (seq: number, data: Record<string, unknown>) => project(state, {
+		type: 'event',
+		event: { type: 'agent/inbox/spliced', seq, time: seq, data },
+	});
+	claim(1, {
+		target: 'next-step',
+		start: 0,
+		removedCount: 0,
+		inserted: [{ id: 'm-steer', source: { kind: 'user' } }],
+	});
+	claim(2, { target: 'next-step', start: 0, removedCount: 1, inserted: [] });
+	const steered = project(state, {
+		type: 'event',
+		event: {
+			type: 'user/message',
+			seq: 3,
+			time: 3,
+			turn: 4,
+			data: { id: 'm-steer', source: { kind: 'user' }, content: [{ type: 'text', text: 'while running' }] },
+		},
+	});
+	assert.equal(steered.nodes.at(-1)?.kind, 'steering');
+	const node = steered.nodes.at(-1);
+	if (node?.kind === 'steering') {
+		assert.equal(node.messageId, 'm-steer');
+		assert.equal(node.turn, 4);
+	}
+	const plain = project(state, {
+		type: 'event',
+		event: {
+			type: 'user/message',
+			seq: 4,
+			time: 4,
+			data: { id: 'm-plain', source: { kind: 'user' }, content: [{ type: 'text', text: 'new turn' }] },
+		},
+	});
+	assert.equal(plain.nodes.at(-1)?.kind, 'user');
+});
+
+test('非人类 user/message 投影为 context 并带上 source 与 producer', () => {
+	const state = createDshIdeConversationState();
+	const source = { kind: 'skill-invocation', name: 'dsh-doc', form: 'instructions' };
+	const view = project(state, {
+		type: 'event',
+		event: {
+			type: 'user/message',
+			seq: 8,
+			time: 8,
+			data: { source, content: [{ type: 'text', text: 'use the skill' }] },
+		},
+	});
+	assert.equal(view.nodes[0]?.kind, 'context');
+	const node = view.nodes[0];
+	if (node?.kind === 'context') {
+		assert.deepEqual(node.source, source);
+		assert.equal(node.producer?.role, 'inject');
+		assert.equal(node.producer?.label, 'dsh-doc');
+		assert.equal(node.form, 'instructions');
+	}
+});
+
+test('subagent/catalog 走 subagentCatalog 投影通道，不进入节点树', () => {
 	const state = createDshIdeConversationState();
 	const frame = {
 		type: 'event',
@@ -85,20 +150,29 @@ test('subagent/catalog version 3 投影为 catalog 节点且保留 name', () => 
 		},
 	};
 	const view = project(state, frame);
-	assert.equal(view.nodes.length, 1);
-	assert.equal(view.nodes[0].kind, 'subagent-catalog');
-	const catalog = view.nodes[0];
-	if (catalog.kind === 'subagent-catalog') {
-		assert.equal(catalog.name, 'reviewer');
-		assert.equal(catalog.version, 3);
-		assert.equal(catalog.childId, 'child-1');
-		assert.equal(catalog.childCreatedAt, 5);
-		assert.equal(catalog.mode, 'continuable');
-	}
+	// 官方把它放在 SessionProjectionMap['subagentCatalog']，不是 chat 节点 kind。
+	assert.equal(view.nodes.length, 0, 'a catalog fact must not become a chat node');
+	assert.equal(view.subagentCatalog?.length, 1);
+	const entry = view.subagentCatalog![0];
+	assert.equal(entry.name, 'reviewer');
+	assert.equal(entry.version, 3);
+	assert.equal(entry.childId, 'child-1');
+	assert.equal(entry.childCreatedAt, 5);
+	assert.equal(entry.mode, 'continuable');
 	assertNoRaw(view);
 });
 
-test('subagent-settled 的 user/message 投影为 notice 而非用户气泡', () => {
+test('catalog 缺字段时不臆造，也不产生节点', () => {
+	const state = createDshIdeConversationState();
+	const view = project(state, {
+		type: 'event',
+		event: { type: 'subagent/catalog', seq: 4, time: 4, data: {} },
+	});
+	assert.equal(view.nodes.length, 0);
+	assert.deepEqual(view.subagentCatalog, [{ seq: 4, time: 4 }]);
+});
+
+test('subagent-settled 未被认领为唤醒时按普通消息归类，不画成 turn-trigger', () => {
 	const state = createDshIdeConversationState();
 	const frame = {
 		type: 'event',
@@ -106,17 +180,109 @@ test('subagent-settled 的 user/message 投影为 notice 而非用户气泡', ()
 			type: 'user/message',
 			seq: 3,
 			time: 3,
-			data: { source: { kind: 'subagent-settled' }, content: [{ type: 'text', text: 'relay' }] },
+			data: { source: { kind: 'subagent-settled', form: 'notice' }, content: [{ type: 'text', text: 'relay' }] },
 		},
 	};
 	const view = project(state, frame);
 	assert.equal(view.nodes.length, 1);
-	assert.equal(view.nodes[0].kind, 'subagent-notice');
-	const notice = view.nodes[0];
-	if (notice.kind === 'subagent-notice') {
-		assert.deepEqual(notice.content, [{ type: 'text', text: 'relay' }]);
+	// 官方 message.ts 只在 waking 或空 content 的 retry 时产出 turn-trigger；
+	// 其余非人类 source 走 context。
+	assert.equal(view.nodes[0].kind, 'context');
+	const node = view.nodes[0];
+	if (node.kind === 'context') {
+		assert.deepEqual(node.content, [{ type: 'text', text: 'relay' }]);
+		assert.equal(node.form, 'notice');
 	}
 	assertNoRaw(view);
+});
+
+test('被认领为唤醒的 subagent-settled 投影为官方 turn-trigger', () => {
+	const state = createDshIdeConversationState();
+	const view = project(state, {
+		type: 'event',
+		event: {
+			type: 'user/message',
+			seq: 5,
+			time: 5,
+			turn: 2,
+			data: {
+				waking: true,
+				source: { kind: 'subagent-settled', form: 'notice', stopReason: 'completed' },
+				content: [{ type: 'text', text: 'child finished' }],
+			},
+		},
+	});
+	assert.equal(view.nodes.length, 1);
+	assert.equal(view.nodes[0].kind, 'turn-trigger');
+	const node = view.nodes[0];
+	if (node.kind === 'turn-trigger') {
+		assert.deepEqual(node.content, [{ type: 'text', text: 'child finished' }]);
+		assert.equal(node.turn, 2);
+		assert.equal(node.form, 'notice');
+		// source 原样保留：渲染层要按 source.kind / stopReason 选图标与标题。
+		assert.deepEqual(node.source, { kind: 'subagent-settled', form: 'notice', stopReason: 'completed' });
+		assert.equal(node.producer?.role, 'inject');
+		assert.equal(node.producer?.label, 'subagent-settled');
+	}
+	assertNoRaw(view);
+});
+
+test('空 content 的 retry 投影为 turn-trigger，非空 content 的 retry 不是', () => {
+	const state = createDshIdeConversationState();
+	const emptyRetry = project(state, {
+		type: 'event',
+		event: { type: 'user/message', seq: 6, time: 6, data: { source: { kind: 'retry' }, content: [] } },
+	});
+	assert.equal(emptyRetry.nodes[0]?.kind, 'turn-trigger');
+
+	const state2 = createDshIdeConversationState();
+	const withText = project(state2, {
+		type: 'event',
+		event: { type: 'user/message', seq: 7, time: 7, data: { source: { kind: 'retry' }, content: [{ type: 'text', text: 'again' }] } },
+	});
+	assert.notEqual(withText.nodes[0]?.kind, 'turn-trigger');
+});
+
+test('私有 kind 不出现在正式节点白名单里', async () => {
+	const { readFileSync } = await import('node:fs');
+	const protocol = readFileSync(new URL('../../../src/vs/platform/dshClient/protocol/dshIdeProtocol.ts', import.meta.url), 'utf8');
+	assert.ok(!protocol.includes("'subagent-notice'"), 'subagent-notice must not be an official node kind');
+	assert.ok(!protocol.includes("'subagent-catalog'"), 'subagent-catalog must not be an official node kind');
+});
+
+test('协议校验器运行期拒绝私有 kind，接受 turn-trigger 与 subagentCatalog', () => {
+	// 静态源码里没有这些字符串还不够：契约可能是拼接出来的，或被 default 放行。
+	// 这里用真实校验器跑一遍接受/拒绝矩阵。
+	const snapshot = (nodes: readonly unknown[], extra: Record<string, unknown> = {}) => ({
+		wireRevision: DSH_IDE_WIRE_REVISION,
+		channelId: 'c1',
+		binding: { viewId: 'c1', generation: 1, sessionId: null },
+		version: 1,
+		state: { state: 'ready', view: { frame: { type: 'event' }, conversation: { hasMore: true, nodes, ...extra } } },
+	});
+
+	for (const kind of ['subagent-notice', 'subagent-catalog']) {
+		assert.throws(
+			() => validateDshIdeSnapshot(snapshot([{ kind, seq: 1, time: 1, content: [] }]) as never),
+			/kind is not an official conversation node/,
+			`the validator must reject the retired private kind ${kind}`,
+		);
+	}
+
+	assert.doesNotThrow(() => validateDshIdeSnapshot(snapshot([
+		{ kind: 'turn-trigger', seq: 2, time: 2, content: [{ type: 'text', text: 'x' }], source: { kind: 'subagent-settled' } },
+	]) as never), 'turn-trigger must be an accepted official kind');
+
+	assert.doesNotThrow(() => validateDshIdeSnapshot(snapshot([], {
+		subagentCatalog: [{ seq: 3, time: 3, childId: 'c', name: 'n', version: 3 }],
+	}) as never), 'the subagentCatalog projection channel must be accepted');
+
+	// 投影通道同样要严格：未知字段不能被静默吞掉。
+	assert.throws(
+		() => validateDshIdeSnapshot(snapshot([], { subagentCatalog: [{ seq: 3, time: 3, bogus: 1 }] }) as never),
+		/contains unknown field/,
+		'the catalog channel must reject unknown fields',
+	);
 });
 
 test('未知事件类型（turn/start 无 surfaceOp）不产生节点', () => {
@@ -199,6 +365,354 @@ test('quotaNotice 只在 turn/end 的 error.code 为 QUOTA/ACCOUNT_QUOTA 时记�
 		event: { type: 'turn/end', seq: 11, time: 11, data: { turn: 1, step: 1, reason: { kind: 'error', error: { code: 'INTERNAL', name: 'Boom' } } } },
 	});
 	assert.equal(quotaNoticeOf(other), undefined);
+});
+
+test('/compact 命令行与压缩检查点合成 manual-compaction，先到后到都能配对', () => {
+	const compactThenCommand = (order: 'command-first' | 'compaction-first') => {
+		const state = createDshIdeConversationState();
+		const send = (event: Record<string, unknown>) => project(state, { type: 'event', event });
+		const commandRun = { type: 'command/run', seq: 80, time: 80, data: { commandId: 'cmd-1', name: 'compact', rawInput: '' } };
+		const commandDone = { type: 'command/done', seq: 81, time: 81, data: { commandId: 'cmd-1', ok: true, sourceEventSeq: 79 } };
+		const compaction = { type: 'compaction/summary', seq: 79, time: 79, data: { summary: '摘要', shadowedItemCount: 3, shadowedTokenCount: 40 } };
+		let view = order === 'command-first' ? send(commandRun) : send(compaction);
+		if (order === 'command-first') { send(compaction); view = send(commandDone); } else { send(commandRun); view = send(commandDone); }
+		return view;
+	};
+	for (const order of ['command-first', 'compaction-first'] as const) {
+		const view = compactThenCommand(order);
+		assert.deepEqual(view.nodes.map(node => node.kind), ['manual-compaction'], order);
+		const node = view.nodes[0] as { command: { commandId: string; name: string | null }; compaction: { summary: string | null; shadowedItemCount?: number } };
+		assert.equal(node.command.commandId, 'cmd-1');
+		assert.equal(node.command.name, 'compact');
+		assert.equal(node.compaction.summary, '摘要');
+		assert.equal(node.compaction.shadowedItemCount, 3);
+	}
+	// 没有 sourceEventSeq 的普通命令不配对，保持各自的行。
+	const plain = createDshIdeConversationState();
+	project(plain, { type: 'event', event: { type: 'command/run', seq: 90, time: 90, data: { commandId: 'cmd-2', name: 'help', rawInput: '' } } });
+	const done = project(plain, { type: 'event', event: { type: 'command/done', seq: 91, time: 91, data: { commandId: 'cmd-2', ok: true } } });
+	assert.deepEqual(done.nodes.map(node => node.kind), ['command']);
+});
+
+test('a retried attempt replaces the same step usage instead of stacking it', () => {
+	// 官方 `tokenUsageProjectionDefinition`：同一 `(turn, step)` 再来一个样本时用 `addReplacing`
+	// 先扣掉上一次再计入新的。纯累加会把被覆盖的那次也算进总量，比官方偏大。
+	const state = createDshIdeConversationState();
+	const send = (event: Record<string, unknown>) => project(state, { type: 'event', event });
+	send({ type: 'assistant/message', seq: 200, time: 200, turn: 30, data: { turn: 30, step: 1, message: { content: [{ type: 'text', text: 'a' }], usage: { inputTokens: 10, outputTokens: 1 } } } });
+	send({ type: 'assistant/message', seq: 201, time: 201, turn: 30, data: { turn: 30, step: 1, message: { content: [{ type: 'text', text: 'a' }], usage: { inputTokens: 20, outputTokens: 2 } } } });
+	const view = send({ type: 'turn/end', seq: 202, time: 202, data: { turn: 30, step: 1, reason: { kind: 'completed' } } });
+	const tail = view.nodes.find(node => node.kind === 'turn-tail') as { tokenUsage?: { input?: number; output?: number } };
+	assert.equal(tail.tokenUsage?.input, 20, 'the second sample replaces the first');
+	assert.equal(tail.tokenUsage?.output, 2);
+});
+test('turn/end 给出 turn-tail：收尾答复之后的工具使分支不可用', () => {
+	const state = createDshIdeConversationState();
+	const send = (event: Record<string, unknown>) => project(state, { type: 'event', event });
+	send({ type: 'assistant/message', seq: 70, time: 70, turn: 1, data: { turn: 1, step: 1, message: { content: [{ type: 'text', text: '答复' }] } } });
+	let view = send({ type: 'turn/end', seq: 71, time: 71, data: { turn: 1, step: 1, reason: { kind: 'completed' } } });
+	let tail = view.nodes.find(node => node.kind === 'turn-tail') as { turn: number; closing?: string; branchUnavailable?: true };
+	assert.equal(tail.turn, 1);
+	assert.equal(tail.closing, '答复');
+	assert.equal(tail.branchUnavailable, undefined);
+	// 同一 Turn 的两条答复增量在尾部聚合成一份用量。
+	const usageTail = (() => {
+		const state = createDshIdeConversationState();
+		const send = (event: Record<string, unknown>) => project(state, { type: 'event', event });
+		send({ type: 'assistant/message', seq: 90, time: 90, turn: 9, data: { turn: 9, step: 1, message: { content: [{ type: 'text', text: 'a' }], usage: { inputTokens: 2, outputTokens: 3 } } } });
+		send({ type: 'assistant/message', seq: 91, time: 91, turn: 9, data: { turn: 9, step: 2, message: { content: [{ type: 'text', text: 'b' }], usage: { inputTokens: 4, outputTokens: 5, cacheReadTokens: 1 } } } });
+		return send({ type: 'turn/end', seq: 92, time: 92, data: { turn: 9, step: 2, reason: { kind: 'completed' } } })
+			.nodes.find(node => node.kind === 'turn-tail') as { tokenUsage?: { input?: number; output?: number; cacheRead?: number } };
+	})();
+	// 第一条答复没报缓存桶，按官方「每次尝试都报告才存在」，整桶作废。
+	assert.deepEqual(usageTail.tokenUsage, { input: 6, output: 8 });
+	// 官方 `TurnTokenUsage`：缓存/推理桶「只有每次尝试都报告时才存在」，任一次缺失整桶作废。
+	const bucketDropped = (() => {
+		const state = createDshIdeConversationState();
+		const send = (event: Record<string, unknown>) => project(state, { type: 'event', event });
+		send({ type: 'assistant/message', seq: 100, time: 100, turn: 20, data: { turn: 20, step: 1, message: { content: [{ type: 'text', text: 'a' }], usage: { inputTokens: 1, outputTokens: 1, cacheReadTokens: 5, reasoningTokens: 2 } } } });
+		send({ type: 'assistant/message', seq: 101, time: 101, turn: 20, data: { turn: 20, step: 2, message: { content: [{ type: 'text', text: 'b' }], usage: { inputTokens: 1, outputTokens: 1 } } } });
+		return send({ type: 'turn/end', seq: 102, time: 102, data: { turn: 20, step: 2, reason: { kind: 'completed' } } })
+			.nodes.find(node => node.kind === 'turn-tail') as { tokenUsage?: { cacheRead?: number; reasoning?: number } };
+	})();
+	assert.equal(bucketDropped.tokenUsage?.cacheRead, undefined, '一次缺缓存桶，整桶不该出现');
+	assert.equal(bucketDropped.tokenUsage?.reasoning, undefined, '一次缺推理桶，整桶不该出现');
+	// 官方 `TurnTailNodeView` 用 `closing.finalNode.messageId` 给动作行寻址。
+	const closingId = (() => {
+		const state = createDshIdeConversationState();
+		const send = (event: Record<string, unknown>) => project(state, { type: 'event', event });
+		send({ type: 'assistant/message', seq: 120, time: 120, turn: 11, data: { messageId: 'msg-1', turn: 11, step: 1, message: { content: [{ type: 'text', text: '答复' }] } } });
+		return send({ type: 'turn/end', seq: 121, time: 121, data: { turn: 11, step: 1, reason: { kind: 'completed' } } })
+			.nodes.find(node => node.kind === 'turn-tail') as { closingMessageId?: string };
+	})();
+	assert.equal(closingId.closingMessageId, 'msg-1');
+	// 中断冻结的部分回复没有 messageId：官方此时不给动作行，这里也不给。
+	const noClosingId = (() => {
+		const state = createDshIdeConversationState();
+		const send = (event: Record<string, unknown>) => project(state, { type: 'event', event });
+		send({ type: 'assistant/message', seq: 122, time: 122, turn: 12, data: { turn: 12, step: 1, message: { content: [{ type: 'text', text: '半句' }] }, interrupted: true } });
+		return send({ type: 'turn/end', seq: 123, time: 123, data: { turn: 12, step: 1, reason: { kind: 'interrupted' } } })
+			.nodes.find(node => node.kind === 'turn-tail') as { closingMessageId?: string };
+	})();
+	assert.equal(noClosingId.closingMessageId, undefined);
+	// 官方 `chat/turn-assistant.ts` 的 `assistantText` 是 `join('')`：多块正文直接拼接，不加分隔符。
+	const multiBlock = (() => {
+		const state = createDshIdeConversationState();
+		const send = (event: Record<string, unknown>) => project(state, { type: 'event', event });
+		send({ type: 'assistant/message', seq: 124, time: 124, turn: 15, data: { messageId: 'm15', turn: 15, step: 1, message: { content: [{ type: 'text', text: '前半' }, { type: 'reasoning', text: '想一下' }, { type: 'text', text: '后半' }] } } });
+		return send({ type: 'turn/end', seq: 125, time: 125, data: { turn: 15, step: 1, reason: { kind: 'completed' } } })
+			.nodes.find(node => node.kind === 'turn-tail') as { closing?: string };
+	})();
+	assert.equal(multiBlock.closing, '前半后半');
+	// 官方 `hasLaterChatNode`：收尾答复之后若还有同 Turn 的实质节点，分支不可用；
+	// `turn-max-tokens` 与 `turn-tail` / `turn-process` 本身不算（官方 skipWarning 同样跳过）。
+	const laterNode = (() => {
+		const state = createDshIdeConversationState();
+		const send = (event: Record<string, unknown>) => project(state, { type: 'event', event });
+		send({ type: 'assistant/message', seq: 130, time: 130, turn: 13, data: { messageId: 'm13', turn: 13, step: 1, message: { content: [{ type: 'text', text: '答复' }] } } });
+		send({ type: 'turn/end', seq: 131, time: 131, data: { turn: 13, step: 1, reason: { kind: 'max-tokens' } } });
+		return send({ type: 'turn/end', seq: 132, time: 132, data: { turn: 13, step: 1, reason: { kind: 'completed' } } })
+			.nodes.find(node => node.kind === 'turn-tail') as { branchUnavailable?: true };
+	})();
+	assert.equal(laterNode.branchUnavailable, undefined, '只有 turn-max-tokens 时分支仍可用');
+	// 过程组节点与尾部同批产出：锚点、计数与固定 false 的 inlineReasoning。
+	const processTail = (() => {
+		const state = createDshIdeConversationState();
+		const send = (event: Record<string, unknown>) => project(state, { type: 'event', event });
+		send({ type: 'user/message', seq: 95, time: 95, data: { id: 'm', source: { kind: 'user' }, content: [{ type: 'text', text: 'q' }] } });
+		send({ type: 'assistant/message', seq: 96, time: 96, turn: 10, data: { turn: 10, step: 1, message: { content: [{ type: 'text', text: 'a' }] } } });
+		send({ type: 'tool/call', seq: 97, time: 97, data: { turn: 10, callId: 'c1', name: 'subagent', phase: 'start', arguments: '{}' } });
+		send({ type: 'assistant/message', seq: 98, time: 98, turn: 10, data: { turn: 10, step: 2, message: { content: [{ type: 'text', text: 'b' }] } } });
+		return send({ type: 'turn/end', seq: 99, time: 99, data: { turn: 10, step: 2, reason: { kind: 'completed' } } })
+			.nodes.find(node => node.kind === 'turn-process') as {
+				processStartSeq?: number; answerAnchorSeq?: number; answerStep: number;
+				inlineReasoning: boolean; messageCount: number; toolCallCount: number; subagentCount: number;
+			};
+	})();
+	assert.equal(processTail.processStartSeq, 97);
+	assert.equal(processTail.answerAnchorSeq, 96);
+	assert.equal(processTail.answerStep, 2);
+	assert.equal(processTail.inlineReasoning, false);
+	// 官方 `messageCount` 只数最终答复**之前**的助手消息：该 Turn 有 2 条助手，
+	// 最后一条是最终答复，所以是 1。
+	assert.equal(processTail.messageCount, 1);
+	// 该 Turn 只调了一次 `subagent`：按官方「non-subagent」口径，toolCallCount 是 0。
+	assert.equal(processTail.toolCallCount, 0);
+	assert.equal(processTail.subagentCount, 1);
+	// 官方 `TurnProcessSpec.toolCallCount` 是「Durable **non-subagent** Tool calls」：
+	// 子代理委派只进 subagentCount，不能同时算成普通工具调用。
+	const overlap = (() => {
+		const state = createDshIdeConversationState();
+		const send = (event: Record<string, unknown>) => project(state, { type: 'event', event });
+		send({ type: 'assistant/message', seq: 140, time: 140, turn: 14, data: { turn: 14, step: 1, message: { content: [{ type: 'text', text: 'a' }] } } });
+		send({ type: 'tool/call', seq: 141, time: 141, data: { turn: 14, callId: 's1', name: 'subagent', phase: 'start', arguments: '{}' } });
+		send({ type: 'tool/call', seq: 142, time: 142, data: { turn: 14, callId: 'r1', name: 'read', phase: 'start', arguments: '{}' } });
+		return send({ type: 'turn/end', seq: 143, time: 143, data: { turn: 14, step: 1, reason: { kind: 'completed' } } })
+			.nodes.find(node => node.kind === 'turn-process') as { toolCallCount: number; subagentCount: number };
+	})();
+	assert.equal(overlap.subagentCount, 1);
+	assert.equal(overlap.toolCallCount, 1, '只有 read 计入 toolCallCount');
+	// 答复之后又有工具：分支不可用。
+	send({ type: 'assistant/message', seq: 72, time: 72, turn: 2, data: { turn: 2, step: 1, message: { content: [{ type: 'text', text: '第二答' }] } } });
+	send({ type: 'tool/call', seq: 73, time: 73, data: { turn: 2, callId: 'c1', name: 'read', phase: 'start', arguments: '{}' } });
+	view = send({ type: 'turn/end', seq: 74, time: 74, data: { turn: 2, step: 1, reason: { kind: 'completed' } } });
+	tail = view.nodes.find(node => node.kind === 'turn-tail' && (node as { turn: number }).turn === 2) as { closing?: string; branchUnavailable?: true };
+	assert.equal(tail.closing, '第二答');
+	assert.equal(tail.branchUnavailable, true);
+	// 没有答复的 Turn：分支必然不可用。
+	view = send({ type: 'turn/end', seq: 75, time: 75, data: { turn: 3, step: 1, reason: { kind: 'completed' } } });
+	const bare = view.nodes.find(node => node.kind === 'turn-tail' && (node as { turn: number }).turn === 3) as { closing?: string; branchUnavailable?: true };
+	assert.equal(bare.closing, undefined);
+	assert.equal(bare.branchUnavailable, true);
+	// 出错的 Turn 同样不可用。
+	view = send({ type: 'turn/end', seq: 76, time: 76, data: { turn: 4, step: 1, reason: { kind: 'error', failure: { message: 'boom' } } } });
+	const failed = view.nodes.find(node => node.kind === 'turn-tail' && (node as { turn: number }).turn === 4) as { branchUnavailable?: true };
+	assert.equal(failed.branchUnavailable, true);
+});
+
+test('system/message 的 append 生成 system-prompt，文本变化标成更新', () => {
+	const state = createDshIdeConversationState();
+	const send = (seq: number, text: string) => project(state, {
+		type: 'event',
+		event: { type: 'system/message', seq, time: seq, surfaceOp: 'append', data: { content: [{ type: 'text', text }] } },
+	});
+	let view = send(60, '规则一');
+	assert.deepEqual(view.nodes.map(node => node.kind), ['system-prompt']);
+	assert.equal((view.nodes[0] as { update?: true }).update, undefined);
+	view = send(61, '规则一');
+	// 官方的每一次非空 append 都拥有一张提示卡；文本没变时不算更新。
+	assert.equal(view.nodes.length, 2);
+	assert.equal(view.nodes.every(node => (node as { update?: true }).update === undefined), true);
+	view = send(62, '规则二');
+	const latest = view.nodes.at(-1) as { text: string; update?: true };
+	assert.equal(latest.text, '规则二');
+	assert.equal(latest.update, true);
+	// 非 append 的替换不产生新卡片。
+	const replaced = project(createDshIdeConversationState(), {
+		type: 'event',
+		event: { type: 'system/message', seq: 63, time: 63, surfaceOp: 'replace', data: { content: [{ type: 'text', text: '替换' }] } },
+	});
+	assert.deepEqual(replaced.nodes, []);
+});
+
+test('tool-workflow 事件折叠成 workflow-run，成员状态随结算更新', () => {
+	const state = createDshIdeConversationState();
+	const run = (event: Record<string, unknown>) => project(state, { type: 'event', event });
+	run({ type: 'tool-workflow/run-start', seq: 50, time: 50, data: { runId: 'r1', name: 'audit' } });
+	let view = run({ type: 'tool-workflow/agent-start', seq: 51, time: 51, data: { runId: 'r1', seq: 1, label: '扫描', childId: 'child-1', phase: 'a' } });
+	assert.equal(view.nodes.length, 1);
+	assert.equal(view.nodes[0].kind, 'workflow-run');
+	run({ type: 'tool-workflow/agent-start', seq: 52, time: 52, data: { runId: 'r1', seq: 2, label: '复核', childId: 'child-2' } });
+	run({ type: 'tool-workflow/agent-end', seq: 53, time: 53, data: { runId: 'r1', seq: 1, outcome: 'completed' } });
+	view = run({ type: 'tool-workflow/run-end', seq: 54, time: 54, data: { runId: 'r1', stopReason: 'completed' } });
+	const node = view.nodes[0] as { name: string; status: string; phases: { phase: string | null; members: { label: string; status: string }[] }[] };
+	assert.equal(node.name, 'audit');
+	assert.equal(node.status, 'completed');
+	assert.deepEqual(node.phases.map(phase => phase.phase), ['a', null]);
+	assert.deepEqual(node.phases[0].members, [{ seq: 1, label: '扫描', childId: 'child-1', status: 'completed' }]);
+	assert.equal(node.phases[1].members[0].status, 'running');
+	// Turn 被中断且没有 run-end：未结束的运行与成员转成 interrupted（官方 turnAbandoned）。
+	const interrupted = createDshIdeConversationState();
+	const runInterrupted = (event: Record<string, unknown>) => project(interrupted, { type: 'event', event });
+	runInterrupted({ type: 'tool-workflow/run-start', seq: 55, time: 55, turn: 3, data: { runId: 'r2', name: 'audit' } });
+	runInterrupted({ type: 'tool-workflow/agent-start', seq: 56, time: 56, turn: 3, data: { runId: 'r2', seq: 1, label: '扫描', childId: 'child' } });
+	const afterInterrupt = runInterrupted({ type: 'turn/end', seq: 57, time: 57, data: { turn: 3, step: 1, reason: { kind: 'interrupted' } } });
+	const interruptedNode = afterInterrupt.nodes.find(item => item.kind === 'workflow-run') as { status: string; phases: { members: { status: string }[] }[] };
+	assert.equal(interruptedNode.status, 'interrupted');
+	assert.equal(interruptedNode.phases[0].members[0].status, 'interrupted');
+});
+
+test('exit_plan_mode 的带标题计划另成 submitted-plan，坏参数保留工具行', () => {
+	const state = createDshIdeConversationState();
+	const plan = '# 迁移计划\n先做 A。';
+	const view = project(state, {
+		type: 'event',
+		event: {
+			type: 'tool/call',
+			seq: 40,
+			time: 40,
+			data: { callId: 'call-p', name: 'exit_plan_mode', phase: 'start', arguments: JSON.stringify({ plan }) },
+		},
+	});
+	assert.deepEqual(view.nodes.map(node => node.kind).sort(), ['submitted-plan', 'tool-call']);
+	const node = view.nodes.find(item => item.kind === 'submitted-plan') as { title: string; markdown: string; callId: string };
+	assert.equal(node.title, '迁移计划');
+	assert.equal(node.markdown, plan);
+	assert.equal(node.callId, 'call-p');
+	// 没有一级标题、或参数不是 JSON 的计划读不出来，保留普通工具行。
+	for (const args of ['{"plan":"没有标题"}', '不是 JSON']) {
+		const other = createDshIdeConversationState();
+		const fallback = project(other, {
+			type: 'event',
+			event: { type: 'tool/call', seq: 41, time: 41, data: { callId: 'call-q', name: 'exit_plan_mode', phase: 'start', arguments: args } },
+		});
+		assert.deepEqual(fallback.nodes.map(item => item.kind), ['tool-call'], args);
+	}
+});
+
+test('/goal 的人工输入另出 command-input，通用 command 行保留结果', () => {
+	const state = createDshIdeConversationState();
+	const view = project(state, {
+		type: 'event',
+		event: { type: 'command/run', seq: 30, time: 30, data: { commandId: 'c1', name: 'goal', rawInput: ' 完成目标  ' } },
+	});
+	assert.deepEqual(view.nodes.map(node => node.kind).sort(), ['command', 'command-input']);
+	const input = view.nodes.find(node => node.kind === 'command-input') as { text: string; commandId: string };
+	assert.equal(input.text, '/goal 完成目标');
+	assert.equal(input.commandId, 'c1');
+	// 其它命令不产生 command-input，避免把普通斜杠命令伪装成目标输入。
+	const other = createDshIdeConversationState();
+	const plain = project(other, {
+		type: 'event',
+		event: { type: 'command/run', seq: 31, time: 31, data: { commandId: 'c2', name: 'help', rawInput: '' } },
+	});
+	assert.deepEqual(plain.nodes.map(node => node.kind), ['command']);
+});
+
+test('ask_user_question 的整份回执取代工具卡，成为 question-reply', () => {
+	const state = createDshIdeConversationState();
+	const text = JSON.stringify({
+		questions: [{ id: 'a', question: '继续吗', header: '确认' }],
+		answers: [{ id: 'a', selected: ['继续'] }],
+	});
+	const view = project(state, {
+		type: 'event',
+		event: {
+			type: 'tool/result',
+			seq: 20,
+			time: 20,
+			turn: 1,
+			data: {
+				message: { source: { callId: 'call-1' }, content: [{ type: 'text', text }], isError: false },
+				call: { name: 'ask_user_question', argsRaw: JSON.stringify({ questions: [{ id: 'a', question: '继续吗', header: '确认' }] }) },
+			},
+		},
+	});
+	assert.deepEqual(view.nodes.map(node => node.kind), ['question-reply']);
+	const node = view.nodes[0] as { callId: string; questions: unknown[]; answers: unknown[]; text: string };
+	assert.equal(node.callId, 'call-1');
+	assert.equal(node.questions.length, 1);
+	assert.deepEqual(node.answers, [{ id: 'a', selected: ['继续'] }]);
+	assert.equal(node.text, text);
+});
+
+test('回执缺题、带 plan-review 或多块正文时保留普通工具卡', () => {
+	const cases: readonly { args: unknown; text: string; blocks?: number }[] = [
+		{ args: { questions: [{ id: 'a', question: 'q' }] }, text: JSON.stringify({ answers: [] }) },
+		{ args: { questions: [{ id: 'p', question: 'q', intent: { kind: 'plan-review', approve: 'ok' } }] }, text: JSON.stringify({ answers: [{ id: 'p', selected: ['ok'] }] }) },
+		{ args: { questions: [{ id: 'a', question: 'q' }] }, text: JSON.stringify({ answers: [{ id: 'a', selected: [] }], pending: true }) },
+	];
+	for (const item of cases) {
+		const state = createDshIdeConversationState();
+		const view = project(state, {
+			type: 'event',
+			event: {
+				type: 'tool/result',
+				seq: 21,
+				time: 21,
+				turn: 1,
+				data: {
+					message: { source: { callId: 'call-2' }, content: [{ type: 'text', text: item.text }], isError: false },
+					call: { name: 'ask_user_question', argsRaw: JSON.stringify(item.args) },
+				},
+			},
+		});
+		assert.deepEqual(view.nodes.map(node => node.kind), ['tool-result'], JSON.stringify(item));
+	}
+});
+
+test('迟到的人工回执也投影为 question-reply，不冒充普通用户消息', () => {
+	const state = createDshIdeConversationState();
+	const text = JSON.stringify({
+		questions: [{ id: 'b', question: '第二题' }],
+		answers: [{ id: 'b', selected: [], custom: '自己写的' }],
+	});
+	const view = project(state, {
+		type: 'event',
+		event: {
+			type: 'user/message',
+			seq: 22,
+			time: 22,
+			data: {
+				id: 'm-1',
+				source: { kind: 'user-question-reply', callId: 'call-3', outcome: 'answered' },
+				content: [{ type: 'text', text }],
+			},
+		},
+	});
+	assert.deepEqual(view.nodes.map(node => node.kind), ['question-reply']);
+	// 没有 outcome=answered 的迟到消息不得被认领；非 user 来源按既有规则归入 context。
+	const other = createDshIdeConversationState();
+	const fallback = project(other, {
+		type: 'event',
+		event: {
+			type: 'user/message',
+			seq: 23,
+			time: 23,
+			data: { id: 'm-2', source: { kind: 'user-question-reply', callId: 'call-4' }, content: [{ type: 'text', text }] },
+		},
+	});
+	assert.deepEqual(fallback.nodes.map(node => node.kind), ['context']);
 });
 
 test('attachments 从消息 content 收集图片引用并去重', () => {
