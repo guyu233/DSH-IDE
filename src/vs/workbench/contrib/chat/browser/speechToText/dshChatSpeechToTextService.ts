@@ -108,7 +108,7 @@ export class DshChatSpeechToTextService extends Disposable implements IChatSpeec
 			const result = await this.client.call<DshSpeechCatalog>('speechCatalog', {});
 			if (generation !== this.generation) { return; }
 			if (!result.ok || !dshSpeechSampleLimit(result.value)) {
-				this.notifications.warn(localize('dshSpeech.unavailable', "DSH 语音转写不可用，或所选服务尚未就绪。请在 DeepSeek Harness 里配置。"));
+				this.notifications.warn(localize('dshSpeech.unavailable', "DSH transcription is unavailable; check the speech provider selected in DeepSeek Harness."));
 				return;
 			}
 			this.catalog = result.value;
@@ -122,7 +122,7 @@ export class DshChatSpeechToTextService extends Disposable implements IChatSpeec
 			if (generation !== this.generation) { stream.getTracks().forEach(track => track.stop()); return; }
 			this.stream = stream;
 			const context = this.context = new window.AudioContext({ sampleRate: 16000 });
-			if (context.sampleRate !== 16000) { throw new Error(localize('dshSpeech.sampleRate', "麦克风无法以 16 kHz 采集音频。")); }
+			if (context.sampleRate !== 16000) { throw new Error(localize('dshSpeech.sampleRate', "The microphone cannot capture audio at 16 kHz.")); }
 			await context.resume();
 			const capture = await this.createCapture(window, context, 4096, samples => this.captureSamples(samples, generation));
 			if (generation !== this.generation) { capture.node.port.onmessage = null; capture.node.disconnect(); return; }
@@ -136,7 +136,7 @@ export class DshChatSpeechToTextService extends Disposable implements IChatSpeec
 			if (generation === this.generation) {
 				this.release();
 				this.catalog = undefined;
-				this.notifications.error(localize('dshSpeech.startFailed', "无法开始 DSH 听写：{0}", error instanceof Error ? error.message : String(error)));
+				this.notifications.error(localize('dshSpeech.startFailed', "Could not start DSH dictation: {0}", error instanceof Error ? error.message : String(error)));
 			}
 		} finally {
 			if (generation === this.generation) { this.starting = false; }
@@ -161,7 +161,7 @@ export class DshChatSpeechToTextService extends Disposable implements IChatSpeec
 		for (const track of stream.getAudioTracks()) {
 			track.onended = () => {
 				if (this.stream === stream && this.state === ChatSpeechToTextState.Recording) {
-					this.notifications.warn(localize('dshSpeech.interrupted', "麦克风已断开，DSH 听写已停止。"));
+					this.notifications.warn(localize('dshSpeech.interrupted', "The microphone disconnected, so DSH dictation stopped."));
 					void this.cancel();
 				}
 			};
@@ -181,7 +181,7 @@ export class DshChatSpeechToTextService extends Disposable implements IChatSpeec
 	private stopAtLimit(generation: number): void {
 		if (generation !== this.generation || this.state !== ChatSpeechToTextState.Recording || this.limitStopRequested) { return; }
 		this.limitStopRequested = true;
-		status(localize('dshSpeech.limitReached', "已达到 DSH 录音上限，听写已停止。"));
+		status(localize('dshSpeech.limitReached', "The DSH recording limit was reached, so dictation stopped."));
 		void stopDictation();
 	}
 
@@ -233,7 +233,7 @@ export class DshChatSpeechToTextService extends Disposable implements IChatSpeec
 			return generation === this.generation ? text : undefined;
 		} catch (error) {
 			if (generation === this.generation) {
-				this.notifications.error(localize('dshSpeech.transcribeFailed', "DSH 语音转写失败：{0}", error instanceof Error ? error.message : String(error)));
+				this.notifications.error(localize('dshSpeech.transcribeFailed', "DSH transcription failed: {0}", error instanceof Error ? error.message : String(error)));
 			}
 			return undefined;
 		} finally {

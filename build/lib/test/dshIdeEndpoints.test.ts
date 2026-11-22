@@ -22,15 +22,17 @@
 // 形状一律以契约真源 dshIdeProtocol.ts 与 DSH 源码为准，不凭记忆臆造。
 
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
 
 const repoRoot = path.resolve(import.meta.dirname, '../../..');
 const read = (rel: string) => fs.readFileSync(path.join(repoRoot, rel), 'utf8');
-const protocol = read('src/vs/platform/dshClient/common/dshIdeProtocol.ts');
-const transport = read('src/vs/platform/dshClient/transport/dshIdeTransport.ts');
-const host = read('src/vs/platform/dshClient/host/ide-view-host.js');
+const protocol = read('src/vs/platform/dshClient/protocol/dshIdeProtocol.ts');
+const transport = read('src/vs/platform/dshClient/ide/transport/dshIdeTransport.ts');
+const host = read('src/vs/platform/dshClient/host/bridge/ide-view-host.js');
 
 /** D16 核对结论：null = 官方无对应独立 remote / 形状未验证，必须保持 fail-closed。 */
 interface EndpointFinding {
@@ -75,12 +77,6 @@ const FINDINGS: readonly EndpointFinding[] = [
 		note: '已完成（代码侧，第 34 轮）：按 §8.10.10 契约决定接线——command 为不带斜杠的命令名、args 单空格拼入 rawInput、attachments 恒 []、signal 由框架/Host 提供、结果映射 IA/FU；两套 backend 共用 dshIdeCommandLine.js。',
 	},
 	{
-		method: 'listCommands',
-		landing: 'commands/list',
-		evidence: 'interaction/commands/src/index.ts:314 @Remote list(agent)；ui-commands/src/client/service.ts:108 list(sessionId)；bundle/base/cordis.patch.yml:322 commands 默认在册；types.ts:57-66 CommandDescriptor；第 31 轮 wire 证据同 runCommand 行',
-		note: '已完成（代码侧，第 32 轮）：据第 31 轮核实的 wire 形状接线两套 backend——Host 经 agents.get(sessionId)→commands.list(agent)、transport 调 commands/list {agentId}，共用 projectDshIdeCommandList 投影 {name,description}；6 项单测。运行时命令目录可用性归 U10 / U12 真机探针。',
-	},
-	{
 		method: 'deleteSession',
 		landing: 'workspaceRegistry/deleteSession（社区插件 endpoint）',
 		evidence: '§8.10.7 官方入口不存在已定论；§8.10.8 第 20 轮批准调用 @michengai/dsh-archive-manager@1.3.1 的公开 endpoint；D51/D61 已实现',
@@ -89,7 +85,7 @@ const FINDINGS: readonly EndpointFinding[] = [
 ];
 
 /** 已完成（代码侧）：deleteSession、setEffort、listCommands、runCommand / setPermissionPreset、loadOlder（第 21 轮）。 */
-const WIRED = ['deleteSession', 'setEffort', 'listCommands', 'runCommand', 'setPermissionPreset', 'loadOlder', 'rewind'];
+const WIRED = ['deleteSession', 'setEffort', 'runCommand', 'setPermissionPreset', 'loadOlder', 'rewind'];
 /**
  * core 没有、也不靠这两插件补的 method 不在这张表里。
  *
@@ -138,14 +134,9 @@ test('chat-baseline methods without a verified remote stay missing(...)', () => 
 	assert.doesNotMatch(protocol, /\bloadThrough:/, 'loadOlder.throughSeq already is the official cut; do not add loadThrough');
 });
 
-test('setGoal and listSkills are wired to their official services', () => {
-	// goals.create 返回 GoalView；remoteExportCreate 只回 { ref }，界面不能用那条。
-	assert.match(host, /async setGoal\(args\)/);
-	assert.match(host, /goals\.create\(agent, request\)/);
-	assert.doesNotMatch(host, /goals\.remoteExportCreate/);
-	// skills：session-controller 的 sessionSkillCatalog.list({ sessionId }, signal)
-	assert.match(host, /sessionSkillCatalog/);
-	assert.match(host, /catalog\.list\(\{ sessionId \}, callerSignal\(\)\)/);
+test('setGoal and listSkills are not on the chat path', () => {
+	assert.doesNotMatch(host, /async setGoal\(args\)/);
+	assert.doesNotMatch(host, /listSkills:/);
 });
 
 test('D16 Host bridge keeps the unverified methods as missing(...)', () => {
@@ -162,15 +153,15 @@ test('D16 Host bridge keeps the unverified methods as missing(...)', () => {
 // 结论表本身：每条都要有证据与结论，落点与 D13 前置口径一致。
 // ---------------------------------------------------------------------------
 
-test('D16 findings are complete: 7 methods, each with evidence and a conclusion', () => {
-	assert.equal(FINDINGS.length, 7);
+test('D16 findings are complete: 6 methods, each with evidence and a conclusion', () => {
+	assert.equal(FINDINGS.length, 6);
 	assert.deepEqual(FINDINGS.map(f => f.method).sort(),
-		['deleteSession', 'listCommands', 'loadOlder', 'rewind', 'runCommand', 'setEffort', 'setPermissionPreset'].sort());
+		['deleteSession', 'loadOlder', 'rewind', 'runCommand', 'setEffort', 'setPermissionPreset'].sort());
 	for (const f of FINDINGS) {
 		assert.ok(f.evidence.length > 20, `${f.method} must carry source evidence`);
 		assert.ok(f.note.length > 10, `${f.method} must carry a conclusion / D13 prerequisite`);
 	}
-	assert.equal(FINDINGS.filter(f => f.note.startsWith('已完成')).length, 7);
+	assert.equal(FINDINGS.filter(f => f.note.startsWith('已完成')).length, 6);
 	// 每条 finding 必须落在 WIRED 或 UNVERIFIED 之一：既不漏判，也不允许两边都不列。
 	for (const finding of FINDINGS) {
 		assert.ok(
@@ -242,8 +233,8 @@ test('D59 archive endpoints are official remotes and now wired without third-par
 // ---------------------------------------------------------------------------
 
 test('listen event surface stays an explicit allow-list (snapshot / waterfall / session-notice)', () => {
-	const protocol = read('src/vs/platform/dshClient/common/dshIdeProtocol.ts');
-	const channel = read('src/vs/platform/dshClient/electron-main/dshIdeChannel.ts');
+	const protocol = read('src/vs/platform/dshClient/protocol/dshIdeProtocol.ts');
+	const channel = read('src/vs/platform/dshClient/ide/main/dshIdeChannel.ts');
 
 	// 契约里有澄清注释，且明确「当前唯一」「须先改本契约」。
 	assert.match(protocol, /白名单是 `snapshot` 与 `waterfall`/, 'the contract must name both allowed snapshot/waterfall events');
@@ -322,7 +313,7 @@ test('D27 CI aggregate entry exists, follows §2 order, and refuses PENDING', ()
 // ---------------------------------------------------------------------------
 
 test('D62 workspaceRegistry is optional and the bridge still waits for its core deps via ctx.inject', () => {
-	const host = read('src/vs/platform/dshClient/host/ide-view-host.js');
+	const host = read('src/vs/platform/dshClient/host/bridge/ide-view-host.js');
 	const index = read('src/vs/platform/dshClient/index.js');
 
 	// 核心依赖只有会话跟随必需的两项；workspaceRegistry 只被归档/删除用到，
@@ -338,7 +329,7 @@ test('D62 workspaceRegistry is optional and the bridge still waits for its core 
 });
 
 test('DshIdeConsumer exists but its accept() only validates snapshots', () => {
-	const consumer = read('src/vs/workbench/contrib/dsh/browser/dshIdeConsumer.ts');
+	const consumer = read('src/vs/workbench/contrib/dsh/browser/consumer/dshIdeConsumer.ts');
 
 	assert.match(consumer, /export class DshIdeConsumer extends Disposable/, 'the consumer must exist as a class');
 	assert.match(consumer, /accept\(frame: unknown\): boolean/, 'accept() must keep its signature');
@@ -375,30 +366,55 @@ test('D27 the CI aggregate checks prerequisites and names the fix command', () =
 // 记录存在、且明确写着「不构成通过结论」与「D21 整体保持未完成」。
 // ---------------------------------------------------------------------------
 
-test('D26 every patch point carries a sha256 baseline matching the actual file', async () => {
-	const crypto = await import('node:crypto');
-	const fsMod = await import('node:fs');
-	const contract = read('src/vs/platform/dshClient/common/dshIdeContract.ts');
+const contractGateScript = 'build/lib/dsh/verify/dshIdeVerify.mjs';
 
-	const files = [...contract.matchAll(/\bfile:\s*'([^']+)'/g)].map(m => m[1]);
-	const baselines = [...contract.matchAll(/\bsha256:\s*'([0-9a-f]{16})'/g)].map(m => m[1]);
+function runContractGate(root: string, env: Record<string, string>) {
+	const child = spawnSync(process.execPath, [path.join(root, contractGateScript), 'contract'], {
+		cwd: root,
+		encoding: 'utf8',
+		env: { ...process.env, ...env },
+		timeout: 10_000,
+	});
+	assert.ifError(child.error);
+	return { code: child.status, out: child.stdout + child.stderr };
+}
 
+test('D26 the contract gate accepts LF and CRLF checkouts and refuses drift', t => {
+	const root = fs.mkdtempSync(path.join(tmpdir(), 'dsh-d26-'));
+	t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+	const contractFile = 'src/vs/platform/dshClient/protocol/dshIdeContract.ts';
+	const files = [...read(contractFile).matchAll(/\bfile:\s*'([^']+)'/g)].map(m => m[1]);
 	assert.equal(files.length, 4, 'four injection points must be declared');
-	assert.equal(baselines.length, 4, 'each injection point must carry a sha256 baseline');
 
-	for (let i = 0; i < files.length; i++) {
-		const abs = path.join(repoRoot, files[i]);
-		assert.ok(fsMod.existsSync(abs), `injection point file must exist: ${files[i]}`);
-		const actual = crypto.createHash('sha256').update(fsMod.readFileSync(abs)).digest('hex').slice(0, 16);
-		assert.equal(actual, baselines[i],
-			`${files[i]} drifted from its baseline — update the contract baseline deliberately (see §5 §7)`);
+	// 复制门禁和它依赖的文件，在临时目录制造两种检出与真实漂移。
+	for (const file of [contractGateScript, contractFile, 'build/lib/dsh/package.json', 'src/vs/platform/dshClient/host/bridge/ide-view-host.js', ...files]) {
+		const dest = path.join(root, file);
+		fs.mkdirSync(path.dirname(dest), { recursive: true });
+		fs.copyFileSync(path.join(repoRoot, file), dest);
 	}
-});
+	const run = () => runContractGate(root, { DSH_INSTALLED_VERSION: '0.2.2-rc.5', DSH_HOME: '' });
+	for (const [label, eol] of [['LF', '\n'], ['CRLF', '\r\n']]) {
+		for (const file of files) {
+			fs.writeFileSync(path.join(root, file), read(file).replace(/\r?\n/g, eol));
+		}
+		const result = run();
+		assert.equal(result.code, 0, `${label} checkout must pass:\n${result.out}`);
+		assert.match(result.out, /STATUS: PASS +\[contract\]/);
+	}
 
-test('D26 the contract gate fails on fingerprint mismatch instead of only printing', () => {
-	const gate = read('build/lib/dsh/verify/dshIdeVerify.mjs');
-	assert.match(gate, /VSCODE_PATCH_POINTS 指纹与基线不符/, 'the gate must throw on drift');
-	assert.match(gate, /mismatches\.push/, 'the gate must collect mismatches');
+	const changedFile = files[0];
+	const changedPath = path.join(root, changedFile);
+	fs.appendFileSync(changedPath, '\r\n// D26 content drift fixture\r\n');
+	const changed = run();
+	assert.equal(changed.code, 1, changed.out);
+	assert.match(changed.out, /STATUS: FAIL +\[contract\]/);
+	assert.ok(changed.out.includes(`${changedFile}: 基线`), changed.out);
+
+	fs.unlinkSync(changedPath);
+	const missing = run();
+	assert.equal(missing.code, 1, missing.out);
+	assert.match(missing.out, /STATUS: FAIL +\[contract\]/);
+	assert.ok(missing.out.includes(`${changedFile}: 文件缺失`), missing.out);
 });
 
 // ---------------------------------------------------------------------------
@@ -483,19 +499,8 @@ test('every project dsh test file is registered in test-dsh:all', async () => {
 // 重打后若忘记回写，测试即失败。
 // ---------------------------------------------------------------------------
 
-test('D68 contract gate can actually reach PASS, and fails on a lower installed version', async () => {
-	const { execFileSync } = await import('node:child_process');
-	const script = path.join(repoRoot, 'build/lib/dsh/verify/dshIdeVerify.mjs');
-
-	const run = env => {
-		try {
-			return { code: 0, out: execFileSync(process.execPath, [script, 'contract'], {
-				cwd: repoRoot, encoding: 'utf8', env: { ...process.env, ...env },
-			}) };
-		} catch (error) {
-			return { code: error.status ?? 1, out: `${error.stdout ?? ''}${error.stderr ?? ''}` };
-		}
-	};
+test('D68 contract gate can actually reach PASS, and fails on a lower installed version', t => {
+	const run = (env: Record<string, string>) => runContractGate(repoRoot, env);
 
 	// 未设版本且本机没有运行时元数据：不得判 PASS（无法证明相符），且退出码必须非 0
 	// （「没有证据」不能算成功）。两个来源都要清掉，否则自动发现会补上版本。
@@ -503,10 +508,15 @@ test('D68 contract gate can actually reach PASS, and fails on a lower installed 
 	assert.match(unset.out, /STATUS: PENDING/, 'without any version evidence the gate must stay PENDING');
 	assert.notEqual(unset.code, 0, 'PENDING must not exit 0 — a caller using && would treat it as success');
 
-	// 未显式设置、但本机能读到运行时元数据：自动取用，不再永久 PENDING。
-	// 之前只认环境变量，本机装好了门禁也从不判定——等于没有门禁。
-	const auto = run({ DSH_INSTALLED_VERSION: '' });
-	assert.doesNotMatch(auto.out, /PENDING\(上游升级\)/, 'a readable runtime version must be used instead of staying PENDING');
+	// 用临时运行时元数据走自动发现，同一测试可在装机与干净检出环境运行。
+	const home = fs.mkdtempSync(path.join(tmpdir(), 'dsh-d68-'));
+	t.after(() => fs.rmSync(home, { recursive: true, force: true }));
+	const runtime = path.join(home, 'dsh-runtimes', 'desktop');
+	fs.mkdirSync(runtime, { recursive: true });
+	fs.writeFileSync(path.join(runtime, 'runtime.json'), JSON.stringify({ desktopVersion: '0.2.2-rc.5' }));
+	const auto = run({ DSH_INSTALLED_VERSION: '', DSH_HOME: home });
+	assert.equal(auto.code, 0, auto.out);
+	assert.match(auto.out, /STATUS: PASS +\[contract\]/);
 
 	// 版本在 manifest engines.dsh 区间内：应当 PASS。
 	const ok = run({ DSH_INSTALLED_VERSION: '0.2.2-rc.5' });
@@ -609,10 +619,6 @@ test('new channel methods resolve their documented Host services', () => {
 	const cases: readonly { method: string; service: string; call: RegExp }[] = [
 		{ method: 'speechCatalog', service: 'speechController', call: /speech\.catalog\(\)/ },
 		{ method: 'speechTranscribe', service: 'speechController', call: /speech\.transcribe\(args\.request/ },
-		{ method: 'mcpListServers', service: 'mcpManager', call: /manager\.list\(\)/ },
-		{ method: 'mcpRestartServer', service: 'mcpManager', call: /manager\.restart\(args\.name\)/ },
-		{ method: 'jobList', service: 'jobController', call: /jobs\.list\(\{ sessionId \}/ },
-		{ method: 'jobKill', service: 'jobController', call: /jobs\.kill\(\{ sessionId, jobId: args\.jobId \}\)/ },
 		{ method: 'saveImageAttachment', service: 'attachments', call: /attachments\.saveImages\(\[/ },
 		{ method: 'accountStartSignIn', service: 'deepseekAccount', call: /service\.startSignIn\(args\.client, args\.callbackOrigin, args\.loginSource\)/ },
 		{ method: 'accountCancelSignIn', service: 'deepseekAccount', call: /service\.cancelSignIn\(args\.attemptId\)/ },
@@ -626,10 +632,9 @@ test('new channel methods resolve their documented Host services', () => {
 		assert.ok(host.includes("service(bridge.ctx, '" + entry.service + "')"), entry.method + ' must resolve ' + entry.service);
 		assert.match(host, entry.call, entry.method + ' must call its documented service method');
 	}
-	// 补全走 llm + agentDefaultModel：没有默认模型时返回空文本，不抛错。
-	assert.match(host, /async inlineComplete\(args\)/);
-	assert.match(host, /optionalService\(bridge\.ctx, 'llm'\)/);
-	assert.match(host, /return \{ text: '' \}/);
+	assert.doesNotMatch(host, /async inlineComplete\(args\)/);
+	assert.doesNotMatch(host, /async jobList\(args\)/);
+	assert.doesNotMatch(host, /async mcpListServers\(\)/);
 });
 
 test('no channel method is left as a fail-closed stub', () => {
@@ -686,7 +691,7 @@ test('concurrent launch clicks are coalesced, not spawned twice', async () => {
 	// 防抖只看 ideChild，而 spawn 之前有 await（物化主页/解析工具路径/预取 composerState）。
 	// 这期间 ideChild 仍是 undefined，两个并发点击会各拉起一个窗口。
 	const fs = await import('node:fs');
-	const service = fs.readFileSync('src/vs/platform/dshClient/host/ide-service.js', 'utf8');
+	const service = fs.readFileSync('src/vs/platform/dshClient/host/usecase/ide-service.js', 'utf8');
 	assert.match(service, /this\.launchInFlight !== undefined/, 'a second click must reuse the in-flight launch');
 	assert.match(service, /async _spawnIdeProcessOnce\(/, 'the spawn body must be separable from the coalescing gate');
 	assert.match(service, /this\.launchInFlight === inFlight/, 'the gate must only clear its own promise');

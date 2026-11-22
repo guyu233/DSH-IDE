@@ -28,7 +28,7 @@ import { IContextKeyService } from '../../../../platform/contextkey/common/conte
 import { GroupIdentifier } from '../../../common/editor.js';
 import { ACTIVE_GROUP_TYPE, AUX_WINDOW_GROUP_TYPE, SIDE_GROUP_TYPE } from '../../../services/editor/common/editorService.js';
 import type { ICurrentPartialCommand } from '../../../../platform/terminal/common/capabilities/commandDetection/terminalCommand.js';
-import type { IXtermCore, IBufferSet } from './xterm-private.js';
+import type { IXtermCore, IBufferSet } from './xterm-private.d.js';
 import type { IMenu } from '../../../../platform/actions/common/actions.js';
 import type { IProgressState } from '@xterm/addon-progress';
 import type { IEditorOptions } from '../../../../platform/editor/common/editor.js';

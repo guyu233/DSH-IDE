@@ -23,7 +23,7 @@ import * as path from 'node:path';
 
 const repoRoot = path.resolve(import.meta.dirname, '../../..');
 const sourcePath = process.env['DSH_ARTWORK_TS'] ?? '';
-const outputPath = path.join(repoRoot, 'src/vs/workbench/contrib/dsh/browser/dshIconDataUris.ts');
+const outputPath = path.join(repoRoot, 'src/vs/workbench/contrib/dsh/browser/vscode/dshIconDataUris.ts');
 const strokeWidth = 1;
 
 const header = `/*---------------------------------------------------------------------------------------------

@@ -7,7 +7,7 @@ import { AutorunObserver, AutorunState } from '../../reactions/autorunImpl.js';
 import { TransactionImpl } from '../../transaction.js';
 import { IChangeInformation, IObservableLogger } from '../logging.js';
 import { formatValue } from '../consoleObservableLogger.js';
-import { ObsDebuggerApi, IObsDeclaration, ObsInstanceId, ObsStateUpdate, ITransactionState, ObserverInstanceState } from './debuggerApi.js';
+import { ObsDebuggerApi, IObsDeclaration, ObsInstanceId, ObsStateUpdate, ITransactionState, ObserverInstanceState } from './debuggerApi.d.js';
 import { registerDebugChannel } from './debuggerRpc.js';
 import { deepAssign, deepAssignDeleteNulls, Throttler } from './utils.js';
 import { isDefined } from '../../../types.js';

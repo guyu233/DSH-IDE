@@ -11,7 +11,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
-import { dshImagePayload, dshUnsentAttachmentNames } from '../../../src/vs/workbench/contrib/dsh/browser/dshImagePayload.ts';
+import { dshImagePayload, dshUnsentAttachmentNames } from '../../../src/vs/workbench/contrib/dsh/browser/vscode/dshImagePayload.ts';
 
 /**
  * 复刻 `ChatWidget._dshSubmitTarget` 的判定顺序（见 chatWidget.ts）。
@@ -134,6 +134,15 @@ test('bmp and empty bytes are not a payload', () => {
 	assert.equal(dshImagePayload({ value: { buffer: new Uint8Array([0x47, 0x49, 0x46, 0x38, 0x39, 0x61]) } })?.mediaType, 'image/gif');
 });
 
+test('a DSH submit clears only the session that started it', async () => {
+	const widget = readFileSync(new URL('../../../src/vs/workbench/contrib/chat/browser/widget/chatWidget.ts', import.meta.url), 'utf8');
+	// 发送是异步的：期间用户可能已经切到另一个会话。清稿必须以发起时的会话为准，
+	// 只看草稿文本无法区分「同一草稿」和「另一个会话里恰好相同的内容」。
+	assert.match(widget, /const ownedSessionResource = this\.viewModel\?\.sessionResource;/, 'the submit must capture the source session');
+	assert.match(widget, /const stillSameSession = ownedSessionResource === undefined\s*\n\s*\|\| isEqual\(this\.viewModel\?\.sessionResource, ownedSessionResource\)/, 'cleanup must compare the current session with the source session');
+	assert.match(widget, /if \(!stillSameSession\) \{\s*\n\s*options\?\.onRequestAccepted\?\.\(\);\s*\n\s*return;/, 'a switched session must be left untouched');
+});
+
 test('send and open paths keep the payload and the single read', () => {
 	const widget = readFileSync(new URL('../../../src/vs/workbench/contrib/chat/browser/widget/chatWidget.ts', import.meta.url), 'utf8');
 	assert.match(widget, /return dshImagePayload\(entry\)/, 'image bytes must go through the shared payload helper');
@@ -142,7 +151,7 @@ test('send and open paths keep the payload and the single read', () => {
 	const drag = readFileSync(new URL('../../../src/vs/workbench/contrib/chat/browser/widget/chatDragAndDrop.ts', import.meta.url), 'utf8');
 	assert.match(drag, /file\.name !== '' \? file\.name : createDisplayName\(\)/, 'a dropped file must keep its own name');
 	assert.match(drag, /mimeType\.startsWith\('image\/'\)/, 'a dropped file must forward its media type');
-	const fs = readFileSync(new URL('../../../src/vs/workbench/contrib/dsh/browser/dshAttachmentFileSystem.ts', import.meta.url), 'utf8');
+	const fs = readFileSync(new URL('../../../src/vs/workbench/contrib/dsh/browser/vscode/dshAttachmentFileSystem.ts', import.meta.url), 'utf8');
 	assert.match(fs, /private readonly _readCache = new Map/, 'the read cache must hold more than one image');
 	assert.match(fs, /READ_CACHE_LIMIT = 8/, 'the cache must stay bounded');
 	assert.match(fs, /private _remember\(key: string, data: Uint8Array\)/, 'inserts must evict the oldest entry');
@@ -152,4 +161,24 @@ test('send and open paths keep the payload and the single read', () => {
 	assert.match(fs, /this\._inflight\.delete\(key\)/, 'a settled read must leave the in-flight map');
 	assert.match(fs, /decodeBase64\(base64\)/, 'bad base64 must be decoded without atob');
 	assert.doesNotMatch(fs, /atob\(/, 'atob throws on malformed bytes and takes down the viewer');
+});
+
+test('a DSH submit holds one in-flight lock and clears only the owned draft', () => {
+	const widget = readFileSync(new URL('../../../src/vs/workbench/contrib/chat/browser/widget/chatWidget.ts', import.meta.url), 'utf8');
+	// 锁必须在附件入库之前生效：只包住 submit() 不能阻止同一份草稿被编码、上传两次。
+	const providerBlock = widget.slice(widget.indexOf("if (target.kind === 'provider') {"), widget.indexOf('result = await this.chatService.sendRequest'));
+	assert.match(providerBlock, /if \(this\._dshSubmitInFlight\) \{\s*\n\s*return undefined;/, 'a second submit while one is in flight must be refused');
+	assert.match(providerBlock, /this\._dshSubmitInFlight = true;[\s\S]*finally \{\s*\n\s*this\._dshSubmitInFlight = false;/, 'the lock must be released in a finally');
+	const saveAt = providerBlock.indexOf('target.session.saveImage');
+	const lockAt = providerBlock.indexOf('this._dshSubmitInFlight = true');
+	assert.ok(lockAt >= 0 && lockAt < saveAt, 'the lock must cover attachment ingestion, not just the RPC');
+	// 清草稿必须绑定这一次的输入模型、文本与附件，而不是「控件当前的草稿」。
+	assert.match(widget, /const ownedInputModel = this\.viewModel\?\.model\.inputModel;/, 'the submit must capture the source input model');
+	assert.match(widget, /const ownedText = requestInputs\.input;/, 'the submit must capture the sent text');
+	assert.match(widget, /const ownedAttachments = \[\.\.\.this\.input\.attachmentModel\.attachments\];/, 'the submit must capture the attachment snapshot');
+	// 判定已抽成共享模块（fork 与 DSH 提交共用）；这里钉住调用点用的是它，
+	// 具体「文本+附件都要一致」的规则由 draftOwnership.test.ts 覆盖。
+	assert.match(widget, /isOwnedDraftUnchanged\(ownedInputModel, ownedText, ownedAttachments\)/, 'cleanup must use the shared owned-draft check');
+	const ownership = readFileSync(new URL('../../../src/vs/workbench/contrib/chat/browser/widget/input/draftOwnership.ts', import.meta.url), 'utf8');
+	assert.match(ownership, /state\.inputText === text && structuralEquals\(state\.attachments \?\? \[\], attachments\)/, 'ownership must compare text and attachments');
 });

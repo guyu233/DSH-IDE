@@ -13,8 +13,8 @@ import {
 	DSH_IDE_SNAPSHOT_STALE,
 	DSH_IDE_WIRE_REVISION,
 	type DshIdeSnapshot,
-} from '../../../src/vs/platform/dshClient/common/dshIdeProtocol.ts';
-import { DSH_IDE_MERGE_WINDOW_MS, DshIdeConsumer, type DshIdeConsumerState } from '../../../out/vs/workbench/contrib/dsh/browser/dshIdeConsumer.js';
+} from '../../../src/vs/platform/dshClient/protocol/dshIdeProtocol.ts';
+import { DSH_IDE_MERGE_WINDOW_MS, DshIdeConsumer, type DshIdeConsumerState } from '../../../out/vs/workbench/contrib/dsh/browser/consumer/dshIdeConsumer.js';
 
 function frame(type = 'event'): Record<string, unknown> {
 	return { type, event: { type: 'user/message', seq: 1, time: 1, data: {} } };
@@ -59,7 +59,7 @@ test('accepts a starting frame then a ready frame and hands the raw frame on', a
 test('an unchanged ready view does not repaint', () => {
 	// 内核会周期性重发同一份快照。version 严格递增，所以判重看的是
 	// 「version 与状态都没变」这一条件本身；这里钉住它确实存在且返回得早。
-	const source = readFileSync(new URL('../../../src/vs/workbench/contrib/dsh/browser/dshIdeConsumer.ts', import.meta.url), 'utf8');
+	const source = readFileSync(new URL('../../../src/vs/workbench/contrib/dsh/browser/consumer/dshIdeConsumer.ts', import.meta.url), 'utf8');
 	assert.match(source, /previous\.version === frame\.version/, 'the version must take part in the dedupe');
 	assert.match(source, /previous\.state\.state === frame\.state\.state/, 'the phase must take part in the dedupe');
 	assert.match(source, /if \(unchanged\) \{\s*\n\s*return;/, 'an unchanged frame must return before firing');
@@ -276,12 +276,12 @@ test('可选字段清单与契约的视角字段一一对齐（漏一个就会�
 	// 依据 CHK-239：`DSH_IDE_VIEW_OPTIONAL_KEYS` 与契约 `DshIdeViewSnapshot` 的可选字段
 	// 是两处维护的同一份事实。契约新增字段而 consumer 忘记加时，该字段每次帧都会被丢掉
 	// （「缺席=保留」语义失效），且不会报错——只能靠这条断言钉住。
-	const consumerSource = readFileSync('src/vs/workbench/contrib/dsh/browser/dshIdeConsumer.ts', 'utf8');
+	const consumerSource = readFileSync('src/vs/workbench/contrib/dsh/browser/consumer/dshIdeConsumer.ts', 'utf8');
 	const block = /const DSH_IDE_VIEW_OPTIONAL_KEYS = \[([\s\S]*?)\] as const;/.exec(consumerSource);
 	assert.ok(block, 'DSH_IDE_VIEW_OPTIONAL_KEYS must be a const array');
 	const consumerKeys = [...block[1].matchAll(/'([^']+)'/g)].map(m => m[1]);
 
-	const protocolSource = readFileSync('src/vs/platform/dshClient/common/dshIdeProtocol.ts', 'utf8');
+	const protocolSource = readFileSync('src/vs/platform/dshClient/protocol/dshIdeProtocol.ts', 'utf8');
 	const viewBlock = /const DSH_IDE_VIEW_KEYS = \[([\s\S]*?)\] as const;/.exec(protocolSource);
 	assert.ok(viewBlock, 'DSH_IDE_VIEW_KEYS must be a const array');
 	const viewKeys = [...viewBlock[1].matchAll(/'([^']+)'/g)].map(m => m[1]);

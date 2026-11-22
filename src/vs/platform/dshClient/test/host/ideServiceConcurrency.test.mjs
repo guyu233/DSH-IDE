@@ -88,7 +88,7 @@ test('the real ide-service keeps the launch coalescing skeleton', async () => {
 	// `import '@deepseek-ai/cordis'`，该包由 DSH Host 在运行时提供、仓库里没有，
 	// 直接 import 必然失败。此前这里用 `catch { return }` 静默跳过——那会让测试
 	// 永远「通过」却什么都没验（假绿），所以改成文本断言。
-	const source = readFileSync(new URL('../../host/ide-service.js', import.meta.url), 'utf8');
+	const source = readFileSync(new URL('../../host/usecase/ide-service.js', import.meta.url), 'utf8');
 	assert.match(source, /if \(this\.launchInFlight !== undefined\) \{\s*\n\s*return this\.launchInFlight;/, 'launch must reuse the in-flight promise');
 	assert.match(source, /this\.launchInFlight = inFlight;/, 'launch must register the in-flight promise');
 	assert.match(source, /if \(this\.launchInFlight === inFlight\) \{\s*\n\s*this\.launchInFlight = undefined;/, 'launch must clear the in-flight promise');

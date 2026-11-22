@@ -7,7 +7,7 @@ import { Codicon } from '../../../../../../../base/common/codicons.js';
 import { MarkdownString } from '../../../../../../../base/common/htmlContent.js';
 import { localize } from '../../../../../../../nls.js';
 import { IInstantiationService } from '../../../../../../../platform/instantiation/common/instantiation.js';
-import { getMcpServerDisplayLabel, IAgentHostCustomizationService } from '../../../../browser/agentSessions/agentHost/agentHostCustomizationService.js';
+import { getMcpServerDisplayLabel, IAgentHostCustomizationService } from '../../../agentSessions/agentHost/agentHostCustomizationService.js';
 import { IChatToolInvocation } from '../../../../common/chatService/chatService.js';
 import { IChatWidgetService } from '../../../chat.js';
 import { ChatCustomConfirmationWidget } from '../chatConfirmationWidget.js';

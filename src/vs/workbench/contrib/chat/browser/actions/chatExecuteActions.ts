@@ -215,9 +215,14 @@ export class ChatSubmitAction extends SubmitAction {
 				icon: Codicon.arrowUpCompact,
 				tooltip: localize('sendToAgent', "Send to Agent"),
 			},
+			// DSH 会话在生成期间也要能把下一条交给队列：入口本身由 `inputHasSendableContent`
+			// 和会话状态决定，不再额外要求「没有进行中的请求」。队列动作有同样的会话级保护，
+			// 原生其它会话仍由 `queuingActionsPresent` 决定，不受这里影响。
 			keybinding: {
 				when: ContextKeyExpr.and(
 					ChatContextKeys.inChatInput,
+					// 悬停在代码/建议上时 Enter 属于悬停操作，不能顺手把消息发出去。
+					EditorContextKeys.hoverFocused.negate(),
 					ChatContextKeys.withinEditSessionDiff.negate(),
 				),
 				primary: KeyCode.Enter,
@@ -394,6 +399,7 @@ export class OpenModelPickerAction extends Action2 {
 			precondition: ContextKeyExpr.or(
 				ChatContextKeys.location.isEqualTo(ChatAgentLocation.Chat),
 				ChatContextKeys.chatSessionHasModels,
+				ChatContextKeys.chatSessionHasTargetedModels,
 			),
 			menu: {
 				id: MenuId.ChatInput,
@@ -401,11 +407,14 @@ export class OpenModelPickerAction extends Action2 {
 				group: 'navigation',
 				// 只在「该会话确实有模型目录」时显示：`dsh:` 会话由 content provider 注入
 				// 模型组（`chatSessionHasModels` 为真），其它会话类型保持上游原本的隐藏行为。
-				// 这样既给 DSH 留出切换模型/推理档的入口，又不改变 Copilot 等会话的既有 UI。
+				// `chatSessionHasTargetedModels` 覆盖「有模型、但没有非权限选项组」的会话。
 				when: ContextKeyExpr.and(
 					ChatContextKeys.location.isEqualTo(ChatAgentLocation.Chat),
 					ChatContextKeys.inQuickChat.negate(),
-					ChatContextKeys.chatSessionHasModels,
+					ContextKeyExpr.or(
+						ChatContextKeys.chatSessionHasModels,
+						ChatContextKeys.chatSessionHasTargetedModels,
+					),
 				),
 			}
 		});
@@ -431,14 +440,21 @@ export class OpenPermissionPickerAction extends Action2 {
 			tooltip: localize('setPermissionLevel', "Set Permissions"),
 			category: CHAT_CATEGORY,
 			f1: false,
-			precondition: ChatContextKeys.enabled,
+			precondition: ContextKeyExpr.or(
+				ChatContextKeys.enabled,
+				ChatContextKeys.chatSessionHasPermissionGroup,
+			),
 			menu: {
 				id: MenuId.ChatInputSecondary,
 				order: 1,
 				group: 'navigation',
 				when:
 					ContextKeyExpr.and(
-						ChatContextKeys.enabled,
+						// 会话自带权限组时，入口由该组决定，不依赖「已注册默认聊天 Agent」。
+						ContextKeyExpr.or(
+							ChatContextKeys.enabled,
+							ChatContextKeys.chatSessionHasPermissionGroup,
+						),
 						ChatContextKeys.location.isEqualTo(ChatAgentLocation.Chat),
 						ChatContextKeys.chatModeKind.notEqualsTo(ChatModeKind.Ask),
 						ChatContextKeys.inQuickChat.negate(),
@@ -646,7 +662,11 @@ export class ChatSessionPrimaryPickerAction extends Action2 {
 			title: localize2('interactive.openChatSessionPrimaryPicker.label', "Open Primary Session Picker"),
 			category: CHAT_CATEGORY,
 			f1: false,
-			precondition: ChatContextKeys.enabled,
+			precondition: ContextKeyExpr.or(
+				ChatContextKeys.enabled,
+				ChatContextKeys.chatSessionHasModels,
+				ChatContextKeys.chatSessionHasPermissionGroup,
+			),
 			menu: [
 				{
 					// Cloud sessions: keep on the primary chat input toolbar

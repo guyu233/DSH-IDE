@@ -6,7 +6,7 @@
 import { DisposableStore, IDisposable } from '../../../../base/common/lifecycle.js';
 import { ILocalMcpServer, IMcpManagementService, IGalleryMcpServer, InstallOptions, InstallMcpServerEvent, UninstallMcpServerEvent, DidUninstallMcpServerEvent, InstallMcpServerResult, IInstallableMcpServer, IMcpGalleryService, UninstallOptions, IAllowedMcpServersService, RegistryType } from '../../../../platform/mcp/common/mcpManagement.js';
 import { IInstantiationService, refineServiceDecorator } from '../../../../platform/instantiation/common/instantiation.js';
-import { IUserDataProfileService } from '../../../services/userDataProfile/common/userDataProfile.js';
+import { IUserDataProfileService } from '../../userDataProfile/common/userDataProfile.js';
 import { Emitter, Event } from '../../../../base/common/event.js';
 import { IMcpResourceScannerService, McpResourceTarget } from '../../../../platform/mcp/common/mcpResourceScannerService.js';
 import { isWorkspaceFolder, IWorkspaceContextService, IWorkspaceFolder, IWorkspaceFoldersChangeEvent } from '../../../../platform/workspace/common/workspace.js';

@@ -10,7 +10,7 @@
 
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { DshClientSessionListSource } from '../../../out/vs/workbench/contrib/dsh/browser/dshIdeSessionListSource.js';
+import { DshClientSessionListSource } from '../../../out/vs/workbench/contrib/dsh/browser/vscode/dshIdeSessionListSource.js';
 
 /** 最小假 call：记录 method / args，允许按 method 配返回。 */
 function fakeClient(handler: (method: string, args: Record<string, unknown>) => unknown) {

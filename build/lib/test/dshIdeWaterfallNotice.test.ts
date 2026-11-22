@@ -8,8 +8,8 @@
 
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { projectDshIdeWaterfallNotice } from '../../../src/vs/platform/dshClient/common/dshIdeWaterfallNotice.ts';
-import { validateDshIdeWaterfallNotice } from '../../../src/vs/platform/dshClient/common/dshIdeProtocol.ts';
+import { projectDshIdeWaterfallNotice } from '../../../src/vs/platform/dshClient/protocol/dshIdeWaterfallNotice.ts';
+import { validateDshIdeWaterfallNotice } from '../../../src/vs/platform/dshClient/protocol/dshIdeProtocol.ts';
 
 test('approval waterfall drops official objects and keeps the neutral view', () => {
 	const notice = projectDshIdeWaterfallNotice({

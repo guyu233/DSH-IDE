@@ -8,7 +8,7 @@
 
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { DshComposerSource } from '../../../out/vs/workbench/contrib/dsh/browser/dshComposerSource.js';
+import { DshComposerSource } from '../../../out/vs/workbench/contrib/dsh/browser/vscode/dshComposerSource.js';
 
 function composer(model: string) {
 	return {

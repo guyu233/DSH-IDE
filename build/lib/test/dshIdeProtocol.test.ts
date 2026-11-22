@@ -31,7 +31,7 @@ import {
 	validateDshIdeWaterfallNotice,
 	type DshIdeMethod,
 	type DshIdeSnapshot,
-} from '../../../src/vs/platform/dshClient/common/dshIdeProtocol.ts';
+} from '../../../src/vs/platform/dshClient/protocol/dshIdeProtocol.ts';
 
 // ---------------------------------------------------------------------------
 // 每个 method 的正例 + 反例（同一份白名单，顺序与 DshIdeMethodArgs 一致）
@@ -70,17 +70,10 @@ const VALID_ARGS: Record<DshIdeMethod, unknown> = {
 	accountGetProfile: { client: { version: '2.0.0', locale: 'zh-CN', timezoneOffsetSeconds: 28800 } },
 	accountStartSignIn: { client: { version: '2.0.0', locale: 'zh-CN', timezoneOffsetSeconds: 28800 }, callbackOrigin: 'http://127.0.0.1:1', loginSource: 'desktop' },
 	accountCancelSignIn: { attemptId: 'attempt-1' },
-	setGoal: { sessionId: 's1', action: 'create', objective: 'ship the chat baseline' },
-	listSkills: { sessionId: 's1' },
 	capabilities: {},
 	speechCatalog: {},
 	speechTranscribe: { request: { audioBase64: 'AAAA' } },
-	inlineComplete: { prefix: 'const a = 1;' },
 	saveImageAttachment: { mediaType: 'image/png', data: 'AAAA' },
-	mcpListServers: {},
-	mcpRestartServer: { name: 'server-1' },
-	jobList: { sessionId: 's1' },
-	jobKill: { sessionId: 's1', jobId: 'job-1' },
 	renameSession: { sessionId: 's1', title: '新标题' },
 	setSessionFavorite: { sessionId: 's1' },
 	setSessionPinned: { sessionId: 's1' },
@@ -93,7 +86,7 @@ const ALL_METHODS = Object.keys(VALID_ARGS) as DshIdeMethod[];
 
 /** 契约自报的 method 名单：从 DSH_IDE_METHOD_KEYS 的键派生，测试不再维护第二份数字。 */
 function contractMethods(): string[] {
-	const src = readFileSync(new URL('../../../src/vs/platform/dshClient/common/dshIdeProtocol.ts', import.meta.url), 'utf8');
+	const src = readFileSync(new URL('../../../src/vs/platform/dshClient/protocol/dshIdeProtocol.ts', import.meta.url), 'utf8');
 	const block = /const DSH_IDE_METHOD_KEYS[\s\S]*?\n\};/.exec(src);
 	assert.ok(block !== null, 'DSH_IDE_METHOD_KEYS must exist');
 	return [...block[0].matchAll(/^\s*([a-zA-Z]+):/gm)].map(m => m[1]);
@@ -111,11 +104,11 @@ test('fixture covers exactly the contract method set', () => {
 test('every declared method has a validation branch', () => {
 	// 校验 switch 漏一个方法不会让校验失效（无参方法有 exactRecord 兜底），
 	// 但会让「有声明无校验」成为静默惯例——将来给该方法加字段时就漏校验了。
-	const source = readFileSync(new URL('../../../src/vs/platform/dshClient/common/dshIdeProtocol.ts', import.meta.url), 'utf8');
+	const source = readFileSync(new URL('../../../src/vs/platform/dshClient/protocol/dshIdeProtocol.ts', import.meta.url), 'utf8');
 	const withArgs = new Set([...source.matchAll(/^\t(\w+): \{[^}]*\};/gm)].map(match => match[1]));
 	const noArgs = new Set([...source.matchAll(/^\t(\w+): Record<string, never>;/gm)].map(match => match[1]));
 	const declared = new Set([...withArgs, ...noArgs]);
-	assert.ok(declared.size > 40, `the contract should declare dozens of methods (saw ${declared.size})`);
+	assert.ok(declared.size >= 40, `the contract should declare dozens of methods (saw ${declared.size})`);
 	const cases = new Set([...source.matchAll(/^\t\tcase '(\w+)':/gm)].map(match => match[1]));
 	const missing = [...declared].filter(name => !cases.has(name));
 	assert.deepEqual(missing, [], 'a declared method without a validation branch is a silent gap');
@@ -164,8 +157,7 @@ test('validateDshIdeInput rejects missing/invalid required fields', () => {
 	assert.throws(() => validateDshIdeInput('answerApproval', { requestId: 'r1', decision: 'maybe' }), /decision/);
 	assert.throws(() => validateDshIdeInput('answerQuestion', { requestId: 'r1' }), /must be an object/);
 	assert.throws(() => validateDshIdeInput('answerQuestion', { requestId: 'r1', answer: 'yes' }), /must be an object/);
-	assert.throws(() => validateDshIdeInput('setGoal', { sessionId: 's1', action: 'create' }), /non-empty string/);
-	assert.throws(() => validateDshIdeInput('setGoal', { sessionId: 's1', action: 'pause', id: 'g1' }), /revision/);
+
 	assert.throws(() => validateDshIdeInput('runCommand', { sessionId: 's1', command: 'help', args: [1] }), /array of strings/);
 	assert.throws(() => validateDshIdeInput('fetchRowDetail', { rowId: '' }), /non-empty string/);
 });
@@ -221,6 +213,37 @@ test('validateDshIdeSnapshot accepts positive cases', () => {
 	const view = { frame: { type: 'event', event: { type: 'user/message', seq: 1, time: 1, data: {} } } };
 	assert.doesNotThrow(() => validateDshIdeSnapshot(snapshot({ version: 42, state: { state: 'ready', view } })));
 	assert.throws(() => validateDshIdeSnapshot(snapshot({ version: 42, state: { state: 'ready', message: 'ok' } })), /must be an object/);
+});
+
+test('the Chat-layer node kinds added by DSH-IDE pass validation and reject malformed data', () => {
+	const nodes: Record<string, unknown>[] = [
+		{ kind: 'question-reply', seq: 1, time: 1, callId: 'c1', questions: [{ id: 'q', question: 'Q' }], answers: [{ id: 'q', selected: [] }], text: '{}' },
+		{ kind: 'command-input', seq: 2, time: 2, commandId: 'c2', text: '/goal 目标' },
+		{ kind: 'submitted-plan', seq: 3, time: 3, callId: 'c3', title: 'T', markdown: '# T' },
+		{ kind: 'workflow-run', seq: 4, time: 4, runId: 'r', name: 'audit', status: 'running', phases: [{ key: 'missing', phase: null, members: [{ seq: 1, label: '', childId: 'k', status: 'running' }] }] },
+		{ kind: 'system-prompt', seq: 5, time: 5, text: '规则', update: true },
+		{ kind: 'turn-tail', seq: 6, time: 6, turn: 1, closing: '答复', closingMessageId: 'm1', branchUnavailable: true, tokenUsage: { input: 1, output: 2 } },
+		{ kind: 'turn-process', seq: 8, time: 8, turn: 1, answerStep: 1, inlineReasoning: false, messageCount: 2, toolCallCount: 1, subagentCount: 0 },
+		{ kind: 'manual-compaction', seq: 7, time: 7, command: { commandId: 'c', name: 'compact', args: '', outcome: { kind: 'success', sourceEventSeq: 5 } }, compaction: { summary: null } },
+	];
+	assert.doesNotThrow(() => validateDshIdeSnapshot(snapshot({
+		version: 1,
+		state: { state: 'ready', view: { frame: { type: 'snapshot' }, conversation: { hasMore: false, nodes } } },
+	})));
+	const invalid: Record<string, unknown>[] = [
+		{ kind: 'question-reply', seq: 1, time: 1, callId: 'c1', questions: [{ id: 'q', question: 'Q' }], answers: [], text: '{}' },
+		{ kind: 'workflow-run', seq: 2, time: 2, runId: 'r', name: 'audit', status: 'bogus', phases: [] },
+		{ kind: 'system-prompt', seq: 3, time: 3, text: '规则', update: false },
+		{ kind: 'turn-tail', seq: 4, time: 4, turn: 1, branchUnavailable: false },
+		{ kind: 'turn-tail', seq: 6, time: 6, turn: 1, closingMessageId: '' },
+		{ kind: 'manual-compaction', seq: 5, time: 5, command: { commandId: 'c', name: null, args: '', outcome: { kind: 'bogus' } }, compaction: { summary: 1 } },
+	];
+	for (const node of invalid) {
+		assert.throws(() => validateDshIdeSnapshot(snapshot({
+			version: 1,
+			state: { state: 'ready', view: { frame: { type: 'snapshot' }, conversation: { hasMore: false, nodes: [node] } } },
+		})), undefined, JSON.stringify(node));
+	}
 });
 
 test('validateDshIdeSnapshot accepts official typed chat projections and rejects unknown ones', () => {
@@ -372,7 +395,7 @@ test('deleteSession plugin binding names the approved plugin, version and endpoi
 test('契约的 compareVersion 逐段比较 prerelease（rc.10 > rc.9，不能用字符串比）', () => {
 	// 契约文件依赖 base/common/process.js，strip-types 下无法 import，因此按源码结构断言：
 	// 必须存在独立的 comparePrerelease 且用数字正则判定数字段；不得留下整段字符串比较。
-	const contract = readFileSync(new URL('../../../src/vs/platform/dshClient/common/dshIdeContract.ts', import.meta.url), 'utf8');
+	const contract = readFileSync(new URL('../../../src/vs/platform/dshClient/protocol/dshIdeContract.ts', import.meta.url), 'utf8');
 	assert.match(contract, /function comparePrerelease\(/, 'contract must extract a comparePrerelease helper');
 	assert.match(contract, /\/\^\\d\+\$\/\.test\(/, 'prerelease segments must be classified with a numeric regex');
 	assert.match(contract, /Number\(x\) - Number\(y\)/, 'numeric segments must compare by value');
@@ -383,7 +406,7 @@ test('契约的 compareVersion 逐段比较 prerelease（rc.10 > rc.9，不能�
 test('DSH_IDE_API_VERSION pins the validated upstream version', () => {
 	// `dshIdeContract.ts` 依赖 `base/common/process.js`，strip-types 下无法直接加载，
 	// 因此用源码断言核对两者的字面量一致（契约门禁另有版本比对）。
-	const contract = readFileSync(new URL('../../../src/vs/platform/dshClient/common/dshIdeContract.ts', import.meta.url), 'utf8');
+	const contract = readFileSync(new URL('../../../src/vs/platform/dshClient/protocol/dshIdeContract.ts', import.meta.url), 'utf8');
 	const upstream = /UPSTREAM_VALIDATED_VERSION\s*=\s*'([^']+)'/.exec(contract)?.[1];
 	assert.equal(DSH_IDE_API_VERSION, upstream, 'DSH_IDE_API_VERSION must equal UPSTREAM_VALIDATED_VERSION');
 });
@@ -412,7 +435,7 @@ test('D18 legacy account endpoints file is gone and the consumer uses the protoc
 	const legacy = new URL('../../../src/vs/platform/dshClient/common/legacy-account-endpoints.ts', import.meta.url);
 	assert.equal(existsSync(legacy), false, 'the legacy file must be deleted after the D18 merge');
 	const consumer = readFileSync(new URL('../../../src/vs/workbench/browser/parts/globalCompositeBar.ts', import.meta.url), 'utf8');
-	assert.match(consumer, /from '[^']*common\/dshIdeProtocol\.js'/, 'the consumer must import the builder from the protocol single source');
+	assert.match(consumer, /from '[^']*protocol\/dshIdeProtocol\.js'/, 'the consumer must import the builder from the protocol single source');
 	assert.ok(!consumer.includes('legacy-account-endpoints'), 'no stale legacy import may remain');
 });
 
@@ -475,14 +498,6 @@ test('speechTranscribe validates the request shape', () => {
 	assert.throws(() => validateDshIdeInput('speechTranscribe', { request: { audioBase64: 'AAAA', unknown: 1 } }), /unknown field/);
 });
 
-test('inlineComplete enforces bounded prefix and optional suffix', () => {
-	assert.doesNotThrow(() => validateDshIdeInput('inlineComplete', { prefix: 'const a = 1;' }));
-	assert.doesNotThrow(() => validateDshIdeInput('inlineComplete', { prefix: 'x', suffix: 'y', languageId: 'ts', path: '/a.ts' }));
-	assert.throws(() => validateDshIdeInput('inlineComplete', {}), /must be a string/);
-	assert.throws(() => validateDshIdeInput('inlineComplete', { prefix: 'x'.repeat(4001) }), /exceeds 4000 characters/);
-	assert.throws(() => validateDshIdeInput('inlineComplete', { prefix: 'x', suffix: 'y'.repeat(2001) }), /exceeds 2000 characters/);
-});
-
 test('saveImageAttachment accepts only supported image media types', () => {
 	for (const mediaType of ['image/png', 'image/jpeg', 'image/webp', 'image/gif']) {
 		assert.doesNotThrow(() => validateDshIdeInput('saveImageAttachment', { mediaType, data: 'AAAA' }));
@@ -497,15 +512,6 @@ test('account sign-in methods require identity and an allowed login source', () 
 	assert.throws(() => validateDshIdeInput('accountStartSignIn', { client, callbackOrigin: '', loginSource: 'desktop' }), /non-empty string/);
 	assert.throws(() => validateDshIdeInput('accountStartSignIn', { client, callbackOrigin: 'http://x', loginSource: 'mobile' }), /web or desktop/);
 	assert.throws(() => validateDshIdeInput('accountCancelSignIn', {}), /non-empty string/);
-});
-
-test('MCP and job methods validate their identifiers', () => {
-	assert.doesNotThrow(() => validateDshIdeInput('mcpListServers', {}));
-	assert.doesNotThrow(() => validateDshIdeInput('mcpRestartServer', { name: 'server-1' }));
-	assert.throws(() => validateDshIdeInput('mcpRestartServer', {}), /non-empty string/);
-	assert.doesNotThrow(() => validateDshIdeInput('jobList', { sessionId: 's1' }));
-	assert.doesNotThrow(() => validateDshIdeInput('jobKill', { sessionId: 's1', jobId: 'job-1' }));
-	assert.throws(() => validateDshIdeInput('jobKill', { sessionId: 's1' }), /non-empty string/);
 });
 
 test('team and worktrees typed fields are validated and unknown shapes rejected', () => {
@@ -537,14 +543,14 @@ test('setSessionPinned accepts an absolute flag and resolves the next state', ()
 });
 
 test('pin and favorite update the list the user is looking at', () => {
-	const menu = readFileSync(new URL('../../../src/vs/workbench/contrib/dsh/browser/dshSessionMenu.ts', import.meta.url), 'utf8');
+	const menu = readFileSync(new URL('../../../src/vs/workbench/contrib/dsh/browser/vscode/dshSessionMenu.ts', import.meta.url), 'utf8');
 	assert.match(menu, /id: 'dsh\.session\.unpin'/);
 	assert.match(menu, /setPinned\(accessor, sessionId, arg, true\)/);
 	assert.match(menu, /setPinned\(accessor, sessionId, arg, false\)/);
 	assert.match(menu, /session\?\.setPinned\?\.\(applied\)/);
 	assert.match(menu, /dsh\.session\.favorited/);
 	assert.match(menu, /dsh\.session\.unfavorited/);
-	const host = readFileSync(new URL('../../../src/vs/platform/dshClient/host/ide-view-host.js', import.meta.url), 'utf8');
+	const host = readFileSync(new URL('../../../src/vs/platform/dshClient/host/bridge/ide-view-host.js', import.meta.url), 'utf8');
 	assert.match(host, /resolveDshSessionPin\(currently, args\.pinned\)/);
 	assert.match(host, /return \{ accepted: true, pinned \}/);
 	assert.match(host, /return \{ accepted: true, favorite \}/);

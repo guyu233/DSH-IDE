@@ -41,7 +41,7 @@ import { IRemoteAgentConnection, IRemoteAgentService } from '../../../../service
 import { TestFileService } from '../../../../test/common/workbenchTestServices.js';
 import { WebviewThemeDataProvider } from '../../browser/themeing.js';
 import { WebviewElement } from '../../browser/webviewElement.js';
-import { ToWebviewMessage } from '../../browser/webviewMessages.js';
+import { ToWebviewMessage } from '../../browser/webviewMessages.d.js';
 import { asWebviewUri, webviewRootResourceAuthority } from '../../common/webview.js';
 
 suite('WebviewElement', () => {

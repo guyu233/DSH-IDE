@@ -23,8 +23,8 @@ import product from '../../../../../platform/product/common/product.js';
 import { ChatEntitlement, IChatEntitlementService } from '../../../../services/chat/common/chatEntitlementService.js';
 import { IEditorService } from '../../../../services/editor/common/editorService.js';
 import { workbenchInstantiationService } from '../../../../test/browser/workbenchTestServices.js';
-import { ChatStatusDashboard, IChatStatusDashboardOptions } from '../../../chat/browser/chatStatus/chatStatusDashboard.js';
-import { IChatStatusItemService } from '../../../chat/browser/chatStatus/chatStatusItemService.js';
+import { ChatStatusDashboard, IChatStatusDashboardOptions } from '../../browser/chatStatus/chatStatusDashboard.js';
+import { IChatStatusItemService } from '../../browser/chatStatus/chatStatusItemService.js';
 
 interface IQuotaConfig {
 	percentRemaining: number;

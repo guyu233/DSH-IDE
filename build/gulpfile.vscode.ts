@@ -575,6 +575,12 @@ function cjsToEsm(source) {
 	for (const name of exported) {
 		out = out.replace(new RegExp(`^const ${name} = ${name};\\r?\\n`, 'gm'), '');
 	}
+	// tsc 在函数体里写 `exports.X`（例如 wireRevision 比较、视图绑定方法表）。
+	// 赋值行改成 const 之后这些引用仍指向不存在的 `exports`，一调用就抛
+	// `exports is not defined`。会话列表的 listSessions 正是走这条校验。
+	for (const name of [...exported].sort((a, b) => b.length - a.length)) {
+		out = out.replace(new RegExp(`\\bexports\\.${name}\\b`, 'g'), name);
+	}
 	// 末尾补导出表。名字必须排序后稳定输出，避免每次打包产生无意义 diff。
 	out = out.trimEnd() + '\n\nexport { ' + [...exported].sort().join(', ') + ' };\n';
 	return out;
@@ -694,6 +700,15 @@ BUILD_TARGETS.forEach(buildTarget => {
 		if (process.platform === platform && process.arch === arch && minified) {
 			const dshIdePackTask = task.define('dsh-ide-pack', task.series(appTask, async () => {
 				const stagingRoot = appStagingPath;
+				// Electron 在 package.json 没有 main 时去加载 resources/app/index.js。
+				// 本仓库的载荷 package.json 没有 main，窗口会报 ERR_MODULE_NOT_FOUND。
+				// 真正的入口是 vscode 的 out/main.js。
+				const appPackagePath = path.join(stagingRoot, 'runtime', 'app', 'package.json');
+				const appPackage = JSON.parse(await fs.promises.readFile(appPackagePath, 'utf8')) as { main?: string };
+				if (appPackage.main !== './out/main.js') {
+					appPackage.main = './out/main.js';
+					await fs.promises.writeFile(appPackagePath, JSON.stringify(appPackage, null, 2) + '\n');
+				}
 				// bundle 根清单由官方构建生成（§3.7：不再手维护 dsh-ide/ 目录）：
 				//   manifest 模板 + patch  ← build/lib/dsh/
 				//   icon + NLS locale      ← resources/dsh/
@@ -711,22 +726,25 @@ BUILD_TARGETS.forEach(buildTarget => {
 					[path.join(dshResources, 'docs'), 'docs'],
 					[path.join(dshClientOut, 'index.js'), 'index.js'],
 					[path.join(dshClientOut, 'client', 'client.js'), 'client.js'],
-					// host/ 整目录 stage（electron-home / ide-launch-queue / ide-service / ide-view-host 都在其中）。
+					// host/ 整目录：launch（开窗）、usecase（远程服务）、bridge（会话桥）。
 					[path.join(dshClientOut, 'host'), 'host'],
-					// common/ 只 stage Host 直接依赖的环境常量、认证脱敏与中立会话投影；IDE 主进程模块留在 app 内。
-					// 因此按文件 stage，避免把传输层误打进 bundle。
+					// common/ 是 Host 运行时路径，不是协议。协议在 protocol/，和源码里的相对引用一致。
 					[path.join(dshClientOut, 'common', 'env.js'), path.join('common', 'env.js')],
-					[path.join(dshClientOut, 'common', 'dshIdeAuthRedaction.js'), path.join('common', 'dshIdeAuthRedaction.js')],
-					[path.join(dshClientOut, 'common', 'dshIdeSessionList.js'), path.join('common', 'dshIdeSessionList.js')],
-					[path.join(dshClientOut, 'common', 'dshIdeCommandList.js'), path.join('common', 'dshIdeCommandList.js')],
-					[path.join(dshClientOut, 'common', 'dshIdeCommandLine.js'), path.join('common', 'dshIdeCommandLine.js')],
-					[path.join(dshClientOut, 'common', 'dshIdeArchiveSet.js'), path.join('common', 'dshIdeArchiveSet.js')],
-					[path.join(dshClientOut, 'common', 'dshIdeSessionSearch.js'), path.join('common', 'dshIdeSessionSearch.js')],
-					[path.join(dshClientOut, 'common', 'dshIdeComposer.js'), path.join('common', 'dshIdeComposer.js')],
-					[path.join(dshClientOut, 'common', 'dshIdeWaterfallNotice.js'), path.join('common', 'dshIdeWaterfallNotice.js')],
-					[path.join(dshClientOut, 'common', 'dshIdeRequestView.js'), path.join('common', 'dshIdeRequestView.js')],
-					// Host 入口现在直接调用唯一契约校验器：它必须随包进入 Host 的运行闭包。
-					[path.join(dshClientOut, 'common', 'dshIdeProtocol.js'), path.join('common', 'dshIdeProtocol.js')],
+					[path.join(dshClientOut, 'common', 'dshLocations.js'), path.join('common', 'dshLocations.js')],
+					[path.join(dshClientOut, 'common', 'dshThemePreference.js'), path.join('common', 'dshThemePreference.js')],
+					[path.join(dshClientOut, 'common', 'dshLanguagePreference.js'), path.join('common', 'dshLanguagePreference.js')],
+					[path.join(dshClientOut, 'common', 'dshLanguagePacks.js'), path.join('common', 'dshLanguagePacks.js')],
+					[path.join(dshClientOut, 'common', 'dshI18n.zh-cn.json'), path.join('common', 'dshI18n.zh-cn.json')],
+					[path.join(dshClientOut, 'protocol', 'dshIdeAuthRedaction.js'), path.join('protocol', 'dshIdeAuthRedaction.js')],
+					[path.join(dshClientOut, 'protocol', 'dshIdeSessionList.js'), path.join('protocol', 'dshIdeSessionList.js')],
+					[path.join(dshClientOut, 'protocol', 'dshIdeCommandList.js'), path.join('protocol', 'dshIdeCommandList.js')],
+					[path.join(dshClientOut, 'protocol', 'dshIdeCommandLine.js'), path.join('protocol', 'dshIdeCommandLine.js')],
+					[path.join(dshClientOut, 'protocol', 'dshIdeArchiveSet.js'), path.join('protocol', 'dshIdeArchiveSet.js')],
+					[path.join(dshClientOut, 'protocol', 'dshIdeSessionSearch.js'), path.join('protocol', 'dshIdeSessionSearch.js')],
+					[path.join(dshClientOut, 'protocol', 'dshIdeComposer.js'), path.join('protocol', 'dshIdeComposer.js')],
+					[path.join(dshClientOut, 'protocol', 'dshIdeWaterfallNotice.js'), path.join('protocol', 'dshIdeWaterfallNotice.js')],
+					[path.join(dshClientOut, 'protocol', 'dshIdeRequestView.js'), path.join('protocol', 'dshIdeRequestView.js')],
+					[path.join(dshClientOut, 'protocol', 'dshIdeProtocol.js'), path.join('protocol', 'dshIdeProtocol.js')],
 				];
 				for (const [from, to] of copyList) {
 					await fs.promises.cp(from, path.join(stagingRoot, to), { recursive: true });
@@ -742,7 +760,7 @@ BUILD_TARGETS.forEach(buildTarget => {
 				// `exports.X = void 0;` 这类前置声明删除，`exports.X = Y` 改成 `const X = Y`，
 				// 末尾补 `export { … }`。改动只发生在打包产物里，源码与 `out/` 不动。
 				for (const name of ['dshIdeProtocol', 'dshIdeWaterfallNotice']) {
-					const target = path.join(stagingRoot, 'common', `${name}.js`);
+					const target = path.join(stagingRoot, 'protocol', `${name}.js`);
 					if (!fs.existsSync(target)) {
 						continue;
 					}

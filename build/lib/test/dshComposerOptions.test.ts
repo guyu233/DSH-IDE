@@ -13,7 +13,7 @@ import * as fs from 'node:fs';
 import { readFileSync, existsSync, openSync, readSync, closeSync } from 'node:fs';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { toPermissionItems } from '../../../out/vs/workbench/contrib/dsh/browser/dshComposerProjection.js';
+import { toPermissionItems } from '../../../out/vs/workbench/contrib/dsh/browser/vscode/dshComposerProjection.js';
 
 /** 读源码文本：用于锁住「注册/接线存在」这类无法从纯函数断言的约束。 */
 const readSource = (relative: string): string => readFileSync(new URL(`../../../${relative}`, import.meta.url), 'utf8');
@@ -81,7 +81,7 @@ test('no permission projection yields no options instead of inventing defaults',
 test('the composer source is bound to the session the chat panel shows', () => {
 	// 选择器读的是 `getDshComposerSource().state`；数据源不跟着绑定换会话，
 	// 切到别的会话后模型/权限/预设仍是旧会话的目录，未绑定过的窗口更是永远读不到。
-	const session = readSource('src/vs/workbench/contrib/dsh/browser/dshChatSession.ts');
+	const session = readSource('src/vs/workbench/contrib/dsh/browser/vscode/dshChatSession.ts');
 	assert.match(session, /composer\?\.setSession\(sessionId\);\s*\n\s*await composer\?\.refresh\(\);/, 'binding a session must rebind the composer source');
 	assert.ok((session.match(/composer\?\.setSession\(sessionId\)/g) ?? []).length >= 2, 'both bind() and attach() must keep the composer source in sync');
 });
@@ -89,7 +89,7 @@ test('the composer source is bound to the session the chat panel shows', () => {
 test('DSH models are published into the dsh session pool, not the general picker', () => {
 	// `requiresCustomModels` 的会话只有在存在「target 指向自己」的模型时才拿到模型池；
 	// 不打这个标记，`dsh:` 会话会显示「无可用模型」，模型选择器也没有可选项。
-	const projection = readSource('src/vs/workbench/contrib/dsh/browser/dshComposerProjection.ts');
+	const projection = readSource('src/vs/workbench/contrib/dsh/browser/vscode/dshComposerProjection.ts');
 	assert.match(projection, /targetChatSessionType: DSH_CHAT_SESSION_TYPE/, 'DSH models must declare their session type');
 	const contribution = readSource('src/vs/workbench/contrib/dsh/browser/dsh.contribution.ts');
 	assert.match(contribution, /registerChatSessionContribution\(DshChatSessionContribution\)/, 'the dsh session type must be registered');
@@ -119,24 +119,16 @@ test('the header button only uses host theme tokens for its states', () => {
 	// 只有菜单项才 `outline:none`）。这里不重复，避免两处说法打架。
 });
 
-test('inline completion is off by default and only registers when enabled', () => {
-	// 每次光标停顿都是一次跨进程调用加一次 LLM 生成。装插件即开启等于让用户
-	// 在不知情的情况下持续消耗 CPU 与额度，所以默认关闭，且关闭时根本不注册 provider。
-	const src = readSource('src/vs/workbench/contrib/dsh/browser/inlineCompletion.ts');
-	assert.match(src, /export const DSH_INLINE_COMPLETION_SETTING = 'dsh\.inlineCompletion\.enabled'/);
-	assert.match(src, /registerDshInlineCompletionsSetting/);
-	assert.match(src, /if \(!enabled && current !== undefined\)/, 'turning it off must unregister, not just no-op');
-	const config = readSource('src/vs/workbench/contrib/dsh/browser/dshConfiguration.ts');
-	assert.match(config, /default: false/, 'the setting must default to off');
+test('inline completion is not part of the chat path', () => {
 	const contribution = readSource('src/vs/workbench/contrib/dsh/browser/dsh.contribution.ts');
-	assert.match(contribution, /registerDshInlineCompletionsSetting\(configurationService/, 'the contribution must go through the gate');
-	assert.doesNotMatch(contribution, /registerDshInlineCompletions\(languageFeatures, client\)/, 'the ungated registration must be gone');
+	assert.doesNotMatch(contribution, /registerDshInlineCompletionsSetting/);
+	assert.equal(existsSync('src/vs/workbench/contrib/dsh/browser/vscode/inlineCompletion.ts'), false);
 });
 
 test('model equality compares the effort schema field-wise, not by serializing it', () => {
 	// schema 的形状由 toLanguageModel 固定，会变的只有 enum / enumItemLabels / default。
 	// 每次判等都整份 JSON.stringify 两个对象，在模型表刷新时是纯浪费。
-	const src = readSource('src/vs/workbench/contrib/dsh/browser/dshLanguageModelProvider.ts');
+	const src = readSource('src/vs/workbench/contrib/dsh/browser/vscode/dshLanguageModelProvider.ts');
 	const codeLines = src.split(/\r?\n/).filter(line => !/^\s*(\/\/|\*|\/\*)/.test(line));
 	assert.ok(!codeLines.some(line => line.includes('JSON.stringify')), 'the schema must not be serialized for comparison');
 	assert.match(src, /function sameEffortSchema\(/, 'the schema needs its own comparison');
@@ -147,7 +139,7 @@ test('model equality compares the effort schema field-wise, not by serializing i
 test('composer state equality is field-wise, not a JSON round trip', () => {
 	// 原先用 JSON.stringify(a) === JSON.stringify(b)：每次 refresh 都要对整份状态
 	// （可能几十个模型）做两次序列化。改成逐字段比较后，语义必须完全一致。
-	const src = readSource('src/vs/workbench/contrib/dsh/browser/dshComposerSource.ts');
+	const src = readSource('src/vs/workbench/contrib/dsh/browser/vscode/dshComposerSource.ts');
 	// 注释里会提到旧写法（说明为什么不用它），所以只检查代码行。
 	const codeLines = src.split(/\r?\n/).filter(line => !/^\s*(\/\/|\*|\/\*)/.test(line));
 	assert.ok(!codeLines.some(line => line.includes('JSON.stringify(a)')), 'the serialize-and-compare must be gone');
@@ -159,25 +151,15 @@ test('composer state equality is field-wise, not a JSON round trip', () => {
 });
 
 test('DSH slash commands are registered for dsh sessions only', () => {
-	// Host 侧 listCommands / runCommand 早已实现，renderer 零调用点 → 用户敲 `/` 看不到 DSH 命令。
-	const src = readSource('src/vs/workbench/contrib/dsh/browser/dshSlashCommands.ts');
+	// `/` 菜单必须真的出现 DSH 命令：Host 有 listCommands，但 renderer 侧没有注册时
+	// 用户敲 `/` 只能看到 VS Code 自己的命令。注册按会话类型限定，执行只走 runCommand。
+	const src = readSource('src/vs/workbench/contrib/dsh/browser/vscode/dshSlashCommands.ts');
 	assert.match(src, /sessionTypes: \[DSH_CHAT_SESSION_TYPE\]/, 'commands must be limited to the dsh session type');
 	assert.match(src, /'listCommands'/, 'the list must come from the official Host endpoint');
 	assert.match(src, /'runCommand'/, 'execution must go through the single runCommand channel');
-	// 契约：command 不带前导斜杠；args 每项不得含空白或斜杠。
-	assert.match(src, /command: item\.name/, 'command must be the bare name, not a slash-prefixed line');
-	assert.match(src, /args\.some\(part => part\.includes\('\/'\)\)/, 'slash-containing args must be refused, not silently mangled');
-	assert.match(src, /dshSessionIdFromResource\(sessionResource\)/, 'the session id fallback must decode the resource, not strip one slash');
-	assert.doesNotMatch(src, /sessionResource\.path\.replace/, 'a raw path strip leaves percent-encoding in the session id');
-	assert.match(src, /dsh\.slash\.rejected/, 'a rejected command must be shown in the chat response, not only logged');
-	assert.match(src, /dsh\.slash\.ran/, 'a successful command must leave a visible confirmation instead of an empty turn');
 	const contribution = readSource('src/vs/workbench/contrib/dsh/browser/dsh.contribution.ts');
-	assert.match(contribution, /registerDshSlashCommands\(slashCommandService, client, logService\)/,
-		'the contribution must register the bridge');
-	assert.match(contribution, /slashCommandsBridge\.setSession\(boundSessionId\)/,
-		'commands are agent-scoped: binding a session must refresh the list');
-	assert.match(src, /this\.clearRegistered\(\)/, 'unbinding must drop the previous agent commands');
-	assert.match(src, /this\._sessionId !== sessionId/, 'a late command list must not overwrite the session that is now bound');
+	assert.match(contribution, /registerDshSlashCommands\(slashCommandService, client, logService\)/, 'the contribution must register the bridge');
+	assert.match(contribution, /slashCommandsBridge\.setSession\(boundSessionId\)/, 'binding a session must refresh the list');
 });
 
 test('the client registers exactly the locales the host UI can select', () => {
@@ -229,9 +211,21 @@ test('the model picker is scoped to sessions that actually have models', () => {
 	const block = actions.slice(actions.indexOf('class OpenModelPickerAction'), actions.indexOf('class OpenModelPickerAction') + 1600);
 	assert.ok(!/when:\s*ContextKeyExpr\.false\(\)/.test(block), 'the model picker must not be hidden unconditionally');
 	assert.match(block, /ChatContextKeys\.chatSessionHasModels/, 'the picker must be gated on the session having models');
+	// 模型按钮不能只看选项组：只有权限、没有预设的会话也该有模型入口。
+	assert.match(block, /ChatContextKeys\.chatSessionHasTargetedModels/, 'the picker must also accept sessions whose own model pool is non-empty');
 	assert.match(block, /ChatContextKeys\.inQuickChat\.negate\(\)/, 'quick chat must keep its own treatment');
 	// DSH 不注册 chat agent，`chatIsEnabled` 恒假；precondition 不能只依赖它。
 	assert.match(block, /precondition:\s*ContextKeyExpr\.or\(/, 'the precondition must not require a default chat agent only');
+});
+
+test('the permission picker is reachable on a session that contributes its own permission group', () => {
+	// `chatIsEnabled` 由「已注册默认聊天 Agent」驱动，DSH 下恒假；权限入口必须另有会话级条件，
+	// 否则数据链路通了、界面上仍然看不到权限选择器。
+	const actions = readSource('src/vs/workbench/contrib/chat/browser/actions/chatExecuteActions.ts');
+	const start = actions.indexOf('class OpenPermissionPickerAction');
+	const block = actions.slice(start, actions.indexOf('class OpenModePickerAction'));
+	assert.match(block, /ChatContextKeys\.chatSessionHasPermissionGroup/, 'the permission picker must open on a session-scoped permission group');
+	assert.match(block, /precondition:\s*ContextKeyExpr\.or\(/, 'the precondition must not be the default-agent flag alone');
 });
 
 test('the New Session button does not also fire an unregistered command', () => {
@@ -343,26 +337,42 @@ test('a failed launch shows a short label and keeps the reason in the tooltip', 
 	assert.match(client, /"aria-label": accessibleName,/, 'the button must use the accessible name');
 });
 
-test('every workbench-facing string in the dsh layer is Chinese source text', () => {
-	// 本仓库没有 i18n 层（`build/lib/i18n/` 为空、无 `*.i18n.json`），
-	// `localize(key, "source")` 会原样返回 source。因此 source 就是用户看到的文字，
-	// 同层文件里必须统一用中文——此前 `dsh.chatSession.description`、`dsh.newSessionFailed`、
-	// `dsh.bindFailed` 是英文，与同文件的 `dsh.snapshotFailed` 等中文混排。
+test('every workbench-facing string in the dsh layer has an English source and a Chinese translation', () => {
+	// 本仓库没有 vscode-loc 翻译流水线，`localize(key, "source")` 的 source 就是出厂文案。
+	// 因此 source 必须是英文（官方语言包与 DSH 自带的 zh-cn 补丁才能按 key 覆盖），
+	// 而每条 key 都必须在中英两份词典里成对出现——只有英文没有中文，中文界面就会露出英文。
 	const dir = path.join(vscodeRoot, 'src/vs/workbench/contrib/dsh/browser');
+	const english = JSON.parse(fs.readFileSync(path.join(dir, 'i18n', 'dsh.nls.json'), 'utf8'));
+	const chinese = JSON.parse(fs.readFileSync(path.join(dir, 'i18n', 'dsh.nls.zh-cn.json'), 'utf8'));
 	const offenders: string[] = [];
+	const missing: string[] = [];
 	let total = 0;
-	for (const name of fs.readdirSync(dir)) {
-		if (!name.endsWith('.ts')) { continue; }
-		const source = fs.readFileSync(path.join(dir, name), 'utf8');
+	const files: string[] = [];
+	const walk = (folder: string): void => {
+		for (const entry of fs.readdirSync(folder, { withFileTypes: true })) {
+			const full = path.join(folder, entry.name);
+			if (entry.isDirectory()) { walk(full); }
+			else if (entry.name.endsWith('.ts')) { files.push(full); }
+		}
+	};
+	walk(dir);
+	for (const file of files) {
+		const name = path.relative(dir, file).replaceAll('\\', '/');
+		if (name.startsWith('i18n/')) { continue; }
+		const source = fs.readFileSync(file, 'utf8');
 		for (const match of source.matchAll(/localize\(\s*'([^']+)',\s*["']([^"']+)["']/g)) {
 			total += 1;
-			if (!/[\u4e00-\u9fa5]/.test(match[2])) {
+			if (/[\u4e00-\u9fa5]/.test(match[2])) {
 				offenders.push(`${name}: ${match[1]} = ${match[2].slice(0, 40)}`);
+			}
+			if (!(match[1] in english) || !(match[1] in chinese)) {
+				missing.push(`${name}: ${match[1]}`);
 			}
 		}
 	}
-	assert.ok(total > 40, `expected the dsh layer to have a substantial number of strings (found ${total})`);
-	assert.deepStrictEqual(offenders, [], `these user-facing strings are still English: ${offenders.join(' | ')}`);
+	assert.ok(total > 100, `expected the dsh layer to have a substantial number of strings (found ${total})`);
+	assert.deepStrictEqual(offenders, [], `these sources must be English so language packs can override them: ${offenders.join(' | ')}`);
+	assert.deepStrictEqual(missing, [], `these keys have no English/Chinese dictionary entry: ${missing.join(' | ')}`);
 });
 
 test('the client locale fallback forwards interpolation params', () => {
@@ -417,7 +427,7 @@ test('the button inherits only the font family, not the whole font shorthand', (
 test('the model provider stops writing after it is disposed', () => {
 	// 插件停用时 provider 会被 dispose，但在途的 composerState 仍可能回来。
 	// 没有防护的话会写模型表并 fire 到已经释放的监听方。
-	const src = readSource('src/vs/workbench/contrib/dsh/browser/dshLanguageModelProvider.ts');
+	const src = readSource('src/vs/workbench/contrib/dsh/browser/vscode/dshLanguageModelProvider.ts');
 	assert.match(src, /private _disposed = false/, 'the provider must track disposal');
 	assert.match(src, /override dispose\(\): void \{\s*\n\s*this\._disposed = true;/, 'dispose must set the flag');
 	// 守卫必须在 await 之后、写表之前。

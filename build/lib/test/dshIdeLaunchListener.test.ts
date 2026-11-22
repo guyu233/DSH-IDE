@@ -23,8 +23,8 @@ import {
 	DSH_IDE_LAUNCH_WAIT_MS,
 	DshIdeLaunchListener,
 	type DshIdeLaunchRequest,
-} from '../../../out/vs/platform/dshClient/transport/dshIdeLaunchListener.js';
-import { DSH_IDE_WIRE_REVISION } from '../../../src/vs/platform/dshClient/common/dshIdeProtocol.ts';
+} from '../../../out/vs/platform/dshClient/ide/transport/dshIdeLaunchListener.js';
+import { DSH_IDE_WIRE_REVISION } from '../../../src/vs/platform/dshClient/protocol/dshIdeProtocol.ts';
 
 /** 假的 Host 调用面：按脚本回答，并记录调用顺序。 */
 function fakeCaller(script: { register?: () => unknown; poll?: () => unknown }) {
@@ -225,7 +225,7 @@ test('the IDE-side call shapes match the Host method parameter names', async () 
 	// Typert SRC 模式把**形参名**当 wire 字段，多一个/少一个都会被判 invalid。
 	// 这条测试直接读两半源码，锁住「调用形状 == 方法签名」，防止再出现漏 wireRevision 的回归。
 	const fs = await import('node:fs');
-	const host = fs.readFileSync('src/vs/platform/dshClient/host/ide-service.js', 'utf8');
+	const host = fs.readFileSync('src/vs/platform/dshClient/host/usecase/ide-service.js', 'utf8');
 	const hostParams = new Map<string, string[]>();
 	for (const match of host.matchAll(/(?:async\s+\*?)?(launch|registerIdeClient|unregisterIdeClient|pollLaunch|followSession|dispatch)\(([^)]*)\)\s*\{/g)) {
 		hostParams.set(match[1], match[2].split(',').map(part => part.trim()).filter(part => part !== 'signal'));
@@ -234,8 +234,8 @@ test('the IDE-side call shapes match the Host method parameter names', async () 
 	assert.deepEqual(hostParams.get('pollLaunch'), ['clientId', 'wireRevision', 'waitMs']);
 	assert.deepEqual(hostParams.get('unregisterIdeClient'), ['clientId', 'wireRevision']);
 
-	const listener = fs.readFileSync('src/vs/platform/dshClient/transport/dshIdeLaunchListener.ts', 'utf8');
-	const queueSource = fs.readFileSync('src/vs/platform/dshClient/host/ide-launch-queue.js', 'utf8');
+	const listener = fs.readFileSync('src/vs/platform/dshClient/ide/transport/dshIdeLaunchListener.ts', 'utf8');
+	const queueSource = fs.readFileSync('src/vs/platform/dshClient/host/launch/ide-launch-queue.js', 'utf8');
 	const cap = /export const IDE_CLIENT_LONG_POLL_MS = (\d+)/.exec(queueSource);
 	const asked = /export const DSH_IDE_LAUNCH_WAIT_MS = (\d+)/.exec(listener);
 	assert.ok(cap !== null && asked !== null, 'both halves must name the long-poll budget');

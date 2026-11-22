@@ -27,7 +27,7 @@ import {
 	type DshIdeSnapshot,
 	type DshIdeWaterfallNotice,
 	type DshRemoteError,
-} from './dshIdeProtocol.js';
+} from '../protocol/dshIdeProtocol.js';
 
 export type DshClientCallResult<T = unknown> =
 	| { readonly ok: true; readonly value: T }
@@ -154,6 +154,8 @@ export class DshClientService extends Disposable implements IDshClientService {
 		} catch {
 			// 关闭失败不影响用户体验：连接可能已被宿主清理（窗口断开）。
 		}
+		// 不管通道是否还在，本窗口的连接态都要落下。否则界面会停在「已连接」。
+		this.markDisconnected();
 	}
 
 	connect(): Promise<{ ok: boolean; endpoint?: string; error?: DshRemoteError }> {

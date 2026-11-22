@@ -50,6 +50,10 @@ function readMember(member) {
 
 const EXPECTED_COMMON = [
 	'env.js',
+	'dshLocations.js',
+	'dshThemePreference.js',
+];
+const EXPECTED_PROTOCOL = [
 	'dshIdeAuthRedaction.js',
 	'dshIdeSessionList.js',
 	'dshIdeCommandList.js',
@@ -63,10 +67,14 @@ const EXPECTED_COMMON = [
 ];
 
 const present = new Set(list.filter(m => m.startsWith('package/common/')).map(m => path.basename(m)));
-const missingCommon = EXPECTED_COMMON.filter(name => !present.has(name));
+const presentProtocol = new Set(list.filter(m => m.startsWith('package/protocol/')).map(m => path.basename(m)));
+const missingCommon = [
+	...EXPECTED_COMMON.filter(name => !present.has(name)),
+	...EXPECTED_PROTOCOL.filter(name => !presentProtocol.has(name)),
+];
 
 // Host 入口里是否出现新 method 名（说明代码确实是新构建的）。
-const hostEntry = ['package/host/ide-view-host.js', 'package/index.js'].map(readMember).join('\n');
+const hostEntry = ['package/host/bridge/ide-view-host.js', 'package/index.js'].map(readMember).join('\n');
 const methodTraces = ['archiveSession', 'unarchiveSession', 'searchSessions', 'loadOlder', 'throughSeq']
 	.filter(name => hostEntry.includes(name));
 const missingTraces = ['archiveSession', 'searchSessions'].filter(name => !methodTraces.includes(name));
@@ -76,8 +84,8 @@ const missingTraces = ['archiveSession', 'searchSessions'].filter(name => !metho
 const hasNodePtyAsar = list.some(m => m.endsWith('/node_modules.asar'));
 const ptyPrebuilds = list.filter(m => /node_modules\.asar\.unpacked\/node-pty\/prebuilds\//.test(m));
 
-const hostService = readMember('package/host/ide-service.js');
-const hasHostRipgrepAdapter = list.includes('package/host/host-ripgrep.js')
+const hostService = readMember('package/host/usecase/ide-service.js');
+const hasHostRipgrepAdapter = list.includes('package/host/launch/host-ripgrep.js')
 	&& hostService.includes('await resolveHostRipgrep()')
 	&& hostService.includes('DSH_IDE_HOST_RG_PATH');
 const bundledWindowsRipgrep = list.filter(member => /^package\/runtime\/app\/node_modules(?:\.asar\.unpacked)?\/@vscode\/ripgrep-universal\/bin\/win32-[^/]+\/rg\.exe$/u.test(member));

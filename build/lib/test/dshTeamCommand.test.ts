@@ -73,7 +73,7 @@ test('picking the current state does not issue a redundant write', async () => {
 });
 
 test('the current-state mark is on the option that matches enabled', () => {
-	const file = readFileSync(new URL('../../../src/vs/workbench/contrib/dsh/browser/dshTeamCommands.ts', import.meta.url), 'utf8');
+	const file = readFileSync(new URL('../../../src/vs/workbench/contrib/dsh/browser/vscode/dshTeamCommands.ts', import.meta.url), 'utf8');
 	const enableAt = file.indexOf('label: enable');
 	const disableAt = file.indexOf('label: disable');
 	assert.ok(enableAt >= 0 && disableAt > enableAt);

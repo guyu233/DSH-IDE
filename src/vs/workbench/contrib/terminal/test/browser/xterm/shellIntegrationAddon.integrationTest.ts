@@ -15,7 +15,7 @@ import { TerminalCapability, type ICommandDetectionCapability } from '../../../.
 import type { TerminalCapabilityStore } from '../../../../../../platform/terminal/common/capabilities/terminalCapabilityStore.js';
 import { ShellIntegrationAddon } from '../../../../../../platform/terminal/common/xterm/shellIntegrationAddon.js';
 import { workbenchInstantiationService, type TestTerminalConfigurationService } from '../../../../../test/browser/workbenchTestServices.js';
-import { ITerminalConfigurationService } from '../../../../terminal/browser/terminal.js';
+import { ITerminalConfigurationService } from '../../../browser/terminal.js';
 import { TestXtermLogger } from '../../../../../../platform/terminal/test/common/terminalTestHelpers.js';
 
 import { NullTelemetryService } from '../../../../../../platform/telemetry/common/telemetryUtils.js';

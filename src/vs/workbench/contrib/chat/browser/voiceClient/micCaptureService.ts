@@ -12,7 +12,7 @@ import { IStorageService, StorageScope } from '../../../../../platform/storage/c
 import { INotificationService, Severity } from '../../../../../platform/notification/common/notification.js';
 import { ILogService } from '../../../../../platform/log/common/log.js';
 import { localize } from '../../../../../nls.js';
-import { AgentsVoiceStorageKeys } from '../../../../contrib/agentsVoice/common/agentsVoice.js';
+import { AgentsVoiceStorageKeys } from '../../../agentsVoice/common/agentsVoice.js';
 import { createPcmCaptureNode } from '../pcmCaptureWorklet.js';
 import { mainWindow } from '../../../../../base/browser/window.js';
 

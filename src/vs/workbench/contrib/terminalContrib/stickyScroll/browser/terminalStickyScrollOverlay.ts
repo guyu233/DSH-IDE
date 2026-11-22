@@ -24,7 +24,7 @@ import { ICurrentPartialCommand, isFullTerminalCommand } from '../../../../../pl
 import { IThemeService } from '../../../../../platform/theme/common/themeService.js';
 import { ITerminalConfigurationService, ITerminalInstance, IXtermColorProvider, IXtermTerminal } from '../../../terminal/browser/terminal.js';
 import { openContextMenu } from '../../../terminal/browser/terminalContextMenu.js';
-import { IXtermCore } from '../../../terminal/browser/xterm-private.js';
+import { IXtermCore } from '../../../terminal/browser/xterm-private.d.js';
 import { TERMINAL_CONFIG_SECTION, TerminalCommandId } from '../../../terminal/common/terminal.js';
 import { terminalStrings } from '../../../terminal/common/terminalStrings.js';
 import { TerminalStickyScrollSettingId } from '../common/terminalStickyScrollConfiguration.js';

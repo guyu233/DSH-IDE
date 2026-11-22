@@ -9,7 +9,7 @@
 
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { redactAuthMaterial, safeErrorText } from '../../../src/vs/platform/dshClient/common/dshIdeAuthRedaction.js';
+import { redactAuthMaterial, safeErrorText } from '../../../src/vs/platform/dshClient/protocol/dshIdeAuthRedaction.js';
 
 /** 断言输出里不残留任何一个凭据片段。 */
 function assertNoLeak(input: string, secrets: readonly string[]): void {

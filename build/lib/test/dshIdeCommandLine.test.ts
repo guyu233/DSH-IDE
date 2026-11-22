@@ -7,7 +7,7 @@
 
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { buildDshIdeCommandLine, mapDshIdeCommandExecution } from '../../../src/vs/platform/dshClient/common/dshIdeCommandLine.js';
+import { buildDshIdeCommandLine, mapDshIdeCommandExecution } from '../../../src/vs/platform/dshClient/protocol/dshIdeCommandLine.js';
 
 test('buildDshIdeCommandLine builds a slash line from bare command name + args', () => {
 	assert.equal(buildDshIdeCommandLine('plan', undefined), '/plan');

@@ -16,8 +16,8 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
-import { DSH_ICON_DATA_URIS } from '../../../out/vs/workbench/contrib/dsh/browser/dshIconDataUris.js';
-import { DSH_CODICON_GLYPH_MAP, dshIconDataUri, resolveDshGlyph } from '../../../out/vs/workbench/contrib/dsh/browser/dshCodiconMap.js';
+import { DSH_ICON_DATA_URIS } from '../../../out/vs/workbench/contrib/dsh/browser/vscode/dshIconDataUris.js';
+import { DSH_CODICON_GLYPH_MAP, dshIconDataUri, resolveDshGlyph } from '../../../out/vs/workbench/contrib/dsh/browser/vscode/dshCodiconMap.js';
 
 /**
  * 生成物指纹：`genDshIconDataUris.mjs` 的 `--check` 逻辑健全，但需要官方 artwork 源
@@ -27,7 +27,7 @@ import { DSH_CODICON_GLYPH_MAP, dshIconDataUri, resolveDshGlyph } from '../../..
 const EXPECTED_SHA256 = '514e24d8a30b5a21625d168b503c45be0e0f11a10902c118ae817deed4d991a1';
 
 test('dshIconDataUris.ts matches the pinned generation fingerprint', () => {
-	const source = readFileSync(new URL('../../../src/vs/workbench/contrib/dsh/browser/dshIconDataUris.ts', import.meta.url));
+	const source = readFileSync(new URL('../../../src/vs/workbench/contrib/dsh/browser/vscode/dshIconDataUris.ts', import.meta.url));
 	assert.equal(createHash('sha256').update(source).digest('hex'), EXPECTED_SHA256,
 		'dshIconDataUris.ts drifted; regenerate with build/lib/dsh/genDshIconDataUris.mjs and update the fingerprint with the artwork source noted');
 });

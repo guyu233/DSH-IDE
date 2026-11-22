@@ -11,7 +11,7 @@
 
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { validateDshIdeInput } from '../../../src/vs/platform/dshClient/common/dshIdeProtocol.ts';
+import { validateDshIdeInput } from '../../../src/vs/platform/dshClient/protocol/dshIdeProtocol.ts';
 
 /** 断言这份输入会被协议边界拒绝。 */
 function rejects(method: string, args: unknown, why: string): void {

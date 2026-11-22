@@ -151,14 +151,14 @@ import { ITerminalSandboxService, NullTerminalSandboxService } from '../../platf
 import ErrorTelemetry from '../../platform/telemetry/electron-main/errorTelemetry.js';
 import { IProtocolMainService } from '../../platform/protocol/electron-main/protocol.js';
 import { createRemoteResourceRequestHandler } from '../../platform/protocol/electron-main/remoteResourceProtocol.js';
-import { DshIdeChannel, type DshIdeLauncher } from '../../platform/dshClient/electron-main/dshIdeChannel.js';
+import { DshIdeChannel, type DshIdeLauncher } from '../../platform/dshClient/ide/main/dshIdeChannel.js';
 import { DSH_IDE_COOKIE_ENV, DSH_IDE_ENDPOINT_ENV, DSH_IDE_LAUNCH_URL_ENV, DSH_IDE_ENDPOINT_FILE_ENV, DSH_IDE_SESSION_ENV, DSH_IDE_COMPOSER_ENV } from '../../platform/dshClient/common/env.js';
 import { readFile as readFileText } from 'node:fs/promises';
-import { DshIdeTransport, authenticateHost } from '../../platform/dshClient/transport/dshIdeTransport.js';
-import { DshIdeLaunchListener } from '../../platform/dshClient/transport/dshIdeLaunchListener.js';
-import { createDshIdeBackendFromEnv, defaultDshIdeEndpointFile } from '../../platform/dshClient/electron-main/dshIdeBackendFactory.js';
-import { DshIdeViewService } from '../../platform/dshClient/electron-main/ide-view-service.js';
-import { DSH_IDE_CHANNEL } from '../../platform/dshClient/common/dshIdeProtocol.js';
+import { DshIdeTransport, authenticateHost } from '../../platform/dshClient/ide/transport/dshIdeTransport.js';
+import { DshIdeLaunchListener } from '../../platform/dshClient/ide/transport/dshIdeLaunchListener.js';
+import { createDshIdeBackendFromEnv, defaultDshIdeEndpointFile } from '../../platform/dshClient/ide/main/dshIdeBackendFactory.js';
+import { DshIdeViewService } from '../../platform/dshClient/ide/main/ide-view-service.js';
+import { DSH_IDE_CHANNEL } from '../../platform/dshClient/protocol/dshIdeProtocol.js';
 import { logNodeCompileCacheStatus, markNodeCompileCacheReady, waitForNodeCompileCacheReady } from '../../base/node/nodeCompileCache.js';
 
 type OSProxyConfigEvent = {

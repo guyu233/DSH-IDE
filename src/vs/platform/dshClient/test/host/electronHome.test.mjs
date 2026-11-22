@@ -20,7 +20,7 @@ import {
 	electronHomePaths,
 	materializeElectronHome,
 	resolveElectronHomeDir,
-} from '../../host/electron-home.js';
+} from '../../host/launch/electron-home.js';
 
 const windowsOnly = process.platform === 'win32' ? false : 'Windows-only test';
 
@@ -135,18 +135,81 @@ test('标记匹配时不重复重建（幂等）', { skip: windowsOnly }, () => 
 	}
 });
 
-test('插件和 Electron 不在同一块盘时，主页放到可执行文件所在卷', () => {
-	const io = {
-		stat(target) {
-			if (String(target).includes('plugin')) {
-				return { dev: 2, mtimeMs: 1 };
-			}
-			return { dev: 1, mtimeMs: 1 };
-		},
+function withLocationEnv(values, run) {
+	const saved = {
+		DSH_HOME: process.env.DSH_HOME,
+		DSH_PROFILE_DIR: process.env.DSH_PROFILE_DIR,
+		LOCALAPPDATA: process.env.LOCALAPPDATA,
 	};
-	const home = resolveElectronHomeDir('D:\\plugin', 'C:\\Programs\\DeepSeek Harness\\DeepSeek Harness.exe', io);
-	assert.match(home, /dsh-ide[\\/]electron-home$/);
-	assert.doesNotMatch(home, /^D:\\plugin/);
+	for (const key of Object.keys(saved)) {
+		if (values[key] === undefined) {
+			delete process.env[key];
+		} else {
+			process.env[key] = values[key];
+		}
+	}
+	try {
+		return run();
+	} finally {
+		for (const key of Object.keys(saved)) {
+			if (saved[key] === undefined) {
+				delete process.env[key];
+			} else {
+				process.env[key] = saved[key];
+			}
+		}
+	}
+}
+
+test('插件和 Electron 不在同一块盘时，主页放到可执行文件所在卷', () => {
+	withLocationEnv({ DSH_HOME: undefined, DSH_PROFILE_DIR: undefined, LOCALAPPDATA: undefined }, () => {
+		const io = {
+			stat(target) {
+				if (String(target).includes('plugin')) {
+					return { dev: 2, mtimeMs: 1, isDirectory: () => true };
+				}
+				return { dev: 1, mtimeMs: 1, isDirectory: () => !String(target).endsWith('.exe') };
+			},
+		};
+		const home = resolveElectronHomeDir('D:\\plugin', 'C:\\Programs\\DeepSeek Harness\\DeepSeek Harness.exe', io);
+		assert.match(home, /dsh-ide[\\/]electron-home$/);
+		assert.doesNotMatch(home, /^D:\\plugin/);
+	});
+});
+
+test('用户目录还不存在且上级在另一块盘时，不把状态目录建到那块盘', () => {
+	const exe = 'C:\\Programs\\DeepSeek Harness\\DeepSeek Harness.exe';
+	const missing = 'D:\\missing-dsh-home';
+	const local = 'C:\\Users\\x\\AppData\\Local';
+	withLocationEnv({ DSH_HOME: missing, DSH_PROFILE_DIR: undefined, LOCALAPPDATA: local }, () => {
+		const stat = target => {
+			const value = String(target);
+			if (value === missing) {
+				throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
+			}
+			if (value.startsWith('D:')) {
+				return { dev: 2, isDirectory: () => true };
+			}
+			return { dev: 1, isDirectory: () => !value.endsWith('.exe') };
+		};
+		const home = resolveElectronHomeDir('E:\\plugin-link', exe, { stat });
+		assert.equal(home, path.win32.join(local, 'dsh-ide', 'electron-home'));
+	});
+});
+
+test('用户目录还不存在但上级与 exe 同卷时，仍然用用户目录', () => {
+	const exe = 'C:\\Programs\\DeepSeek Harness\\DeepSeek Harness.exe';
+	const missing = 'C:\\Users\\x\\.dsh';
+	withLocationEnv({ DSH_HOME: missing, DSH_PROFILE_DIR: undefined, LOCALAPPDATA: 'C:\\Users\\x\\AppData\\Local' }, () => {
+		const stat = target => {
+			if (String(target) === missing) {
+				throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
+			}
+			return { dev: 1, isDirectory: () => !String(target).endsWith('.exe') };
+		};
+		const home = resolveElectronHomeDir('D:\\plugin-link', exe, { stat });
+		assert.equal(home, path.win32.join(missing, 'dsh-ide', 'electron-home'));
+	});
 });
 
 test('跨卷硬链接失败时明确拒绝，不静默复制', () => {

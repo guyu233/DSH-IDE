@@ -1311,6 +1311,11 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 			// The available-model set changed: re-evaluate whether sending is
 			// possible (a `requiresCustomModels` session may now have, or have
 			// lost, its models).
+			const sessionType = this.getCurrentSessionType();
+			this.updateTargetedModelsContextKey(
+				sessionType,
+				!!sessionType && this.chatSessionsService.requiresCustomModelsForSessionType(sessionType),
+			);
 			this._updateInputContentContextKeys();
 		};
 		this._register(this.languageModelsService.onDidChangeLanguageModels(() => updateAfterModelListChange(false)));
@@ -2815,9 +2820,9 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 		const customAgentTarget = sessionType ? this.chatSessionsService.getCustomAgentTargetForSessionType(sessionType) : Target.Undefined;
 		this.chatSessionHasCustomAgentTarget.set(customAgentTarget !== Target.Undefined);
 
-		// Check if this session type requires custom models
-		const requiresCustomModels = sessionType && this.chatSessionsService.requiresCustomModelsForSessionType(sessionType);
-		this.chatSessionHasTargetedModels.set(!!requiresCustomModels);
+		// 模型按钮的显隐看「这个会话实际有没有可用模型」，而不是「有没有非权限选项组」：
+		// 只有权限、没有预设的会话也该有模型入口。没有模型目录时保持隐藏。
+		this.updateTargetedModelsContextKey(sessionType, !!sessionType && this.chatSessionsService.requiresCustomModelsForSessionType(sessionType));
 
 		const visibleOptionGroups = this.getVisibleOptionGroups(sessionResource);
 		// 权限组不进 `visibleOptionGroups`（它们在权限选择器内部渲染），必须单独判定：
@@ -2843,6 +2848,16 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 		this._updateInputContentContextKeys();
 
 		return visibleOptionGroups;
+	}
+
+	/**
+	 * 更新「当前会话有可用模型」这个上下文键。
+	 *
+	 * 模型目录异步到位，因此模型列表变化时也要重算，否则按钮会一直停在初始隐藏状态。
+	 */
+	private updateTargetedModelsContextKey(sessionType: string | undefined, requiresCustomModels: boolean | undefined): void {
+		const hasModels = !!sessionType && !!requiresCustomModels && this.getModelsForSessionType(sessionType).length > 0;
+		this.chatSessionHasTargetedModels.set(hasModels);
 	}
 
 	private getCurrentSessionResource() {

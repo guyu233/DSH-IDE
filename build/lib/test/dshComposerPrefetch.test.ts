@@ -14,8 +14,8 @@
 
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { projectDshIdeComposer } from '../../../src/vs/platform/dshClient/common/dshIdeComposer.js';
-import { normalizeDshComposerState } from '../../../out/vs/workbench/contrib/dsh/browser/dshComposerSource.js';
+import { projectDshIdeComposer } from '../../../src/vs/platform/dshClient/protocol/dshIdeComposer.js';
+import { normalizeDshComposerState } from '../../../out/vs/workbench/contrib/dsh/browser/vscode/dshComposerSource.js';
 
 /** 官方 `sessionController` 侧的最小真实形状。 */
 function hostSource() {

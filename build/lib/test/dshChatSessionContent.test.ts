@@ -10,7 +10,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { readFileSync } from 'node:fs';
-import { toHistory } from '../../../out/vs/workbench/contrib/dsh/browser/dshChatHistory.js';
+import { toHistory } from '../../../out/vs/workbench/contrib/dsh/browser/vscode/dshChatHistory.js';
 
 /** 最小节点来源：只实现 `toHistory` 用到的 `nodes()`。 */
 function session(nodes: readonly unknown[]) {
@@ -107,9 +107,10 @@ test('pending approvals merge into the last response as warning plus approve/rej
 	assert.equal(last?.type, 'response');
 	if (last?.type === 'response') {
 		assert.equal((last.parts[0] as { kind: string }).kind, 'markdownContent');
-		assert.ok(last.parts.some(part => (part as { kind: string }).kind === 'warning'));
+		// 标题是任务行；Allow / Reject 仍是 command，因为原生 confirmation 会另发请求。
+		assert.ok(last.parts.some(part => (part as { kind: string }).kind === 'progressTaskSerialized'));
 		const commands = last.parts.filter(part => (part as { kind: string }).kind === 'command') as { command: { id: string; title: string; arguments?: readonly unknown[] } }[];
-		assert.deepEqual(commands.map(c => c.command.title), ['允许', '拒绝']);
+		assert.deepEqual(commands.map(c => c.command.title), ['Allow', 'Reject']);
 		assert.deepEqual(commands[0].command.arguments, ['e-1', 'approve']);
 		assert.deepEqual(commands[1].command.arguments, ['e-1', 'reject']);
 	}
@@ -199,9 +200,9 @@ test('plan and goal state are visible in the transcript', () => {
 	});
 	const response = history.find(item => item.type === 'response');
 	if (response?.type === 'response') {
-		const infos = response.parts.filter(part => part.kind === 'info') as { content: { value: string } }[];
-		assert.ok(infos.some(part => part.content.value.includes('计划模式已启用')));
-		assert.ok(infos.some(part => part.content.value.includes('完成手册') && part.content.value.includes('3 轮')));
+		const tasks = response.parts.filter(part => part.kind === 'progressTaskSerialized') as { content: { value: string } }[];
+		assert.ok(tasks.some(part => part.content.value.includes('Plan mode is on')));
+		assert.ok(tasks.some(part => part.content.value.includes('完成手册') && part.content.value.includes('3 rounds')));
 	}
 });
 
@@ -213,7 +214,7 @@ test('plan and goal state are visible in the transcript', () => {
 // node 的 strip-types 模式无法解析（仓库里同类「接线存在」的断言都用这个办法）。
 // ---------------------------------------------------------------------------
 test('the content provider seeds option groups for a real dsh session', () => {
-	const file = readFileSync(new URL('../../../src/vs/workbench/contrib/dsh/browser/dshChatSessionContent.ts', import.meta.url), 'utf8');
+	const file = readFileSync(new URL('../../../src/vs/workbench/contrib/dsh/browser/vscode/dshChatSessionContent.ts', import.meta.url), 'utf8');
 	assert.match(file, /getNewChatSessionInputState\(DSH_CHAT_SESSION_TYPE, sessionResource\)/,
 		'the provider must ask the sessions service for dsh option groups');
 	assert.match(file, /updateSessionOptions\(sessionResource, options\)/,
@@ -225,18 +226,27 @@ test('the content provider seeds option groups for a real dsh session', () => {
 test('one frame rebuilds the history once, not once per event', () => {
 	// 一帧内容会连发 pending / extras / nodes 三个事件。每个都全量重建 history 的话，
 	// 同一帧要跑三遍 O(节点数) 的投影——这是滚动长会话时最直接的 CPU 开销。
-	const file = readFileSync(new URL('../../../src/vs/workbench/contrib/dsh/browser/dshChatSessionContent.ts', import.meta.url), 'utf8');
+	const file = readFileSync(new URL('../../../src/vs/workbench/contrib/dsh/browser/vscode/dshChatSessionContent.ts', import.meta.url), 'utf8');
 	assert.match(file, /queueMicrotask/, 'rebuilds must be coalesced');
 	assert.match(file, /let rebuildScheduled = false/, 'a second event in the same frame must be dropped');
-	const history = readFileSync(new URL('../../../src/vs/workbench/contrib/dsh/browser/dshChatHistory.ts', import.meta.url), 'utf8');
+	const history = readFileSync(new URL('../../../src/vs/workbench/contrib/dsh/browser/vscode/dshChatHistory.ts', import.meta.url), 'utf8');
 	assert.match(history, /const nodes = session\.nodes\(\)/, 'the node list must be read once per projection');
 	assert.equal((history.match(/session\.nodes\(\)/g) ?? []).length, 1, 'toHistory must not walk the node list twice');
 });
 
+test('a pending interaction blocks sending while keeping the draft editable', () => {
+	// 官方 `IChatSession.isInputBlocked`：「Temporarily prevents sending while keeping the draft
+	// visible and editable」。DSH 的待决审批/问卷/计划审阅正好是这个语义，原生 ChatWidget
+	// 已经把它接到 ChatContextKeys.inputBlocked 与提交门禁上，DSH 只需提供这个 observable。
+	const file = readFileSync(new URL('../../../src/vs/workbench/contrib/dsh/browser/vscode/dshChatSessionContent.ts', import.meta.url), 'utf8');
+	assert.match(file, /get isInputBlocked\(\): IObservable<boolean>/, 'the session must expose isInputBlocked');
+	assert.match(file, /this\._session\.onDidChangePending/, 'blocking must follow the pending set, not a timer');
+	assert.match(file, /this\._session\.pending\(\)\.length > 0/, 'blocked exactly while something is pending');
+});
 test('a truncated backfill says so instead of pretending the history is complete', () => {
 	// 后台补历史有页数上限（40）。到上限时 Host 仍说 hasMore，原先直接 return，
 	// 用户看到的是一个「到底了」的面板，实际更早的记录还在 Host 上。
-	const file = readFileSync(new URL('../../../src/vs/workbench/contrib/dsh/browser/dshChatSessionContent.ts', import.meta.url), 'utf8');
+	const file = readFileSync(new URL('../../../src/vs/workbench/contrib/dsh/browser/vscode/dshChatSessionContent.ts', import.meta.url), 'utf8');
 	assert.match(file, /reportOlderHistoryTruncated/);
 	assert.match(file, /if \(!content\.isDisposed && session\.hasMore\(\)\)/, 'the notice must only fire when more really exists');
 	assert.match(file, /dsh\.history\.truncated/);
@@ -245,12 +255,15 @@ test('a truncated backfill says so instead of pretending the history is complete
 test('session attachments become openable URIs instead of a decorative count', () => {
 	// 原生 Chat 没有图片进度部件：只写「会话附件 N 个」用户点不开也看不到。
 	// 附件必须以 `dsh-attachment:` 引用出现，字节由 Host 官方附件服务提供。
-	const history = readFileSync(new URL('../../../src/vs/workbench/contrib/dsh/browser/dshChatHistory.ts', import.meta.url), 'utf8');
-	assert.match(history, /pushImageReferences\(/, 'images must be placed on the turn that produced them');
-	assert.doesNotMatch(history, /dshAttachmentUri\(attachment, extras\.sessionId\)/, 'images must not be dumped onto the last response');
+	const history = readFileSync(new URL('../../../src/vs/workbench/contrib/dsh/browser/vscode/dshChatHistory.ts', import.meta.url), 'utf8');
+	// 图片改由该段 slot host 的 `dshImageGallery` 画（官方只有一个 user.images 席位）。
+	// history 再产一份 `dsh-attachment:` reference 会让同一张图显示两次，因此这里断言的是
+	// 「history 不再重复引用」，而不是「history 里有引用」。
+	assert.doesNotMatch(history, /pushImageReferences\(/, 'history must not duplicate images the gallery already draws');
+	assert.doesNotMatch(history, /dshAttachmentUri\(/, 'history must not mint attachment URIs at all');
 	assert.doesNotMatch(history, /会话附件 \$\{extras\.attachments\.length\} 个/, 'the decorative count must be gone');
 
-	const fs = readFileSync(new URL('../../../src/vs/workbench/contrib/dsh/browser/dshAttachmentFileSystem.ts', import.meta.url), 'utf8');
+	const fs = readFileSync(new URL('../../../src/vs/workbench/contrib/dsh/browser/vscode/dshAttachmentFileSystem.ts', import.meta.url), 'utf8');
 	assert.match(fs, /registerProvider\(DSH_ATTACHMENT_SCHEME, this\)/, 'the read-only scheme must be registered');
 	assert.match(fs, /call<[^>]*>\('readAttachment'/, 'bytes must come from the official Host attachment service');
 	assert.match(fs, /FileSystemProviderCapabilities\.Readonly/, 'the provider must advertise readonly so the editor does not offer save');
@@ -260,7 +273,7 @@ test('session attachments become openable URIs instead of a decorative count', (
 test('the truncation warning is only appended once per content instance', () => {
 	// 同一个会话反复打开都会走到 40 页上限。每次都追加的话，
 	// history 尾部会堆出一串一模一样的警告。
-	const source = readFileSync(new URL('../../../src/vs/workbench/contrib/dsh/browser/dshChatSessionContent.ts', import.meta.url), 'utf8');
+	const source = readFileSync(new URL('../../../src/vs/workbench/contrib/dsh/browser/vscode/dshChatSessionContent.ts', import.meta.url), 'utf8');
 	assert.match(source, /private _truncationReported = false/, 'the report must be tracked');
 	assert.match(source, /if \(this\._truncationReported\) \{\s*\n\s*return;/, 'a second report must be a no-op');
 	assert.match(source, /this\._truncationReported = true;/, 'the flag must be set on the first report');
@@ -269,7 +282,7 @@ test('the truncation warning is only appended once per content instance', () => 
 test('an unchanged frame does not rebuild or republish the history', () => {
 	// rebuild 已用 queueMicrotask 合并同轮多次触发，但每次仍无条件 toHistory + fire。
 	// 节点数、首尾 seq、待决议条数都没变时，说明这一帧没有新内容。
-	const source = readFileSync(new URL('../../../src/vs/workbench/contrib/dsh/browser/dshChatSessionContent.ts', import.meta.url), 'utf8');
+	const source = readFileSync(new URL('../../../src/vs/workbench/contrib/dsh/browser/vscode/dshChatSessionContent.ts', import.meta.url), 'utf8');
 	assert.match(source, /private _historyFingerprint: string \| undefined/, 'the fingerprint must be tracked');
 	assert.match(source, /historyFingerprintOf\(session, extras\)/, 'the fingerprint must be computed from nodes and extras');
 	assert.match(source, /if \(fingerprint === this\._historyFingerprint\) \{\s*\n\s*return;/, 'an identical fingerprint must skip the rebuild');
@@ -278,9 +291,9 @@ test('an unchanged frame does not rebuild or republish the history', () => {
 test('an extras-only change still rebuilds the history', () => {
 	// extras（目标 / 计划 / 待办 / 技能 / 团队 / 交付物）不体现在节点上，
 	// 但它们会改变 history 尾部。指纹必须把它们算进去，否则目标阶段变了界面不更新。
-	const source = readFileSync(new URL('../../../src/vs/workbench/contrib/dsh/browser/dshChatSessionContent.ts', import.meta.url), 'utf8');
+	const source = readFileSync(new URL('../../../src/vs/workbench/contrib/dsh/browser/vscode/dshChatSessionContent.ts', import.meta.url), 'utf8');
 	assert.match(source, /extrasFingerprint\(extras\)/, 'the fingerprint must include the extras');
-	const history = readFileSync(new URL('../../../src/vs/workbench/contrib/dsh/browser/dshChatHistory.ts', import.meta.url), 'utf8');
+	const history = readFileSync(new URL('../../../src/vs/workbench/contrib/dsh/browser/vscode/dshChatHistory.ts', import.meta.url), 'utf8');
 	assert.match(history, /export function extrasFingerprint/, 'the extras fingerprint must exist');
 	// 目标阶段必须参与，否则「进行中 → 已完成」不会触发重建。
 	assert.match(history, /goal\.phase/, 'the goal phase must take part in the fingerprint');
@@ -292,7 +305,7 @@ test('the truncation notice survives a later rebuild', () => {
 	// 警告是「这次加载没到底」的说明，不属于 Host 投影。新内容一到 rebuild 会用
 	// toHistory 重建，若不拼回去，这条警告就整条消失——而 _truncationReported
 	// 已是 true，再也不会补回来。
-	const source = readFileSync(new URL('../../../src/vs/workbench/contrib/dsh/browser/dshChatSessionContent.ts', import.meta.url), 'utf8');
+	const source = readFileSync(new URL('../../../src/vs/workbench/contrib/dsh/browser/vscode/dshChatSessionContent.ts', import.meta.url), 'utf8');
 	assert.match(source, /const TRUNCATION_NOTICE: IChatSessionHistoryItem/, 'the notice must be a shared constant');
 	assert.match(source, /private _truncationFolded = false/, 'the folded state must be tracked');
 	assert.match(source, /this\._truncationFolded = true;/, 'folding must be recorded when appended');

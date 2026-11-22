@@ -466,7 +466,9 @@ export class WorkbenchThemeService extends Disposable implements IWorkbenchTheme
 	}
 
 	public async getColorThemes(): Promise<IWorkbenchColorTheme[]> {
-		return this.colorThemeRegistry.getThemes();
+		// DSH 只有浅色和深色。其余内置配色不进入选择列表；跟随系统走自动检测，不是第三套配色。
+		const allowed = new Set(['Light Modern', 'Dark Modern']);
+		return this.colorThemeRegistry.getThemes().filter(theme => allowed.has(theme.settingsId));
 	}
 
 	public getPreferredColorScheme(): ColorScheme | undefined {

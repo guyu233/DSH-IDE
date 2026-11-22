@@ -29,36 +29,68 @@ export function dshUserRoot() {
 
 /**
  * @param {string} target
- * @param {(path: string) => { dev?: number }} stat
- * @returns {number | undefined}
+ * @param {(path: string) => { dev?: number, isDirectory?: () => boolean }} stat
  */
-function deviceId(target, stat) {
+function statInfo(target, stat) {
 	try {
-		const dev = stat(target).dev;
-		return typeof dev === 'number' ? dev : undefined;
+		return stat(target);
 	} catch {
 		return undefined;
 	}
 }
 
 /**
+ * 路径本身，或它还不存在时最近的已存在上级，所在的卷。
+ * 目录还没建出来时，创建它会落在上级那块盘上；stat 失败不能当成「哪块盘都行」。
+ * 候选路径本身是文件时不可用：不能把状态目录建在文件下面。
+ * @param {string} target
+ * @param {(path: string) => { dev?: number, isDirectory?: () => boolean }} stat
+ * @returns {{ dev: number, usable: boolean } | undefined}
+ */
+function volumeOf(target, stat) {
+	let current = target;
+	for (let depth = 0; depth < 32; depth++) {
+		const info = statInfo(current, stat);
+		if (info) {
+			const dev = info.dev;
+			if (typeof dev !== 'number') {
+				return undefined;
+			}
+			const fileAtTarget = current === target
+				&& typeof info.isDirectory === 'function'
+				&& info.isDirectory() === false;
+			return { dev, usable: !fileAtTarget };
+		}
+		const parent = dirname(current);
+		if (parent === current) {
+			return undefined;
+		}
+		current = parent;
+	}
+	return undefined;
+}
+
+/**
  * 插件运行时状态目录（端点文件、Electron 主页）。
  * 必须和本次 DSH 可执行文件同一块盘，否则硬链接铺不开主页。
  * 候选顺序：用户的 DSH 数据目录、LOCALAPPDATA、可执行文件所在目录。
+ * 只有卷号对得上才选用；对不上或还无法证明同卷时，退回可执行文件所在目录。
  * @param {string} [exePath]
- * @param {(path: string) => { dev?: number }} [stat]
+ * @param {(path: string) => { dev?: number, isDirectory?: () => boolean }} [stat]
  */
 export function dshIdeStateDir(exePath = process.execPath, stat = statSync) {
-	const exeDev = deviceId(exePath, stat);
+	const exe = volumeOf(exePath, stat);
 	const candidates = [
 		dshUserRoot(),
 		process.env.LOCALAPPDATA,
 		dshInstallRoot(exePath),
 	].filter(dir => typeof dir === 'string' && dir !== '');
-	for (const dir of candidates) {
-		const dev = deviceId(dir, stat);
-		if (exeDev === undefined || dev === undefined || dev === exeDev) {
-			return join(dir, 'dsh-ide');
+	if (exe !== undefined) {
+		for (const dir of candidates) {
+			const volume = volumeOf(dir, stat);
+			if (volume !== undefined && volume.usable && volume.dev === exe.dev) {
+				return join(dir, 'dsh-ide');
+			}
 		}
 	}
 	return join(dshInstallRoot(exePath), 'dsh-ide');

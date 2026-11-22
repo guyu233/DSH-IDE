@@ -47,7 +47,7 @@ import { IEditorGroup } from '../../../services/editor/common/editorGroupsServic
 import { IContextMenuService } from '../../../../platform/contextview/browser/contextView.js';
 import { IMenu, IMenuService, MenuId } from '../../../../platform/actions/common/actions.js';
 import { CommandsRegistry } from '../../../../platform/commands/common/commands.js';
-import { COPY_ADDRESS_ID, COPY_ADDRESS_LABEL } from '../../../../workbench/contrib/debug/browser/debugCommands.js';
+import { COPY_ADDRESS_ID, COPY_ADDRESS_LABEL } from './debugCommands.js';
 import { IClipboardService } from '../../../../platform/clipboard/common/clipboardService.js';
 import { getFlatContextMenuActions } from '../../../../platform/actions/browser/menuEntryActionViewItem.js';
 

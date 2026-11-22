@@ -10,7 +10,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 
-const SOURCE = 'src/vs/workbench/contrib/dsh/browser/dshSessionMenu.ts';
+const SOURCE = 'src/vs/workbench/contrib/dsh/browser/vscode/dshSessionMenu.ts';
 
 function readSource(): string {
 	return readFileSync(new URL('../../../' + SOURCE, import.meta.url), 'utf8');
@@ -54,12 +54,12 @@ test('archive and unarchive are exact opposites', () => {
 	assert.ok(!actionBlock(source, 'unarchive').includes('isArchivedAgentSession.negate()'), 'unarchive must not negate the archived key');
 });
 
-test('a failed session action is reported at error level, like every other DSH command', () => {
-	// 目标 / 作业 / MCP 命令的失败都用 error。会话操作的失败同样是「刚才那一下没做成」，
-	// 用 warn 会更弱、也更容易被当成非致命提醒而忽略。
+test('a failed session action goes through the shared failure notice', () => {
+	// 会话操作失败与其它 DSH-IDE 报错同一类别：统一走 `dshFail`（红色错误框），
+	// 不在这里自己挑通知级别，否则同类失败会出现两种框。
 	const source = readSource();
 	const failBody = /async function fail\([\s\S]{0,400}?\n\}/.exec(source)?.[0] ?? '';
 	assert.ok(failBody !== '', 'the fail helper must exist');
-	assert.match(failBody, /notifications\.error\(/, 'the fail helper must use error level');
-	assert.doesNotMatch(failBody, /notifications\.warn\(/, 'the fail helper must not downgrade to warn');
+	assert.match(failBody, /dshFail\(notifications,/, 'the fail helper must use the shared failure notice');
+	assert.doesNotMatch(failBody, /notifications\.(error|warn)\(/, 'the fail helper must not pick a level itself');
 });

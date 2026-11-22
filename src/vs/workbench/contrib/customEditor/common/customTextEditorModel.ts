@@ -15,7 +15,7 @@ import { IInstantiationService } from '../../../../platform/instantiation/common
 import { ILabelService } from '../../../../platform/label/common/label.js';
 import { IRevertOptions, ISaveOptions } from '../../../common/editor.js';
 import { ICustomEditorModel } from './customEditor.js';
-import { IExtensionService } from '../../../../workbench/services/extensions/common/extensions.js';
+import { IExtensionService } from '../../../services/extensions/common/extensions.js';
 import { ITextFileEditorModel, ITextFileService, TextFileEditorModelState } from '../../../services/textfile/common/textfiles.js';
 
 export class CustomTextEditorModel extends Disposable implements ICustomEditorModel {

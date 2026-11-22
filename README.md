@@ -31,7 +31,7 @@ DSH 是一个本地 AI 内核，具备会话、模型、工具调用、审批与
 | 智能体预设 | 新会话创建前选择 DSH 智能体预设 |
 | 账号入口 | 左下角显示 DSH 登录态的真实头像与昵称 |
 | 流式回答 | 支持增量渲染，回答逐字输出 |
-| 行内补全 | **已接入**：经唯一通道 `inlineComplete` 调用 Host 已选模型；未连接或没有默认模型时不产生补全 |
+| 行内补全 | 不在聊天主路径上，不注册 |
 
 ## 系统要求
 
@@ -91,11 +91,17 @@ AI 能力全部留在 DSH 一侧；IDE 侧只消费中立 DTO，不持有 DSH �
 ## 仓库结构
 
 ```
-src/vs/workbench/contrib/dsh/     DSH 集成层（Agent、输入框数据源、会话树）
-src/vs/workbench/contrib/chat/    Chat 视图与输入框（VS Code 核心，DSH 定制在此）
-src/vs/platform/dshClient/        与 DSH 通信的唯一通道
-build/lib/dsh/                    打包与验证脚本
-build/dsh/chat-render/            聊天渲染复用件的历史来源凭据（只读，不参与构建）
+src/vs/platform/dshClient/index.js                 插件入口：等依赖就绪后挂上桥
+src/vs/platform/dshClient/host/usecase/            Host 用例：列会话、开窗、远程方法
+src/vs/platform/dshClient/host/bridge/             桥：只 follow 一次，把 DSH 事件投影成帧
+src/vs/platform/dshClient/host/launch/             Windows 拉窗，和会话桥分开
+src/vs/platform/dshClient/protocol/                唯一协议：帧、命令、版本、校验
+src/vs/platform/dshClient/ide/transport/           IDE 侧传输，只搬字节
+src/vs/platform/dshClient/ide/main/                IDE 主进程通道
+src/vs/workbench/contrib/dsh/browser/consumer/     校验帧、合并状态、重连
+src/vs/workbench/contrib/dsh/browser/vscode/       Chat、命令、主题等 VS Code 适配
+src/vs/workbench/contrib/dsh/browser/dsh.contribution.ts
+                                                   把上面几层接进工作台
 ```
 
 ## 构建与开发

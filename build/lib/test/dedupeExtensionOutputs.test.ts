@@ -8,7 +8,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { dedupeExtensionOutputs, DEDUPE_GROUPS, type IDedupeGroup } from '../../../build/lib/dsh/dedupeExtensionOutputs.ts';
+import { dedupeExtensionOutputs, DEDUPE_GROUPS, type IDedupeGroup } from '../dsh/dedupeExtensionOutputs.ts';
 
 /** 夹具用的目录组（真实组指向 mermaid 扩展）。 */
 const GROUP: readonly IDedupeGroup[] = [{ keep: 'markdown-preview-out', drop: ['notebook-out'] }];

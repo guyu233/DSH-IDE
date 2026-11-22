@@ -8,7 +8,7 @@
 
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { projectDshIdeArchiveSet } from '../../../src/vs/platform/dshClient/common/dshIdeArchiveSet.js';
+import { projectDshIdeArchiveSet } from '../../../src/vs/platform/dshClient/protocol/dshIdeArchiveSet.js';
 
 test('projectDshIdeArchiveSet maps the official full archive set to a string array', () => {
 	assert.deepEqual(projectDshIdeArchiveSet({ archivedSessionIds: ['s-1', 's-2'] }), ['s-1', 's-2']);

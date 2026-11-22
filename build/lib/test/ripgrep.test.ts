@@ -11,7 +11,7 @@ import { suite, test, type TestContext } from 'node:test';
 import { Readable } from 'node:stream';
 import VinylFile from 'vinyl';
 import { filter } from '../gulp/facade.ts';
-import { DSH_IDE_HOST_RG_PATH, resolveHostRipgrep } from '../../../src/vs/platform/dshClient/host/host-ripgrep.js';
+import { DSH_IDE_HOST_RG_PATH, resolveHostRipgrep } from '../../../src/vs/platform/dshClient/host/launch/host-ripgrep.js';
 import { getDshRipgrepPayloadFilter, getRipgrepExcludeFilter } from '../ripgrep.ts';
 
 suite('ripgrep platform filtering', () => {

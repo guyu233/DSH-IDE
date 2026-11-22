@@ -10,7 +10,7 @@ import { localize } from '../../../../nls.js';
 import { SortBy } from '../../../../platform/extensionManagement/common/extensionManagement.js';
 import { EXTENSION_CATEGORIES } from '../../../../platform/extensions/common/extensions.js';
 import { CountTokensCallback, IToolData, IToolImpl, IToolInvocation, IToolResult, ToolDataSource, ToolProgress } from '../../chat/common/tools/languageModelToolsService.js';
-import { ExtensionState, IExtension, IExtensionsWorkbenchService } from '../common/extensions.js';
+import { ExtensionState, IExtension, IExtensionsWorkbenchService } from './extensions.js';
 
 export const SearchExtensionsToolId = 'vscode_searchExtensions_internal';
 

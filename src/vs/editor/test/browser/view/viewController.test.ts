@@ -19,7 +19,7 @@ import { ILanguageConfigurationService } from '../../../common/languages/languag
 import { NullState } from '../../../common/languages/nullTokenize.js';
 import { MonospaceLineBreaksComputerFactory } from '../../../common/viewModel/monospaceLineBreaksComputer.js';
 import { ViewModel } from '../../../common/viewModel/viewModelImpl.js';
-import { instantiateTextModel } from '../../../test/common/testTextModel.js';
+import { instantiateTextModel } from '../../common/testTextModel.js';
 import { TestLanguageConfigurationService } from '../../common/modes/testLanguageConfigurationService.js';
 import { TestConfiguration } from '../config/testConfiguration.js';
 import { createCodeEditorServices } from '../testCodeEditor.js';

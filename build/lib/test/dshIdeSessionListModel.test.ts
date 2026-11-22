@@ -11,13 +11,13 @@
 
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import type { IDshIdeSessionSummary } from '../../../src/vs/platform/dshClient/common/dshIdeProtocol.ts';
+import type { IDshIdeSessionSummary } from '../../../src/vs/platform/dshClient/protocol/dshIdeProtocol.ts';
 import {
 	DshIdeSessionListModel,
 	type IDshIdeSessionListSource,
 	type IDshIdeSessionListState,
-} from '../../../out/vs/workbench/contrib/dsh/browser/dshIdeSessionListModel.js';
-import { projectDshIdeSessionList, projectDshIdeWorkspaceSessions } from '../../../src/vs/platform/dshClient/common/dshIdeSessionList.js';
+} from '../../../out/vs/workbench/contrib/dsh/browser/vscode/dshIdeSessionListModel.js';
+import { projectDshIdeSessionList, projectDshIdeWorkspaceSessions } from '../../../src/vs/platform/dshClient/protocol/dshIdeSessionList.js';
 
 /** 最小会话摘要（字段与契约真源一致，够测状态机即可）。 */
 function summary(sessionId: string): IDshIdeSessionSummary {

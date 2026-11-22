@@ -9,7 +9,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
-import { dshMoveChoices, dshRewindSeq } from '../../../src/vs/workbench/contrib/dsh/browser/dshSessionMove.ts';
+import { dshMoveChoices, dshRewindSeq } from '../../../src/vs/workbench/contrib/dsh/browser/vscode/dshSessionMove.ts';
 
 test('the current workspace and blank ids are not move targets', () => {
 	const choices = dshMoveChoices([
@@ -38,7 +38,7 @@ test('rewind targets are an @ seq and nothing else', () => {
 });
 
 test('rewind is a real menu action and a missing new session id is reported', () => {
-	const menu = readFileSync(new URL('../../../src/vs/workbench/contrib/dsh/browser/dshSessionMenu.ts', import.meta.url), 'utf8');
+	const menu = readFileSync(new URL('../../../src/vs/workbench/contrib/dsh/browser/vscode/dshSessionMenu.ts', import.meta.url), 'utf8');
 	assert.match(menu, /id: 'dsh\.session\.rewind'/);
 	assert.match(menu, /capability: 'rewind'/);
 	assert.match(menu, /dshRewindSeq\(raw\)/);
@@ -48,20 +48,13 @@ test('rewind is a real menu action and a missing new session id is reported', ()
 	assert.match(contrib, /dsh\.newSessionNoId/);
 });
 
-test('success notices exist for move, fork, rename, mcp, jobs and goal', () => {
-	const menu = readFileSync(new URL('../../../src/vs/workbench/contrib/dsh/browser/dshSessionMenu.ts', import.meta.url), 'utf8');
+test('success notices exist for move, fork and rename', () => {
+	const menu = readFileSync(new URL('../../../src/vs/workbench/contrib/dsh/browser/vscode/dshSessionMenu.ts', import.meta.url), 'utf8');
 	assert.match(menu, /dshMoveChoices\(/);
 	assert.match(menu, /dsh\.session\.moved/);
 	assert.match(menu, /dsh\.session\.forkedNoId/);
 	assert.match(menu, /dsh\.session\.renamed/);
 	assert.doesNotMatch(menu, /workspace\.path/);
-	const mcp = readFileSync(new URL('../../../src/vs/workbench/contrib/dsh/browser/dshMcpCommands.ts', import.meta.url), 'utf8');
-	assert.match(mcp, /dsh\.mcp\.restarted/);
-	const jobs = readFileSync(new URL('../../../src/vs/workbench/contrib/dsh/browser/dshJobsCommands.ts', import.meta.url), 'utf8');
-	assert.match(jobs, /dsh\.jobs\.killed/);
-	const goal = readFileSync(new URL('../../../src/vs/workbench/contrib/dsh/browser/dshGoalCommands.ts', import.meta.url), 'utf8');
-	assert.match(goal, /dsh\.goal\.created/);
-	assert.match(goal, /dsh\.goal\.updated/);
 });
 
 test('a duplicated workspace id appears only once', () => {

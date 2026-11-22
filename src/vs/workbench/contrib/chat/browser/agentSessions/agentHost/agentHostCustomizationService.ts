@@ -66,7 +66,7 @@ type IAgentHostMcpServer = {
 };
 import { resolveMcpServerAuthentication, agentHostMcpServerId, autoAuthenticateMcpServer } from './agentHostAuth.js';
 import { IOutputService } from '../../../../../services/output/common/output.js';
-import { IMcpService } from '../../../../../contrib/mcp/common/mcpTypes.js';
+import { IMcpService } from '../../../../mcp/common/mcpTypes.js';
 import { MCP } from '../../../../mcp/common/modelContextProtocol.js';
 import { ContributionEnablementState } from '../../../common/enablement.js';
 import { getLocalAgentHostSessionProvider } from './agentHostSessionUri.js';

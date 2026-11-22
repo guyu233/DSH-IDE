@@ -58,10 +58,10 @@ function detectInstalledDshVersion() {
 	return undefined;
 }
 
-const commonDir = 'platform/dshClient/common';
-const protocolRel = `${commonDir}/dshIdeProtocol.ts`;
-const contractRel = `${commonDir}/dshIdeContract.ts`;
-const hostRel = 'platform/dshClient/host/ide-view-host.js';
+const protocolDir = 'platform/dshClient/protocol';
+const protocolRel = `${protocolDir}/dshIdeProtocol.ts`;
+const contractRel = `${protocolDir}/dshIdeContract.ts`;
+const hostRel = 'platform/dshClient/host/bridge/ide-view-host.js';
 
 function walk(dir, out = []) {
 	if (!fs.existsSync(dir)) { return out; }
@@ -183,7 +183,7 @@ function boundary() {
 
 	// channel 零 Cordis Context 引用：构造只接收 IdeViewHost 窄接口。
 	// 注意：IServerChannel.call/listen 的 ctx: string 是 IPC 连接层上下文，合法，不在禁止之列。
-	const channel = read('platform/dshClient/electron-main/dshIdeChannel.ts');
+	const channel = read('platform/dshClient/ide/main/dshIdeChannel.ts');
 	assert.doesNotMatch(channel, /\bCordis\b|\bCordisContext\b|\bdshCtx\b|apply\s*\(\s*ctx\s*\)/,
 		'DshIdeChannel must not depend on Cordis Context');
 	// 通道仍只依赖窄接口：现在按连接创建一个视图，因此构造参数是返回 IdeViewHost 的工厂，
@@ -196,14 +196,19 @@ function boundary() {
 	// 插件侧 TS 生产文件零 electron / DSH 运行时包 / Cordis Context 直接引用。
 	// 范围由**目录扫描**决定，不维护文件名白名单：新增 .ts 自动纳入，避免「新建文件漏检、
 	// 门禁仍绿」——这与 tsc 过滤列表硬编码同族。
-	// 排除：test/（测试可用测试设施）；Host 侧 JS 桥接层（host/ide-service.js、index.js、
+	// 排除：test/（测试可用测试设施）；Host 侧 JS 桥接层（host/**/*.js、index.js、
 	// client/client.js）合法持有 Cordis 与官方包，且非 .ts，不在本扫描范围。
 	// 目录扫描而非文件名白名单：新增目录自动纳入，避免「新建文件漏检、门禁仍绿」。
-	// transport/ 是 IDE 侧官方传输适配（P3），同样必须零 electron / Cordis 引用。
+	//
+	// 分层后真实位置：`protocol/`（契约与投影）、`ide/`（IDE 侧传输与 main）、
+	// `common/`（运行时路径与主题/语言偏好）、`host/`（少量 TS 类型）。
+	// 此前只扫 common/electron-main/transport 三处，分层搬走后命中数掉到 1，
+	// 门禁实际上已失效——扫描根必须跟着目录结构走。
 	const pluginSources = [
 		...walk(path.join(srcRoot, 'platform/dshClient/common')),
-		...walk(path.join(srcRoot, 'platform/dshClient/electron-main')),
-		...walk(path.join(srcRoot, 'platform/dshClient/transport')),
+		...walk(path.join(srcRoot, 'platform/dshClient/protocol')),
+		...walk(path.join(srcRoot, 'platform/dshClient/ide')),
+		...walk(path.join(srcRoot, 'platform/dshClient/host')),
 	].filter(f => f.endsWith('.ts') && !rel(f).includes('/test/')).map(rel).sort();
 	assert.ok(pluginSources.length >= 6, `plugin source sweep found only ${pluginSources.length} .ts files`);
 	for (const file of pluginSources) {
@@ -219,8 +224,8 @@ function boundary() {
 	// 单一收听（D78）：会话内容只由内核调一次 `sessionController.follow`；
 	// 窗口只消费内核的 `ide/followSession`，不得自己开 `session/follow` / `$events`，
 	// 不得把 prompt / cancel / selectModel 重写成 `session/*` 请求，也不得再自带 translator/projector。
-	const transport = read('platform/dshClient/transport/dshIdeTransport.ts');
-	const hostBridge = read('platform/dshClient/host/ide-view-host.js');
+	const transport = read('platform/dshClient/ide/transport/dshIdeTransport.ts');
+	const hostBridge = read('platform/dshClient/host/bridge/ide-view-host.js');
 	assert.match(hostBridge, /controller\.follow\(\{[\s\S]*?assistantStream: true/, 'the kernel must call sessionController.follow with assistantStream');
 	// 调用现在跨多行（follow 多了 onDisconnect 参数），断言按「出现该端点」匹配。
 	assert.match(transport, /'ide\/followSession'/, 'the window must follow through the kernel stream');
@@ -251,9 +256,9 @@ function boundary() {
 	// 聊天渲染层隔离：帧解码与面板只依赖平台 DTO 与 VS Code 既有模块，
 	// 既不能 import DSH 包（上面已扫），也不能反向依赖主进程/通道层。
 	const uiProjectionFiles = [
-		'workbench/contrib/dsh/browser/dshIdeConsumer.ts',
-		'workbench/contrib/dsh/browser/dshChatModel.ts',
-		'workbench/contrib/dsh/browser/dshChatSession.ts',
+		'workbench/contrib/dsh/browser/consumer/dshIdeConsumer.ts',
+		'workbench/contrib/dsh/browser/vscode/dshChatModel.ts',
+		'workbench/contrib/dsh/browser/vscode/dshChatSession.ts',
 	];
 	for (const file of uiProjectionFiles) {
 		const text = read(file);
@@ -265,7 +270,7 @@ function boundary() {
 	// 消费者必须是唯一做帧校验的地方：通道层不得重复实现（单一实现纪律，第 2 章 §9）。
 	assert.match(read(uiProjectionFiles[0]), /validateDshIdeSnapshot/,
 		'DshIdeConsumer must validate frames (it is the single validation point)');
-	const channelForValidation = read('platform/dshClient/electron-main/dshIdeChannel.ts');
+	const channelForValidation = read('platform/dshClient/ide/main/dshIdeChannel.ts');
 	assert.doesNotMatch(channelForValidation, /validateDshIdeSnapshot/,
 		'the channel must not duplicate frame validation — that belongs to the consumer');
 	return 'PASS';
@@ -279,8 +284,8 @@ function boundary() {
 // 断言每个节点都过协议校验，且关键事实（子代理发现 / 结算通知）不被丢掉。
 // ---------------------------------------------------------------------------
 async function projectionGolden() {
-	const projectPath = pathToFileURL(path.join(repoRoot, 'src/vs/platform/dshClient/common/dshIdeConversation.ts')).href;
-	const protocolPath = pathToFileURL(path.join(repoRoot, 'src/vs/platform/dshClient/common/dshIdeProtocol.ts')).href;
+	const projectPath = pathToFileURL(path.join(repoRoot, 'src/vs/platform/dshClient/protocol/dshIdeConversation.ts')).href;
+	const protocolPath = pathToFileURL(path.join(repoRoot, 'src/vs/platform/dshClient/protocol/dshIdeProtocol.ts')).href;
 	const { createDshIdeConversationState, projectDshIdeConversation } = await import(projectPath);
 	const { validateDshIdeSnapshot, DSH_IDE_WIRE_REVISION } = await import(protocolPath);
 
@@ -288,16 +293,19 @@ async function projectionGolden() {
 		{ seq: 1, time: 1, type: 'user/message', data: { source: { kind: 'user' }, content: [{ type: 'text', text: 'hi' }] } },
 		{ seq: 2, time: 2, type: 'assistant/message', data: { turn: 1, step: 1, message: { content: [{ type: 'text', text: 'hello' }] }, usage: { inputTokens: 10, outputTokens: 2 } } },
 		{ seq: 3, time: 3, type: 'subagent/catalog', data: { childId: 'child-1', childCreatedAt: 5, mode: 'continuable', label: 'reviewer', name: 'reviewer', version: 3 } },
-		{ seq: 4, time: 4, type: 'user/message', data: { source: { kind: 'subagent-settled' }, content: [{ type: 'text', text: 'relay' }] } },
+		// 官方 `message.ts` 只在 waking 或空 content 的 retry 时产出 turn-trigger；
+		// 这条带 `waking: true`，因此必须投影成官方 `turn-trigger`。
+		{ seq: 4, time: 4, type: 'user/message', data: { waking: true, source: { kind: 'subagent-settled' }, content: [{ type: 'text', text: 'relay' }] } },
 		{ seq: 5, time: 5, type: 'deliverables/presented', data: { turn: 1, callId: 'present-1', files: [{ path: 'docs/a.md' }] } },
 	];
 
 	const state = createDshIdeConversationState();
-	const view = { hasMore: false, nodes: [] };
+	const view = { hasMore: false, nodes: [], subagentCatalog: [] };
 	for (const event of events) {
 		const next = projectDshIdeConversation(state, { type: 'event', event });
 		assert.ok(next !== undefined, `projection must return a view for ${event.type}`);
 		view.nodes = next.nodes;
+		view.subagentCatalog = next.subagentCatalog ?? [];
 	}
 
 	// 每个投影结果都必须过协议真源的校验（fail-closed）。
@@ -317,19 +325,29 @@ async function projectionGolden() {
 	}), /DshIdeViewBinding/, 'a snapshot without a view binding must be rejected');
 
 	const kinds = view.nodes.map(node => node.kind);
-	assert.deepEqual(kinds, ['user', 'assistant', 'subagent-catalog', 'subagent-notice'],
-		'projection must keep the user message, the assistant reply, the subagent catalog fact and the settlement notice');
+	// 官方 kind 白名单：`subagent/catalog` 走投影通道，不是 chat 节点。
+	assert.deepEqual(kinds, ['user', 'assistant', 'turn-trigger'],
+		'projection must keep the user message, the assistant reply and the official turn-trigger row');
+	for (const node of view.nodes) {
+		assert.ok(!['subagent-catalog', 'subagent-notice'].includes(node.kind),
+			`${node.kind} is a retired private kind and must never enter the node tree`);
+	}
 
-	// 子代理发现事实必须原样保留名字，不能只留一个空节点。
-	const catalog = view.nodes.find(node => node.kind === 'subagent-catalog');
-	assert.equal(catalog?.name, 'reviewer', 'subagent catalog must keep the child name');
+	// 子代理目录必须走 `subagentCatalog` 投影通道，并原样保留名字。
+	assert.equal(view.subagentCatalog.length, 1, 'the catalog fact must reach the projection channel');
+	assert.equal(view.subagentCatalog[0].name, 'reviewer', 'subagent catalog must keep the child name');
+	assert.equal(view.subagentCatalog[0].childId, 'child-1', 'subagent catalog must keep the child id');
+
+	// turn-trigger 必须保留原始 source，渲染层才能按 source.kind 选图标与标题。
+	const trigger = view.nodes.find(node => node.kind === 'turn-trigger');
+	assert.equal(trigger?.source?.kind, 'subagent-settled', 'turn-trigger must keep its recorded source');
 
 	// 投影节点不得携带原始事件（raw 不进线协议）。
 	for (const node of view.nodes) {
 		assert.equal(Object.hasOwn(node, 'raw'), false, 'projected nodes must not carry raw');
 	}
 
-	console.log(`projection-golden: ${view.nodes.length} 个金标准节点全部通过协议校验（含子代理发现与结算通知）`);
+	console.log(`projection-golden: ${view.nodes.length} 个金标准节点 + ${view.subagentCatalog.length} 条子代理目录事实全部通过协议校验（含官方 turn-trigger）`);
 	return 'PASS';
 }
 
@@ -430,7 +448,9 @@ function contract() {
 			mismatches.push(`${f}: 文件缺失`);
 			return `  ${f}  MISSING`;
 		}
-		const actual = createHash('sha256').update(fs.readFileSync(abs)).digest('hex').slice(0, 16);
+		// 只把 CRLF 转成 LF。用单字节编码保留其余字节，避免解码时替换无效的 UTF-8。
+		const normalized = fs.readFileSync(abs).toString('latin1').replace(/\r\n/g, '\n');
+		const actual = createHash('sha256').update(normalized, 'latin1').digest('hex').slice(0, 16);
 		const expected = baselines[i];
 		if (actual !== expected) {
 			mismatches.push(`${f}: 基线 ${expected} ≠ 实际 ${actual}`);

@@ -13,8 +13,8 @@ import { test } from 'node:test';
 import {
 	DSH_IDE_WIRE_REVISION,
 	validateDshIdeSnapshot,
-} from '../../../src/vs/platform/dshClient/common/dshIdeProtocol.ts';
-import { projectDshIdeProjections } from '../../../src/vs/platform/dshClient/common/dshIdeProjections.ts';
+} from '../../../src/vs/platform/dshClient/protocol/dshIdeProtocol.ts';
+import { projectDshIdeProjections } from '../../../src/vs/platform/dshClient/protocol/dshIdeProjections.ts';
 
 /** 把投影字段挂进 ready 快照，确认协议真源认这些字段。 */
 function assertValidView(fields: ReturnType<typeof projectDshIdeProjections>): void {

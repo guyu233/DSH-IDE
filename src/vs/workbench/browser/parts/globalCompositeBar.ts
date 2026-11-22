@@ -47,7 +47,7 @@ import { KeyCode } from '../../../base/common/keyCodes.js';
 import { ACTIVITY_BAR_BADGE_BACKGROUND, ACTIVITY_BAR_BADGE_FOREGROUND } from '../../common/theme.js';
 import { IBaseActionViewItemOptions } from '../../../base/browser/ui/actionbar/actionViewItems.js';
 import { IDshClientService } from '../../../platform/dshClient/common/dshClientService.js';
-import { dshAccountClientMetadata } from '../../../platform/dshClient/common/dshIdeProtocol.js';
+import { dshAccountClientMetadata } from '../../../platform/dshClient/protocol/dshIdeProtocol.js';
 import { IOpenerService } from '../../../platform/opener/common/opener.js';
 import { ICommandService } from '../../../platform/commands/common/commands.js';
 
@@ -476,7 +476,7 @@ export class AccountsActivityActionViewItem extends AbstractGlobalActivityAction
 	private async cancelSignIn(attemptId: string): Promise<void> {
 		const result = await this.dshClientService.call('accountCancelSignIn', { attemptId });
 		if (!result.ok) {
-			this.notificationService.warn(localize('dsh.cancelSignInFailed', "取消登录失败：{0}", result.error.message));
+			this.notificationService.warn(localize('dsh.cancelSignInFailed', "Could not cancel sign-in: {0}", result.error.message));
 			return;
 		}
 		if (this.pendingSignInAttemptId === attemptId) {
@@ -495,9 +495,9 @@ export class AccountsActivityActionViewItem extends AbstractGlobalActivityAction
 	private showCancelSignInHint(attemptId: string): void {
 		this.notificationService.notify({
 			severity: Severity.Info,
-			message: localize('dsh.signInPending', "请在浏览器完成 DeepSeek 授权。"),
+			message: localize('dsh.signInPending', "Complete the DeepSeek authorization in your browser."),
 			actions: {
-				primary: [new Action('dsh.cancelSignIn', localize('dsh.cancelSignIn', "取消登录"), undefined, true, () => {
+				primary: [new Action('dsh.cancelSignIn', localize('dsh.cancelSignIn', "Cancel sign-in"), undefined, true, () => {
 					void this.cancelSignIn(attemptId);
 				})],
 			},
@@ -563,7 +563,7 @@ export class AccountsActivityActionViewItem extends AbstractGlobalActivityAction
 	/** 悬停提示：账号按钮现在是「打开桌面端」入口，提示要把这件事说清楚。 */
 	protected override computeTitle(): string {
 		const acc = this.dshAccount;
-		const openDesktop = localize('dshOpenDesktop', "打开 DeepSeek-Harness 桌面端");
+		const openDesktop = localize('dshOpenDesktop', "Open the DeepSeek Harness desktop app");
 		if (acc?.signedIn) {
 			const name = acc.name || 'DeepSeek';
 			const who = acc.contact && acc.contact !== name ? `${name} (${acc.contact})` : name;
@@ -584,19 +584,19 @@ export class AccountsActivityActionViewItem extends AbstractGlobalActivityAction
 		await this.refreshDshAccount();
 		const account = this.dshAccount;
 		if (!account) {
-			return [disposables.add(new Action('dshAccountLoading', localize('dshAccountLoading', "正在读取 DeepSeek 账号…"), undefined, false))];
+			return [disposables.add(new Action('dshAccountLoading', localize('dshAccountLoading', "Reading the DeepSeek account…"), undefined, false))];
 		}
 		if (account.unavailable) {
-			return [disposables.add(new Action('dshAccountUnavailable', localize('dshAccountUnavailable', "DeepSeek 账号不可用"), undefined, false))];
+			return [disposables.add(new Action('dshAccountUnavailable', localize('dshAccountUnavailable', "The DeepSeek account is unavailable"), undefined, false))];
 		}
 		if (!account.signedIn) {
 			const actions: IAction[] = [
-				disposables.add(new Action('dsh.signIn', localize('dshSignIn', "登录 DeepSeek"), undefined, true, () => { void this.signInDsh(); })),
+				disposables.add(new Action('dsh.signIn', localize('dshSignIn', "Sign in to DeepSeek"), undefined, true, () => { void this.signInDsh(); })),
 			];
 			// 授权已发起但还没回来：菜单里给出取消入口（与通知里的按钮同一动作）。
 			const attemptId = this.pendingSignInAttemptId;
 			if (attemptId !== undefined) {
-				actions.push(disposables.add(new Action('dsh.cancelSignIn', localize('dsh.cancelSignIn', "取消登录"), undefined, true, () => {
+				actions.push(disposables.add(new Action('dsh.cancelSignIn', localize('dsh.cancelSignIn', "Cancel sign-in"), undefined, true, () => {
 					void this.cancelSignIn(attemptId);
 				})));
 			}
@@ -648,7 +648,7 @@ export class AccountsActivityActionViewItem extends AbstractGlobalActivityAction
 		// 它不持有需要释放的资源（`IAction` 本身没有 dispose）。
 		return toAction({
 			id: 'dsh.account.openSettings',
-			label: localize('dshOpenSettings', "设置"),
+			label: localize('dshOpenSettings', "Settings"),
 			run: () => { void this.commandService.executeCommand('workbench.action.openSettings'); },
 		});
 	}

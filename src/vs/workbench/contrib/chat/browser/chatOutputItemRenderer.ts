@@ -19,7 +19,7 @@ import { IContextKeyService } from '../../../../platform/contextkey/common/conte
 import { ExtensionIdentifier } from '../../../../platform/extensions/common/extensions.js';
 import { createDecorator } from '../../../../platform/instantiation/common/instantiation.js';
 import { IStorageService } from '../../../../platform/storage/common/storage.js';
-import { ExtensionKeyedWebviewOriginStore, IWebview, IWebviewService, WebviewContentPurpose } from '../../../contrib/webview/browser/webview.js';
+import { ExtensionKeyedWebviewOriginStore, IWebview, IWebviewService, WebviewContentPurpose } from '../../webview/browser/webview.js';
 import { IExtensionService, isProposedApiEnabled } from '../../../services/extensions/common/extensions.js';
 import { ExtensionsRegistry, IExtensionPointUser } from '../../../services/extensions/common/extensionsRegistry.js';
 import { IChatWidgetService } from './chat.js';

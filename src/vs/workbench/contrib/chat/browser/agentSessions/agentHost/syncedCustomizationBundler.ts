@@ -21,8 +21,8 @@ import { toClientPluginMcpDefaultCwdsMeta, toClientPluginStandaloneMeta, type Cl
 import { withCustomizationEnablement } from '../../../../../../platform/chatContracts/common/customizationEnablement.js';
 import { customizationId, type ClientPluginCustomization } from '../../../../../../platform/chatContracts/common/state/sessionState.js';
 import { CustomizationEnablementKind, CustomizationType, type CustomizationEnablement, type URI as ProtocolURI } from '../../../../../../platform/chatContracts/common/state/protocol/state.js';
-import { IAgentHostFileSystemService, SYNCED_CUSTOMIZATION_DISPLAY_NAME, SYNCED_CUSTOMIZATION_SCHEME } from '../../../../../../workbench/services/agentHost/common/agentHostFileSystemService.js';
-import { IgnoreFile } from '../../../../../../workbench/services/search/common/ignoreFile.js';
+import { IAgentHostFileSystemService, SYNCED_CUSTOMIZATION_DISPLAY_NAME, SYNCED_CUSTOMIZATION_SCHEME } from '../../../../../services/agentHost/common/agentHostFileSystemService.js';
+import { IgnoreFile } from '../../../../../services/search/common/ignoreFile.js';
 
 // Re-export so existing consumers don't need to change their import source.
 export { SYNCED_CUSTOMIZATION_SCHEME };

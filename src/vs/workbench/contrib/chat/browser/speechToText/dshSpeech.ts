@@ -61,7 +61,7 @@ export function encodeDshSpeechWave(samples: Float32Array): Uint8Array {
 export async function transcribeDshSpeech(client: Pick<IDshClientService, 'call'>, catalog: DshSpeechCatalog, samples: Float32Array): Promise<string> {
 	const limit = dshSpeechSampleLimit(catalog);
 	if (!samples.length || !limit || samples.length > limit) {
-		throw new Error(localize('dshSpeech.outOfRange', "录音不可用或超出 DSH 允许的时长与大小上限。"));
+		throw new Error(localize('dshSpeech.outOfRange', "Recording is unavailable or exceeds the duration and size limits DSH allows."));
 	}
 	const request = {
 		audioBase64: encodeBase64(VSBuffer.wrap(encodeDshSpeechWave(samples))),

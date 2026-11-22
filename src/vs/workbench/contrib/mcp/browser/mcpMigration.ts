@@ -8,7 +8,7 @@ import { ConfigurationTarget } from '../../../../platform/configuration/common/c
 import { ILogService } from '../../../../platform/log/common/log.js';
 import { IMcpServerConfiguration, IMcpServerVariable, IMcpStdioServerConfiguration, McpServerType } from '../../../../platform/mcp/common/mcpPlatformTypes.js';
 import { IStringDictionary } from '../../../../base/common/collections.js';
-import { mcpConfigurationSection } from '../../../contrib/mcp/common/mcpConfiguration.js';
+import { mcpConfigurationSection } from '../common/mcpConfiguration.js';
 import { IWorkbenchMcpManagementService } from '../../../services/mcp/common/mcpWorkbenchManagementService.js';
 import { IWorkbenchContribution } from '../../../common/contributions.js';
 import { IUserDataProfileService } from '../../../services/userDataProfile/common/userDataProfile.js';

@@ -11,7 +11,7 @@ import { createSandboxNetworkFilter, IAgentNetworkFilterService } from '../../ne
 import { ISandboxNetworkRestrictions } from '../../sandbox/common/sandboxSettingsResolutionHelper.js';
 import { equals } from '../../../base/common/objects.js';
 import { IInvokeFunctionResult, IPlaywrightService } from '../common/playwrightService.js';
-import { IBrowserViewGroupRemoteService } from '../node/browserViewGroupRemoteService.js';
+import { IBrowserViewGroupRemoteService } from './browserViewGroupRemoteService.js';
 import { IBrowserViewGroup } from '../common/browserViewGroup.js';
 import { getAgentBrowserViewCreationDefaults } from '../common/browserView.js';
 import { PlaywrightTab, DialogInterruptedError } from './playwrightTab.js';

@@ -22,7 +22,7 @@ import { ITerminalConfiguration, ITerminalProcessManager } from '../../../../ter
 import { TestViewDescriptorService } from '../../../../terminal/test/browser/xterm/xtermTestUtils.js';
 import { TestStorageService } from '../../../../../test/common/workbenchTestServices.js';
 import type { ILink, Terminal } from '@xterm/xterm';
-import { IXtermCore } from '../../../../terminal/browser/xterm-private.js';
+import { IXtermCore } from '../../../../terminal/browser/xterm-private.d.js';
 import { TerminalLinkResolver } from '../../browser/terminalLinkResolver.js';
 import { importAMDNodeModule } from '../../../../../../amdX.js';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../../base/test/common/utils.js';

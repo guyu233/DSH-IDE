@@ -1,0 +1,238 @@
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) DSH-IDE contributors. All rights reserved.
+ *  Licensed under the MIT License.
+ *--------------------------------------------------------------------------------------------*/
+
+// DshConversationNodeTree：稳定 key、按 key 通知、turn 切片隔离、底部 exchange、导航。
+// 运行：node --experimental-strip-types --test build/lib/test/dshConversationNodeTree.test.ts
+
+import assert from 'node:assert/strict';
+import { test } from 'node:test';
+import { DshConversationNodeTree, dshNodeKey, type DshIndexedNode } from '../../../src/vs/workbench/contrib/dsh/browser/vscode/dshConversationNodeTree.ts';
+
+interface SampleNode extends DshIndexedNode {
+	readonly text?: string;
+}
+
+function node(partial: SampleNode): SampleNode {
+	return partial;
+}
+
+test('node keys prefer messageId and callId over seq', () => {
+	assert.equal(dshNodeKey(node({ kind: 'user', seq: 4, messageId: 'm1' })), 'user:m1');
+	assert.equal(dshNodeKey(node({ kind: 'tool-result', seq: 9, callId: 'c1' })), 'tool-result:c1');
+	assert.equal(dshNodeKey(node({ kind: 'compaction', seq: 3, turn: 1 })), 'compaction:3:1:');
+});
+
+test('accept keeps an unchanged key quiet and drops a removed key', () => {
+	const tree = new DshConversationNodeTree<SampleNode>('s1');
+	const user = node({ kind: 'user', seq: 1, messageId: 'm1', turn: 1, text: 'hello' });
+	const assistant = node({ kind: 'assistant', seq: 2, messageId: 'a1', turn: 1, step: 0, text: 'old' });
+	const userSource = tree.source('user:m1');
+	const assistantSource = tree.source('assistant:a1');
+	let userNotes = 0;
+	let assistantNotes = 0;
+	userSource.subscribe(() => { userNotes++; });
+	assistantSource.subscribe(() => { assistantNotes++; });
+	const first = tree.accept([assistant, user]);
+	assert.deepEqual(first.changed, ['user:m1', 'assistant:a1']);
+	assert.equal(userNotes, 1);
+	assert.equal(assistantNotes, 1);
+	assert.deepEqual(tree.keys(), ['user:m1', 'assistant:a1']);
+	const second = tree.accept([
+		user,
+		node({ kind: 'assistant', seq: 2, messageId: 'a1', turn: 1, step: 0, text: 'new' }),
+	]);
+	assert.deepEqual(second.changed, ['assistant:a1']);
+	assert.equal(userNotes, 1);
+	assert.equal(assistantNotes, 2);
+	assert.equal(assistantSource.get()?.text, 'new');
+	const third = tree.accept([user]);
+	assert.deepEqual(third.removed, ['assistant:a1']);
+	assert.equal(assistantSource.get(), undefined);
+	assert.equal(tree.get('user:m1')?.text, 'hello');
+});
+
+test('turnDataSource ignores other turns and other kinds', () => {
+	const tree = new DshConversationNodeTree<SampleNode>('s1');
+	const tools = tree.turnDataSource(1, 'tool-call');
+	const later = tree.turnDataSource(2, 'tool-call');
+	let toolNotes = 0;
+	let laterNotes = 0;
+	tools.subscribe(() => { toolNotes++; });
+	later.subscribe(() => { laterNotes++; });
+	tree.accept([
+		node({ kind: 'tool-call', seq: 1, turn: 1, callId: 'c1', text: 'read' }),
+		node({ kind: 'assistant', seq: 2, turn: 1, messageId: 'a1', text: 'answer' }),
+	]);
+	assert.equal(toolNotes, 1);
+	assert.equal(laterNotes, 0);
+	assert.equal(tools.get().length, 1);
+	tree.accept([
+		node({ kind: 'tool-call', seq: 1, turn: 1, callId: 'c1', text: 'read' }),
+		node({ kind: 'assistant', seq: 2, turn: 1, messageId: 'a1', text: 'answer changed' }),
+		node({ kind: 'tool-call', seq: 3, turn: 2, callId: 'c2', text: 'other' }),
+	]);
+	assert.equal(toolNotes, 1);
+	assert.equal(laterNotes, 1);
+	assert.equal(tools.get()[0].text, 'read');
+});
+
+test('bottomSource follows the latest turn and navigation lists anchors', () => {
+	const tree = new DshConversationNodeTree<SampleNode>('s1');
+	tree.accept([
+		node({ kind: 'user', seq: 1, messageId: 'u1', turn: 1, text: 'one' }),
+		node({ kind: 'assistant', seq: 2, messageId: 'a1', turn: 1, step: 0, text: 'reply' }),
+	]);
+	const first = tree.bottomSource('user:u1');
+	const second = tree.bottomSource('user:u2');
+	let moves = 0;
+	first.subscribe(() => { moves++; });
+	assert.equal(first.get(), true);
+	tree.accept([
+		node({ kind: 'user', seq: 1, messageId: 'u1', turn: 1, text: 'one' }),
+		node({ kind: 'assistant', seq: 2, messageId: 'a1', turn: 1, step: 0, text: 'reply' }),
+		node({ kind: 'user', seq: 3, messageId: 'u2', turn: 2, text: 'two' }),
+	]);
+	assert.equal(first.get(), false);
+	assert.equal(second.get(), true);
+	assert.equal(moves, 1);
+	assert.deepEqual(tree.navigationItems(), [
+		{ turn: 1, anchorKey: 'user:u1', promptKey: 'user:u1', responseKey: 'assistant:a1' },
+		{ turn: 2, anchorKey: 'user:u2', promptKey: 'user:u2' },
+	]);
+	assert.equal(tree.getStep(1, 0)[0].kind, 'assistant');
+	const shot = tree.snapshot();
+	assert.deepEqual(shot.order, ['user:u1', 'assistant:a1', 'user:u2']);
+	assert.equal(shot.nodes.get('assistant:a1')?.text, 'reply');
+	assert.deepEqual(shot.locations.filter(item => item.turn === 1).map(item => item.key), ['user:u1', 'assistant:a1']);
+	assert.equal(shot.navigation.length, 2);
+	shot.nodes.delete('assistant:a1');
+	assert.equal(tree.get('assistant:a1')?.text, 'reply');
+});
+
+test('processSource stays on one turn and clears when the node leaves', () => {
+	const tree = new DshConversationNodeTree<SampleNode>('s1');
+	tree.accept([
+		node({ kind: 'user', seq: 1, messageId: 'u1', turn: 1, text: 'one' }),
+		node({ kind: 'tool-call', seq: 2, turn: 1, callId: 'c1', text: 'read' }),
+		node({ kind: 'user', seq: 3, messageId: 'u2', turn: 2, text: 'two' }),
+	]);
+	const process = tree.processSource('tool-call:c1');
+	const other = tree.processSource('user:u2');
+	let processNotes = 0;
+	let otherNotes = 0;
+	process.subscribe(() => { processNotes++; });
+	other.subscribe(() => { otherNotes++; });
+	assert.equal(process.get().length, 2);
+	tree.accept([
+		node({ kind: 'user', seq: 1, messageId: 'u1', turn: 1, text: 'one' }),
+		node({ kind: 'tool-call', seq: 2, turn: 1, callId: 'c1', text: 'read' }),
+		node({ kind: 'assistant', seq: 4, messageId: 'a1', turn: 1, step: 0, text: 'done' }),
+		node({ kind: 'user', seq: 3, messageId: 'u2', turn: 2, text: 'two' }),
+	]);
+	assert.equal(processNotes, 1);
+	assert.equal(otherNotes, 0);
+	assert.equal(process.get().length, 3);
+	tree.accept([
+		node({ kind: 'user', seq: 3, messageId: 'u2', turn: 2, text: 'two' }),
+	]);
+	assert.equal(process.get().length, 0);
+	assert.equal(other.get().length, 1);
+});
+
+test('parentCallId nests a sibling under the parent tool and a cycle stays put', () => {
+	const tree = new DshConversationNodeTree<SampleNode>('s1');
+	tree.accept([
+		node({ kind: 'tool-call', seq: 1, callId: 'parent', name: 'bash' }),
+		node({ kind: 'tool-call', seq: 2, callId: 'child', name: 'read', parentCallId: 'parent' } as SampleNode),
+		node({ kind: 'tool-call', seq: 3, callId: 'a', parentCallId: 'b' } as SampleNode),
+		node({ kind: 'tool-call', seq: 4, callId: 'b', parentCallId: 'a' } as SampleNode),
+	]);
+	assert.deepEqual(tree.childKeysOf('tool-call:parent'), ['tool-call:child']);
+	assert.equal(tree.parentKey('tool-call:child'), 'tool-call:parent');
+	assert.equal(tree.list().some(item => item.callId === 'child'), false);
+	assert.equal(tree.parentKey('tool-call:a'), 'tool-call:b');
+	assert.equal(tree.parentKey('tool-call:b'), undefined);
+});
+
+test('subCalls are indexed under their parent and stay out of the top-level order', () => {
+	const tree = new DshConversationNodeTree<SampleNode>('s1');
+	const child = node({ kind: 'tool-call', seq: 3, turn: 1, callId: 'child', text: 'nested' });
+	tree.accept([
+		node({
+			kind: 'tool-result',
+			seq: 2,
+			turn: 1,
+			callId: 'root',
+			text: 'parent',
+			subCalls: [child],
+		}),
+	]);
+	assert.deepEqual(tree.keys(), ['tool-result:root']);
+	assert.equal(tree.get('tool-call:child')?.text, 'nested');
+	assert.equal(tree.parentKey('tool-call:child'), 'tool-result:root');
+	assert.deepEqual(tree.childKeysOf('tool-result:root'), ['tool-call:child']);
+	assert.equal(tree.turnDataSource(1, 'tool-call').get()[0].callId, 'child');
+	const again = tree.accept([
+		node({
+			kind: 'tool-result',
+			seq: 2,
+			turn: 1,
+			callId: 'root',
+			text: 'parent',
+			subCalls: [child],
+		}),
+	]);
+	assert.deepEqual(again.changed, []);
+});
+
+test('a second session tree does not share keys with the first', () => {
+	const left = new DshConversationNodeTree<SampleNode>('left');
+	const right = new DshConversationNodeTree<SampleNode>('right');
+	left.accept([node({ kind: 'user', seq: 1, messageId: 'm', turn: 1, text: 'left' })]);
+	assert.equal(right.get('user:m'), undefined);
+	assert.equal(left.sessionId, 'left');
+});
+
+test('raw payload and key order do not count as display changes', () => {
+	// 契约 §19 S1：`raw` 是整帧源载荷，流式帧每次都会重新序列化；它不出现在
+	// 任何渲染路径上，不能被当成「这一行变了」，否则每帧都会通知订阅者。
+	const tree = new DshConversationNodeTree<SampleNode & { readonly raw?: unknown; readonly timing?: unknown }>('s1');
+	const source = tree.source('assistant:a1');
+	let notes = 0;
+	source.subscribe(() => { notes++; });
+	const base = {
+		kind: 'assistant' as const,
+		seq: 2,
+		messageId: 'a1',
+		turn: 1,
+		step: 0,
+		text: 'same',
+		raw: { z: 1, a: 2 },
+		timing: { start: 1 },
+	};
+	assert.deepEqual(tree.accept([{ ...base }]).changed, ['assistant:a1']);
+	assert.equal(notes, 1);
+
+	// raw / timing 变化（甚至只是字段顺序变化）不触发通知。
+	const second = tree.accept([{ raw: { a: 2, z: 1 }, timing: { start: 2 }, text: 'same', step: 0, turn: 1, messageId: 'a1', seq: 2, kind: 'assistant' }]);
+	assert.deepEqual(second.changed, []);
+	assert.equal(notes, 1);
+
+	// 真正影响显示的字段变化仍然通知。
+	const third = tree.accept([{ ...base, text: 'changed' }]);
+	assert.deepEqual(third.changed, ['assistant:a1']);
+	assert.equal(notes, 2);
+});
+
+test('subCalls carried on a parent still count as display changes', () => {
+	// `subCalls` 决定工具树的子行，必须参与比较；只有不显示的内部字段被忽略。
+	const tree = new DshConversationNodeTree<SampleNode>('s1');
+	const root = { kind: 'tool-result' as const, seq: 2, turn: 1, callId: 'root', text: 'parent' };
+	tree.accept([{ ...root, subCalls: [] }]);
+	const change = tree.accept([{ ...root, subCalls: [{ kind: 'tool-call', seq: 3, callId: 'child', text: 'nested' }] }]);
+	// 新增的子调用也新进索引，两个 key 都算「这次接受后可见内容变了」。
+	assert.deepEqual(change.changed.sort(), ['tool-call:child', 'tool-result:root']);
+	assert.equal(tree.get('tool-call:child')?.text, 'nested');
+});

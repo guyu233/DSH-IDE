@@ -44,7 +44,7 @@ import { IFileQuery, ISearchService } from '../../../../../services/search/commo
 import { IExtensionService } from '../../../../../services/extensions/common/extensions.js';
 import { ILanguageModelToolsService } from '../../../common/tools/languageModelToolsService.js';
 import { TerminalToolId } from '../../../common/tools/terminalToolIds.js';
-import { IRemoteAgentService } from '../../../../../../workbench/services/remote/common/remoteAgentService.js';
+import { IRemoteAgentService } from '../../../../../services/remote/common/remoteAgentService.js';
 import { basename } from '../../../../../../base/common/resources.js';
 import { match } from '../../../../../../base/common/glob.js';
 import { ChatModeKind } from '../../../common/constants.js';

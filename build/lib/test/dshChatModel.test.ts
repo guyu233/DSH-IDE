@@ -11,11 +11,11 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
-import { DshChatModel } from '../../../out/vs/workbench/contrib/dsh/browser/dshChatModel.js';
+import { DshChatModel } from '../../../out/vs/workbench/contrib/dsh/browser/vscode/dshChatModel.js';
 import {
 	createDshIdeConversationState,
 	projectDshIdeConversation,
-} from '../../../src/vs/platform/dshClient/common/dshIdeConversation.ts';
+} from '../../../src/vs/platform/dshClient/protocol/dshIdeConversation.ts';
 
 /** 用 Host 同款投影器把一串官方事件投影成模型输入。 */
 function conversationOf(events: readonly Record<string, unknown>[], hasMore = false) {
@@ -78,27 +78,36 @@ test('assistant blocks keep reasoning and tool-call kinds verbatim', () => {
 	}
 });
 
-test('subagent/catalog becomes a catalog node and does not invent missing fields', () => {
+test('subagent/catalog never becomes a chat node', () => {
 	const model = new DshChatModel();
 	accept(model, [
 		event(1, 'subagent/catalog', { childId: 'c-1', childCreatedAt: 5, mode: 'continuable', label: 'reviewer', name: 'reviewer', version: 3 }),
 	]);
-	assert.equal(model.list.length, 1);
-	const node = model.list[0];
-	assert.equal(node.kind, 'subagent-catalog');
-	if (node.kind === 'subagent-catalog') {
-		assert.equal(node.name, 'reviewer');
-		assert.equal(node.version, 3);
-	}
+	// 官方把它放在 SessionProjectionMap['subagentCatalog']，不进入 chat 节点树。
+	assert.equal(model.list.length, 0);
 });
 
-test('subagent-settled user messages are notices, not user bubbles', () => {
+test('an unclaimed subagent-settled message is a context row, not a user bubble', () => {
 	const model = new DshChatModel();
 	accept(model, [
 		event(1, 'user/message', { source: { kind: 'subagent-settled' }, content: [{ type: 'text', text: 'relay' }] }),
 	]);
 	assert.equal(model.list.length, 1);
-	assert.equal(model.list[0].kind, 'subagent-notice');
+	// 官方 message.ts 只在 waking 或空 content 的 retry 时产出 turn-trigger。
+	assert.equal(model.list[0].kind, 'context');
+});
+
+test('a claimed subagent-settled message becomes the official turn-trigger node', () => {
+	const model = new DshChatModel();
+	accept(model, [
+		event(1, 'user/message', { waking: true, source: { kind: 'subagent-settled' }, content: [{ type: 'text', text: 'relay' }] }),
+	]);
+	assert.equal(model.list.length, 1);
+	assert.equal(model.list[0].kind, 'turn-trigger');
+	const node = model.list[0];
+	if (node.kind === 'turn-trigger') {
+		assert.deepEqual(node.source, { kind: 'subagent-settled' });
+	}
 });
 
 test('session/end-seed(inherited) becomes an inherited-history marker', () => {
@@ -162,18 +171,19 @@ test('acceptConversation builds the node tree straight from typed nodes', () => 
 		hasMore: true,
 		nodes: [
 			{ kind: 'user', seq: 3, time: 3, content: [{ type: 'text', text: 'typed' }] },
-			{ kind: 'subagent-catalog', seq: 4, time: 4, childId: 'c-1', mode: 'continuable', name: 'reviewer', version: 3 },
+			{ kind: 'turn-trigger', seq: 4, time: 4, turn: 1, content: [{ type: 'text', text: 'woke' }], source: { kind: 'subagent-settled' } },
 			{ kind: 'assistant', seq: 5, time: 5, turn: 1, step: 1, blocks: [{ kind: 'text', text: 'ok' }] },
 			{ kind: 'tool-result', seq: 6, time: 6, callId: 'call-1', name: 'read', args: { path: 'a' }, content: [{ type: 'text', text: 'body' }], isError: false, subCalls: [] },
 		],
+		subagentCatalog: [{ seq: 7, time: 7, childId: 'c-1', mode: 'continuable', name: 'reviewer', version: 3 }],
 	} as never);
-	assert.deepEqual(model.list.map(node => node.kind), ['user', 'subagent-catalog', 'assistant', 'tool-result']);
+	assert.deepEqual(model.list.map(node => node.kind), ['user', 'turn-trigger', 'assistant', 'tool-result']);
 	assert.equal(model.hasMore(), true);
-	const catalog = model.list[1];
-	assert.equal(catalog.kind, 'subagent-catalog');
-	if (catalog.kind === 'subagent-catalog') {
-		assert.equal(catalog.name, 'reviewer');
-		assert.equal(catalog.childId, 'c-1');
+	const trigger = model.list[1];
+	assert.equal(trigger.kind, 'turn-trigger');
+	if (trigger.kind === 'turn-trigger') {
+		assert.deepEqual(trigger.source, { kind: 'subagent-settled' });
+		assert.equal(trigger.turn, 1);
 	}
 });
 
@@ -259,7 +269,7 @@ test('the sorted node list is reused until the nodes actually change', () => {
 	const model = new DshChatModel();
 	const first = model.list;
 	assert.equal(model.list, first, 'an unchanged model must return the same array instance');
-	const read = readFileSync(new URL('../../../src/vs/workbench/contrib/dsh/browser/dshChatModel.ts', import.meta.url), 'utf8');
+	const read = readFileSync(new URL('../../../src/vs/workbench/contrib/dsh/browser/vscode/dshChatModel.ts', import.meta.url), 'utf8');
 	assert.match(read, /private _nodesVersion = 0/, 'mutations must bump a version');
 	assert.match(read, /this\._listVersion === this\._nodesVersion/, 'the cache must be keyed on that version');
 	// firstSeq 不得为了一次比较复制整份节点表。

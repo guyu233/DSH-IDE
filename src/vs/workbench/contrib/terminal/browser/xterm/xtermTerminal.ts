@@ -12,7 +12,7 @@ import type { SerializeAddon as SerializeAddonType } from '@xterm/addon-serializ
 import type { ImageAddon as ImageAddonType } from '@xterm/addon-image';
 import type { ClipboardAddon as ClipboardAddonType } from '@xterm/addon-clipboard';
 import * as dom from '../../../../../base/browser/dom.js';
-import { IXtermCore } from '../xterm-private.js';
+import { IXtermCore } from '../xterm-private.d.js';
 import { IConfigurationService } from '../../../../../platform/configuration/common/configuration.js';
 import { Disposable, DisposableStore, MutableDisposable } from '../../../../../base/common/lifecycle.js';
 import { IEditorOptions } from '../../../../../editor/common/config/editorOptions.js';

@@ -92,7 +92,8 @@ const responsePartSchema = Adapt.v<PersistedResponsePart, SerializedChatResponse
 				case 'workspaceEdit':
 				case 'externalEdit':
 				case 'disabledClaudeHooks':
-					return a.kind === b.kind;
+				case 'dshSlotHost':
+					return a.kind === b.kind && objectsEqual(a, b);
 
 				default: {
 					// Hello developer! You are probably here because you added a new chat response type.

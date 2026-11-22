@@ -14,8 +14,8 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
-import { DshChatSession } from '../../../out/vs/workbench/contrib/dsh/browser/dshChatSession.js';
-import { extrasOf, toHistory } from '../../../out/vs/workbench/contrib/dsh/browser/dshChatHistory.js';
+import { DshChatSession } from '../../../out/vs/workbench/contrib/dsh/browser/vscode/dshChatSession.js';
+import { extrasOf, toHistory } from '../../../out/vs/workbench/contrib/dsh/browser/vscode/dshChatHistory.js';
 
 /** 只实现 `DshChatSession` 用到的调用：这些单测不碰通道。 */
 function fakeClient() {
@@ -78,19 +78,16 @@ test('2-A: identical extras do not fire onDidChangeExtras twice', () => {
 	}
 });
 
-test('follow frames without skills keep a catalog loaded by listSkills', async () => {
-	const skills = [{ name: 'dsh-doc', description: 'DSH 文档', modelInvocable: true, userInvocable: true }];
+test('follow frames do not fetch a separate skill catalog', async () => {
 	const session = new DshChatSession({
-		call: async (method: string) => method === 'listSkills'
-			? { ok: true, value: skills }
-			: { ok: false, error: { code: 'dsh-ide/feature-unavailable', message: 'test' } },
+		call: async () => ({ ok: false, error: { code: 'dsh-ide/feature-unavailable', message: 'test' } }),
 		rebindView: async () => ({ ok: true }),
 	} as never);
 	try {
 		await session.attach('session-1');
-		assert.deepEqual(session.skills(), skills);
+		assert.deepEqual(session.skills(), []);
 		session.acceptView(view({ plan: PLAN }));
-		assert.deepEqual(session.skills(), skills, 'a content frame must not wipe the skill catalog');
+		assert.deepEqual(session.skills(), []);
 	} finally {
 		session.dispose();
 	}
@@ -160,9 +157,9 @@ test('2-A: a shared task status is shown in Chinese, not as a kernel enum', () =
 		const history = toHistory(empty, [], { team: { enabled: true, tasks: [{ id: 't1', subject: '写测试', status, ready: false }] } });
 		return history.flatMap(item => item.type === 'response' ? (item.parts ?? []).map(part => (part as { progress?: { content?: { value?: string } }[] }).progress?.map(p => p.content?.value ?? '').join('\n') ?? '') : []).join('\n');
 	};
-	assert.ok(textOf('pending').includes('[待处理] 写测试'));
-	assert.ok(textOf('in_progress').includes('[进行中] 写测试'));
-	assert.ok(textOf('completed').includes('[已完成] 写测试'));
+	assert.ok(textOf('pending').includes('[Pending] 写测试'));
+	assert.ok(textOf('in_progress').includes('[In progress] 写测试'));
+	assert.ok(textOf('completed').includes('[Completed] 写测试'));
 	// 官方任务板会加新状态：未知值原样显示，不猜中文词。
 	assert.ok(textOf('cancelled').includes('[cancelled] 写测试'));
 });
@@ -173,10 +170,10 @@ test('2-A: the goal phase is shown in Chinese, not as a kernel enum', () => {
 		const history = toHistory(empty, [], { goal: { goal: { id: 'g', revision: 1, objective: '做完', phase, maxGoalRounds: 10 } as never, roundsStarted: 2 } });
 		return history.flatMap(item => item.type === 'response' ? (item.parts ?? []).map(part => (part as { content?: { value?: string } }).content?.value ?? '') : []).join('\n');
 	};
-	assert.ok(textOf('active').includes('进行中'));
-	assert.ok(textOf('paused').includes('已暂停'));
-	assert.ok(textOf('blocked').includes('受阻'));
-	assert.ok(textOf('complete').includes('已完成'));
+	assert.ok(textOf('active').includes('In progress'));
+	assert.ok(textOf('paused').includes('Paused'));
+	assert.ok(textOf('blocked').includes('Blocked'));
+	assert.ok(textOf('complete').includes('Completed'));
 	// 未知值原样显示，不猜含义，也不吞掉。
 	assert.ok(textOf('weird').includes('weird'));
 });
@@ -190,18 +187,18 @@ test('2-A: a disabled or failed team never looks like it is on', () => {
 	const off = toHistory(empty, [], {
 		team: { enabled: false, tasks: [{ id: 't1', subject: '旧任务', status: 'completed', ready: false }] },
 	});
-	assert.ok(textsOf(off).includes('共享任务未启用'));
-	assert.ok(!textsOf(off).includes('共享任务 1/1'), 'a disabled team must not list stale tasks');
+	assert.ok(textsOf(off).includes('Shared tasks are off'));
+	assert.ok(!textsOf(off).includes('Shared tasks 1/1'), 'a disabled team must not list stale tasks');
 
 	// 开启时才列任务。
 	const on = toHistory(empty, [], {
 		team: { enabled: true, tasks: [{ id: 't1', subject: '写测试', status: 'completed', ready: false }] },
 	});
-	assert.ok(textsOf(on).includes('共享任务 1/1'));
+	assert.ok(textsOf(on).includes('Shared tasks 1/1'));
 
 	// 设置失败必须说明，否则开关看着生效、实际没写进内核。
 	const failed = toHistory(empty, [], { team: { enabled: true, tasks: [], failure: '拒绝写入' } });
-	assert.ok(textsOf(failed).includes('共享任务设置失败：拒绝写入'));
+	assert.ok(textsOf(failed).includes('Shared task setup failed: 拒绝写入'));
 });
 
 test('2-A: the four fields reach history parts through the same extras shape the provider uses', () => {
@@ -218,15 +215,14 @@ test('2-A: the four fields reach history parts through the same extras shape the
 		const response = history.find(item => item.type === 'response');
 		assert.ok(response !== undefined && response.type === 'response');
 		if (response?.type === 'response') {
-			const infos = response.parts.filter(part => part.kind === 'info') as { content: { value: string } }[];
-			assert.ok(infos.some(part => part.content.value.includes('计划模式已启用')));
-			assert.ok(infos.some(part => part.content.value.includes('完成手册') && part.content.value.includes('3 轮')));
-			assert.ok(infos.some(part => part.content.value.includes('dsh-doc')));
-			// Todo 用原生任务行承接：标题是完成数，逐项在 progress 里。
 			const tasks = response.parts.filter(part => part.kind === 'progressTaskSerialized') as { content: { value: string }; progress: { content: { value: string } }[] }[];
-			assert.equal(tasks.length, 1, 'todos must render as one native progress task');
-			assert.ok(tasks[0].content.value.includes('待办'));
-			assert.ok(tasks[0].progress.some(part => part.content.value.includes('[x] 写测试')));
+			assert.ok(tasks.some(part => part.content.value.includes('Plan mode is on')));
+			assert.ok(tasks.some(part => part.content.value.includes('完成手册') && part.content.value.includes('3 rounds')));
+			assert.ok(tasks.some(part => part.content.value.includes('dsh-doc')));
+			// Todo 用原生任务行承接：标题是完成数，逐项在 progress 里。
+			const todos = tasks.filter(part => part.content.value.includes('Todos'));
+			assert.equal(todos.length, 1, 'todos must render as one native progress task');
+			assert.ok(todos[0].progress.some(part => part.content.value.includes('[x] 写测试')));
 		}
 	} finally {
 		session.dispose();
@@ -472,7 +468,7 @@ test('a rejected model switch reports the host reason and keeps the previous mod
 	try {
 		assert.equal(await session.bind('A'), true);
 		await session.selectModel('unit', 'A');
-		assert.deepEqual(reasons, ['切换模型失败：model locked']);
+		assert.deepEqual(reasons, ['Could not change the model: model locked']);
 		assert.equal(session.currentModel(), undefined);
 	} finally {
 		listener.dispose();
@@ -488,7 +484,7 @@ test('a rejected submit keeps a reason the panel can show', async () => {
 	try {
 		assert.equal(await session.bind('A'), true);
 		assert.equal(await session.submit('hello'), false);
-		assert.equal(session.submitFailure(), '发送失败：agent is busy');
+		assert.equal(session.submitFailure(), 'Send failed: agent is busy');
 		assert.equal(session.running(), false);
 	} finally {
 		session.dispose();
@@ -507,7 +503,13 @@ test('submit sends the session that was bound when the text was sent', async () 
 	try {
 		assert.equal(await session.bind('A'), true);
 		assert.equal(await session.submit('hello'), true);
-		assert.deepEqual(calls.filter(call => call.method === 'submit'), [{ method: 'submit', args: { text: 'hello', sessionId: 'A' } }]);
+		const submits = calls.filter(call => call.method === 'submit');
+		assert.equal(submits.length, 1);
+		assert.deepEqual(Object.keys(submits[0].args as object).sort(), ['requestId', 'sessionId', 'text']);
+		assert.equal((submits[0].args as { sessionId: string }).sessionId, 'A');
+		assert.equal((submits[0].args as { text: string }).text, 'hello');
+		// 关联标识必须真的下发：断线核对与重试都靠它对齐同一个内核请求。
+		assert.match((submits[0].args as { requestId: string }).requestId, /\S/);
 	} finally {
 		session.dispose();
 	}
@@ -520,7 +522,7 @@ test('a rejected image save keeps the host reason', async () => {
 	try {
 		const saved = await session.saveImage(new Uint8Array([1, 2, 3]), 'image/png', 'shot.png');
 		assert.equal(saved, undefined);
-		assert.equal(session.imageFailure(), '图片入库失败：store full');
+		assert.equal(session.imageFailure(), 'Image ingestion failed: store full');
 	} finally {
 		session.dispose();
 	}
@@ -554,7 +556,7 @@ test('a rejected older-history load reports the host reason', async () => {
 		assert.equal(session.hasMore(), true);
 		assert.equal(await session.loadOlder(), false);
 		assert.equal(session.historyStatus(), 'error');
-		assert.deepEqual(reasons, ['更早的历史没有加载：page missing']);
+		assert.deepEqual(reasons, ['Earlier history did not load: page missing']);
 	} finally {
 		listener.dispose();
 		session.dispose();
@@ -573,7 +575,7 @@ test('a rejected stop reports the host reason and does not claim success', async
 	try {
 		assert.equal(await session.bind('A'), true);
 		assert.equal(await session.cancel(), false);
-		assert.deepEqual(reasons, ['停止失败：still running']);
+		assert.deepEqual(reasons, ['Stop failed: still running']);
 	} finally {
 		listener.dispose();
 		session.dispose();
@@ -626,11 +628,11 @@ test('a stale question card tells the user instead of answering silently', async
 	try {
 		await session.answerQuestion('gone', '选项一');
 		assert.equal(failures.length, 1, 'the user must be told the card is stale');
-		assert.match(failures[0], /问卷/, 'the notice must name the question card');
+		assert.match(failures[0], /question/, 'the notice must name the question card');
 	} finally {
 		session.dispose();
 	}
-	const read = readFileSync(new URL('../../../src/vs/workbench/contrib/dsh/browser/dshChatSession.ts', import.meta.url), 'utf8');
+	const read = readFileSync(new URL('../../../src/vs/workbench/contrib/dsh/browser/vscode/dshChatSession.ts', import.meta.url), 'utf8');
 	assert.match(read, /dsh\.answer\.staleQuestion/, 'the stale-question notice must exist');
 });
 
@@ -683,9 +685,9 @@ test('a changed approval title still repaints the card', async () => {
 		listener.dispose();
 		session.dispose();
 	}
-	const read = readFileSync(new URL('../../../src/vs/workbench/contrib/dsh/browser/dshChatSession.ts', import.meta.url), 'utf8');
+	const read = readFileSync(new URL('../../../src/vs/workbench/contrib/dsh/browser/vscode/dshChatSession.ts', import.meta.url), 'utf8');
 	assert.match(read, /function samePendingItems\(/, 'pending must compare per entry');
-	assert.match(read, /item\.title !== title/, 'the title must take part in the comparison');
+	assert.match(read, /JSON\.stringify\(item\) !== fingerprint/, 'the whole pending entry must take part in the comparison');
 });
 
 test('an unchanged model catalog does not rebuild the menu', async () => {
@@ -715,7 +717,7 @@ test('an unchanged model catalog does not rebuild the menu', async () => {
 		listener.dispose();
 		session.dispose();
 	}
-	const read = readFileSync(new URL('../../../src/vs/workbench/contrib/dsh/browser/dshChatSession.ts', import.meta.url), 'utf8');
+	const read = readFileSync(new URL('../../../src/vs/workbench/contrib/dsh/browser/vscode/dshChatSession.ts', import.meta.url), 'utf8');
 	assert.match(read, /private _composerInFlight/, 'the in-flight read must be tracked');
 	assert.match(read, /function sameModelOptions\(/, 'the catalog must be compared before firing');
 });
@@ -742,11 +744,29 @@ test('concurrent skill reads for one session share a single request', async () =
 	} finally {
 		session.dispose();
 	}
-	const read = readFileSync(new URL('../../../src/vs/workbench/contrib/dsh/browser/dshChatSession.ts', import.meta.url), 'utf8');
+	const read = readFileSync(new URL('../../../src/vs/workbench/contrib/dsh/browser/vscode/dshChatSession.ts', import.meta.url), 'utf8');
 	assert.match(read, /private _skillsInFlight/, 'the in-flight read must be tracked');
 	assert.match(read, /pending\.sessionId === sessionId/, 'only the same session may reuse it');
 });
 
+test('AGENTS 1.6: the IDE layer never fabricates session facts', () => {
+	// DSH-IDE 是 DSH core 的 UI 投影层，不是第二个响应生成器。允许本地处理的只有：
+	// 输入草稿、optimistic running、卡片临时隐藏、折叠状态、滚动位置、失败提示。
+	// 这里用源码断言守住边界：IDE 侧不得自己造 assistant 正文 / 工具结果 / 待决终态。
+	const read = (name: string) => readFileSync(new URL(`../../../src/vs/workbench/contrib/dsh/browser/vscode/${name}`, import.meta.url), 'utf8');
+	const session = read('dshChatSession.ts');
+	// 乐观 running 只能由 Host 的 api-session/status 复位。
+	assert.match(session, /acceptSessionStatus/, 'running must be reset by the Host status frame');
+	assert.match(session, /this\.client\.call\('cancelRequest'/, 'discuss must settle through the Host');
+	// 卡片隐藏只发生在 Host 确认之后：hidePending 调用点必须在 result.ok 分支里。
+	const okBranch = session.slice(session.indexOf('if (result.ok)'), session.indexOf('if (result.ok)') + 400);
+	assert.match(okBranch, /this\.hidePending\(/, 'cards may only disappear after the Host confirms');
+	// 投影层所有节点都来自 Host 事件分支。
+	const projection = readFileSync(new URL('../../../src/vs/platform/dshClient/protocol/dshIdeConversation.ts', import.meta.url), 'utf8');
+	assert.doesNotMatch(projection, /function makeAssistant|function synthesize|fakeAssistant/, 'no local assistant synthesis');
+	const eventBranches = (projection.match(/if \(type === '/g) ?? []).length;
+	assert.ok(eventBranches >= 25, `every projection node must hang off a Host event branch, saw ${eventBranches}`);
+});
 test('the settled-request set does not grow without bound', async () => {
 	// 每张卡片的终态 id 都要记住（防重放），但长会话会一直攒。设上限后旧的被淘汰，
 	// 新的仍能挡住重放——这比「记住一切」省内存，也不改变可观察行为。
@@ -975,7 +995,7 @@ test('an oversized image is refused before it is encoded and sent', async () => 
 		assert.equal(ref, undefined, 'an oversized image must be refused');
 		assert.equal(imageCalls, 0, 'it must be refused before any saveImageAttachment call');
 		const failure = session.imageFailure() ?? '';
-		assert.ok(failure.includes('太大'), `the failure must explain the size limit, saw: ${failure}`);
+		assert.ok(failure.includes('too large'), `the failure must explain the size limit, saw: ${failure}`);
 	} finally {
 		session.dispose();
 	}

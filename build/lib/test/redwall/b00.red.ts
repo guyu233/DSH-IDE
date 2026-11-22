@@ -22,7 +22,7 @@ import {
 	type DshIdeSnapshot,
 	type DshIdeViewSnapshot,
 	type DshIdeWaterfallNotice,
-} from '../../../../src/vs/platform/dshClient/common/dshIdeProtocol.ts';
+} from '../../../../src/vs/platform/dshClient/protocol/dshIdeProtocol.ts';
 
 const root = new URL('../../../../', import.meta.url);
 
@@ -69,9 +69,9 @@ const [
 	{ DshChatSession }, { DshComposerSource }, { DSH_IDE_MERGE_WINDOW_MS, DshIdeConsumer },
 	{ createDshIdeConversationState, projectDshIdeConversation },
 ] = await Promise.all([
-	loadBuilt<{ createDshIdeBackendFromEnv(env: Record<string, string>): DshIdeBackend }>('platform/dshClient/electron-main/dshIdeBackendFactory'),
-	loadBuilt<{ DshIdeChannel: new (view: unknown) => TestChannel }>('platform/dshClient/electron-main/dshIdeChannel'),
-	loadBuilt<{ DshIdeViewService: new (backend: DshIdeBackend) => unknown }>('platform/dshClient/electron-main/ide-view-service'),
+	loadBuilt<{ createDshIdeBackendFromEnv(env: Record<string, string>): DshIdeBackend }>('platform/dshClient/ide/main/dshIdeBackendFactory'),
+	loadBuilt<{ DshIdeChannel: new (view: unknown) => TestChannel }>('platform/dshClient/ide/main/dshIdeChannel'),
+	loadBuilt<{ DshIdeViewService: new (backend: DshIdeBackend) => unknown }>('platform/dshClient/ide/main/ide-view-service'),
 	loadBuilt<{ DshChatModel: new () => TestChatModel }>('workbench/contrib/dsh/browser/dshChatModel'),
 	loadBuilt<{ DshChatSession: new (client: TestClient) => TestChatSession }>('workbench/contrib/dsh/browser/dshChatSession'),
 	loadBuilt<{ DshComposerSource: new (client: TestClient, log: { trace(): void; warn(): void }) => TestComposer }>('workbench/contrib/dsh/browser/dshComposerSource'),
@@ -588,7 +588,7 @@ test('BUG-022: the stream baseline reads revision from the outer assistantStream
 
 test('BUG-018: a first-click open reports queued, not opened', () => {
 	// 只核对结果语义：拉起进程不等于窗口已经打开；已报到的 IDE 也只是「已排队、待其轮询取走」。
-	const service = source('src/vs/platform/dshClient/host/ide-service.js');
+	const service = source('src/vs/platform/dshClient/host/usecase/ide-service.js');
 	assert.match(service, /via: 'registered-ide', opened: false, queued: true/, 'a registered IDE only queues the request until it polls');
 	assert.match(service, /via: 'spawned-ide', opened: false, queued: true/, 'a freshly spawned IDE is only queued');
 	assert.doesNotMatch(service, /via: 'spawned-ide' \};/, 'a spawned IDE must never be reported as opened');
@@ -596,7 +596,7 @@ test('BUG-018: a first-click open reports queued, not opened', () => {
 });
 
 test('BUG-018: the spawn result waits for the asynchronous error event', () => {
-	const service = source('src/vs/platform/dshClient/host/ide-service.js');
+	const service = source('src/vs/platform/dshClient/host/usecase/ide-service.js');
 	// `spawn` 只代表请求已提交；真正的失败以异步 `error` 到达，try/catch 覆盖不到。
 	assert.match(service, /child\.once\('error'/, 'the async error event must be observed');
 	assert.match(service, /child\.once\('spawn'/, 'success must be confirmed by the spawn event');
@@ -605,20 +605,20 @@ test('BUG-018: the spawn result waits for the asynchronous error event', () => {
 
 test('BUG-020: a business rejection is never replayed as if it were a transport failure', () => {
 	// 只核对分类边界：端点没变时不得重放，否则一次业务拒绝会被当成瞬时故障重发。
-	const factory = source('src/vs/platform/dshClient/electron-main/dshIdeBackendFactory.ts');
+	const factory = source('src/vs/platform/dshClient/ide/main/dshIdeBackendFactory.ts');
 	assert.match(factory, /if \(!\(await this\.refreshEndpoint\(\)\)\) \{\s*\n\s*throw error;/, 'a non-endpoint failure must be rethrown unchanged');
 	assert.match(factory, /this\.assertLive\(epoch\)/, 'a closed view must cancel the call instead of retrying it');
 });
 
 test('BUG-021: an archive reply older than a newer request is discarded', () => {
 	// 回包是完整集合，只能整体采纳；乱序时必须只采纳序号最新的那一次。
-	const controller = source('src/vs/workbench/contrib/dsh/browser/dshAgentSessionsController.ts');
+	const controller = source('src/vs/workbench/contrib/dsh/browser/vscode/dshAgentSessionsController.ts');
 	assert.match(controller, /const epoch = \+\+this\.archiveEpoch;/, 'each archive request must take an epoch');
 	assert.match(controller, /if \(!isCurrentRefresh\(epoch, this\.archiveEpoch\)\)/, 'a stale reply must be dropped before it replaces the set');
 });
 
 test('BUG-021: a queued toggle re-checks ownership before it runs', () => {
-	const host = source('src/vs/platform/dshClient/host/ide-view-host.js');
+	const host = source('src/vs/platform/dshClient/host/bridge/ide-view-host.js');
 	// 入队前的检查不够：排队期间视图可能换绑，执行时必须重新核对这一行仍然可见。
 	const favorite = host.slice(host.indexOf('async setSessionFavorite'));
 	const pin = host.slice(host.indexOf('async setSessionPinned'));
@@ -703,7 +703,7 @@ test('DOC-007: every verifier derives the repo root from its own location', () =
 });
 
 test('DOC-005: runtime and gate share one strict semver rule', async () => {
-	const { parseVersion, compareVersion, installedMeetsVersion } = await import(new URL('out/vs/platform/dshClient/common/dshIdeContract.js', root).href) as {
+	const { parseVersion, compareVersion, installedMeetsVersion } = await import(new URL('out/vs/platform/dshClient/protocol/dshIdeContract.js', root).href) as {
 		parseVersion(v: string): [number, number, number, string] | undefined;
 		compareVersion(a: string, b: string): number | undefined;
 		installedMeetsVersion(v: string): boolean;
@@ -753,7 +753,7 @@ test('DOC-003: install-drift reports PENDING instead of PASS when it cannot comp
 
 test('DOC-002: the public support claim matches the implemented platform gate', () => {
 	const readme = source('README.md');
-	const host = source('src/vs/platform/dshClient/host/electron-home.js');
+	const host = source('src/vs/platform/dshClient/host/launch/electron-home.js');
 	// 实现只支持 Windows 首次拉窗：声明必须与之一致。
 	assert.match(host, /platform !== 'win32'/, 'the platform gate must exist');
 	assert.match(host, /Windows-only/, 'the gate must say what it does');
@@ -777,7 +777,7 @@ test('DOC-002: dev header version and runtime ABI are documented as different th
 });
 
 test('DOC-006: historical provenance is corrected by errata, never rewritten', () => {
-	const manual = source('docs/DSH-IDE改造开发手册.md');
+	const manual = source('docs/DSH历史证据汇编.md');
 	// 勘误必须写在现行手册里，并明确「不回写原文」的处置方式。
 	assert.match(manual, /历史凭据勘误/, 'the manual must carry the errata section');
 	assert.match(manual, /保留原文、不得删改/, 'the errata must state the originals are preserved');
@@ -809,16 +809,11 @@ test('DOC-004: sync-upstream never writes to the reference repo', () => {
 	assert.match(script, /api\.github\.com\/repos\/deepseek-ai\/deepseek-harness/, 'comparison must use the read-only API');
 });
 
-test('SEC-001: inline completion uses the unique channel, not a side path', () => {
-	const protocol = source('src/vs/platform/dshClient/common/dshIdeProtocol.ts');
+test('SEC-001: inline completion is not on the chat path', () => {
+	const protocol = source('src/vs/platform/dshClient/protocol/dshIdeProtocol.ts');
 	const contribution = source('src/vs/workbench/contrib/dsh/browser/dsh.contribution.ts');
-	const provider = source('src/vs/workbench/contrib/dsh/browser/inlineCompletion.ts');
-	const readme = source('README.md');
-	assert.match(protocol, /inlineComplete: \['prefix', 'suffix', 'languageId', 'path'\]/, 'the method must be in the contract whitelist');
-	assert.match(contribution, /this\._register\(registerDshInlineCompletions\(/, 'the provider must be registered through the contribution');
-	assert.doesNotMatch(provider, /ide\/inlineComplete/, 'the provider must not call the old side endpoint');
-	assert.match(provider, /'inlineComplete'/, 'the provider must call the unique-channel method');
-	assert.match(readme, /行内补全 \| \*\*已接入\*\*/, 'the README must state it is connected');
+	assert.doesNotMatch(protocol, /inlineComplete:/);
+	assert.doesNotMatch(contribution, /registerDshInlineCompletions/);
 });
 
 test('SEC-006: the flagged supply-chain versions are at or above the fixed releases', () => {
@@ -845,7 +840,7 @@ test('SEC-006: the flagged supply-chain versions are at or above the fixed relea
 });
 
 test('SEC-004: a launch URL on a different origin never receives the token exchange', async () => {
-	const transport = await import(new URL('out/vs/platform/dshClient/transport/dshIdeTransport.js', root).href) as {
+	const transport = await import(new URL('out/vs/platform/dshClient/ide/transport/dshIdeTransport.js', root).href) as {
 		authenticateHost(origin: string, launchUrl: string, primitives?: { fetch: (i: string | URL, init: RequestInit) => Promise<unknown> }): Promise<string>;
 	};
 	let calls = 0;
@@ -905,8 +900,8 @@ test('D23: the native binding assertion follows the loader order, not one fixed 
 
 test('SEC-003: Host dispatch shares the packaged protocol validator', () => {
 	// 只审查装配和单一校验器的接线；不发送非法 DTO，不调用真实 Host。
-	const host = source('src/vs/platform/dshClient/host/ide-view-host.js');
-	const service = source('src/vs/platform/dshClient/host/ide-service.js');
+	const host = source('src/vs/platform/dshClient/host/bridge/ide-view-host.js');
+	const service = source('src/vs/platform/dshClient/host/usecase/ide-service.js');
 	const staging = source('build/gulpfile.vscode.ts');
 	const usesContract = [host, service].some(code =>
 		/\bimport\s*\{[^}]*\bvalidateDshIdeInput\b[^}]*\}\s*from\s*'\.\.\/common\/dshIdeProtocol\.js'/.test(code)

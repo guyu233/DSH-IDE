@@ -66,6 +66,7 @@ import { ChatEditPillElement, isResourceContentEmpty } from './chatEditPillEleme
 import { ChatExtensionsContentPart } from './chatExtensionsContentPart.js';
 import { ChatProgressSubPart } from './chatProgressContentPart.js';
 import { IncrementalDOMMorpher } from './chatIncrementalRendering/chatIncrementalRendering.js';
+import { dshMarkdownFenceOverride } from '../../../../dsh/browser/vscode/dshChatSlots.js';
 import { IChatOutputPartStateCache, IOutputPartState } from './chatOutputPartStateCache.js';
 import './media/chatMarkdownPart.css';
 
@@ -288,6 +289,14 @@ export class ChatMarkdownContentPart extends Disposable implements IChatContentP
 					if (languageId === 'vscode-extensions') {
 						const chatExtensions = store.add(instantiationService.createInstance(ChatExtensionsContentPart, { kind: 'extensions', extensions: text.split(',') }));
 						return chatExtensions.domNode;
+					}
+					// 官方 `conversation.chat.markdown.fence` 是 hoc 槽：occupant 可按围栏 info 接管这一段。
+					// 没有 occupant 时返回 undefined，走下面完全不变的原生渲染。
+					const fenceReplacement = dshMarkdownFenceOverride(element.sessionResource?.toString(), languageId);
+					if (fenceReplacement !== undefined) {
+						const replaced = $('div');
+						replaced.textContent = fenceReplacement;
+						return replaced;
 					}
 					const globalIndex = globalCodeBlockIndexStart++;
 					let codeBlockText = text;

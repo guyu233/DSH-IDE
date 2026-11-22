@@ -23,7 +23,7 @@ import { TerminalWordLinkDetector } from './terminalWordLinkDetector.js';
 import { ITerminalConfigurationService, ITerminalExternalLinkProvider, TerminalLinkQuickPickEvent } from '../../../terminal/browser/terminal.js';
 import { ILinkHoverTargetOptions, TerminalHover } from '../../../terminal/browser/widgets/terminalHoverWidget.js';
 import { TerminalWidgetManager } from '../../../terminal/browser/widgets/widgetManager.js';
-import { IXtermCore } from '../../../terminal/browser/xterm-private.js';
+import { IXtermCore } from '../../../terminal/browser/xterm-private.d.js';
 import { ITerminalCapabilityStore } from '../../../../../platform/terminal/common/capabilities/capabilities.js';
 import { ITerminalConfiguration, ITerminalProcessInfo, TERMINAL_CONFIG_SECTION } from '../../../terminal/common/terminal.js';
 import type { ILink, ILinkProvider, IViewportRange, Terminal } from '@xterm/xterm';

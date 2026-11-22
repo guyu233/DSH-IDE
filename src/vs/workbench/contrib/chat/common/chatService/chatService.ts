@@ -1683,7 +1683,21 @@ export type IChatProgress =
 	| IChatHookPart
 	| IChatExternalToolInvocationUpdate
 	| IChatDisabledClaudeHooksPart
-	| IChatAutoModeResolutionPart;
+	| IChatAutoModeResolutionPart
+	| IDshSlotHostContent;
+
+/**
+ * 一条 DSH 回复在原生 ChatList 里的唯一入口。
+ * 节点正文在 session 的 node tree 里，这里只带引用，避免 history 把整棵树再存一份。
+ */
+export interface IDshSlotHostContent {
+	kind: 'dshSlotHost';
+	treeId: string;
+	nodeIds: readonly string[];
+	/** 待决问卷只携带身份，草稿与提交状态由会话内容 store 持有。 */
+	questionIds?: readonly string[];
+	questionSignature?: string;
+}
 
 export interface IChatFollowup {
 	kind: 'reply';

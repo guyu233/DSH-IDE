@@ -12,7 +12,7 @@ import { Registry } from '../../../../../platform/registry/common/platform.js';
 import { getQuickNavigateHandler } from '../../../../browser/quickaccess.js';
 import { registerTerminalAction } from '../../../terminal/browser/terminalActions.js';
 import { TerminalContextKeys } from '../../../terminal/common/terminalContextKey.js';
-import { TerminalQuickAccessProvider } from '../../../terminalContrib/quickAccess/browser/terminalQuickAccess.js';
+import { TerminalQuickAccessProvider } from './terminalQuickAccess.js';
 
 const enum TerminalQuickAccessCommandId {
 	QuickOpenTerm = 'workbench.action.quickOpenTerm',

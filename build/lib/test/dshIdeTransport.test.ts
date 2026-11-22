@@ -23,14 +23,14 @@ import {
 	DSH_IDE_SESSION_SWITCHED,
 	DSH_IDE_WIRE_REVISION,
 	type DshIdeMethod,
-} from '../../../src/vs/platform/dshClient/common/dshIdeProtocol.ts';
+} from '../../../src/vs/platform/dshClient/protocol/dshIdeProtocol.ts';
 import {
 	DshIdeTransport,
 	DshIdeTransportBackend,
 	DshIdeTransportError,
 	authenticateHost,
 	type DshIdeStreamFrame,
-} from '../../../out/vs/platform/dshClient/transport/dshIdeTransport.js';
+} from '../../../out/vs/platform/dshClient/ide/transport/dshIdeTransport.js';
 
 interface RecordedRequest {
 	readonly url: string;

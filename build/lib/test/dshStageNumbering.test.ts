@@ -116,8 +116,17 @@ test('the release gate covers the unit test suite too', () => {
 
 test('the dsh session type has exactly one definition', () => {
 	// 两份同名常量可以各自漂移；scheme 不一致时会话资源就认不出来。
+	// 分层后定义文件在 browser/vscode/，扫描必须递归，否则守卫会因「只扫顶层」而恒空。
 	const dir = 'src/vs/workbench/contrib/dsh/browser';
-	const files = fs.readdirSync(dir).filter(f => f.endsWith('.ts') && !f.includes('test'));
+	const files: string[] = [];
+	const walk = (folder: string, prefix: string): void => {
+		for (const entry of fs.readdirSync(folder, { withFileTypes: true })) {
+			const rel = prefix === '' ? entry.name : `${prefix}/${entry.name}`;
+			if (entry.isDirectory()) { walk(`${folder}/${entry.name}`, rel); }
+			else if (entry.name.endsWith('.ts') && !entry.name.includes('test')) { files.push(rel); }
+		}
+	};
+	walk(dir, '');
 	const definers: string[] = [];
 	for (const file of files) {
 		const source = readFileSync(`${dir}/${file}`, 'utf8');
@@ -125,5 +134,5 @@ test('the dsh session type has exactly one definition', () => {
 			definers.push(file);
 		}
 	}
-	assert.deepEqual(definers, ['dshSessionType.ts'], 'only dshSessionType.ts may define the session type');
+	assert.deepEqual(definers, ['vscode/dshSessionType.ts'], 'only dshSessionType.ts may define the session type');
 });

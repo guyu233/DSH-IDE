@@ -32,7 +32,7 @@ import { getEvaluatableExpressionAtPosition } from '../common/debugUtils.js';
 import { DisassemblyViewInput } from '../common/disassemblyViewInput.js';
 import { IEditorService } from '../../../services/editor/common/editorService.js';
 import { IViewsService } from '../../../services/views/common/viewsService.js';
-import { TOGGLE_BREAKPOINT_ID } from '../../../../workbench/contrib/debug/browser/debugCommands.js';
+import { TOGGLE_BREAKPOINT_ID } from './debugCommands.js';
 
 class ToggleBreakpointAction extends Action2 {
 	constructor() {

@@ -13,7 +13,6 @@ import { disposableTimeout, timeout } from '../../../../../base/common/async.js'
 import { CancellationToken, CancellationTokenSource } from '../../../../../base/common/cancellation.js';
 import { Codicon } from '../../../../../base/common/codicons.js';
 import { toErrorMessage } from '../../../../../base/common/errorMessage.js';
-import { structuralEquals } from '../../../../../base/common/equals.js';
 import { CancellationError, ErrorNoTelemetry, isCancellationError } from '../../../../../base/common/errors.js';
 import { Emitter, Event } from '../../../../../base/common/event.js';
 import { hash } from '../../../../../base/common/hash.js';
@@ -57,13 +56,14 @@ import { SaveReason } from '../../../../common/editor.js';
 import { ChatEntitlementContextKeys, IChatEntitlementService } from '../../../../services/chat/common/chatEntitlementService.js';
 import { ACTIVE_GROUP, IEditorService } from '../../../../services/editor/common/editorService.js';
 import { IWorkbenchLayoutService } from '../../../../services/layout/browser/layoutService.js';
+import { IWorkspaceContextService } from '../../../../../platform/workspace/common/workspace.js';
 import { ILifecycleService } from '../../../../services/lifecycle/common/lifecycle.js';
 import { checkModeOption } from '../../common/chat.js';
 import { IChatAgentAttachmentCapabilities, IChatAgentCommand, IChatAgentData, IChatAgentService, UserSelectedTools } from '../../common/participants/chatAgents.js';
 import { ChatContextKeys } from '../../common/actions/chatContextKeys.js';
 import { applyingChatEditsFailedContextKey, decidedChatEditingResourceContextKey, hasAppliedChatEditsContextKey, hasUndecidedChatEditingResourceContextKey, IChatEditingService, IChatEditingSession, inChatEditingSessionContextKey, ModifiedFileEntryState } from '../../common/editing/chatEditingService.js';
 import { IChatLayoutService } from '../../common/widget/chatLayoutService.js';
-import { IChatModel, IChatModelInputState, IChatResponseModel, logChangesToStateModel } from '../../common/model/chatModel.js';
+import { IChatModel, IChatModelInputState, IChatResponseModel, IInputModel, logChangesToStateModel } from '../../common/model/chatModel.js';
 import { isChatModelIdle } from '../../common/model/chatModelIdle.js';
 import { ChatMode, getModeNameForTelemetry, IChatMode } from '../../common/chatModes.js';
 import { chatAgentLeader, ChatRequestAgentPart, ChatRequestDynamicVariablePart, ChatRequestSlashCommandPart, ChatRequestSlashPromptPart, ChatRequestToolPart, ChatRequestToolSetPart, chatSubcommandLeader, formatChatQuestion, IParsedChatRequest } from '../../common/requestParser/chatParserTypes.js';
@@ -91,6 +91,7 @@ import { PromptsStorage } from '../../common/promptSyntax/service/promptsService
 import { handleModeSwitch } from '../actions/chatActions.js';
 import { ChatTreeItem, ChatViewPaneTarget, IChatAcceptInputOptions, IChatAccessibilityService, IChatCodeBlockInfo, IChatFileTreeInfo, IChatFindController, IChatListItemRendererOptions, IChatPasteTargetService, IChatWidget, IChatWidgetService, IChatWidgetViewContext, IChatWidgetViewModelChangeEvent, IChatWidgetViewOptions, IChatWidgetViewState, isIChatResourceViewContext, isIChatViewViewContext } from '../chat.js';
 import { ChatAttachmentModel } from '../attachments/chatAttachmentModel.js';
+import { clearOwnedDraft, isOwnedDraftUnchanged } from './input/draftOwnership.js';
 import { IChatAttachmentResolveService } from '../attachments/chatAttachmentResolveService.js';
 import { ChatDynamicVariableModel } from '../attachments/chatDynamicVariables.js';
 import { ChatAttachmentsContentPart } from './chatContentParts/chatAttachmentsContentPart.js';
@@ -120,8 +121,9 @@ import { getChatPetListPadding } from './chatPetWidget.js';
 import { IChatPetWidgetService } from './chatPetWidgetService.js';
 import { IChatPetService } from '../chatPetService.js';
 import { ChatPetAchievementIds, hasChatPetImageAttachment } from '../chatPetAchievements.js';
-import type { DshIdeImageAttachmentRef } from '../../../../../platform/dshClient/common/dshIdeProtocol.js';
-import { dshImagePayload, dshUnsentAttachmentNames } from '../../../dsh/browser/dshImagePayload.js';
+import type { DshIdeImageAttachmentRef } from '../../../../../platform/dshClient/protocol/dshIdeProtocol.js';
+import { dshImagePayload, dshUnsentAttachmentNames } from '../../../dsh/browser/vscode/dshImagePayload.js';
+import { projectDshReferences } from '../../../dsh/browser/vscode/dshReferences.js';
 import { INotificationService } from '../../../../../platform/notification/common/notification.js';
 import { stopDictationForEditor } from '../speechToText/dictationSession.js';
 import { ChatUserInteraction } from '../chatUserInteractionTelemetry.js';
@@ -216,7 +218,9 @@ type DshSubmitTarget =
 
 /** content provider 产出的会话对象里，本文件真正用到的那一个方法。 */
 interface IDshSubmitSession {
-	submit(text: string, attachments?: readonly DshIdeImageAttachmentRef[]): Promise<boolean>;
+	submit(text: string, attachments?: readonly DshIdeImageAttachmentRef[], requestId?: string): Promise<boolean>;
+	/** 这条 DSH 会话当前是否在生成。原生面板不订阅 DSH 帧，排队提示要靠它。 */
+	running?(): boolean;
 	/** 最近一次发送失败的原因。没有失败时为 undefined。 */
 	submitFailure?(): string | undefined;
 	/** 最近一次图片入库失败的原因。 */
@@ -287,6 +291,30 @@ export function shouldUnlockChatPetRequestRevision(isEditing: boolean, isUserQue
 
 export function shouldUnlockChatPetQueueOrSteeringMessage(isUserQuery: boolean, queue: ChatRequestQueueKind | undefined): boolean {
 	return isUserQuery && queue !== undefined;
+}
+
+/**
+ * 生成一次 DSH 提交的关联标识。
+ *
+ * 它同时是内核请求 id：断线重连后核对同一次提交、或用户确认后重试时都复用同一个值。
+ * 只要求进程内唯一，不用于安全用途。
+ */
+export function nextDshSubmitId(): string {
+	try {
+		return globalThis.crypto.randomUUID();
+	} catch {
+		return `dsh-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+	}
+}
+
+/**
+ * 提交结果无法确认时的说明文案。
+ *
+ * 「不知道有没有发出去」不能渲染成「发送失败」：后者会让用户直接再发一次，
+ * 同一句话就可能进队列两遍。文案只陈述事实与下一步可核对的对象。
+ */
+export function dshSubmitUnconfirmedText(requestId: string): string {
+	return `发送结果待确认（请求 ${requestId}）：连接在 Host 应答前中断。内容已保留；恢复连接后请先核对原会话，再决定是否重发。`;
 }
 
 type ChatHandoffClickEvent = {
@@ -403,6 +431,16 @@ export class ChatWidget extends Disposable implements IChatWidget {
 	private readonly _onDidSubmitAgent = this._register(new Emitter<{ agent: IChatAgentData; slashCommand?: IChatAgentCommand }>());
 	readonly onDidSubmitAgent = this._onDidSubmitAgent.event;
 	private _submitHandlerInFlight = false;
+	/**
+	 * DSH 提交锁：从附件入库之前生效，直到 Host 给出「已接受 / 未接受」为止。
+	 * 只保护 DSH provider 分支，不改变原生 chatService 的既有并发语义。
+	 */
+	private _dshSubmitInFlight = false;
+	/**
+	 * 结果未确认的提交：requestId → 发起时间。连接恢复后据此提示核对原会话。
+	 * 只保留最近若干条，避免长期运行攒下无界表。
+	 */
+	private readonly dshUnconfirmedSubmits = new Map<string, number>();
 	private _participantRedirectInFlight = false;
 
 	private _onDidChangeAgent = this._register(new Emitter<{ agent: IChatAgentData; slashCommand?: IChatAgentCommand }>());
@@ -705,6 +743,7 @@ export class ChatWidget extends Disposable implements IChatWidget {
 		@IAgentHostNewSessionFolderService private readonly _agentHostNewSessionFolderService: IAgentHostNewSessionFolderService,
 		@IUriIdentityService private readonly _uriIdentityService: IUriIdentityService,
 		@IWorkbenchLayoutService private readonly layoutService: IWorkbenchLayoutService,
+		@IWorkspaceContextService private readonly workspaceContextService: IWorkspaceContextService,
 		@IManagedSettingsService managedSettingsService: IManagedSettingsService,
 		@ICommandService private readonly commandService: ICommandService,
 		@IAgentHostPolicyContinuationService private readonly policyContinuationService: IAgentHostPolicyContinuationService,
@@ -1722,7 +1761,7 @@ export class ChatWidget extends Disposable implements IChatWidget {
 			const numItems = this.viewModel?.getItems().length ?? 0;
 			if (!numItems) {
 				// DSH 集成：本 IDE 由 DSH 驱动、不接入 GitHub Copilot，去掉欢迎页的 Copilot 条款文案，改为中性提示。
-				const additionalMessage: string | IMarkdownString | undefined = new MarkdownString(localize('dshWelcomeHint', "输入消息开始，由 DSH 处理。"));
+				const additionalMessage: string | IMarkdownString | undefined = new MarkdownString(localize('dshWelcomeHint', "Type a message to start; DSH handles it."));
 				const welcomeContent = this.getWelcomeViewContent(additionalMessage);
 				if (!this.welcomePart.value || this.welcomePart.value.needsRerender(welcomeContent)) {
 					dom.clearNode(this.welcomeMessageContainer);
@@ -3410,18 +3449,9 @@ export class ChatWidget extends Disposable implements IChatWidget {
 		const sourceInputModel = this.viewModel?.model.inputModel;
 		const ownedAttachments = [...this.input.attachmentModel.attachments];
 		// Keep cleanup bound to the source model even after navigating to the fork.
+		// 与 DSH 提交共用同一份「仍是原稿」判定，避免两处规则漂移。
 		return () => {
-			if (!sourceInputModel) {
-				return;
-			}
-			const state = sourceInputModel.state.get();
-			if (state?.inputText !== ownedInput) {
-				return;
-			}
-			if (!structuralEquals(state.attachments ?? [], ownedAttachments)) {
-				return;
-			}
-			sourceInputModel.setState({ inputText: '', attachments: [] });
+			clearOwnedDraft(sourceInputModel, ownedInput, ownedAttachments);
 		};
 	}
 
@@ -3532,9 +3562,25 @@ export class ChatWidget extends Disposable implements IChatWidget {
 		isUserQuery: boolean,
 		submittedWithImage: boolean,
 		options: IChatAcceptInputOptions | undefined,
+		ownedInputModel: IInputModel | undefined,
+		ownedText: string,
+		ownedAttachments: readonly IChatRequestVariableEntry[],
+		ownedSessionResource: URI | undefined,
 	): void {
 		this.updateChatViewVisibility();
-		this.input.acceptInput(options?.storeToHistory ?? isUserQuery, options?.preserveFocus);
+		// Host 已接受本次提交：只清「这一次」的草稿。
+		// 发送期间用户改了文本或附件，说明当前编辑器里是新草稿，必须原样保留。
+		// 发送期间切到别的会话时，当前控件里的草稿属于那个会话，绝不能在这里清掉。
+		const stillSameSession = ownedSessionResource === undefined
+			|| isEqual(this.viewModel?.sessionResource, ownedSessionResource);
+		if (!stillSameSession) {
+			options?.onRequestAccepted?.();
+			return;
+		}
+		// 复用同一份「仍是原稿」判定；真正清稿仍由 acceptInput 完成（它同时写历史、清编辑器）。
+		if (isOwnedDraftUnchanged(ownedInputModel, ownedText, ownedAttachments)) {
+			this.input.acceptInput(options?.storeToHistory ?? isUserQuery, options?.preserveFocus);
+		}
 		if (!options?.preserveInput) {
 			this._maybeStartGoalSummary(requestInput);
 		}
@@ -3545,6 +3591,26 @@ export class ChatWidget extends Disposable implements IChatWidget {
 		if (submittedWithImage) {
 			this.chatPetService.unlockAchievement(ChatPetAchievementIds.ImageRequest);
 		}
+	}
+
+	/**
+	 * 提交结果无法确认：保留草稿与附件，记录待核对的关联标识。
+	 *
+	 * 只提示，不改输入框内容，也不把 `_submitFailure` 写成「失败」——
+	 * 「不知道发没发出去」和「明确没发出去」是两种状态，用户动作不同。
+	 */
+	private reportDshSubmitUnconfirmed(requestId: string, error: unknown): void {
+		this.logService.warn('[chat] DSH submit result is unconfirmed', requestId, toErrorMessage(error));
+		this.dshUnconfirmedSubmits.set(requestId, Date.now());
+		// 只留最近 20 条：这张表只用于恢复后提醒核对，不是审计账本。
+		while (this.dshUnconfirmedSubmits.size > 20) {
+			const oldest = this.dshUnconfirmedSubmits.keys().next().value;
+			if (oldest === undefined) {
+				break;
+			}
+			this.dshUnconfirmedSubmits.delete(oldest);
+		}
+		this.notificationService.warn(dshSubmitUnconfirmedText(requestId));
 	}
 
 	async rerunLastRequest(): Promise<void> {
@@ -3975,68 +4041,111 @@ export class ChatWidget extends Disposable implements IChatWidget {
 				if (transcriptContext) {
 					this.setTranscriptContext(transcriptContext);
 				}
-				this.notificationService.error(localize('chat.dsh.sessionUnavailable', "无法发送：DSH 会话内容暂不可用，输入已保留。"));
+				this.notificationService.error(localize('chat.dsh.sessionUnavailable', "Cannot send: DSH session content is unavailable. The input was kept."));
 				return undefined;
 			}
 			if (target.kind === 'provider') {
-				const entries = [...requestInputs.attachedContext.asArray(), ...resolvedImageVariables];
-				const unsent = dshUnsentAttachmentNames(entries);
-				if (unsent.length > 0) {
-					if (transcriptContext) {
-						this.setTranscriptContext(transcriptContext);
-					}
-					this.notificationService.warn(localize(
-						'chat.dsh.unsentAttachments',
-						"DeepSeek Harness 带不走这些附件：{0}。本次输入已保留，未发送任何内容。",
-						unsent.join('、'),
-					));
+				// 一次提交从附件入库前就锁定：附件编码/上传、RPC 往返期间再按一次发送直接拒绝，
+				// 不会把同一份草稿发两遍。锁只覆盖 DSH 分支，释放前不会清空任何输入。
+				if (this._dshSubmitInFlight) {
 					return undefined;
 				}
-				const images = collectDshImageAttachments(entries);
-				const refs: DshIdeImageAttachmentRef[] = [...images.refs];
-				if (images.rejected.length > 0) {
-					// 尚未入库的图片先交给 Host 用官方 saveImages 入库，再随本条消息提交。
-					if (typeof target.session.saveImage !== 'function') {
+				this._dshSubmitInFlight = true;
+				// 这次发送发生时当前回合是否还在生成：Host 一律排队，界面据此给出「已入队」。
+				const wasGenerating = target.session.running?.() ?? this.viewModel.model.requestInProgress.get();
+				try {
+					// 本次提交归属：原始输入模型 + 发送时的文本 + 附件快照。
+					// Host 接受后只清这一份；期间用户改了草稿就保留用户的修改。
+					const ownedInputModel = this.viewModel?.model.inputModel;
+					const ownedSessionResource = this.viewModel?.sessionResource;
+					const ownedText = requestInputs.input;
+					const ownedAttachments = [...this.input.attachmentModel.attachments];
+					// 工作区 file/directory 条目改写成 DSH 的 `@path` mention，随提示文本下发。
+					// 它们不是附件：DSH 按引用语法解析，Host 不接收「原生文件对象」。
+					const roots = this.workspaceContextService.getWorkspace().folders.map(folder => folder.uri.fsPath);
+					const projected = projectDshReferences([...requestInputs.attachedContext.asArray(), ...resolvedImageVariables], roots);
+					const entries = projected.remaining;
+					const unsent = dshUnsentAttachmentNames(entries);
+					if (unsent.length > 0) {
 						if (transcriptContext) {
 							this.setTranscriptContext(transcriptContext);
 						}
 						this.notificationService.warn(localize(
-							'chat.dsh.unsupportedAttachments',
-							"这条会话只能发送已入库的图片附件；本次输入已保留，未发送任何内容。",
+							'chat.dsh.unsentAttachments',
+							"DeepSeek Harness cannot carry these attachments: {0}. The input was kept and nothing was sent.",
+							unsent.join('、'),
 						));
 						return undefined;
 					}
-					for (const entry of images.rejected) {
-						const bytes = imageBytesOf(entry as { readonly value?: unknown; readonly mimeType?: string; readonly name?: string });
-						const ref = bytes === undefined ? undefined : await target.session.saveImage(bytes.data, bytes.mediaType, (entry as { readonly name?: string }).name);
-						if (ref === undefined) {
+					const images = collectDshImageAttachments(entries);
+					const refs: DshIdeImageAttachmentRef[] = [...images.refs];
+					if (images.rejected.length > 0) {
+						// 尚未入库的图片先交给 Host 用官方 saveImages 入库，再随本条消息提交。
+						if (typeof target.session.saveImage !== 'function') {
 							if (transcriptContext) {
 								this.setTranscriptContext(transcriptContext);
 							}
-							const imageReason = target.session.imageFailure?.();
-							this.notificationService.warn(imageReason !== undefined && imageReason !== '' ? imageReason : localize(
-								'chat.dsh.imageNotStored',
-								"这张图片无法交给 DeepSeek Harness 入库；本次输入已保留，未发送任何内容。",
+							this.notificationService.warn(localize(
+								'chat.dsh.unsupportedAttachments',
+								"This session can only send stored image attachments; the input was kept and nothing was sent.",
 							));
 							return undefined;
 						}
-						refs.push(ref);
+						for (const entry of images.rejected) {
+							const bytes = imageBytesOf(entry as { readonly value?: unknown; readonly mimeType?: string; readonly name?: string });
+							const ref = bytes === undefined ? undefined : await target.session.saveImage(bytes.data, bytes.mediaType, (entry as { readonly name?: string }).name);
+							if (ref === undefined) {
+								if (transcriptContext) {
+									this.setTranscriptContext(transcriptContext);
+								}
+								const imageReason = target.session.imageFailure?.();
+								this.notificationService.warn(imageReason !== undefined && imageReason !== '' ? imageReason : localize(
+									'chat.dsh.imageNotStored',
+									"This image could not be stored in DeepSeek Harness; the input was kept and nothing was sent.",
+								));
+								return undefined;
+							}
+							refs.push(ref);
+						}
 					}
-				}
-				const accepted = await target.session.submit(requestInputs.input, refs);
-				if (!accepted) {
-					if (transcriptContext) {
-						this.setTranscriptContext(transcriptContext);
+					// 关联标识在附件入库前生成：重试/核对复用同一个值，Host 用同一个内核请求 id 结算。
+					const submitId = nextDshSubmitId();
+					let accepted: boolean;
+					try {
+						const submitText = projected.mentions.length === 0
+							? requestInputs.input
+							: `${requestInputs.input}${requestInputs.input === '' ? '' : '\n'}${projected.mentions.join(' ')}`;
+						accepted = await target.session.submit(submitText, refs, submitId);
+					} catch (error) {
+						// 断线/超时这类「不知道 Host 有没有收到」的失败：保留草稿，明确标记待确认。
+						// 不能当成「没发出」静默重试，否则同一句话可能进队列两次。
+						this.reportDshSubmitUnconfirmed(submitId, error);
+						return undefined;
 					}
-					const reason = target.session.submitFailure?.();
-					this.notificationService.warn(reason !== undefined && reason !== ''
-						? reason
-						: localize('chat.dsh.submitFailed', "发送失败，输入已保留。"));
+					if (!accepted) {
+						if (transcriptContext) {
+							this.setTranscriptContext(transcriptContext);
+						}
+						const reason = target.session.submitFailure?.();
+						this.notificationService.warn(reason !== undefined && reason !== ''
+							? reason
+							: localize('chat.dsh.submitFailed', "Send failed. The input was kept."));
+						return undefined;
+					}
+					this._acceptDshSubmission(requestInputs.input, isUserQuery, submittedWithImage, options, ownedInputModel, ownedText, ownedAttachments, ownedSessionResource);
+					// Host 的 submit 固定走 queue：生成期间再发一条是排队，不是打断。
+					// 原生面板没有 DSH 队列条目，所以在这里明确说一句，避免「按下去了没反应」。
+					if (wasGenerating) {
+						this.notificationService.info(localize(
+							'chat.dsh.queued',
+							"已加入队列：当前回合结束后发送。",
+						));
+					}
+					// 内容由 provider 的 history 推送，这里不再产出原生 response。
 					return undefined;
+				} finally {
+					this._dshSubmitInFlight = false;
 				}
-				this._acceptDshSubmission(requestInputs.input, isUserQuery, submittedWithImage, options);
-				// 内容由 provider 的 history 推送，这里不再产出原生 response。
-				return undefined;
 			}
 			result = await this.chatService.sendRequest(this.viewModel.sessionResource, requestInputs.input, {
 				onDidCreateResponse,

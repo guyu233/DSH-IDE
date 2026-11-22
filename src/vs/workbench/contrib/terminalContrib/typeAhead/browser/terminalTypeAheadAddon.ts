@@ -11,7 +11,7 @@ import { Disposable, toDisposable } from '../../../../../base/common/lifecycle.j
 import { escapeRegExpCharacters } from '../../../../../base/common/strings.js';
 import { IConfigurationService } from '../../../../../platform/configuration/common/configuration.js';
 import { ITelemetryService } from '../../../../../platform/telemetry/common/telemetry.js';
-import { XtermAttributes, IXtermCore } from '../../../terminal/browser/xterm-private.js';
+import { XtermAttributes, IXtermCore } from '../../../terminal/browser/xterm-private.d.js';
 import { IBeforeProcessDataEvent, ITerminalProcessManager, TERMINAL_CONFIG_SECTION } from '../../../terminal/common/terminal.js';
 import type { IBuffer, IBufferCell, IDisposable, ITerminalAddon, Terminal } from '@xterm/xterm';
 import { DEFAULT_LOCAL_ECHO_EXCLUDE, type ITerminalTypeAheadConfiguration } from '../common/terminalTypeAheadConfiguration.js';

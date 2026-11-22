@@ -8,9 +8,10 @@
 // 唯一 `dshIde` 通道由主进程分发（P3）。
 // 聊天和 Sessions 都在 VS Code 的 Chat 视图容器里（ChatViewPane，见
 // chatParticipant.contribution.ts）。不再注册左侧自建会话视图。
-// 另外保留行内补全注册（通道未接线时优雅降级为无补全，不报错）。
+// 聊天主路径是开窗、跟随、发送和停止。目标、作业、MCP、斜杠命令和行内补全不在这条路径上。
 
 import { localize } from '../../../../nls.js';
+import { dshDone, dshFail, dshLink } from './dshNotice.js';
 import { registerSingleton, InstantiationType } from '../../../../platform/instantiation/common/extensions.js';
 import { INotificationService } from '../../../../platform/notification/common/notification.js';
 import { IContextKeyService } from '../../../../platform/contextkey/common/contextkey.js';
@@ -18,39 +19,33 @@ import { IDshClientService, DshClientService } from '../../../../platform/dshCli
 import { IWorkbenchContribution, registerWorkbenchContribution2, WorkbenchPhase } from '../../../common/contributions.js';
 import { DSH_IDE_SESSION_ENV, DSH_IDE_COMPOSER_ENV } from '../../../../platform/dshClient/common/env.js';
 import { env } from '../../../../base/common/process.js';
-import { registerDshInlineCompletionsSetting } from './inlineCompletion.js';
-import { DshIdeConsumer } from './dshIdeConsumer.js';
-import { DshChatSession, dshChatSessionFor } from './dshChatSession.js';
-import { registerDshLanguageModelProvider } from './dshLanguageModelProvider.js';
-import { DshComposerSource } from './dshComposerSource.js';
-import { setDshComposerSource } from './dshComposerRegistry.js';
+import { DshIdeConsumer } from './consumer/dshIdeConsumer.js';
+import { DshChatSession, dshChatSessionFor } from './vscode/dshChatSession.js';
+import { registerDshLanguageModelProvider } from './vscode/dshLanguageModelProvider.js';
+import { DshComposerSource } from './vscode/dshComposerSource.js';
+import { setDshComposerSource } from './vscode/dshComposerRegistry.js';
 import { ILanguageModelsService } from '../../chat/common/languageModels.js';
 import { IChatSessionsService, type IChatSessionsExtensionPoint } from '../../chat/common/chatSessionsService.js';
+import { IChatSlashCommandService } from '../../chat/common/participants/chatSlashCommands.js';
 import { ILogService } from '../../../../platform/log/common/log.js';
 import { Disposable } from '../../../../base/common/lifecycle.js';
-import { registerDshChatSessionContent, registerDshAnswerCommands } from './dshChatSessionContent.js';
-import { IDshIdeSessionsService, DshIdeSessionsService } from './dshIdeSessionsService.js';
-import { registerDshSessionSearchAction, registerDshSessionSearchCommands } from './dshSessionSearchCommands.js';
-import { registerDshSessionMenu } from './dshSessionMenu.js';
-import { applyDshCapabilities } from './dshCapabilities.js';
-import { DSH_IDE_SNAPSHOT_STALE, validateCapabilities, type DshIdeCapabilities } from '../../../../platform/dshClient/common/dshIdeProtocol.js';
-import { registerDshTeamAction, registerDshTeamCommands } from './dshTeamCommands.js';
-import { registerDshGoalAction, registerDshGoalCommand } from './dshGoalCommands.js';
-import { registerDshMcpAction, registerDshMcpCommand } from './dshMcpCommands.js';
-import { registerDshJobsAction, registerDshJobsCommand } from './dshJobsCommands.js';
-import { registerDshIconReplacement } from './dshIconReplacement.js';
+import { registerDshChatSessionContent, registerDshAnswerCommands } from './vscode/dshChatSessionContent.js';
+import { IDshIdeSessionsService, DshIdeSessionsService } from './vscode/dshIdeSessionsService.js';
+import { registerDshSessionSearchAction, registerDshSessionSearchCommands } from './vscode/dshSessionSearchCommands.js';
+import { registerDshSessionMenu } from './vscode/dshSessionMenu.js';
+import { applyDshCapabilities } from './vscode/dshCapabilities.js';
+import { DSH_IDE_SNAPSHOT_STALE, validateCapabilities, type DshIdeCapabilities } from '../../../../platform/dshClient/protocol/dshIdeProtocol.js';
+import { registerDshTeamAction, registerDshTeamCommands, registerDshTeamInputAction } from './vscode/dshTeamCommands.js';
+import { registerDshIconReplacement } from './vscode/dshIconReplacement.js';
+import { registerDshSlashCommands } from './vscode/dshSlashCommands.js';
 import { IQuickInputService } from '../../../../platform/quickinput/common/quickInput.js';
 import { openSessionByResource } from '../../chat/browser/agentSessions/agentSessionsOpener.js';
-import { dshSessionResource } from './dshAgentSessionsController.js';
-import { ILanguageFeaturesService } from '../../../../editor/common/services/languageFeatures.js';
-import { IConfigurationService } from '../../../../platform/configuration/common/configuration.js';
+import { dshSessionResource } from './vscode/dshAgentSessionsController.js';
 import { IInstantiationService } from '../../../../platform/instantiation/common/instantiation.js';
 import { IFileService } from '../../../../platform/files/common/files.js';
-import { DshAttachmentFileSystemProvider } from './dshAttachmentFileSystem.js';
-import { registerDshSlashCommands } from './dshSlashCommands.js';
-import { IChatSlashCommandService } from '../../chat/common/participants/chatSlashCommands.js';
+import { DshAttachmentFileSystemProvider } from './vscode/dshAttachmentFileSystem.js';
 import { CommandsRegistry } from '../../../../platform/commands/common/commands.js';
-import './dshAgentSessionsController.js';
+import './vscode/dshAgentSessionsController.js';
 
 registerSingleton(IDshClientService, DshClientService, InstantiationType.Delayed);
 registerSingleton(IDshIdeSessionsService, DshIdeSessionsService, InstantiationType.Delayed);
@@ -69,7 +64,7 @@ const DshChatSessionContribution: IChatSessionsExtensionPoint = {
 	type: 'dsh',
 	name: 'dsh',
 	displayName: 'DSH-IDE',
-	description: localize('dsh.chatSession.description', "DeepSeek Harness 会话"),
+	description: localize('dsh.chatSession.description', "DeepSeek Harness session"),
 	requiresCustomModels: true,
 	supportsAutoModel: false,
 	supportsDelegation: false,
@@ -89,8 +84,6 @@ class DshClientContribution extends Disposable implements IWorkbenchContribution
 		@IInstantiationService private readonly instantiationService: IInstantiationService,
 		@IContextKeyService contextKeyService: IContextKeyService,
 		@ILogService logService: ILogService,
-		@ILanguageFeaturesService languageFeatures: ILanguageFeaturesService,
-		@IConfigurationService configurationService: IConfigurationService,
 		@IFileService fileService: IFileService,
 		@IChatSlashCommandService slashCommandService: IChatSlashCommandService,
 	) {
@@ -116,22 +109,15 @@ class DshClientContribution extends Disposable implements IWorkbenchContribution
 		// DSH 团队开关：原生模型选择器没有对应控件，用命令承接。
 		this._register(registerDshTeamCommands(this.quickInputService, this.notifications));
 		this._register(registerDshTeamAction());
-		// DSH 目标：Host 的 setGoal 已实现，这里补窗口入口。
-		this._register(registerDshGoalCommand(client, this.quickInputService, this.notifications));
-		this._register(registerDshGoalAction());
-		// DSH 自己的 MCP 管理；IDE 原有 MCP 扩展栈保持不动。
-		this._register(registerDshMcpCommand(client, this.quickInputService, this.notifications));
-		this._register(registerDshMcpAction());
-		// DSH 后台作业；IDE 自己的 TaskService 保持不动。
-		this._register(registerDshJobsCommand(client, this.quickInputService, this.notifications));
-		this._register(registerDshJobsAction());
+		// 输入区「更多」里的团队开关：与命令面板共用同一个切换命令。
+		this._register(registerDshTeamInputAction());
 		// DSH 图标：把语义对得上的 codicon 换成官方产品图形（混合状态，未命中保留 codicon）。
 		this._register(registerDshIconReplacement());
 		// 会话附件的只读 URI 方案：原生 Chat 没有图片进度部件，附件以 `dsh-attachment:` 引用
 		// 出现，由 VS Code 自己的查看器经 Host 官方附件服务读字节。
 		this._register(new DshAttachmentFileSystemProvider(client, fileService));
-		// DSH 自己的斜杠命令：Host 侧 `listCommands` / `runCommand` 早已实现，renderer 侧
-		// 零调用点——不注册的话，IDE 输入框敲 `/` 看不到任何 DSH 命令。
+		// DSH 自己的斜杠命令：`listCommands` 按会话取目录，执行只走 `runCommand`。
+		// 不注册的话，IDE 输入框敲 `/` 永远看不到 DSH 命令。
 		const slashCommandsBridge = this._register(registerDshSlashCommands(slashCommandService, client, logService));
 		const preset = readComposerPreset();
 		const composer = this._register(new DshComposerSource(client, logService, preset));
@@ -146,9 +132,6 @@ class DshClientContribution extends Disposable implements IWorkbenchContribution
 		if (preset === undefined) {
 			void composer.refresh();
 		}
-		// 行内补全走唯一通道 inlineComplete。默认关闭：每次光标停顿都是一次跨进程调用加一次
-		// LLM 生成，装插件即开启会让用户什么都没配就持续消耗 CPU 与额度。
-		this._register(registerDshInlineCompletionsSetting(configurationService, languageFeatures, client));
 		const consumer = this._register(new DshIdeConsumer());
 		this._register(consumer.onDidFail((error: { readonly code: string }) => {
 			// 丢帧后 consumer 会熔断，只能靠一次显式重建恢复。`refreshSnapshot` 是契约里
@@ -160,17 +143,17 @@ class DshClientContribution extends Disposable implements IWorkbenchContribution
 					}
 				}, () => undefined);
 			}
-			this.notifications.warn(localize(
+			dshLink(this.notifications, localize(
 				'dsh.snapshotFailed',
-				"DSH-IDE 帧被拒绝（{0}），界面保持上一次一致状态。",
+				"DSH-IDE: frame rejected ({0}); the UI keeps the last consistent state.",
 				error.code,
 			));
 		}));
 		// 帧直接交给聊天面板的会话状态；批准 / 问卷帧也走同一处，不弹通知。
 		this._chat = dshChatSessionFor(client);
-		this._register(this._chat.onDidFailAction(message => this.notifications.warn(message)));
+		this._register(this._chat.onDidFailAction(message => dshFail(this.notifications, message)));
 		if (composer.onDidReject !== undefined) {
-			this._register(composer.onDidReject(message => this.notifications.warn(message)));
+			this._register(composer.onDidReject(message => dshFail(this.notifications, message)));
 		}
 		this._register(consumer.onDidChangeFrame(({ state }) => {
 			// 稳定路径读 typed 视图；`frame` 只作兼容回退（旧 Host 不带 typed 字段时）。
@@ -180,9 +163,9 @@ class DshClientContribution extends Disposable implements IWorkbenchContribution
 		this._register(client.onDidWaterfall(notice => this._chat.acceptWaterfall(notice)));
 		// 原生面板一次只画一题：这份问卷需要多题/多选答案时，明确告诉用户去桌面入口完成。
 		this._register(this._chat.onDidNeedDesktopQuestion(() => {
-			this.notifications.info(localize(
+			dshDone(this.notifications, localize(
 				'dsh.questionNeedsDesktop',
-				"这条问卷需要在 DSH 桌面端完整回答；IDE 面板只显示第一题，未提交任何部分答案。",
+				"This question must be answered completely in the DSH desktop app; the IDE panel shows only the first question and submits no partial answer.",
 			));
 		}));
 		// 回合结束只由 `api-session/status` 通知（`session-status`）：内容帧不带 running，
@@ -262,7 +245,7 @@ class DshClientContribution extends Disposable implements IWorkbenchContribution
 				void refreshCapabilities();
 				if (sawDisconnect) {
 					sawDisconnect = false;
-					this.notifications.info(localize('dsh.reconnected', "已重新连上 DeepSeek Harness。"));
+					dshLink(this.notifications, localize('dsh.reconnected', "DSH-IDE: reconnected to DeepSeek Harness."));
 				}
 				return;
 			}
@@ -270,7 +253,7 @@ class DshClientContribution extends Disposable implements IWorkbenchContribution
 			// 只提示一次：连接层会反复重试，每次都弹就成了噪音。
 			if (!sawDisconnect) {
 				sawDisconnect = true;
-				this.notifications.warn(localize('dsh.disconnected', "与 DeepSeek Harness 的连接已断开，正在重试。这期间的发送会失败。"));
+				dshLink(this.notifications, localize('dsh.disconnected', "DSH-IDE: the connection to DeepSeek Harness is closed and retrying. Sending will fail in the meantime."));
 			}
 		}));
 
@@ -282,9 +265,9 @@ class DshClientContribution extends Disposable implements IWorkbenchContribution
 		void slashCommandsBridge.setSession(boundSessionId);
 		void client.openView({ view: 'chat', params: boundSessionId === undefined ? {} : { sessionId: boundSessionId } }).then(result => {
 			if (!result.ok) {
-				this.notifications.info(localize(
+				dshLink(this.notifications, localize(
 					'dsh.connectionUnavailable',
-					"DSH-IDE AI 连接层尚未就绪（{0}），聊天暂不可用。",
+					"DSH-IDE: the connection is not ready ({0}); chat is unavailable.",
 					result.error.code,
 				));
 				return;
@@ -296,16 +279,16 @@ class DshClientContribution extends Disposable implements IWorkbenchContribution
 		this._register(CommandsRegistry.registerCommand('dsh.newSession', async () => {
 			const created = await this._sessions.createSession();
 			if (!created.ok) {
-				this.notifications.error(localize('dsh.newSessionFailed', "创建 DSH 会话失败：{0}", created.error));
+				dshFail(this.notifications, localize('dsh.newSessionFailed', "DSH-IDE: could not create the session: {0}", created.error));
 				return;
 			}
 			if (created.sessionId === undefined) {
-				this.notifications.error(localize('dsh.newSessionNoId', "会话已创建，但没有返回会话编号，无法打开。"));
+				dshFail(this.notifications, localize('dsh.newSessionNoId', "DSH-IDE: the session was created but no session id was returned, so it cannot be opened."));
 				return;
 			}
 				const bound = await this._chat.bind(created.sessionId);
 				if (!bound) {
-					this.notifications.error(localize('dsh.bindFailed', "DSH 会话已创建，但绑定失败。请重新打开该会话。"));
+					dshFail(this.notifications, localize('dsh.bindFailed', "DSH-IDE: the session was created but binding failed. Reopen that session."));
 					return;
 				}
 				// 按会话资源打开：`workbench.action.chat.open` 不带 `dsh:/<id>`，会停在当前会话。

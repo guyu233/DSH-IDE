@@ -9,7 +9,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
-import { projectDshIdeSessionSearch } from '../../../src/vs/platform/dshClient/common/dshIdeSessionSearch.js';
+import { projectDshIdeSessionSearch } from '../../../src/vs/platform/dshClient/protocol/dshIdeSessionSearch.js';
 
 test('projectDshIdeSessionSearch keeps only the neutral sessionId/snippet pair', () => {
 	const value = {
@@ -51,11 +51,11 @@ test('projectDshIdeSessionSearch is fail-closed for malformed payloads', () => {
 
 test('the IDE service forwards hasMore instead of dropping it', () => {
 	// 官方单批上限 20 条。服务层若把 hasMore 丢掉，用户搜到 20 条会以为那就是全部。
-	const source = readFileSync(new URL('../../../src/vs/workbench/contrib/dsh/browser/dshIdeSessionsService.ts', import.meta.url), 'utf8');
+	const source = readFileSync(new URL('../../../src/vs/workbench/contrib/dsh/browser/vscode/dshIdeSessionsService.ts', import.meta.url), 'utf8');
 	assert.match(source, /readonly hasMore: boolean/, 'the service result must carry hasMore');
 	assert.match(source, /hasMore: result\.value\?\.hasMore === true/, 'hasMore must come from the host reply');
 	// 命令入口必须在有下一批时说明，否则用户不知道结果被截断。
-	const commands = readFileSync(new URL('../../../src/vs/workbench/contrib/dsh/browser/dshSessionSearchCommands.ts', import.meta.url), 'utf8');
+	const commands = readFileSync(new URL('../../../src/vs/workbench/contrib/dsh/browser/vscode/dshSessionSearchCommands.ts', import.meta.url), 'utf8');
 	assert.match(commands, /dsh\.searchSessions\.truncated/, 'the command must say the list is truncated');
 	assert.match(commands, /if \(result\.hasMore\)/, 'the notice must be conditional on hasMore');
 });
@@ -64,7 +64,7 @@ test('write paths do not re-read the list after the host already fanned it out',
 	// Host 的 newSession / archiveSession / unarchiveSession / setSessionFavorite /
 	// setSessionPinned 都会 fanout `session-list`，列表控制器收到后自己重查。
 	// 服务层再 await refresh() 等于每次写操作多打一轮 listSessions。
-	const source = readFileSync(new URL('../../../src/vs/workbench/contrib/dsh/browser/dshIdeSessionsService.ts', import.meta.url), 'utf8');
+	const source = readFileSync(new URL('../../../src/vs/workbench/contrib/dsh/browser/vscode/dshIdeSessionsService.ts', import.meta.url), 'utf8');
 	for (const method of ['createSession', 'archiveSession', 'unarchiveSession']) {
 		const start = source.indexOf(`async ${method}(`);
 		assert.ok(start >= 0, `${method} must exist`);

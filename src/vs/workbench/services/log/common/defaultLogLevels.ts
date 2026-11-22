@@ -5,9 +5,9 @@
 
 import { ILogService, ILoggerService, LogLevel, LogLevelToString, getLogLevel, parseLogLevel } from '../../../../platform/log/common/log.js';
 import { createDecorator } from '../../../../platform/instantiation/common/instantiation.js';
-import { IWorkbenchEnvironmentService } from '../../../services/environment/common/environmentService.js';
+import { IWorkbenchEnvironmentService } from '../../environment/common/environmentService.js';
 import { FileOperationResult, IFileService, toFileOperationResult } from '../../../../platform/files/common/files.js';
-import { IJSONEditingService } from '../../../services/configuration/common/jsonEditing.js';
+import { IJSONEditingService } from '../../configuration/common/jsonEditing.js';
 import { isString, isUndefined } from '../../../../base/common/types.js';
 import { EXTENSION_IDENTIFIER_WITH_LOG_REGEX } from '../../../../platform/environment/common/environmentService.js';
 import { InstantiationType, registerSingleton } from '../../../../platform/instantiation/common/extensions.js';

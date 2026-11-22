@@ -6,8 +6,11 @@
 
 1. 全仓只承认一条开发路线，不得在代码注释、提交信息或文档中新增并行路线、可选阶段、回退路径、条件替代形态。
 2. **身份前提（每一次改动的默认假设）**：DSH-IDE 是 **DSH 应用内的 bundle 插件**，不是独立应用，不产出独立 IDE 安装包，不新增第二个 Cordis 根、第二套会话或第二套协议。「一体」是**天然前提**而非待达成的合并目标：`dshCtx` 本就是 DSH 的、位于 DSH Host 进程，DSH-IDE 作为插件直接复用；DSH 应用内部的进程边界（Host 半身 / IDE 窗口）只走官方客户端传输与唯一 `dshIde` 通道。**禁止**把它当作「两个 app 需要跨边界合并」来设计、评估或讨论。
-3. 改动涉及契约时，先改契约真源 `src/vs/platform/dshClient/common/dshIdeProtocol.ts`，再改实现，最后跑门禁。
+3. 改动涉及契约时，先改契约真源 `src/vs/platform/dshClient/protocol/dshIdeProtocol.ts`，再改实现，最后跑门禁。
 4. 发现文档与代码矛盾时，改文档迁就代码，而不是反过来。
+5. **文档事实必须双证据**：DSH 侧结论必须给出在线 DSH 源码路径/HEAD（或 commit）与具体符号/注册点；DSH-IDE 侧结论必须给出当前 `src/**`、`build/**`、测试或实测输出。无双边证据的内容只能标为待核对，不得写成事实；协议/数据存在不等于界面已显示，计划不等于已实现。状态只使用 `已实现` / `部分实现` / `未实现` / `PENDING`。
+6. **业务事实单一真源**：DSH-IDE 是 DSH core 的 UI 投影层，不是第二个响应生成器。用户消息、assistant 正文、thinking、工具调用/结果、approval/question/plan 终态、usage、quota、deliverables、turn/process/tail 必须由 DSH core/Host 回来；IDE 侧只允许本地处理输入草稿、optimistic running、卡片临时隐藏、折叠状态、滚动位置、失败提示与结构化内容的原生化投影。禁止本地生成 assistant 回复、工具结果、审批/问卷答复节点、plan discuss 终态或任何伪装成 DSH 会话事实的 response。
+7. **每轮适配性检查与优化机会评估**：每一轮开发/评审开始时必须在线只读检查 DSH GitHub 最新提交与破坏性变更信号（协议、事件、slot/node、tool view、pending、session API、composer、attachment、context/producer/form），并检查 VS Code 最新更新日志/相关 API 与 Chat 组件变更；按检查结果判断本仓是否需要调整协议、投影、渲染、门禁或文档。除破坏性风险外，必须同时评估上游更新是否让本仓已有实现获得更优替代：原生组件、官方 API、官方 event/projection、官方 slot/node/tool view、官方 settlement、官方增量/折叠/滚动/a11y 机制，凡能替换自研补丁、文本模拟、兼容层或降级实现的，必须记录为优化机会并进入计划。DSH 侧有破坏性更新时优先适配 DSH；VS Code 侧通常按小更新处理，只吸收与 Chat/editor/input/theme/a11y 相关的变更。检查结果必须在提交信息/文档记录中写明：检查日期、来源、破坏性结论、优化机会、本仓动作（无需调整也要记录）。禁止用本地历史快照代替在线检查。
 
 ## 2. 资源复用优先
 
@@ -36,6 +39,7 @@
 
 ## 6. 提交与验证纪律
 
+- 每完成一个可独立验收的大问题修复、新功能实现或较大改动，必须立即提交一次；不得把多个大主题混在一次提交里，也不得把已完成工作长期积压在工作树。小改动可随同主题一起提交。
 - 每次提交信息写清「做了什么 / 门禁实测结果 / 未完成项」；未跑的门禁如实标注，禁止写「门禁全过」这类模糊表述。
 - 提交前核对 `git status --short` 的状态码（`M` 与 `A` 区分），显式 `git add <文件>`，不用 `-A`。
 - 门禁状态只允许 `PASS` / `PENDING` / `FAIL` 三种；`PENDING` 不计入通过，不得标成 `PASS`。
@@ -46,5 +50,5 @@
 - **风格单一**：改动一律遵循 VS Code 既有约定——制表符缩进、单引号、语句结尾分号、`camelCase` / `PascalCase`、接口 `I` 前缀、类私有成员 `_` 前缀、`this._register(...)` / `DisposableStore` 管理生命周期、错误走 `onUnexpectedError`。不得引入第二套缩进、引号、命名或错误处理风格。
 - **同目录一致**：动手前先读同目录相邻实现，文件组织、导入顺序、命名、日志与配置读取方式与其保持一致。同一能力只保留一处实现和一个公共入口。
 - **注释语言**：**新增注释一律用中文**；不得翻译、改写或批量替换上游既有英文注释（保持与上游 diff 最小）。用户可见字符串、NLS key、日志与错误文案、类型名/标识符、API 注释仍按上游英文约定，不受本条影响。
-- **对照源码**：开发 DSH 相关能力时必须先查 GitHub 在线最新源码（`https://github.com/deepseek-ai/deepseek-harness`；VS Code 为 `https://github.com/microsoft/vscode` 或直接读本项目 `src/**`），以协议、事件、字段与调用顺序为依据；不得凭记忆臆造形状，不在本机下载整仓副本，找不到依据时回到契约真源 `src/vs/platform/dshClient/common/dshIdeProtocol.ts`。
+- **对照源码**：开发 DSH 相关能力时必须先查 GitHub 在线最新源码（`https://github.com/deepseek-ai/deepseek-harness`；VS Code 为 `https://github.com/microsoft/vscode` 或直接读本项目 `src/**`），以协议、事件、字段与调用顺序为依据；不得凭记忆臆造形状，不在本机下载整仓副本，找不到依据时回到契约真源 `src/vs/platform/dshClient/protocol/dshIdeProtocol.ts`。
 - **质量门禁**：新增与修改代码必须通过 `tsc --noEmit` 与相关测试。

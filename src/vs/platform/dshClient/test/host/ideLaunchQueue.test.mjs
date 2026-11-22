@@ -11,7 +11,7 @@
 
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { IDE_CLIENT_LONG_POLL_MS, IDE_CLIENT_POLL_TIMEOUT_MS, IdeLaunchQueue, ideWorkspaceArgs, normalizeLaunchWait } from '../../host/ide-launch-queue.js';
+import { IDE_CLIENT_LONG_POLL_MS, IDE_CLIENT_POLL_TIMEOUT_MS, IdeLaunchQueue, ideWorkspaceArgs, normalizeLaunchWait } from '../../host/launch/ide-launch-queue.js';
 
 test('ideWorkspaceArgs puts the workspace after -- so a leading dash is not a switch', () => {
 	assert.deepEqual(ideWorkspaceArgs(undefined), []);

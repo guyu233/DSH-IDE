@@ -79,13 +79,13 @@ test('DSH bundle: host/client/manifest/icon live at their native positions', () 
 		'resources/dsh/locale/pt.json',
 		'src/vs/platform/dshClient/index.js',
 		'src/vs/platform/dshClient/client/client.js',
-		'src/vs/platform/dshClient/host/ide-service.js',
+		'src/vs/platform/dshClient/host/usecase/ide-service.js',
 		'src/vs/platform/dshClient/common/env.js',
 		// P1：协议真源与版本契约（单一真源，二者必须存在于原生位置）。
-		'src/vs/platform/dshClient/common/dshIdeProtocol.ts',
-		'src/vs/platform/dshClient/common/dshIdeContract.ts',
-		'src/vs/platform/dshClient/electron-main/dshIdeChannel.ts',
-		'src/vs/platform/dshClient/electron-main/ide-view-service.ts',
+		'src/vs/platform/dshClient/protocol/dshIdeProtocol.ts',
+		'src/vs/platform/dshClient/protocol/dshIdeContract.ts',
+		'src/vs/platform/dshClient/ide/main/dshIdeChannel.ts',
+		'src/vs/platform/dshClient/ide/main/ide-view-service.ts',
 		// 旧连接层/聊天文件已整删，不再列入（协议耦合的 renderer 侧实现与事件映射）。
 	];
 	for (const relative of expected) {
@@ -189,12 +189,13 @@ test('DSH bundle: chat content is driven by the native ChatModel, no sidecar art
 test('DSH bundle: only the Host common dependencies are staged (transport modules stay in the app)', () => {
 	const gulp = fs.readFileSync(path.join(vscodeRoot, 'build/gulpfile.vscode.ts'), 'utf8');
 	assert.match(gulp, /path\.join\(dshClientOut, 'common', 'env\.js'\)/, 'common/env.js must be staged as a single file');
-	assert.match(gulp, /path\.join\(dshClientOut, 'common', 'dshIdeAuthRedaction\.js'\)/, 'D55 auth redaction must be shipped with the Host bridge');
-	assert.match(gulp, /path\.join\(dshClientOut, 'common', 'dshIdeSessionList\.js'\)/, 'shared session projection must be shipped with the Host bridge');
-	assert.match(gulp, /path\.join\(dshClientOut, 'common', 'dshIdeCommandList\.js'\)/, 'D13 shared command projection must be shipped with the Host bridge');
-	assert.match(gulp, /path\.join\(dshClientOut, 'common', 'dshIdeCommandLine\.js'\)/, 'D13 shared command line builder must be shipped with the Host bridge');
-	assert.match(gulp, /path\.join\(dshClientOut, 'common', 'dshIdeArchiveSet\.js'\)/, 'D59 shared archive projection must be shipped with the Host bridge');
-	assert.match(gulp, /path\.join\(dshClientOut, 'common', 'dshIdeSessionSearch\.js'\)/, 'D59 shared session search projection must be shipped with the Host bridge');
+	// 分层后协议投影在 `protocol/`，Host 运行时路径（env / 定位 / 主题）留在 `common/`。
+	assert.match(gulp, /path\.join\(dshClientOut, 'protocol', 'dshIdeAuthRedaction\.js'\)/, 'D55 auth redaction must be shipped with the Host bridge');
+	assert.match(gulp, /path\.join\(dshClientOut, 'protocol', 'dshIdeSessionList\.js'\)/, 'shared session projection must be shipped with the Host bridge');
+	assert.match(gulp, /path\.join\(dshClientOut, 'protocol', 'dshIdeCommandList\.js'\)/, 'D13 shared command projection must be shipped with the Host bridge');
+	assert.match(gulp, /path\.join\(dshClientOut, 'protocol', 'dshIdeCommandLine\.js'\)/, 'D13 shared command line builder must be shipped with the Host bridge');
+	assert.match(gulp, /path\.join\(dshClientOut, 'protocol', 'dshIdeArchiveSet\.js'\)/, 'D59 shared archive projection must be shipped with the Host bridge');
+	assert.match(gulp, /path\.join\(dshClientOut, 'protocol', 'dshIdeSessionSearch\.js'\)/, 'D59 shared session search projection must be shipped with the Host bridge');
 	assert.doesNotMatch(gulp, /path\.join\(dshClientOut, 'common'\), 'common'/, 'common/ must not be staged as a whole directory');
 });
 
@@ -219,14 +220,15 @@ test('DSH bundle: runtime host-endpoint.json is removed from staging before pack
 test('every common/ shared module is explicitly staged for the bundle', () => {
 	const gulp = fs.readFileSync(path.join(repoRoot, 'build/gulpfile.vscode.ts'), 'utf8');
 
-	const commonDir = path.join(repoRoot, 'src/vs/platform/dshClient/common');
-	const shipped = fs.readdirSync(commonDir).filter(name => name.endsWith('.js')).sort();
-	assert.ok(shipped.length >= 7, `expected the shared common modules, got ${shipped.length}`);
+	// 共享投影现在在 protocol/；common/ 只剩 Host 运行时路径。
+	const protocolDir = path.join(repoRoot, 'src/vs/platform/dshClient/protocol');
+	const shipped = fs.readdirSync(protocolDir).filter(name => name.endsWith('.js')).sort();
+	assert.ok(shipped.length >= 7, `expected the shared protocol modules, got ${shipped.length}`);
 
-	// gulpfile 里每个 common 模块都应有 `'common', '<file>'` 形式的 staging 条目。
-	const staged = new Set([...gulp.matchAll(/'common',\s*'([a-zA-Z]+\.js)'/g)].map(m => m[1]));
+	// gulpfile 里每个 protocol 模块都应有 `'protocol', '<file>'` 形式的 staging 条目。
+	const staged = new Set([...gulp.matchAll(/'protocol',\s*'([a-zA-Z]+\.js)'/g)].map(m => m[1]));
 	const missing = shipped.filter(name => !staged.has(name));
-	assert.deepEqual(missing, [], `these common modules are not staged and would be missing from the bundle: ${missing.join(', ')}`);
+	assert.deepEqual(missing, [], `these protocol modules are not staged and would be missing from the bundle: ${missing.join(', ')}`);
 });
 
 
@@ -390,7 +392,7 @@ test('every bundled module is loadable as ESM, matching the package type', () =>
 	for (const name of names) {
 		const source = execFileSync('tar', ['-xzOf', tgz, name], { encoding: 'utf8', maxBuffer: 32 * 1024 * 1024 });
 		const head = source.slice(0, 400);
-		if (/^"use strict";/.test(head) || /^exports\.[\w$]+ = /m.test(head)) {
+		if (/^"use strict";/.test(head) || /^exports\.[\w$]+ = /m.test(head) || /\bexports\./.test(source)) {
 			offenders.push(name);
 		}
 	}

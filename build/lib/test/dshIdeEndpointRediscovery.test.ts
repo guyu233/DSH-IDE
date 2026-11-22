@@ -32,7 +32,7 @@ test('env declares the endpoint-file variable both halves share', () => {
 });
 
 test('Host hands the endpoint file path to the IDE it spawns', () => {
-	const service = read('src/vs/platform/dshClient/host/ide-service.js');
+	const service = read('src/vs/platform/dshClient/host/usecase/ide-service.js');
 	assert.match(service, /env\.DSH_IDE_ENDPOINT_FILE = /,
 		'host must pass the endpoint file path, otherwise the IDE cannot rediscover a new port');
 	assert.match(service, /host-endpoint\.json/,
@@ -55,7 +55,7 @@ test('launch listener caller rediscovers the endpoint after a failed call', () =
 });
 
 test('chat backend rediscovers the endpoint for both invoke and follow', () => {
-	const factory = read('src/vs/platform/dshClient/electron-main/dshIdeBackendFactory.ts');
+	const factory = read('src/vs/platform/dshClient/ide/main/dshIdeBackendFactory.ts');
 	assert.match(factory, /DSH_IDE_ENDPOINT_FILE_ENV/, 'the backend must accept the endpoint file path');
 	assert.match(factory, /private async refreshEndpoint\(\): Promise<boolean>/,
 		'the backend must own a rediscovery routine');
@@ -67,13 +67,13 @@ test('chat backend rediscovers the endpoint for both invoke and follow', () => {
 });
 
 test('a changed endpoint discards the stale cookie', () => {
-	const factory = read('src/vs/platform/dshClient/electron-main/dshIdeBackendFactory.ts');
+	const factory = read('src/vs/platform/dshClient/ide/main/dshIdeBackendFactory.ts');
 	assert.match(factory, /this\.cookie = undefined;/,
 		'a cookie issued by the old port must not be reused against the new one');
 });
 
 test('the follow stream reconnects by itself after the host goes away', () => {
-	const factory = read('src/vs/platform/dshClient/electron-main/dshIdeBackendFactory.ts');
+	const factory = read('src/vs/platform/dshClient/ide/main/dshIdeBackendFactory.ts');
 	// 断线不能是一条流的终点：必须排一次重连。
 	assert.match(factory, /const scheduleRetry = \(\): void =>/, 'the backend must schedule a reconnect');
 	assert.match(factory, /onDisconnect\?\.\(error\)/, 'a transport disconnect must be reported upward');
@@ -84,19 +84,19 @@ test('the follow stream reconnects by itself after the host goes away', () => {
 });
 
 test('a transport stream reports disconnect through the port contract', () => {
-	const protocol = read('src/vs/platform/dshClient/common/dshIdeProtocol.ts');
+	const protocol = read('src/vs/platform/dshClient/protocol/dshIdeProtocol.ts');
 	// 端口仍必须暴露断线回调；现在它排在绑定参数之前，签名因此显式可缺省。
 	assert.match(protocol, /onDisconnect: \(\(error: unknown\) => void\) \| undefined/,
 		'the port must expose a disconnect signal, otherwise no layer can reconnect');
 	assert.match(protocol, /binding: DshIdeViewBinding/,
 		'the same port must carry the originating view binding');
-	const transport = read('src/vs/platform/dshClient/transport/dshIdeTransport.ts');
+	const transport = read('src/vs/platform/dshClient/ide/transport/dshIdeTransport.ts');
 	assert.match(transport, /onDisconnect\?\.\(error\)/,
 		'the transport must forward the stream error to the disconnect callback');
 });
 
 test('a disconnected view tells the UI it is rebuilding instead of freezing', () => {
-	const service = read('src/vs/platform/dshClient/electron-main/ide-view-service.ts');
+	const service = read('src/vs/platform/dshClient/ide/main/ide-view-service.ts');
 	// 断线回调按代次过滤：只有当前代的断开才允许把界面切到 rebuild。
 	assert.match(service, /private publishDisconnected\(generation: number, error: unknown\): void/,
 		'the view service must publish a rebuild state on disconnect');
@@ -110,7 +110,7 @@ test('the IDE can bootstrap when DSH restarts before it starts', () => {
 	// 只知道端点文件也要启动接单器；否则 IDE 会比 DSH 活得久时永远接不了单。
 	assert.match(app, /const hasEntry = \(typeof endpointOrigin === 'string' && endpointOrigin !== ''\)/,
 		'the launch listener must start from the endpoint file alone');
-	const factory = read('src/vs/platform/dshClient/electron-main/dshIdeBackendFactory.ts');
+	const factory = read('src/vs/platform/dshClient/ide/main/dshIdeBackendFactory.ts');
 	assert.match(factory, /if \(\(origin === undefined \|\| origin === ''\) && \(endpointFile === undefined \|\| endpointFile === ''\)\)/,
 		'the backend must stay available when only the endpoint file is known');
 });

@@ -74,7 +74,7 @@ Registry.as<IConfigurationRegistry>(ConfigurationExtensions.Configuration).regis
 			type: 'string',
 			default: '',
 			scope: ConfigurationScope.APPLICATION,
-			markdownDescription: nls.localize('dsh.hostBaseUrl', "DeepSeek Harness Host 的地址（由 DSH-IDE 插件自动写入）。"),
+			markdownDescription: nls.localize('dsh.hostBaseUrl', "Address of the DeepSeek Harness host (written automatically by the DSH-IDE plugin)."),
 		},
 	},
 });

@@ -13,7 +13,7 @@ import { ITextModel } from '../../../../../editor/common/model.js';
 import { IInstantiationService } from '../../../../../platform/instantiation/common/instantiation.js';
 import { ILabelService } from '../../../../../platform/label/common/label.js';
 import { IUriIdentityService } from '../../../../../platform/uriIdentity/common/uriIdentity.js';
-import { IReplaceService } from './../replace.js';
+import { IReplaceService } from '../replace.js';
 import { IFileMatch, IPatternInfo, ITextQuery, ITextSearchPreviewOptions, resultIsMatch } from '../../../../services/search/common/search.js';
 
 import { FileMatchImpl } from './fileMatch.js';

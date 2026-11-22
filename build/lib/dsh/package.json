@@ -16,6 +16,7 @@
     "client.js",
     "host/",
     "common/",
+    "protocol/",
     "cordis.patch.yml",
     "locale/*.json",
     "docs",

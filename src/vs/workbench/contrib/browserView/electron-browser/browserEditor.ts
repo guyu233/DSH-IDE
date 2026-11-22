@@ -16,7 +16,7 @@ import { BrowserEditorInput } from '../common/browserEditorInput.js';
 import { ThemeIcon } from '../../../../base/common/themables.js';
 import { URI } from '../../../../base/common/uri.js';
 import { IQuickInputButton } from '../../../../platform/quickinput/common/quickInput.js';
-import { IBrowserViewModel } from '../../browserView/common/browserView.js';
+import { IBrowserViewModel } from '../common/browserView.js';
 import { IThemeService } from '../../../../platform/theme/common/themeService.js';
 import { ITelemetryService } from '../../../../platform/telemetry/common/telemetry.js';
 import { IStorageService } from '../../../../platform/storage/common/storage.js';

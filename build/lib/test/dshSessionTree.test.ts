@@ -13,8 +13,8 @@ import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import { URI } from '../../../out/vs/base/common/uri.js';
 import { ChatSessionStatus, type IChatSessionItem } from '../../../out/vs/workbench/contrib/chat/common/chatSessionsService.js';
-import type { IDshIdeSessionSummary } from '../../../out/vs/platform/dshClient/common/dshIdeProtocol.js';
-import { archiveIdsFromResult, buildSessionTree, dropSession, flattenTree, isCurrentRefresh, mapTreeItem, sameTreeItem, sessionReadState } from '../../../out/vs/workbench/contrib/dsh/browser/dshSessionTree.js';
+import type { IDshIdeSessionSummary } from '../../../out/vs/platform/dshClient/protocol/dshIdeProtocol.js';
+import { archiveIdsFromResult, buildSessionTree, dropSession, flattenTree, isCurrentRefresh, mapTreeItem, sameTreeItem, sessionReadState } from '../../../out/vs/workbench/contrib/dsh/browser/vscode/dshSessionTree.js';
 
 function summary(sessionId: string, extra: Partial<IDshIdeSessionSummary> = {}): IDshIdeSessionSummary {
 	return {
@@ -196,14 +196,14 @@ test('a newer timestamp marks a known session unread and a first sighting stays 
 test('the live-running map is pruned to the sessions that still exist', () => {
 	// `liveRunning` 只增不清的话，删掉/归档的会话会一直留在内存里。
 	// 每轮刷新按当前名单剪一次，长会话不会越积越多。
-	const file = readFileSync(new URL('../../../src/vs/workbench/contrib/dsh/browser/dshAgentSessionsController.ts', import.meta.url), 'utf8');
+	const file = readFileSync(new URL('../../../src/vs/workbench/contrib/dsh/browser/vscode/dshAgentSessionsController.ts', import.meta.url), 'utf8');
 	assert.match(file, /const liveIds = new Set\(summaries\.map/, 'the current ids must be collected');
 	assert.match(file, /if \(!liveIds\.has\(sessionId\)\) \{\s*\n\s*this\.liveRunning\.delete\(sessionId\);/, 'a gone session must be dropped');
 });
 
 test('multi-root workspaces list in parallel instead of stacking round trips', () => {
 	// 每个工作区目录各要一次 listSessions。串行等的话，N 根工作区要叠加 N 次往返。
-	const file = readFileSync(new URL('../../../src/vs/workbench/contrib/dsh/browser/dshAgentSessionsController.ts', import.meta.url), 'utf8');
+	const file = readFileSync(new URL('../../../src/vs/workbench/contrib/dsh/browser/vscode/dshAgentSessionsController.ts', import.meta.url), 'utf8');
 	assert.match(file, /await Promise\.all\(queries\.map/, 'the per-folder reads must run concurrently');
 	assert.match(file, /const stale = \(\)/, 'the cancel/epoch check must be shared, not copy-pasted');
 	// 并发之后多个目录可能同时发现视图没开：必须共用一个在途 openView。
@@ -213,14 +213,14 @@ test('multi-root workspaces list in parallel instead of stacking round trips', (
 test('concurrent refresh triggers share one listSessions round', () => {
 	// 启动时会连着触发几次（构造、getStatus、连接状态变化），工作区切换也可能连发。
 	// 不合并的话每次都是一整轮 listSessions，按工作区目录数还要再翻倍。
-	const file = readFileSync(new URL('../../../src/vs/workbench/contrib/dsh/browser/dshAgentSessionsController.ts', import.meta.url), 'utf8');
+	const file = readFileSync(new URL('../../../src/vs/workbench/contrib/dsh/browser/vscode/dshAgentSessionsController.ts', import.meta.url), 'utf8');
 	assert.match(file, /private _refreshInFlight: Promise<void> \| undefined/);
 	assert.match(file, /if \(this\._refreshInFlight !== undefined\) \{\s*\n\s*return;/, 'a second trigger must reuse the in-flight round');
 	assert.match(file, /this\._refreshInFlight = undefined;/, 'the in-flight marker must be cleared when the round settles');
 });
 
 test('unarchive failure is not reported as an archive failure', () => {
-	const file = readFileSync(new URL('../../../src/vs/workbench/contrib/dsh/browser/dshAgentSessionsController.ts', import.meta.url), 'utf8');
+	const file = readFileSync(new URL('../../../src/vs/workbench/contrib/dsh/browser/vscode/dshAgentSessionsController.ts', import.meta.url), 'utf8');
 	assert.match(file, /dsh\.sessions\.unarchiveFailed/);
 	assert.match(file, /archived\s*\?\s*localize\('dsh\.sessions\.archiveFailed'/);
 	assert.match(file, /dsh\.sessions\.refreshFailed/);
@@ -240,7 +240,7 @@ test('a dropped connection is announced once and a reconnect clears it', () => {
 test('the sessions controller stops writing after it is disposed', () => {
 	// 控制器释放后，在途的 delete / archive 回包仍可能回来。
 	// 没有防护的话会写 _items 并 fire 到已经释放的列表视图。
-	const file = readFileSync(new URL('../../../src/vs/workbench/contrib/dsh/browser/dshAgentSessionsController.ts', import.meta.url), 'utf8');
+	const file = readFileSync(new URL('../../../src/vs/workbench/contrib/dsh/browser/vscode/dshAgentSessionsController.ts', import.meta.url), 'utf8');
 	assert.match(file, /private _disposed = false/, 'the controller must track disposal');
 	assert.match(file, /override dispose\(\): void \{\s*\n\s*this\._disposed = true;/, 'dispose must set the flag');
 	const deleteIdx = file.indexOf("await this.client.call('deleteSession'");

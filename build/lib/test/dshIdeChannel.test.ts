@@ -25,7 +25,7 @@ import {
 	type DshIdeSnapshot,
 	type DshIdeWaterfallNotice,
 	type DshIdeViewBinding,
-} from '../../../src/vs/platform/dshClient/common/dshIdeProtocol.ts';
+} from '../../../src/vs/platform/dshClient/protocol/dshIdeProtocol.ts';
 import {
 	DSH_IDE_CONTROL_CLOSE,
 	DSH_IDE_CONTROL_LAUNCH,
@@ -34,26 +34,24 @@ import {
 	DSH_IDE_WATERFALL_EVENT,
 	DshIdeChannel,
 	type DshIdeLauncher,
-} from '../../../out/vs/platform/dshClient/electron-main/dshIdeChannel.js';
+} from '../../../out/vs/platform/dshClient/ide/main/dshIdeChannel.js';
 import {
 	DshIdeViewService,
 	UnavailableDshIdeBackend,
 	type DshIdeBackend,
-} from '../../../out/vs/platform/dshClient/electron-main/ide-view-service.js';
+} from '../../../out/vs/platform/dshClient/ide/main/ide-view-service.js';
 
 const ALL_METHODS: DshIdeMethod[] = [
 	'submit', 'interrupt', 'resume', 'newSession', 'fork', 'rewind', 'loadOlder',
 	'answerApproval', 'answerQuestion', 'cancelRequest', 'setModel', 'setEffort',
-	'setPermissionPreset', 'runCommand', 'listSessions', 'deleteSession', 'listModels',
-	'listCommands', 'fetchRowDetail', 'readAttachment', 'refreshSnapshot',
+	'setPermissionPreset', 'runCommand', 'listSessions', 'deleteSession', 'listModels', 'listCommands',
+	'fetchRowDetail', 'readAttachment', 'refreshSnapshot',
 	'accountGetState', 'accountGetProfile',
 	'archiveSession', 'unarchiveSession', 'searchSessions',
 	'composerState', 'presentationSettings', 'setTeamEnabled', 'setAgentPreset',
-	'setGoal', 'listSkills',
 	'renameSession', 'setSessionFavorite', 'setSessionPinned', 'listWorkspaces', 'moveSession', 'openSessionPath',
 	'capabilities',
-	'speechCatalog', 'speechTranscribe', 'inlineComplete', 'saveImageAttachment',
-	'mcpListServers', 'mcpRestartServer', 'jobList', 'jobKill',
+	'speechCatalog', 'speechTranscribe', 'saveImageAttachment',
 	'accountStartSignIn', 'accountCancelSignIn',
 ];
 
@@ -143,7 +141,10 @@ test('view service emits starting first and reuses channelId on repeated open', 
 	assert.equal(again.channelId, first.channelId, 'repeated open must reuse the same channelId');
 	assert.equal(again.version, first.version);
 	view.close();
-	assert.ok(backend.calls.includes('close'));
+	// 传输是进程级共享资源：单窗口 close 只释放自己的订阅，不能关闭共享传输。
+	// 关闭动作收在 `DshIdeChannel.dispose()`，由 `channel 整体释放` 单测覆盖。
+	assert.ok(backend.calls.includes('unfollow'), 'closing the view must release its follow subscription');
+	assert.ok(!backend.calls.includes('close'), 'closing one view must not close the shared backend');
 });
 
 test('view service publishes ready snapshots with strictly increasing versions', async () => {
@@ -224,7 +225,8 @@ const VALID: Record<DshIdeMethod, unknown> = {
 	listSessions: {},
 	deleteSession: { sessionId: 's-1' },
 	listModels: { workspace: 'w1' },
-	listCommands: { sessionId: 's-1', workspace: 'w1' },
+	listCommands: { sessionId: 's-1' },
+
 	fetchRowDetail: { rowId: 'row:1' },
 	readAttachment: { sessionId: 's-1', attachment: { attachmentId: 'img-1', mediaType: 'image/png', bytes: 3, width: 1, height: 1 } },
 	refreshSnapshot: {},
@@ -237,8 +239,6 @@ const VALID: Record<DshIdeMethod, unknown> = {
 	presentationSettings: {},
 	setTeamEnabled: { sessionId: 's-1', enabled: false },
 	setAgentPreset: { sessionId: 's-1', preset: 'create' },
-	setGoal: { sessionId: 's-1', action: 'create', objective: 'ship the chat baseline' },
-	listSkills: { sessionId: 's-1' },
 	capabilities: {},
 	renameSession: { sessionId: 's-1', title: '新标题' },
 	setSessionFavorite: { sessionId: 's-1' },
@@ -248,12 +248,7 @@ const VALID: Record<DshIdeMethod, unknown> = {
 	openSessionPath: { sessionId: 's-1' },
 	speechCatalog: {},
 	speechTranscribe: { request: { audioBase64: 'AAAA' } },
-	inlineComplete: { prefix: 'const a = 1;' },
 	saveImageAttachment: { mediaType: 'image/png', data: 'AAAA' },
-	mcpListServers: {},
-	mcpRestartServer: { name: 'server-1' },
-	jobList: { sessionId: 's-1' },
-	jobKill: { sessionId: 's-1', jobId: 'job-1' },
 	accountStartSignIn: { client: { version: '2.0.0', locale: 'zh-CN', timezoneOffsetSeconds: 28800 }, callbackOrigin: 'http://127.0.0.1:1', loginSource: 'desktop' },
 	accountCancelSignIn: { attemptId: 'attempt-1' },
 };
@@ -270,7 +265,7 @@ async function openedChannel(backend = fakeBackend()) {
 	return { view: views[0]!, views, channel, backend, first };
 }
 
-test('channel dispatches all 49 DTO methods through validateDshIdeInput', async () => {
+test('channel dispatches every DTO method through validateDshIdeInput', async () => {
 	const { channel, backend } = await openedChannel();
 	for (const method of ALL_METHODS) {
 		const output = await channel.call<{ value: unknown }>('ctx-a', method, VALID[method]);
@@ -378,6 +373,19 @@ test('disposeOwner removes only the named connection and is idempotent', async (
 	await assert.rejects(() => channel.call('ctx-a', 'listSessions', {}), (error: { code?: string }) => error.code === DSH_IDE_FEATURE_UNAVAILABLE);
 	const output = await channel.call<{ value: unknown }>('ctx-b', 'listSessions', {});
 	assert.deepEqual(Object.keys(output), ['value']);
+});
+
+test('disposing the whole channel closes the shared backend exactly once', async () => {
+	// 共享传输的生命周期归属：单窗口 close 不关（见上一条），通道销毁才关一次。
+	let closes = 0;
+	const backend = fakeBackend({ close: () => { closes++; } });
+	const channel = new DshIdeChannel(() => new DshIdeViewService(backend), undefined, () => backend.close());
+	await channel.call('ctx-a', DSH_IDE_CONTROL_OPEN, { view: 'chat' });
+	await channel.call('ctx-b', DSH_IDE_CONTROL_OPEN, { view: 'chat' });
+	channel.disposeOwner('ctx-a');
+	assert.equal(closes, 0, 'closing one view must not close the shared backend');
+	channel.dispose();
+	assert.equal(closes, 1, 'disposing the channel closes the shared backend once');
 });
 
 test('close control command releases the connection without cancelling sessions', async () => {

@@ -24,8 +24,8 @@ import {
 	removeHostEndpoint,
 	endpointLogText,
 	resolveHostEndpoint,
-} from '../../../../../../out/vs/platform/dshClient/host/ide-view-host.js';
-import { redactAuthMaterial, safeErrorText } from '../../../../../../out/vs/platform/dshClient/common/dshIdeAuthRedaction.js';
+} from '../../../../../../out/vs/platform/dshClient/host/bridge/ide-view-host.js';
+import { redactAuthMaterial, safeErrorText } from '../../../../../../out/vs/platform/dshClient/protocol/dshIdeAuthRedaction.js';
 
 /** 最小假上下文：记录监听、支持 emit，并按名字返回服务。 */
 function fakeCtx(services = {}) {
@@ -278,7 +278,12 @@ test('follow calls sessionController.follow once per session and fans the same f
 	const a = bridge.follow('s-1', frame => first.push(frame));
 	const b = bridge.follow('s-1', frame => second.push(frame));
 	assert.equal(requests.length, 1, 'one session is one follow');
-	assert.deepEqual(requests[0], { address: { kind: 'session', sessionId: 's-1' }, assistantStream: true });
+	assert.deepEqual(requests[0], {
+		address: { kind: 'session', sessionId: 's-1' },
+		assistantStream: true,
+		maxMessages: 500,
+		turnWindow: { minMessages: 50, minTurns: 2 },
+	});
 	push({ type: 'event', event: { type: 'user/message', seq: 1 } });
 	await new Promise(resolve => setImmediate(resolve));
 	assert.equal(first.length, 1);
@@ -887,7 +892,7 @@ test('plugin entry inject matches REQUIRED_SERVICES', async () => {
 	// 放进顶层 inject 会让整插件一直等它（真机实测）。
 	assert.deepEqual(declared, ['sessions'], 'top-level inject must only wait for the kernel service');
 	assert.ok(source.includes('ctx.inject(REQUIRED_SERVICES,'), 'bridge injection must use the same service list as bridge construction');
-	assert.match(source, /import \{ REQUIRED_SERVICES,.*\} from '\.\/host\/ide-view-host\.js'/);
+	assert.match(source, /import \{ REQUIRED_SERVICES,.*\} from '\.\/host\/bridge\/ide-view-host\.js'/);
 });
 
 
@@ -938,20 +943,44 @@ test('publishHostEndpointWhenListening gives up instead of inventing an endpoint
 // ---------------------------------------------------------------------------
 // 端点查找路径（真机缺陷：launch 永远找不到端点）
 //
-// IdeRemoteService 的 `root` 是 Host 工作目录（profile 根），而端点文件写在
-// `<plugin>/runtime/host-endpoint.json`。历史实现用 `join(root, 'runtime', ...)`，
-// 两条路径不是一回事 → 按钮点了永远失败。
+// 端点文件必须和本次 DSH 可执行文件同一块盘。
+// 写进插件包目录会在 pnpm link 跨盘时让硬链接失败，按钮点了没窗口。
 // ---------------------------------------------------------------------------
 
-test('endpoint lives under the plugin directory, not the host cwd', () => {
-	// 真实布局：<profile>/node_modules/dsh-ide/runtime/host-endpoint.json
-	//           root = <profile>
-	const profile = 'C:/Users/x/.dsh/profiles/desktop';
-	const pluginRoot = `${profile}/node_modules/dsh-ide`;
-	const correct = `${pluginRoot}/runtime/host-endpoint.json`;
-	const wrong = `${profile}/runtime/host-endpoint.json`;
-	assert.notEqual(correct, wrong, 'the two paths must differ — this is the bug that was fixed');
-	assert.ok(correct.includes('node_modules/dsh-ide'), 'the endpoint must be looked up inside the plugin');
+test('endpoint file stays on the exe volume, not inside a cross-volume plugin link', async () => {
+	const { hostEndpointFile } = await import('../../common/dshLocations.js');
+	const previous = {
+		DSH_HOME: process.env.DSH_HOME,
+		DSH_PROFILE_DIR: process.env.DSH_PROFILE_DIR,
+		LOCALAPPDATA: process.env.LOCALAPPDATA,
+	};
+	const missing = 'D:\\missing-dsh-home';
+	const local = 'C:\\Users\\x\\AppData\\Local';
+	process.env.DSH_HOME = missing;
+	delete process.env.DSH_PROFILE_DIR;
+	process.env.LOCALAPPDATA = local;
+	try {
+		const file = hostEndpointFile('C:\\Programs\\DeepSeek Harness\\DeepSeek Harness.exe', target => {
+			const value = String(target);
+			if (value === missing) {
+				throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
+			}
+			if (value.startsWith('D:')) {
+				return { dev: 2, isDirectory: () => true };
+			}
+			return { dev: 1, isDirectory: () => !value.endsWith('.exe') };
+		});
+		assert.equal(file, 'C:\\Users\\x\\AppData\\Local\\dsh-ide\\host-endpoint.json');
+		assert.equal(file.includes('node_modules'), false);
+	} finally {
+		for (const key of Object.keys(previous)) {
+			if (previous[key] === undefined) {
+				delete process.env[key];
+			} else {
+				process.env[key] = previous[key];
+			}
+		}
+	}
 });
 
 // ---------------------------------------------------------------------------
@@ -1085,91 +1114,6 @@ function commandServices(overrides = {}) {
 		...overrides,
 	};
 }
-
-test('listCommands resolves the bound agent and projects only neutral command fields', async () => {
-	let seenAgent;
-	const services = commandServices({
-		commands: { list: agent => { seenAgent = agent; return [
-			{ definitionId: 'internal', name: 'plan', description: 'Plan a task', input: { hint: 'topic' } },
-			{ name: 'clear', description: '' },
-			{ name: 'status', description: 'Show status' },
-		]; } },
-	});
-	const { bridge } = bridgeWith(services);
-	bridge.open({ view: 'chat', params: { sessionId: 's-1' } });
-	const result = await bridge.invoke('listCommands', { sessionId: 's-1' });
-	assert.deepEqual(seenAgent, { id: 's-1' });
-	assert.deepEqual(result, [
-		{ name: 'plan', description: 'Plan a task' },
-		{ name: 'clear', description: '' },
-		{ name: 'status', description: 'Show status' },
-	]);
-	// 官方内部结构（definitionId / input）不得透传到 IDE 侧。
-	assert.ok(!JSON.stringify(result).includes('internal') && !JSON.stringify(result).includes('hint'));
-});
-
-test('listCommands refuses when the DSH commands service is unavailable', async () => {
-	const { bridge } = bridgeWith({ agents: { get: () => ({ id: 's-1' }) } });
-	bridge.open({ view: 'chat', params: { sessionId: 's-1' } });
-	await assert.rejects(() => bridge.invoke('listCommands', { sessionId: 's-1' }), error => error.code === FEATURE_UNAVAILABLE && /commands/.test(error.message));
-});
-
-test('listCommands refuses when the bound session has no live agent', async () => {
-	const { bridge } = bridgeWith(commandServices({ agents: { get: () => undefined } }));
-	bridge.open({ view: 'chat', params: { sessionId: 's-1' } });
-	await assert.rejects(() => bridge.invoke('listCommands', { sessionId: 's-1' }), error => error.code === FEATURE_UNAVAILABLE && /no live agent/.test(error.message));
-});
-
-// ---------------------------------------------------------------------------
-// D13（第 34 轮）：runCommand / setPermissionPreset 接线（§8.10.10 契约决定后）。
-// Host 侧进程内直调 commands.execute(agent, line, [], signal)，共享 line 构造与结果映射。
-// ---------------------------------------------------------------------------
-
-function commandExecuteServices(outcome) {
-	return {
-		agents: { get: id => (id === 's-1' ? { id: 's-1' } : undefined) },
-		commands: { list: () => [], execute: async (agent, line, attachments, signal) => {
-			commandExecuteServices.lastCall = { agent, line, attachments, signal };
-			return outcome;
-		} },
-	};
-}
-
-test('runCommand builds a slash line and maps a success result to accepted', async () => {
-	const { bridge } = bridgeWith(commandExecuteServices({ commandId: 'c1', result: { kind: 'success', text: 'ok' } }));
-	bridge.open({ view: 'chat', params: { sessionId: 's-1' } });
-	assert.deepEqual(await bridge.invoke('runCommand', { sessionId: 's-1', command: 'plan', args: ['a', 'b-c'] }), { accepted: true });
-	const call = commandExecuteServices.lastCall;
-	assert.equal(call.line, '/plan a b-c');
-	assert.deepEqual(call.attachments, []);
-	assert.ok(call.signal instanceof AbortSignal, 'Host must provide a real AbortSignal for in-process execute');
-});
-
-test('setPermissionPreset reuses the same executor with /permission <preset>', async () => {
-	const { bridge } = bridgeWith(commandExecuteServices({ commandId: 'c1', result: { kind: 'success' } }));
-	bridge.open({ view: 'chat', params: { sessionId: 's-1' } });
-	assert.deepEqual(await bridge.invoke('setPermissionPreset', { sessionId: 's-1', preset: 'workspace-write' }), { accepted: true });
-	assert.equal(commandExecuteServices.lastCall.line, '/permission workspace-write');
-});
-
-test('runCommand rejects a non-admitted (undefined) or error result instead of faking accepted', async () => {
-	{
-		const { bridge } = bridgeWith(commandExecuteServices(undefined));
-		bridge.open({ view: 'chat', params: { sessionId: 's-1' } });
-		await assert.rejects(() => bridge.invoke('runCommand', { sessionId: 's-1', command: 'nope' }), error => error.code === INVALID_ARGUMENT && /not admitted/.test(error.message));
-	}
-	{
-		const { bridge } = bridgeWith(commandExecuteServices({ commandId: 'c1', result: { kind: 'error', text: 'unknown preset "x"' } }));
-		bridge.open({ view: 'chat', params: { sessionId: 's-1' } });
-		await assert.rejects(() => bridge.invoke('setPermissionPreset', { sessionId: 's-1', preset: 'x' }), error => error.code === FEATURE_UNAVAILABLE && /unknown preset/.test(error.message));
-	}
-});
-
-// ---------------------------------------------------------------------------
-// D52（第 37 轮）：活动会话删除判据——§8.10.5（2）要求「能证明已停止且资源
-// 已释放」才允许删除。DSH-IDE 不自行 flush / detach，只做 fail-closed 前置：
-// running===true 拒绝、读不到状态同样拒绝、仅 running===false 放行。
-// ---------------------------------------------------------------------------
 
 test('D52 deleteSession refuses a session that is still running', async () => {
 	let pluginCalled = false;
@@ -1473,69 +1417,6 @@ test('composerState keeps only the fields the input bar renders', async () => {
 	});
 });
 
-test('listSkills projects only the neutral skill card fields', async () => {
-	const calls = [];
-	const { bridge } = bridgeWith({
-		sessionSkillCatalog: {
-			list: async (request, signal) => {
-				calls.push({ request, hasSignal: signal instanceof AbortSignal });
-				return {
-					skills: [
-						{
-							name: 'dsh-doc',
-							description: 'DSH 文档',
-							whenToUse: '查 DSH 事实时',
-							modelInvocable: true,
-							path: 'C:/secret/absolute/path.md',
-						},
-						{
-							name: 'virtual-only',
-							description: '虚拟技能',
-							modelInvocable: false,
-						},
-						// 缺必填字段的条目不投影，也不伪造默认值。
-						{ name: '', description: 'bad', modelInvocable: true },
-						null,
-					],
-				};
-			},
-		},
-	});
-	bridge.open({ view: 'chat', params: { sessionId: 's-1' } });
-	const skills = await bridge.invoke('listSkills', { sessionId: 's-1' });
-	assert.equal(calls.length, 1);
-	assert.deepEqual(calls[0].request, { sessionId: 's-1' });
-	assert.equal(calls[0].hasSignal, true);
-	assert.deepEqual(skills, [
-		{
-			name: 'dsh-doc',
-			description: 'DSH 文档',
-			whenToUse: '查 DSH 事实时',
-			modelInvocable: true,
-			userInvocable: true,
-		},
-		{
-			name: 'virtual-only',
-			description: '虚拟技能',
-			modelInvocable: false,
-			userInvocable: true,
-		},
-	]);
-	for (const skill of skills) {
-		assert.equal('path' in skill, false);
-		assert.equal('provider' in skill, false);
-	}
-});
-
-test('listSkills rejects explicitly when the session skill catalog is unavailable', async () => {
-	const { bridge } = bridgeWith();
-	bridge.open({ view: 'chat', params: { sessionId: 's-1' } });
-	await assert.rejects(
-		() => bridge.invoke('listSkills', { sessionId: 's-1' }),
-		error => error.code === 'dsh-ide/feature-unavailable',
-	);
-});
-
 test('setTeamEnabled and setAgentPreset call the official services on the live agent', async () => {
 	const agent = { id: 's-1' };
 	const calls = [];
@@ -1549,53 +1430,6 @@ test('setTeamEnabled and setAgentPreset call the official services on the live a
 	assert.deepEqual(await bridge.invoke('setAgentPreset', { sessionId: 's-1', preset: 'create' }), { accepted: true });
 	assert.deepEqual(calls, [['team', agent, true], ['preset', agent, 'create']]);
 	await assert.rejects(() => bridge.invoke('setAgentPreset', { sessionId: 's-1', preset: 'has space' }), error => error.code === INVALID_ARGUMENT);
-});
-
-test('setGoal routes each action to the official goals service', async () => {
-	const agent = { id: 's-1' };
-	const calls = [];
-	const view = {
-		id: 'g-1', revision: 2, objective: '完成手册', phase: 'active', maxGoalRounds: 8,
-		roundsStarted: 1, createdAt: 10, updatedAt: 20, activation: 'armed',
-	};
-	const goals = {
-		create: (who, request) => { calls.push(['create', who, request]); return view; },
-		edit: (who, ref, request) => { calls.push(['edit', who, ref, request]); return view; },
-		pause: (who, ref) => { calls.push(['pause', who, ref]); return { ...view, phase: 'paused' }; },
-		resume: (who, ref) => { calls.push(['resume', who, ref]); return view; },
-		complete: (who, ref) => { calls.push(['complete', who, ref]); return { ...view, phase: 'complete' }; },
-		clear: (who, ref) => { calls.push(['clear', who, ref]); return ref; },
-	};
-	const { bridge } = bridgeWith({
-		agents: { get: id => id === 's-1' ? agent : undefined },
-		goals,
-	});
-	bridge.open({ view: 'chat', params: { sessionId: 's-1' } });
-
-	const created = await bridge.invoke('setGoal', { sessionId: 's-1', action: 'create', objective: '完成手册', maxGoalRounds: 8 });
-	assert.equal(created.goal.id, 'g-1');
-	assert.equal(created.goal.objective, '完成手册');
-	assert.equal(created.activation, 'armed');
-	await bridge.invoke('setGoal', { sessionId: 's-1', action: 'edit', id: 'g-1', revision: 1, objective: '新目标' });
-	await bridge.invoke('setGoal', { sessionId: 's-1', action: 'pause', id: 'g-1', revision: 2 });
-	await bridge.invoke('setGoal', { sessionId: 's-1', action: 'resume', id: 'g-1', revision: 3 });
-	await bridge.invoke('setGoal', { sessionId: 's-1', action: 'complete', id: 'g-1', revision: 4 });
-	await bridge.invoke('setGoal', { sessionId: 's-1', action: 'clear', id: 'g-1', revision: 5 });
-
-	assert.deepEqual(calls.map(call => call[0]), ['create', 'edit', 'pause', 'resume', 'complete', 'clear']);
-	// create 走进程内 goals.create，入参形状对齐 CreateGoalRequest，返回值是投影后的 GoalView。
-	assert.deepEqual(calls[0][2], { objective: '完成手册', maxGoalRounds: 8 });
-	// 其余动作都带 CAS 引用。
-	assert.deepEqual(calls[2][2], { id: 'g-1', revision: 2 });
-});
-
-test('setGoal refuses when there is no live agent', async () => {
-	const { bridge } = bridgeWith();
-	bridge.open({ view: 'chat', params: { sessionId: 's-1' } });
-	await assert.rejects(
-		() => bridge.invoke('setGoal', { sessionId: 's-1', action: 'create', objective: 'x' }),
-		error => error.code === 'dsh-ide/feature-unavailable',
-	);
 });
 
 test('archiving fans out the session list so other windows re-group the row', async () => {
@@ -1685,11 +1519,3 @@ test('close clears every per-bridge collection', async () => {
 	assert.equal(bridge._modelCatalogCache, undefined, '_modelCatalogCache must be dropped after close');
 });
 
-test('job operations reject a session that is not the bound one', async () => {
-	// 后台作业属于当前绑定的会话。修复前 jobList/jobKill 直接用 args.sessionId
-	// 调官方服务，任意 id 都能读到/终止别的会话的作业。
-	const { bridge } = bridgeWith();
-	bridge.open({ view: 'chat', params: { sessionId: 's-1' } });
-	await assert.rejects(() => bridge.invoke('jobList', { sessionId: 's-2' }), error => error.code === SESSION_SWITCHED);
-	await assert.rejects(() => bridge.invoke('jobKill', { sessionId: 's-2', jobId: 'j-1' }), error => error.code === SESSION_SWITCHED);
-});

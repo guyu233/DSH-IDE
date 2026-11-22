@@ -7,7 +7,7 @@ import { CancellationToken } from '../../../../../base/common/cancellation.js';
 import { URI } from '../../../../../base/common/uri.js';
 
 import { IMarkdownString } from '../../../../../base/common/htmlContent.js';
-import { ChatContextIconPath } from '../../common/attachments/chatVariableEntries.js';
+import { ChatContextIconPath } from '../attachments/chatVariableEntries.js';
 
 export interface IChatContextItem {
 	iconPath?: ChatContextIconPath;

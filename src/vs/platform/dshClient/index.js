@@ -10,8 +10,10 @@
 import { dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { hostEndpointFile } from './common/dshLocations.js';
-import { IdeRemoteService } from './host/ide-service.js';
-import { REQUIRED_SERVICES, createDshIdeHostBridge, publishHostEndpointWhenListening, removeHostEndpoint, endpointLogText } from './host/ide-view-host.js';
+import { watchThemePreference } from './host/usecase/dshThemeSync.js';
+import { watchLanguagePreference } from './host/usecase/dshLanguageSync.js';
+import { IdeRemoteService } from './host/usecase/ide-service.js';
+import { REQUIRED_SERVICES, createDshIdeHostBridge, publishHostEndpointWhenListening, removeHostEndpoint, endpointLogText } from './host/bridge/ide-view-host.js';
 
 export const name = 'dsh-ide';
 // 只硬依赖 `sessions`（内核级、必然存在）。`sessionController` 是 API 层服务，
@@ -24,14 +26,15 @@ export function apply(ctx, config = {}) {
 	const pluginRoot = dirname(fileURLToPath(import.meta.url));
 
 	// 官方 @Remote IDE 扩展服务（命名空间 ide，经官方 Typert Gateway 暴露给客户端）。
-	// `pluginRoot` 必须传**插件自身目录**：端点文件写在 `<plugin>/runtime/host-endpoint.json`，
-	// 而 `root`（= process.cwd() = profile 根）是另一条路径。历史实现把两者混用，
-	// 导致 launch() 永远找不到端点、按钮点了没反应（真机实测）。
+	// `pluginRoot` 必须传**插件自身目录**：载荷在 `<plugin>/runtime/app`。
+	// 端点文件不写在这里——插件可以被 pnpm link 到另一块盘。
+	// `root`（= process.cwd() = profile 根）同样不是端点文件的位置。
 	ctx.plugin(IdeRemoteService, { root, pluginRoot });
 
-	// 端点自解析：由 Host 自己算出 IDE 可用的 origin + launch URL，并写入插件目录下的
-	// `runtime/host-endpoint.json`。IDE 进程由操作系统单独拉起，环境变量无法传递，
-	// 而文件只解决「怎么找到端口」的引导问题——传输仍是官方 HTTP/WS（第 7 章 §3.1 裁定）。
+	// 端点自解析：由 Host 自己算出 IDE 可用的 origin + launch URL，并写入与本次
+	// DSH 可执行文件同卷的状态目录（`dshLocations.hostEndpointFile`）。IDE 子进程靠环境变量
+	// 和这份文件重新发现端口；文件不在插件包目录里。
+	// 文件只解决「怎么找到端口」的引导问题——传输仍是官方 HTTP/WS（第 7 章 §3.1 裁定）。
 	//
 	// 必须等 `webServer` 真正开始监听：`apply` 时 `webServer.port` 还是 undefined
 	// （端口由 listen 回填），立刻发布只会得到「无从发布」并静默跳过（真机实测踩过）。
@@ -40,6 +43,10 @@ export function apply(ctx, config = {}) {
 	// D55：插件卸载 / Host 重启时删除端点文件，让一次性 query token 不再落盘。
 	// ctx.effect 的清理函数在上下文销毁时调用；删除是 fire-and-forget，不阻塞卸载。
 	ctx.effect(() => () => void removeHostEndpoint(endpointFile), 'dsh-ide.host-endpoint-cleanup');
+	// DSH 外观（浅色 / 深色 / 跟随系统）是唯一来源，写进 IDE 用户设置。
+	ctx.effect(() => watchThemePreference(ctx), 'dsh-ide.theme-sync');
+	// DSH 的界面语言是唯一来源：同步到 IDE 的 argv.json；缺语言包时只记录，不伪造切换。
+	ctx.effect(() => watchLanguagePreference(ctx), 'dsh-ide.language-sync');
 	ctx.inject(['webServer', 'connection'], endpointCtx => {
 		void publishHostEndpointWhenListening(endpointCtx, endpointFile).then(endpoint => {
 			if (endpoint !== undefined) {
