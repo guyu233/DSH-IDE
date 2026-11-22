@@ -630,7 +630,12 @@ export function latestExchangeTurns(groups: readonly DshTurnProcess[]): readonly
 		}
 	}
 	if (startIndex === -1) {
-		return [];
+		// 官方「Collapse timing」：「The latest exchange of a **reopened Session** also receives the
+		// exemption, **starting at the first loaded Turn when the loaded window holds no opening Turn**.」
+		//
+		// 重开会话时窗口可能从中间切进来——没有「接纳人类输入」的 Turn（prompt 在窗口之外）。
+		// 此时不能返回空集合（那等于完全失去豁免），而应从**已载入的第一个 Turn** 起算。
+		return ordered.map(group => group.turn);
 	}
 	return ordered.slice(startIndex).map(group => group.turn);
 }

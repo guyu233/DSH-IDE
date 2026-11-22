@@ -247,7 +247,9 @@ test('latestExchangeTurns starts at the last turn that admitted human input', ()
 	// 最后一个有人类输入的是 turn 3 → exchange 是 [3,4,5]。
 	assert.deepEqual([...latestExchangeTurns(groups)], [3, 4, 5]);
 	// 没有人类输入时没有 exchange（豁免为空）。
-	assert.deepEqual([...latestExchangeTurns([mk(1, []), mk(2, [])])], []);
+	// 官方：重开会话时窗口可能从中间切进来、没有「接纳人类输入」的 Turn——
+	// 此时不能失去豁免，而应从**已载入的第一个 Turn** 起算。
+	assert.deepEqual([...latestExchangeTurns([mk(1, []), mk(2, [])])], [1, 2]);
 	// 只有第一个 Turn 有输入时，整个列表都属于同一个 exchange。
 	assert.deepEqual([...latestExchangeTurns([mk(1, ['u']), mk(2, []), mk(3, [])])], [1, 2, 3]);
 });
