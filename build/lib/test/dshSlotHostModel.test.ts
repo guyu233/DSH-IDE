@@ -632,7 +632,12 @@ test('the renderer consumes multi-segment groups instead of one line per turn', 
 	const source = readFileSync(new URL('../../../src/vs/workbench/contrib/dsh/browser/vscode/dshSlotHostContentPart.ts', import.meta.url), 'utf8');
 	assert.ok(source.includes('this.segmentAnchors(group, binding)'), 'the renderer must consult segment anchors');
 	assert.ok(source.includes('group.segments.length <= 1'), 'a single segment must fall back to the turn anchor');
-	assert.ok(source.includes("rows.push({ key: `summary:${nodeId}:${index}`"), 'multiple summaries per anchor must be rendered');
+	assert.ok(source.includes('key: `summary:${nodeId}:${index}`'), 'multiple summaries per anchor must be rendered');
+	// 组头必须是真 disclosure：`aria-expanded` 与 `aria-controls` 成对，且目标 id 由同一派生函数生成。
+	assert.ok(source.includes("button.setAttribute('aria-controls', row.controlledId)"), 'the header must point at a real target');
+	assert.ok(source.includes("button.setAttribute('aria-expanded'"), 'and announce its expanded state');
+	assert.ok(source.includes('element.id = this.groupHostId(row.nodeKey)'), 'the target row must actually carry that id');
+	assert.ok(source.includes('controlledId: this.groupHostId(nodeId)'), 'both sides must use the same derivation');
 	// summaryBefore 必须能存多行（否则多段会被覆盖成一行）。
 	// 组头现在是结构化的（含 line/expanded/onToggle），不再是纯字符串数组。
 	assert.ok(source.includes('const summaryBefore = new Map<string, readonly {'), 'the summary map must hold structured headers');

@@ -383,7 +383,14 @@ export class DshSlotHostContentPart extends Disposable implements IChatContentPa
 			const headers = summaryBefore.get(nodeId);
 			// 一个锚点前可能有多段各自的组头（同 Turn 多段时），按序各画一行。
 			headers?.forEach((header, index) => {
-				rows.push({ key: `summary:${nodeId}:${index}`, kind: 'summary', line: header.line, turn: header.turn, expanded: header.expanded, onToggle: header.onToggle });
+				rows.push({
+					key: `summary:${nodeId}:${index}`, kind: 'summary', line: header.line,
+					turn: header.turn, expanded: header.expanded, onToggle: header.onToggle,
+					// 组头控制的是它**下方那一行**（同一锚点节点），给那行一个稳定 id。
+					// 目标 id 由**锚点节点 key**派生，与 `renderNodeRow` 里给 node 行设 id 的规则一致——
+					// 两处都算同一个函数，避免跨帧存一份状态。
+					controlledId: this.groupHostId(nodeId),
+				});
 			});
 			rows.push({ key: `node:${nodeId}`, kind: 'node', nodeKey: nodeId });
 		}
@@ -432,11 +439,13 @@ export class DshSlotHostContentPart extends Disposable implements IChatContentPa
 					};
 					button.addEventListener('click', click);
 					refs.add({ dispose: () => button.removeEventListener('click', click) });
-					// **不设 `aria-expanded` / `aria-controls`**：本仓的组头目前只切换图标，
-					// 并不真的隐藏/显示一块独立 DOM 容器（过程内容由 slot host 整体重绘）。
-					// 只设 `aria-expanded` 会让读屏以为存在一个可展开区域，而 `aria-controls`
-					// 又找不到真实目标——那是**假装有 disclosure**，比不设更糟。
-					// 等组内容有独立容器后再一起补（届时成对设置）。
+					// 组头是真正的 disclosure：展开会显示/隐藏它下方的内容（CHK-369）。
+					// `aria-expanded` 与 `aria-controls` **必须成对**——目标 id 由锚点节点行承载，
+					// 两处用同一个派生函数（`groupHostId`），所以永远对得上。
+					if (row.controlledId !== undefined) {
+						button.setAttribute('aria-controls', row.controlledId);
+					}
+					button.setAttribute('aria-expanded', row.expanded === true ? 'true' : 'false');
 					button.title = row.line;
 				}
 				return button;
@@ -463,8 +472,13 @@ export class DshSlotHostContentPart extends Disposable implements IChatContentPa
 				part?.dispose();
 				return document.createElement('div');
 			}
-			case 'node':
-				return this.renderNode(row.nodeKey, binding, false, refs, row.key);
+			case 'node': {
+				const element = this.renderNode(row.nodeKey, binding, false, refs, row.key);
+				// 若某个组头把这一行当作 `aria-controls` 目标，它必须真的带 id。
+				// 用同一个派生函数（`groupHostId`），组头与目标永远对得上。
+				element.id = this.groupHostId(row.nodeKey);
+				return element;
+			}
 		}
 	}
 
@@ -573,6 +587,16 @@ export class DshSlotHostContentPart extends Disposable implements IChatContentPa
 			}
 		}
 		return anchors;
+	}
+
+	/**
+	 * 组头 `aria-controls` 的目标 id（由锚点节点 key 派生）。
+	 *
+	 * 组头控制的是「它下方那一行」——也就是锚点节点行。只要两处用同一个派生函数，
+	 * id 就永远对得上，不需要跨帧保存映射表。
+	 */
+	private groupHostId(nodeKey: string): string {
+		return `${this.domIdPrefix}-group-${nodeKey.replace(/[^A-Za-z0-9_-]/g, '_')}`;
 	}
 
 	private renderNode(nodeId: string, binding: NonNullable<ReturnType<typeof dshContentStore.get>>, nested: boolean, refs: DisposableStore, rowKey = nodeId): HTMLElement {
