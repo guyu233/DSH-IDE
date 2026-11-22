@@ -115,7 +115,8 @@ export class DshChatInputDockContribution extends Disposable {
 			// 队列来自 DSH 会话的 `inbox` 投影（官方 `QueueDock` 的数据源）。
 			// 没有会话时没有队列；`DshChatSession` 是本贡献点唯一的事实来源，不在 IDE 侧自建。
 			const inbox = sessionId === undefined ? undefined : this.chat.inboxNextTurn();
-			input.update(sessionId, session === undefined ? undefined : { session }, inbox);
+			const inboxStep = sessionId === undefined ? undefined : this.chat.inboxNextStep();
+			input.update(sessionId, session === undefined ? undefined : { session }, inbox, inboxStep);
 			composer.update(sessionId);
 		};
 		sync();

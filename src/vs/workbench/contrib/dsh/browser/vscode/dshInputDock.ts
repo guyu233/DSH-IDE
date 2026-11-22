@@ -132,7 +132,7 @@ function projectDockRows(slot: string, sessionId: string | undefined, props: Rea
 /** 官方 `QueueDock` 在可变更时提供的三种动作，顺序与官方按钮一致。 */
 const QUEUE_ACTIONS: readonly DshQueueRowAction[] = ['steer', 'edit', 'remove'];
 
-export function dshQueueDockRows(messages: readonly DshIdeInboxMessage[] | undefined): readonly DshInputDockRow[] {
+export function dshQueueDockRows(messages: readonly DshIdeInboxMessage[] | undefined, kind: 'next-turn' | 'next-step' = 'next-turn'): readonly DshInputDockRow[] {
 	const rows = (messages ?? []).filter(message => message !== null && typeof message === 'object');
 	if (rows.length === 0) {
 		return [];
@@ -152,14 +152,17 @@ export function dshQueueDockRows(messages: readonly DshIdeInboxMessage[] | undef
 	if (rows.length === 1) {
 		const preview = previewOf(rows[0]);
 		// 一条时也必须是非空行：正文与附件都没有就不画（与官方 `textOf`/`queueAttachments` 的容忍一致）。
-		return preview === '' ? [] : [{ id: 'queue', label: preview, order: 20, queueActions: QUEUE_ACTIONS }];
+		// `next-step` 是「转向」：与排队等下一轮的消息分开成行，id 不能撞。
+		return preview === '' ? [] : [{ id: kind === 'next-turn' ? 'queue' : 'queue-steer', label: preview, order: kind === 'next-turn' ? 20 : 21, queueActions: QUEUE_ACTIONS }];
 	}
 	const first = previewOf(rows[0]);
 	return [{
-		id: 'queue',
-		label: localize('dsh.queue.count', "{0} queued", rows.length),
+		id: kind === 'next-turn' ? 'queue' : 'queue-steer',
+		label: kind === 'next-turn'
+			? localize('dsh.queue.count', "{0} queued", rows.length)
+			: localize('dsh.queue.steerCount', "{0} to steer", rows.length),
 		...(first === '' ? {} : { description: first }),
-		order: 20,
+		order: kind === 'next-turn' ? 20 : 21,
 		queueActions: QUEUE_ACTIONS,
 	}];
 }

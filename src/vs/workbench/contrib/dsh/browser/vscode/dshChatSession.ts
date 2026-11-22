@@ -101,6 +101,8 @@ export interface IDshChatSession {
 	hasMore(): boolean;
 	/** 排队等下一个 Turn 的输入（官方 `inbox['next-turn']`，含内容块）。 */
 	inboxNextTurn(): readonly DshIdeInboxMessage[];
+	/** 排队等下一个 step 的转向输入（官方 `inbox['next-step']`）。 */
+	inboxNextStep(): readonly DshIdeInboxMessage[];
 	firstSeq(): number | undefined;
 	historyStatus(): DshHistoryStatus;
 	selectModel(provider: string, model: string): Promise<void>;
@@ -577,6 +579,10 @@ export class DshChatSession extends Disposable implements IDshChatSession {
 
 	inboxNextTurn(): readonly DshIdeInboxMessage[] {
 		return this.model.inboxNextTurn();
+	}
+
+	inboxNextStep(): readonly DshIdeInboxMessage[] {
+		return this.model.inboxNextStep();
 	}
 
 	hasMore(): boolean {

@@ -274,7 +274,8 @@
 		"dsh.queue.steer"
 	],
 	"vs/workbench/contrib/dsh/browser/vscode/dshInputDock": [
-		"dsh.queue.count"
+		"dsh.queue.count",
+		"dsh.queue.steerCount"
 	],
 	"vs/workbench/contrib/dsh/browser/vscode/dshChatInputDockContribution": [
 		"dsh.queue.editTitle",

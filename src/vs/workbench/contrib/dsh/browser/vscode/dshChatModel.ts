@@ -394,6 +394,8 @@ export class DshChatModel extends Disposable {
 	private _hasMore = true;
 	/** 官方 `inbox` 投影的 `next-turn`：排队等下一个 Turn 的输入（含内容块）。 */
 	private _inboxNextTurn: readonly DshIdeInboxMessage[] = [];
+	/** 官方 `inbox` 投影的 `next-step`：排队等下一个 step 的转向输入。 */
+	private _inboxNextStep: readonly DshIdeInboxMessage[] = [];
 	/**
 	 * 已读到的最早 durable seq（含已被实时窗口替换掉的旧页）。
 	 *
@@ -529,6 +531,7 @@ export class DshChatModel extends Disposable {
 		this._hasMore = this._hasMore && conversation.hasMore;
 		// 队列随每次会话帧整体替换（官方 `inbox` 是 fold 出来的完整值，不是增量）。
 		this._inboxNextTurn = conversation.inboxNextTurn ?? [];
+		this._inboxNextStep = conversation.inboxNextStep ?? [];
 		// 分页边界只前进：实时窗口把旧页挤出画面时，游标仍停在已读到的最早 seq。
 		if (liveMin !== undefined && (this.durableFloor === undefined || liveMin < this.durableFloor)) {
 			this.durableFloor = liveMin;
@@ -594,6 +597,11 @@ export class DshChatModel extends Disposable {
 	/** 当前排队等下一个 Turn 的输入（官方 `inbox['next-turn']`）。 */
 	inboxNextTurn(): readonly DshIdeInboxMessage[] {
 		return this._inboxNextTurn;
+	}
+
+	/** 当前排队等下一个 step 的转向输入（官方 `inbox['next-step']`）。 */
+	inboxNextStep(): readonly DshIdeInboxMessage[] {
+		return this._inboxNextStep;
 	}
 
 	hasMore(): boolean {

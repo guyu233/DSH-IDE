@@ -239,5 +239,6 @@
 	"dsh.queue.steer": "立即发送",
 	"dsh.question.viewAnswers": "查看答案",
 	"dsh.question.viewAnswersLabel": "查看已记录的答案",
-	"dsh.toolbar.label": "操作"
+	"dsh.toolbar.label": "操作",
+	"dsh.queue.steerCount": "{0} 条待转向"
 }

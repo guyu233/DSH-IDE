@@ -96,7 +96,8 @@ test('navigation lists anchors and steps after the latest turn grows', () => {
 		{ turn: 1, anchorKey: 'user:u1', promptKey: 'user:u1', responseKey: 'assistant:a1' },
 		{ turn: 2, anchorKey: 'user:u2', promptKey: 'user:u2' },
 	]);
-	assert.equal(tree.getStep(1, 0)[0].kind, 'assistant');
+	// `getStep` 无生产消费者，已删除（CHK-345）；同一断言改用 `list()` 表达。
+	assert.equal(tree.list().filter(node => node.turn === 1 && node.step === 0)[0].kind, 'assistant');
 	const shot = tree.snapshot();
 	assert.deepEqual(shot.order, ['user:u1', 'assistant:a1', 'user:u2']);
 	assert.equal(shot.nodes.get('assistant:a1')?.text, 'reply');

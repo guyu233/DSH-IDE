@@ -71,15 +71,17 @@ export class DshChatInputDock extends Disposable {
 	 * `owner` 只对 `conversation.input.dock` 有意义（官方 owner 是 `InputZone`）；
 	 * `composer.dock` 只用会话 id。两者都允许缺省，表示「当前没有会话」。
 	 */
-	update(sessionId: string | undefined, owner?: DshInputZoneOwner, inbox?: readonly DshIdeInboxMessage[]): void {
+	update(sessionId: string | undefined, owner?: DshInputZoneOwner, inbox?: readonly DshIdeInboxMessage[], inboxStep?: readonly DshIdeInboxMessage[]): void {
 		this.sessionId = sessionId;
 		this.owner = owner;
 		this.inbox = inbox;
+		this.inboxStep = inboxStep;
 		this.render();
 	}
 
 	private sessionId: string | undefined;
 	private inbox: readonly DshIdeInboxMessage[] | undefined;
+	private inboxStep: readonly DshIdeInboxMessage[] | undefined;
 
 	private render(): void {
 		for (const ref of this.rowRefs) {
@@ -91,7 +93,15 @@ export class DshChatInputDock extends Disposable {
 		// 官方把 `QueueDock` 注册成该槽的 `id: 'queue'` / `order: 20` occupant，
 		// 这里用同一套 list 语义把它并进去（同 order 时按 id 稳定排序）。
 		const rows = this.side === 'input'
-			? mergeDockRows(dshInputDockRows(this.sessionId, this.owner), dshQueueDockRows(this.inbox))
+			? mergeDockRows(
+				dshInputDockRows(this.sessionId, this.owner),
+				// 两个队列分开画：`next-turn` 是排队等下一轮，`next-step` 是转向当前轮。
+				// 它们的状态机与处置完全不同（一个可等、一个立刻插队），不能合成一行。
+				[
+					...dshQueueDockRows(this.inbox, 'next-turn'),
+					...dshQueueDockRows(this.inboxStep, 'next-step'),
+				],
+			)
 			: dshComposerDockRows(this.sessionId);
 		if (rows.length === 0) {
 			this.domNode.style.display = 'none';

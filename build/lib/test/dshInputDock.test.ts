@@ -106,3 +106,30 @@ test('a queued message with only attachments previews the attachment names', asy
 	assert.deepEqual(dshQueueDockRows([{ id: 'm2', sourceKind: 'user', content: [] }]), []);
 	assert.deepEqual(dshQueueDockRows(undefined), []);
 });
+
+test('the next-step queue renders as its own row, not merged into next-turn', async () => {
+	// 官方 `inbox` 有两个队列：`next-turn`（排队等下一轮）与 `next-step`（转向当前轮）。
+	// 它们的状态机与处置不同（一个可等、一个立刻插队），合成一行会让用户分不清。
+	const { dshQueueDockRows } = await import('../../../src/vs/workbench/contrib/dsh/browser/vscode/dshInputDock.ts');
+	const messages = [{ id: 'm1', sourceKind: 'user', content: [{ type: 'text', text: 'steer me' }] }];
+	const turn = dshQueueDockRows(messages, 'next-turn');
+	const step = dshQueueDockRows(messages, 'next-step');
+	assert.equal(turn[0].id, 'queue');
+	assert.equal(step[0].id, 'queue-steer', 'the two queues must not share a row id');
+	assert.notEqual(turn[0].order, step[0].order, 'and must not share an order slot');
+	assert.equal(turn[0].label, 'steer me');
+	assert.equal(step[0].label, 'steer me');
+});
+
+test('multiple next-step messages show a steer-specific count, not the queued wording', async () => {
+	const { dshQueueDockRows } = await import('../../../src/vs/workbench/contrib/dsh/browser/vscode/dshInputDock.ts');
+	const messages = [
+		{ id: 'm1', sourceKind: 'user', content: [{ type: 'text', text: 'a' }] },
+		{ id: 'm2', sourceKind: 'user', content: [{ type: 'text', text: 'b' }] },
+	];
+	const step = dshQueueDockRows(messages, 'next-step');
+	assert.match(step[0].label, /2/);
+	assert.equal(step[0].description, 'a');
+	// `next-turn` 的多条仍是 queued 措辞：两个队列的计数文案不能互换。
+	assert.doesNotMatch(dshQueueDockRows(messages, 'next-turn')[0].label, /steer/i);
+});

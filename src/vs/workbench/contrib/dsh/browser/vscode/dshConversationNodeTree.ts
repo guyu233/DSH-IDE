@@ -253,10 +253,6 @@ export class DshConversationNodeTree<T extends DshIndexedNode = DshIndexedNode> 
 		return this.visibleNodes().filter(node => node.turn === turn);
 	}
 
-	getStep(turn: number, step: number): readonly T[] {
-		return this.visibleNodes().filter(node => node.turn === turn && node.step === step);
-	}
-
 	/** 已载入 turn 的导航项，按 turn 升序。 */
 	navigationItems(): readonly DshTurnNavigationItem[] {
 		const groups = new Map<number, T[]>();
