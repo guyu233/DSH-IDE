@@ -427,15 +427,6 @@ test('a compaction card is a collapsible structure, not a text blob', async () =
 	assert.equal(empty?.collapsible, false);
 });
 
-test('a system prompt card is collapsible and keeps its update line', async () => {
-	const { dshCardSpec } = await import('../../../src/vs/workbench/contrib/dsh/browser/vscode/dshCardSpec.ts');
-	const spec = dshCardSpec({ kind: 'dshSystemPrompt', text: 'full prompt', update: 'delta' });
-	assert.equal(spec?.title, 'System prompt');
-	assert.equal(spec?.collapsible, true);
-	assert.equal(spec?.open, false);
-	assert.deepEqual(spec?.lines, [{ role: 'body', text: 'full prompt' }, { role: 'meta', text: 'delta' }]);
-});
-
 test('result cards are expanded and non-collapsible; native parts are not taken over', async () => {
 	const { dshCardSpec } = await import('../../../src/vs/workbench/contrib/dsh/browser/vscode/dshCardSpec.ts');
 	const deliverables = dshCardSpec({ kind: 'dshDeliverables', files: [{ path: 'a.ts' }, { path: 'b.ts', description: 'why' }] });

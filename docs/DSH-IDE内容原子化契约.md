@@ -267,7 +267,7 @@ Chat 层目标 kind（Host 投影到位前不进入节点树）：
 | `assistant-step` | `ui-chat` | status、turn、step、blocks、time、usage、finalNode |
 | `turn-tail` | `ui-chat` | turn、seq、time、closing、branchUnavailable、tokenUsage |
 | `turn-process` | `ui-chat` | turn、controlAnchorSeq、processStartSeq、answerAnchorSeq、answerStep、inlineReasoning、messageCount、toolCallCount、subagentCount |
-| `system-prompt` | `ui-chat` | text、update? |
+| `system-prompt` | `ui-chat` | text、update?（**投影仍产出，但 Chat 视图层不显示**——官方「Hidden Chat rows」：所有 work-details 模式下都不显示，且不改变已记录事件与 Trajectory；2026-11-23 CHK-347） |
 | `manual-compaction` | `ui-chat` | command + compaction |
 | `submitted-plan` | `ui-plan` | SubmittedPlan（callId、title、markdown） |
 | `command-input` | `ui-goal` | GoalCommandInputData（commandId、text、time） |

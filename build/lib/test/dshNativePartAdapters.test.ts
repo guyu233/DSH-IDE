@@ -125,7 +125,6 @@ test('reuse names a renderer that actually exists', () => {
 		{ kind: 'turn-error', seq: 3, message: 'boom', code: 'QUOTA' },
 		{ kind: 'compaction', seq: 4, summary: 's' },
 		{ kind: 'image', seq: 5, content: [{ type: 'image', attachment: { attachmentId: 'i1', mediaType: 'image/png' } }] },
-		{ kind: 'system-prompt', seq: 6, text: 'sys' },
 		{ kind: 'turn-tail', seq: 7, turn: 1, closing: 'c' },
 	] as DshIndexedNode[];
 	for (const node of samples) {
@@ -347,14 +346,11 @@ test('a turn trigger keeps its image and a system prompt keeps its update', () =
 	} as DshIndexedNode);
 	assert.equal(trigger.map(part => part.adapter).join(','), 'turn-trigger,image');
 	assert.equal(trigger[0].part.kind === 'dshTurnTrigger' && trigger[0].part.title, 'Subagent settled: done');
-	const prompt = adaptDshNode({
-		kind: 'system-prompt',
-		seq: 36,
-		text: '规则',
-		update: '第二条',
-	} as DshIndexedNode);
-	assert.equal(prompt[0].part.kind === 'dshSystemPrompt' && prompt[0].part.text, '规则');
-	assert.equal(prompt[0].part.kind === 'dshSystemPrompt' && prompt[0].part.update, '第二条');
+	// 官方 ui-chat「Hidden Chat rows」：Chat 在所有 work-details 模式下都不显示 system-prompt 行，
+	// 且过滤在视图层（`fromConversationNode`）而不是投影层。所以这里不再有 system-prompt 适配器：
+	// 该节点到不了 `DshChatNode`，`adaptDshNode` 对它返回空。
+	const prompt = adaptDshNode({ kind: 'system-prompt', seq: 36, text: '规则', update: '第二条' } as DshIndexedNode);
+	assert.deepEqual(prompt, [], 'a system prompt never reaches the chat flow');
 });
 
 test('turn triggers keep the source title and drop the quote prefix', () => {
@@ -597,4 +593,18 @@ test('todo_write becomes a task list', () => {
 	assert.ok(task);
 	assert.equal(task.reuse, 'ChatTaskContentPart');
 	assert.deepEqual(task.part.kind === 'progressTaskSerialized' ? task.part.items : [], ['写适配', '跑测试']);
+});
+
+test('the chat view filters system-prompt instead of the projection', async () => {
+	// 官方 ui-chat「Hidden Chat rows」：Chat omits system-prompt rows in every work-details mode,
+	// and "The filter changes neither recorded Session events nor Trajectory inspection".
+	// 所以过滤必须在视图层（fromConversationNode），投影层仍产出该节点。
+	const { readFileSync } = await import('node:fs');
+	const view = readFileSync(new URL('../../../src/vs/workbench/contrib/dsh/browser/vscode/dshChatModel.ts', import.meta.url), 'utf8');
+	const projection = readFileSync(new URL('../../../src/vs/platform/dshClient/protocol/dshIdeConversation.ts', import.meta.url), 'utf8');
+	assert.match(projection, /kind: 'system-prompt'/, 'the projection must keep producing the node (Trajectory still reads it)');
+	// 视图层不留这个 kind 的任何构造分支：没有 case 就无从产出 DshChatNode，
+	// `fromConversationNode` 的 switch 会落到 default 返回 undefined。
+	assert.ok(!view.includes("case 'system-prompt':"), 'the chat view must not build a system-prompt node');
+	assert.ok(!view.includes("kind: 'system-prompt', text:"), 'and must not map it into the chat flow');
 });

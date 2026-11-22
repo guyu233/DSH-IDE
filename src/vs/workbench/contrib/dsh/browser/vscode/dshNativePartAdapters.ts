@@ -13,7 +13,7 @@ import { dshNodeKey } from './dshConversationNodeTree.js';
 import { dshToolViewId, type DshToolViewId } from './dshToolViewRegistry.js';
 import { dshCommandRowOverride, dshQuotaNoticeOverride, dshReasoningBodyOverride, dshToolViewOverride, dshTurnTailExtras } from './dshChatSlots.js';
 
-export type DshNativeAdapterId = 'markdown' | 'thinking' | 'tool' | 'task' | 'reference' | 'error' | 'quota' | 'diff' | 'tree' | 'image' | 'file' | 'compaction' | 'command' | 'usage' | 'deliverable' | 'system-prompt' | 'turn-trigger' | 'unknown' | 'context' | 'assistant-meta' | 'model-retry' | 'inherited-history' | 'max-tokens' | 'turn-tail' | 'question-reply' | 'command-input' | 'submitted-plan' | 'workflow-run' | 'manual-compaction';
+export type DshNativeAdapterId = 'markdown' | 'thinking' | 'tool' | 'task' | 'reference' | 'error' | 'quota' | 'diff' | 'tree' | 'image' | 'file' | 'compaction' | 'command' | 'usage' | 'deliverable' | 'turn-trigger' | 'unknown' | 'context' | 'assistant-meta' | 'model-retry' | 'inherited-history' | 'max-tokens' | 'turn-tail' | 'question-reply' | 'command-input' | 'submitted-plan' | 'workflow-run' | 'manual-compaction';
 
 export interface DshNativeAdaptation {
 	readonly adapter: DshNativeAdapterId;
@@ -46,7 +46,6 @@ export type DshNativePart =
 	| { readonly kind: 'dshCommand'; readonly commandId: string; readonly name: string | null; readonly args: string | null; readonly outcome: 'success' | 'error' | null; readonly text?: string; /** `conversation.chat.commandview` occupant 覆盖的标题。 */ readonly title?: string; readonly detail?: string; readonly icon?: string }
 	| { readonly kind: 'dshUsage'; readonly input?: number; readonly output?: number; readonly total?: number; readonly cacheRead?: number; readonly cacheWrite?: number; readonly reasoning?: number }
 	| { readonly kind: 'dshDeliverables'; readonly files: readonly { readonly path: string; readonly description?: string }[] }
-	| { readonly kind: 'dshSystemPrompt'; readonly text: string; readonly update?: string }
 	| { readonly kind: 'dshTurnTrigger'; readonly sourceKind: string; readonly title: string; readonly body: string }
 	| { readonly kind: 'dshUnknown'; readonly type: string; readonly data: string }
 	| { readonly kind: 'dshContext'; readonly text: string; readonly form: string | null; readonly producer: string | null }
@@ -149,9 +148,6 @@ export function adaptDshNode(node: DshIndexedNode, sessionId?: string): readonly
 	}
 	if (node.kind === 'command') {
 		return [commandCard(record, 'command', sessionId)];
-	}
-	if (node.kind === 'system-prompt') {
-		return [systemPromptCard(record.text || '', record.update)];
 	}
 	if (node.kind === 'context') {
 		return [...contextCard(record), ...contentExtras(node, record.content, sessionId)];
@@ -667,18 +663,6 @@ function turnTriggerCard(node: DshIndexedNode, body: string): DshNativeAdaptatio
 	};
 }
 
-function systemPromptCard(text: string, update?: string): DshNativeAdaptation {
-	return {
-		adapter: 'system-prompt',
-		reuse: 'dshSlotHostContentPart:renderAdaptedFallback',
-		reason: '系统提示是可折叠正文，不是普通 markdown 节点',
-		part: {
-			kind: 'dshSystemPrompt',
-			text,
-			...(update === undefined || update === '' ? {} : { update }),
-		},
-	};
-}
 
 function turnTailCard(record: { readonly closing?: unknown; readonly branchUnavailable?: unknown }): DshNativeAdaptation[] {
 	const closing = typeof record.closing === 'string' ? record.closing : '';

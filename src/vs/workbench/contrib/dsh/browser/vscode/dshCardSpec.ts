@@ -6,8 +6,8 @@
 // `dsh*` 自研部件的**结构**描述（契约 §16 退出条件 4：不得用 info/warning/markdown 文本模拟）。
 //
 // 为什么拆出这份纯数据：`dshSlotHostContentPart` 里原本把所有 `dsh*` 部件都拼成一串
-// `textContent`——`dshCompaction` 是「摘要 + 两个数字换行拼接」、`dshSystemPrompt` 是
-// 「正文 + 更新」、`dshDeliverables` 是「路径 + 描述」……这既是文本模拟，也让「折叠」
+// `textContent`——`dshCompaction` 是「摘要 + 两个数字换行拼接」、`dshDeliverables` 是
+// 「路径 + 描述」……这既是文本模拟，也让「折叠」
 // 无从谈起（没有 DOM 结构可折叠）。
 //
 // 这里只产出「该画什么行、每行是什么角色、是否可折叠」的描述；DOM 由渲染层按描述建。
@@ -37,7 +37,7 @@ export interface DshCardSpec {
 	/**
 	 * 是否默认展开。
 	 *
-	 * `compaction` / `system-prompt` 属于「背景资料」：默认收起，用户需要时才展开；
+	 * `compaction` 属于「背景资料」：默认收起，用户需要时才展开；
 	 * 结果类卡片（交付物、错误、用量）默认展开。
 	 */
 	readonly open: boolean;
@@ -73,13 +73,6 @@ export function dshCardSpec(part: DshNativePart): DshCardSpec | undefined {
 				lines.push({ role: 'meta', text: counts.join(' · ') });
 			}
 			return { title: 'Compaction', lines, open: false, collapsible: lines.length > 0 };
-		}
-		case 'dshSystemPrompt': {
-			const lines: DshCardLine[] = [{ role: 'body', text: part.text }];
-			if (part.update !== undefined && part.update !== '') {
-				lines.push({ role: 'meta', text: part.update });
-			}
-			return { title: 'System prompt', lines, open: false, collapsible: lines.length > 0 };
 		}
 		case 'dshDeliverables': {
 			const lines = part.files.map(file => ({

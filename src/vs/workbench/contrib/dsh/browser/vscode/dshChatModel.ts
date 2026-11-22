@@ -280,13 +280,6 @@ export interface DshTurnTailNode extends DshNodeBase {
 	readonly branchUnavailable?: true;
 }
 
-/** DSH `system-prompt`（官方 `ui-chat`）：一次请求的完整系统提示，或历史内的提示更新。 */
-export interface DshSystemPromptNode extends DshNodeBase {
-	readonly kind: 'system-prompt';
-	readonly text: string;
-	readonly update?: true;
-}
-
 /** DSH `workflow-run`（官方 `ui-workflow-run`）：顶层运行与实际启动的成员。 */
 export interface DshWorkflowRunNode extends DshNodeBase {
 	readonly kind: 'workflow-run';
@@ -346,7 +339,6 @@ export type DshChatNode =
 	| DshCommandInputNode
 	| DshSubmittedPlanNode
 	| DshWorkflowRunNode
-	| DshSystemPromptNode
 	| DshTurnTailNode
 	| DshManualCompactionNode;
 
@@ -891,8 +883,6 @@ function fromConversationNode(node: DshIdeConversationNode): DshChatNode | undef
 				phases: node.phases,
 				...(node.turn === undefined ? {} : { turn: node.turn }),
 			} as DshChatNode;
-		case 'system-prompt':
-			return { ...base, kind: 'system-prompt', text: node.text, ...(node.update === true ? { update: true as const } : {}) } as DshChatNode;
 		case 'turn-tail':
 			return {
 				...base,
