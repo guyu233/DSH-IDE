@@ -14,6 +14,45 @@ import * as ts from 'typescript';
 const repoRoot = path.resolve(import.meta.dirname, '../../..');
 const vscodeRoot = repoRoot;
 
+/** 取一个 `const NAME = [ ... ];` 数组字面量的源码（到匹配的 `];` 为止）。 */
+function gulpArrayBody(source: string, declaration: string): string {
+	const start = source.indexOf(declaration);
+	assert.ok(start > 0, `${declaration} not found`);
+	const open = source.indexOf('[', start);
+	assert.ok(open > 0, `${declaration} has no array literal`);
+	const end = source.indexOf('];', open);
+	assert.ok(end > open, `${declaration} array is not terminated`);
+	return source.slice(open, end);
+}
+
+/**
+ * 取 `const NAME = task.define(..., task.series( ... ));` 里 **task.series 的完整实参**。
+ *
+ * 不能用 `slice(start, start + N)`：固定窗口会跨过本任务、命中下一个任务的
+ * `...dshIdeBuildPrerequisites`，于是「CI 任务漏了共享前置」这种真实分叉抓不到
+ * （2026-11-23 反向验证实测：按固定窗口写的断言对还原后的分叉体仍然通过）。
+ */
+function gulpTaskSeriesArgs(source: string, taskName: string): string {
+	const start = source.indexOf(`const ${taskName} = task.define(`);
+	assert.ok(start > 0, `${taskName} definition not found`);
+	const series = source.indexOf('task.series(', start);
+	assert.ok(series > start, `${taskName} has no task.series(`);
+	const open = source.indexOf('(', series);
+	let depth = 0;
+	for (let i = open; i < source.length; i++) {
+		const ch = source[i];
+		if (ch === '(') {
+			depth++;
+		} else if (ch === ')') {
+			depth--;
+			if (depth === 0) {
+				return source.slice(open, i + 1);
+			}
+		}
+	}
+	assert.fail(`${taskName} task.series( is not terminated`);
+}
+
 function readGulpfile(): ts.SourceFile {
 	return ts.createSourceFile('gulpfile.vscode.ts', fs.readFileSync(path.join(vscodeRoot, 'build/gulpfile.vscode.ts'), 'utf8'), ts.ScriptTarget.Latest, true);
 }
@@ -162,10 +201,12 @@ test('DSH bundle: DSH whale media is staged after the bundle step (cleanDir woul
 	const body = fs.readFileSync(path.join(vscodeRoot, 'build/gulpfile.vscode.ts'), 'utf8');
 	const source = readGulpfile();
 	// prepare-dsh-chat-render 仍负责鲸鱼图标，且必须排在 esbuildBundleTask 之后。
-	const appTaskIndex = body.indexOf('const appTask = task.define(`dsh-ide-${platform}-${arch}${dashed(minified)}`');
-	assert.ok(appTaskIndex > 0, 'appTask definition not found');
-	const appTaskBody = body.slice(appTaskIndex, appTaskIndex + 900);
-	assert.ok(appTaskBody.indexOf('esbuildBundleTask') < appTaskBody.indexOf('prepareDshChatRenderTask'),
+	//
+	// 2026-11-23（CHK-330）：步骤已从 appTask 的内联数组提成 `dshIdePackageTail`，
+	// 让 `appTask`（发布）与 `appTaskCI`（CI）共用同一份，避免两条入口再分叉。
+	// 断言改为直接读这个数组——它才是「实际执行顺序」的唯一真源。
+	const tail = gulpArrayBody(body, 'const dshIdePackageTail');
+	assert.ok(tail.indexOf('esbuildBundleTask') < tail.indexOf('prepareDshChatRenderTask'),
 		'prepareDshChatRenderTask must run AFTER esbuildBundleTask');
 	assert.match(body, /dsh-whale\.svg/, 'the Chat view icon must still be staged');
 	assert.ok(source.statements.length > 0);
@@ -287,11 +328,22 @@ test('the pack task compiles out/ before copying the plugin layer', () => {
 	const gulp = fs.readFileSync(path.join(repoRoot, 'build/gulpfile.vscode.ts'), 'utf8');
 	assert.match(gulp, /const compileDshPluginLayerTask = task\.define\('dsh-ide-compile-plugin-layer'/,
 		'the plugin layer compile step must exist as a named task');
-	const appTaskStart = gulp.indexOf('const appTask = task.define(`dsh-ide-${platform}-${arch}${dashed(minified)}`');
-	assert.ok(appTaskStart > 0, 'appTask definition not found');
-	const appTaskBody = gulp.slice(appTaskStart, appTaskStart + 1200);
-	assert.ok(appTaskBody.includes('compileDshPluginLayerTask'), 'the pack task must depend on the compile step');
-	assert.ok(appTaskBody.indexOf('compileDshPluginLayerTask') < appTaskBody.indexOf('packageAppTask'),
+	// CHK-330：前置步骤提成 `dshIdeBuildPrerequisites`，`appTask` 与 `appTaskCI` 都展开它。
+	// 断言必须覆盖**两个入口都引用同一份**，否则将来只给一边加步骤就会重新分叉
+	// （这正是 CHK-329 修掉的真实缺陷）。
+	const prerequisites = gulpArrayBody(gulp, 'const dshIdeBuildPrerequisites');
+	assert.ok(prerequisites.includes('compileDshPluginLayerTask'), 'the prerequisite list must compile the plugin layer');
+	assert.ok(prerequisites.includes('util.rimraf(appStagingPath)'),
+		'the prerequisite list must clear the staging root (otherwise a previous runtime-only staging is reused)');
+	for (const taskName of ['appTaskCI', 'appTask']) {
+		const body = gulpTaskSeriesArgs(gulp, taskName);
+		assert.ok(body.includes('...dshIdeBuildPrerequisites'), `${taskName} must expand the shared prerequisite list`);
+		assert.ok(body.includes('...dshIdePackageTail'), `${taskName} must expand the shared package tail`);
+	}
+	const tail = gulpArrayBody(gulp, 'const dshIdePackageTail');
+	assert.ok(tail.indexOf('packageAppTask') >= 0, 'the package step must still run');
+	assert.ok(prerequisites.indexOf('compileDshPluginLayerTask') >= 0, 'compile must be part of the prerequisites');
+	assert.ok(gulp.indexOf('...dshIdeBuildPrerequisites') < gulp.indexOf('...dshIdePackageTail'),
 		'compile must run before the app is packaged');
 	// 用官方编译实现，不自造编译流程。
 	assert.match(gulp, /compilation\.transpileTask\('src', 'out'\)/, 'the compile step must reuse the official transpile task');
