@@ -952,3 +952,23 @@ test('llm/retry-started clears the replacement slot so the retried attempt count
 	assert.equal(tail?.tokenUsage?.input, 30, 'after a retry-started, both attempts count');
 	assert.equal(tail?.tokenUsage?.output, 3);
 });
+
+test('an attempt sample and the same step\'s message sample replace instead of stacking', () => {
+	// 官方为什么需要 `addReplacing`：`assistant/attempt` 与随后同 step 的 `assistant/message`
+	// 会各报一次用量，纯累加会把同一次尝试算两遍。同 (turn, step) 的后者必须**替换**前者。
+	const state = createDshIdeConversationState();
+	const project = (event: Record<string, unknown>) => projectDshIdeConversation(state, { type: 'event', event });
+	project({ type: 'turn/start', seq: 1, time: 1, data: { turn: 1 } });
+	project({
+		type: 'assistant/attempt', seq: 2, time: 2,
+		data: { turn: 1, step: 0, stream: [{ chunk: { type: 'usage', usage: { inputTokens: 10, outputTokens: 1 } } }] },
+	});
+	project({
+		type: 'assistant/message', seq: 3, time: 3,
+		data: { turn: 1, step: 0, message: { content: [{ type: 'text', text: 'final' }] }, usage: { inputTokens: 12, outputTokens: 2 } },
+	});
+	const tail = project({ type: 'turn/end', seq: 4, time: 4, data: { turn: 1, reason: { kind: 'completed' } } })
+		.nodes.find(node => node.kind === 'turn-tail') as { tokenUsage?: { input?: number; output?: number } } | undefined;
+	assert.equal(tail?.tokenUsage?.input, 12, 'the message sample replaces the attempt sample, not adds to it');
+	assert.equal(tail?.tokenUsage?.output, 2);
+});
