@@ -31,6 +31,7 @@ import { ScrollEvent } from '../../../../../base/common/scrollable.js';
 import { FileAccess, Schemas } from '../../../../../base/common/network.js';
 import { clamp, formatTokenCount } from '../../../../../base/common/numbers.js';
 import { ThemeIcon } from '../../../../../base/common/themables.js';
+import { isAbsolute } from '../../../../../base/common/path.js';
 import { URI } from '../../../../../base/common/uri.js';
 import { localize } from '../../../../../nls.js';
 import { MenuEntryActionViewItem, createActionViewItem } from '../../../../../platform/actions/browser/menuEntryActionViewItem.js';
@@ -42,6 +43,7 @@ import { IContextKeyService } from '../../../../../platform/contextkey/common/co
 import { IHoverService } from '../../../../../platform/hover/browser/hover.js';
 import { IInstantiationService } from '../../../../../platform/instantiation/common/instantiation.js';
 import { ServiceCollection } from '../../../../../platform/instantiation/common/serviceCollection.js';
+import { IFileService } from '../../../../../platform/files/common/files.js';
 import { ILogService } from '../../../../../platform/log/common/log.js';
 import { IMarkdownRenderer } from '../../../../../platform/markdown/browser/markdownRenderer.js';
 import { isDark } from '../../../../../platform/theme/common/theme.js';
@@ -56,9 +58,16 @@ import { checkModeOption } from '../../common/chat.js';
 import { IChatAgentMetadata } from '../../common/participants/chatAgents.js';
 import { ChatContextKeys } from '../../common/actions/chatContextKeys.js';
 import { IChatProgressResponseContent, IChatTextEditGroup } from '../../common/model/chatModel.js';
+import { DshSlotHostContentPart } from '../../../dsh/browser/vscode/dshSlotHostContentPart.js';
+import { DshQuestionCarouselContentPart } from '../../../dsh/browser/vscode/dshQuestionCarouselContentPart.js';
+import { DshAttachmentListContentPart } from '../../../dsh/browser/vscode/dshAttachmentListContentPart.js';
+import { dshAttachmentUri } from '../../../dsh/browser/vscode/dshAttachmentFileSystem.js';
+import { dshSessionIdFromResource } from '../../../dsh/browser/vscode/dshAgentSessionsController.js';
+import { dshContentStore } from '../../../dsh/browser/vscode/dshContentStore.js';
+import type { DshNativePart } from '../../../dsh/browser/vscode/dshNativePartAdapters.js';
 import { chatSubcommandLeader } from '../../common/requestParser/chatParserTypes.js';
 import { TerminalToolId } from '../../common/tools/terminalToolIds.js';
-import { ChatAgentVoteDirection, ChatErrorLevel, ChatRequestQueueKind, ElicitationState, IChatConfirmation, IChatContentReference, IChatDisabledClaudeHooksPart, IChatElicitationRequest, IChatElicitationRequestSerialized, IChatExtensionsContent, IChatExternalEdit, IChatFollowup, IChatHookPart, IChatMarkdownContent, IChatMcpServersStarting, IChatMcpServersStartingSerialized, IChatMultiDiffData, IChatMultiDiffDataSerialized, IChatPlanReview, IChatPlanReviewResult, IChatPullRequestContent, IChatQuestionAnswerValue, IChatQuestionAnswers, IChatQuestionCarousel, IChatService, IChatTask, IChatTaskSerialized, IChatThinkingPart, IChatToolInvocation, IChatToolInvocationSerialized, IChatTreeData, IChatUndoStop, IChatUsageModelTotal, isChatFollowup } from '../../common/chatService/chatService.js';
+import { ChatAgentVoteDirection, ChatErrorLevel, ChatRequestQueueKind, ElicitationState, IChatConfirmation, IChatContentReference, IChatDisabledClaudeHooksPart, IChatElicitationRequest, IChatElicitationRequestSerialized, IChatExtensionsContent, IChatExternalEdit, IChatFollowup, IChatHookPart, IChatMarkdownContent, IChatMcpServersStarting, IChatMcpServersStartingSerialized, ChatMultiDiffData, IChatMultiDiffData, IChatMultiDiffDataSerialized, IChatPlanReview, IChatPlanReviewResult, IChatPullRequestContent, IChatQuestionAnswerValue, IChatQuestionAnswers, IChatQuestionCarousel, IChatService, IChatTask, IChatTaskSerialized, IChatThinkingPart, IChatToolInvocation, IChatToolInvocationSerialized, IChatTreeData, IChatUndoStop, IChatUsageModelTotal, isChatFollowup } from '../../common/chatService/chatService.js';
 import { ChatPlanReviewData } from '../../common/model/chatProgressTypes/chatPlanReviewData.js';
 import { ChatQuestionCarouselData } from '../../common/model/chatProgressTypes/chatQuestionCarouselData.js';
 import { localChatSessionType } from '../../common/chatSessionsService.js';
@@ -953,6 +962,7 @@ export class ChatListItemRenderer extends Disposable implements ITreeRenderer<Ch
 		@IAccessibilityService private readonly accessibilityService: IAccessibilityService,
 		@IWorkbenchEnvironmentService private readonly environmentService: IWorkbenchEnvironmentService,
 		@ITelemetryService private readonly telemetryService: ITelemetryService,
+		@IFileService private readonly fileService: IFileService,
 	) {
 		super();
 		this.persistentBackgroundActivityTracker.value = viewModel ? new PersistentBackgroundActivityTracker(viewModel, () => this.updateWorkingProgressForBackgroundActivity()) : undefined;
@@ -4567,6 +4577,26 @@ export class ChatListItemRenderer extends Disposable implements ITreeRenderer<Ch
 
 			if (content.kind === 'treeData') {
 				return this.renderTreeData(content, templateData, context);
+			} else if (content.kind === 'dshSlotHost') {
+				return new DshSlotHostContentPart(content, {
+					render: part => this.renderDshAdaptedPart(part, templateData, context),
+					executeCommand: (command, args) => { void this.commandService.executeCommand(command, ...args); },
+					loadImage: async uri => {
+						// `dsh-attachment:` 的字节来自 Host；读失败时返回 undefined，让画廊退回名字。
+						try {
+							return (await this.fileService.readFile(uri)).value.buffer;
+						} catch {
+							return undefined;
+						}
+					},
+					renderQuestion: eventId => {
+						const questions = dshContentStore.get(content.treeId)?.questions;
+						const entry = questions?.get(eventId);
+						return questions !== undefined && entry !== undefined
+							? this.instantiationService.createInstance(DshQuestionCarouselContentPart, questions, entry)
+							: undefined;
+					},
+				});
 			} else if (content.kind === 'multiDiffData') {
 				return this.renderMultiDiffData(content, templateData, context);
 			} else if (content.kind === 'progressMessage') {
@@ -5611,6 +5641,103 @@ export class ChatListItemRenderer extends Disposable implements ITreeRenderer<Ch
 		}
 
 		return editPart;
+	}
+
+	private renderDshAdaptedPart(part: DshNativePart, templateData: IChatListItemTemplate, context: IChatContentPartRenderContext): IChatContentPart | undefined {
+		if (part.kind === 'markdownContent') {
+			return this.renderMarkdown(part as IChatMarkdownContent, templateData, context);
+		}
+		if (part.kind === 'thinking') {
+			return this.renderThinkingPart(part, context, templateData);
+		}
+		if (part.kind === 'toolInvocationSerialized') {
+			return this.renderToolInvocation({
+				...part,
+				originMessage: undefined,
+				isConfirmed: undefined,
+				presentation: undefined,
+				source: { type: 'internal', label: 'Built-In' },
+			}, context, templateData);
+		}
+		if (part.kind === 'warning') {
+			return this.instantiationService.createInstance(ChatErrorContentPart, ChatErrorLevel.Warning, part.content, part, this.chatContentMarkdownRenderer);
+		}
+		if (part.kind === 'progressTaskSerialized') {
+			const task: IChatTaskSerialized = {
+				kind: 'progressTaskSerialized',
+				content: new MarkdownString(part.content.value),
+				progress: part.items.map(item => ({ kind: 'warning', content: new MarkdownString(item) })),
+			};
+			return this.renderProgressTask(task, templateData, context);
+		}
+		if (part.kind === 'treeData') {
+			const children = part.labels.map((label, index) => ({
+				label,
+				uri: isAbsolute(label) ? URI.file(label) : URI.from({ scheme: 'dsh-search', path: `/${index}` }),
+			}));
+			return this.renderTreeData({
+				kind: 'treeData',
+				treeData: {
+					label: 'matches',
+					uri: URI.from({ scheme: 'dsh-search', path: '/matches' }),
+					children,
+				},
+			}, templateData, context);
+		}
+		if (part.kind === 'multiDiffData') {
+			const resources = part.files.flatMap(file => {
+				if (!isAbsolute(file.path)) {
+					return [];
+				}
+				const uri = URI.file(file.path);
+				return [{ modifiedUri: uri, goToFileUri: uri }];
+			});
+			if (resources.length === 0) {
+				return undefined;
+			}
+			return this.renderMultiDiffData(new ChatMultiDiffData({
+				multiDiffData: { title: 'Changes', resources },
+				readOnly: true,
+			}), templateData, context);
+		}
+		if (part.kind === 'dshImageGallery') {
+			// 官方 `conversation.chat.user.images` 的等价物就是原生 `ChatAttachmentsContentPart`：
+			// 缩略图、点击打开、hover 预览与主题适配都已具备。此前用回退行只列附件名，
+			// 等于放弃这些能力（AGENTS §1.7 的优化机会）。
+			// 会话 id 必须走同一个解码口径：`dshSessionIdFromResource` 会 `decodeURIComponent`，
+			// 直接 `path.replace` 遇到编码过的 id 会与投影用的 key 不一致。
+			const sessionId = dshSessionIdFromResource(context.element.sessionResource) ?? '';
+			const images: IChatRequestVariableEntry[] = part.images.map(image => ({
+				kind: 'image' as const,
+				id: image.attachmentId,
+				name: image.name ?? image.attachmentId,
+				value: dshAttachmentUri({ attachmentId: image.attachmentId, mediaType: image.mediaType ?? 'image/png' }, sessionId),
+				...(image.mediaType === undefined ? {} : { mimeType: image.mediaType }),
+				isFile: false,
+				isDirectory: false,
+			}));
+			return new DshAttachmentListContentPart(this.renderAttachments(images, context.element.sessionResource, undefined, undefined, templateData));
+		}
+		if (part.kind === 'reference' || part.kind === 'dshFileCard' || part.kind === 'dshDeliverables') {
+			const references = part.kind === 'reference'
+				? [{ kind: 'reference' as const, reference: part.label }]
+				: part.kind === 'dshFileCard'
+					? part.files.map(file => ({ kind: 'reference' as const, reference: file.name }))
+					: part.files.map(file => ({ kind: 'reference' as const, reference: isAbsolute(file.path) ? URI.file(file.path) : file.path }));
+			return this.renderContentReferencesListData({ kind: 'references', references }, undefined, context, templateData);
+		}
+		if (part.kind === 'errorDetails') {
+			if (!isResponseVM(context.element)) {
+				const warning = { kind: 'warning' as const, content: new MarkdownString(part.message) };
+				return this.instantiationService.createInstance(ChatErrorContentPart, ChatErrorLevel.Error, warning.content, warning, this.chatContentMarkdownRenderer);
+			}
+			return this.instantiationService.createInstance(ChatQuotaExceededPart, context.element, {
+				kind: 'errorDetails',
+				errorDetails: { message: part.message, isQuotaExceeded: true },
+				isLast: true,
+			}, this.chatContentMarkdownRenderer);
+		}
+		return undefined;
 	}
 
 	private renderMarkdown(markdown: IChatMarkdownContent, templateData: IChatListItemTemplate, context: IChatContentPartRenderContext): IChatContentPart {
