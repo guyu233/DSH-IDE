@@ -32,7 +32,7 @@ export function getDshRipgrepPayloadFilter(arch: string): string[] {
 }
 
 /** DSH Windows 桌面：终端原生绑定由 Host 提供，载荷只保留 JS 与 ASAR 索引。 */
-export function getDshNodePtyPayloadFilter(arch: string): string[] {
+export function getDshNodePtyPayloadFilter(): string[] {
 	const platforms = ['darwin-arm64', 'darwin-x64', 'linux-arm64', 'linux-x64', 'win32-arm64', 'win32-x64'];
 
 	return ['**', ...platforms.map(p => `!**/node_modules.asar.unpacked/node-pty/prebuilds/${p}/**`)];

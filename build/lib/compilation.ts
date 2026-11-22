@@ -206,7 +206,10 @@ class MonacoGenerator {
 		}
 	}
 
-	private _executeSoonTimer: NodeJS.Timeout | null = null;
+	// 用 `ReturnType<typeof setTimeout>` 而不是 `NodeJS.Timeout`：本仓的 build tsconfig
+	// 同时看得到 `@types/node` 与 web 定时器声明，两边的 `setTimeout` 返回类型不同；
+	// 写死任一具体类型都会在另一套声明下报 TS2740。这里只要求「能传给 clearTimeout」。
+	private _executeSoonTimer: ReturnType<typeof setTimeout> | null = null;
 	private _executeSoon(): void {
 		if (this._executeSoonTimer !== null) {
 			clearTimeout(this._executeSoonTimer);

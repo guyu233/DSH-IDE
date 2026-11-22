@@ -236,7 +236,7 @@ function packageTask(platform: string, arch: string, sourceFolderName: string, d
 		const shippedDeps = _opts?.appOnly && platform === 'win32'
 			? deps
 				.pipe(filter(getDshRipgrepPayloadFilter(arch), { dot: true }))
-				.pipe(filter(getDshNodePtyPayloadFilter(arch), { dot: true }))
+				.pipe(filter(getDshNodePtyPayloadFilter(), { dot: true }))
 			: deps;
 
 		const mergeStreams = [
@@ -557,8 +557,8 @@ async function verifyDshBuildProvenance(stagingRoot: string): Promise<void> {
  * 真要做通用转换应改用 esbuild，但它的临时目录在 Windows 上清理会失败。
  * @param {string} source tsc 产物内容
  */
-function cjsToEsm(source) {
-	const exported = new Set();
+function cjsToEsm(source: string): string {
+	const exported = new Set<string>();
 	let out = source
 		// `"use strict";` 在 ESM 里是空操作，但 `exports` 引用会直接报错，先删。
 		.replace(/^"use strict";\r?\n/, '')
@@ -567,7 +567,7 @@ function cjsToEsm(source) {
 	// 前置声明：`exports.A = exports.B = void 0;`（可能多行）
 	out = out.replace(/^exports\.[\w$]+(?: = exports\.[\w$]+)* = void 0;\r?\n/gm, '');
 	// 赋值导出：`exports.X = <expr>;` → `const X = <expr>;`
-	out = out.replace(/^exports\.([\w$]+) = /gm, (_m, name) => {
+	out = out.replace(/^exports\.([\w$]+) = /gm, (_m: string, name: string) => {
 		exported.add(name);
 		return `const ${name} = `;
 	});
@@ -578,7 +578,7 @@ function cjsToEsm(source) {
 	// tsc 在函数体里写 `exports.X`（例如 wireRevision 比较、视图绑定方法表）。
 	// 赋值行改成 const 之后这些引用仍指向不存在的 `exports`，一调用就抛
 	// `exports is not defined`。会话列表的 listSessions 正是走这条校验。
-	for (const name of [...exported].sort((a, b) => b.length - a.length)) {
+	for (const name of [...exported].sort((a: string, b: string) => b.length - a.length)) {
 		out = out.replace(new RegExp(`\\bexports\\.${name}\\b`, 'g'), name);
 	}
 	// 末尾补导出表。名字必须排序后稳定输出，避免每次打包产生无意义 diff。
