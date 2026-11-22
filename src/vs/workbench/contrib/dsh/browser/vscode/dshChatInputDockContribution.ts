@@ -27,7 +27,7 @@ import { DshChatInputDock } from './dshChatInputDock.js';
 import type { DshQueueRowAction } from './dshInputDock.js';
 import { dshSessionIdFromResource } from './dshAgentSessionsController.js';
 import { dshContentStore } from './dshContentStore.js';
-import { dshTurnNavEntries } from './dshTurnNavigation.js';
+import { dshTurnNavEntries, dshTurnNavSummaryOf } from './dshTurnNavigation.js';
 import { dshChatSessionFor, type DshChatSession } from './dshChatSession.js';
 import { IDshClientService } from '../../../../../platform/dshClient/common/dshClientService.js';
 
@@ -121,7 +121,19 @@ export class DshChatInputDockContribution extends Disposable {
 			// Turn 导航：官方 turn rail 的等价投影。数据来自 `DshConversationNodeTree.navigationItems()`
 			// （本仓早已实现但零消费——CHK-377 核实过原生 promptTimeline 的模型不匹配）。
 			const binding = sessionId === undefined ? undefined : dshContentStore.get(sessionId);
-			const turnNav = binding === undefined ? [] : dshTurnNavEntries(binding.tree.navigationItems()).map(entry => ({
+			const turnNav = binding === undefined ? [] : dshTurnNavEntries(
+				binding.tree.navigationItems(),
+				// 摘要来自该 Turn 的 prompt 节点首行（官方 rail 的「prompt 一行」）。
+				// 找不到 prompt（例如窗口从中间切进来）时返回空串，行文案只显示 `#N`。
+				item => {
+					const promptKey = item.promptKey;
+					if (promptKey === undefined) {
+						return '';
+					}
+					const prompt = binding.tree.get(promptKey) as { readonly content?: readonly { readonly type: string; readonly text?: string }[] } | undefined;
+					return dshTurnNavSummaryOf(prompt?.content);
+				},
+			).map(entry => ({
 				id: entry.id, label: entry.label, order: entry.order, command: entry.command, arguments: entry.arguments,
 			}));
 			input.update(sessionId, session === undefined ? undefined : { session }, inbox, inboxStep, turnNav);

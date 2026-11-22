@@ -316,3 +316,18 @@ test('turn navigation projects into dock rows with stable ids and anchors', asyn
 	// 没有 Turn 时不画空壳。
 	assert.deepEqual(dshTurnNavEntries([]), []);
 });
+
+test('the turn nav summary comes from the prompt first line only', async () => {
+	// 官方 rail 的预览是「prompt 一行（50 字符）」。摘要必须只取首行：
+	// 多行提问的后续行属于详情，塞进导航行会把一行撑成多行。
+	const { dshTurnNavSummaryOf } = await import('../../../src/vs/workbench/contrib/dsh/browser/vscode/dshTurnNavigation.ts');
+	assert.equal(dshTurnNavSummaryOf([{ type: 'text', text: '第一行\n第二行\n第三行' }]), '第一行');
+	assert.equal(dshTurnNavSummaryOf([{ type: 'text', text: '  多余   空白  ' }]), '多余 空白');
+	// 跳过非 text 块，取第一个有文本的。
+	assert.equal(dshTurnNavSummaryOf([{ type: 'image' }, { type: 'text', text: '真正的问题' }]), '真正的问题');
+	// 空块 / 纯空白 / 缺失都返回空串（调用方据此只显示 #N）。
+	assert.equal(dshTurnNavSummaryOf([]), '');
+	assert.equal(dshTurnNavSummaryOf([{ type: 'text', text: '   ' }]), '');
+	assert.equal(dshTurnNavSummaryOf(undefined), '');
+	assert.equal(dshTurnNavSummaryOf([{ type: 'text', text: '\n\n' }]), '');
+});

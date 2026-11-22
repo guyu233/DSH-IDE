@@ -67,3 +67,30 @@ export function dshTurnNavEntries(
 		};
 	});
 }
+
+/**
+ * 从一条 prompt 节点取首行摘要（供 `dshTurnNavEntries` 的 `summaryOf` 使用）。
+ *
+ * 官方 rail 的预览是「prompt 一行（50 字符）」。这里取第一条 text 块的第一行，
+ * 空白归一化后交给 `dshTurnNavEntries` 统一截断——不在两处各截一次，避免边界不一致。
+ *
+ * @param content prompt 节点的内容块；缺失或没有 text 块时返回空串
+ * @returns 首行文本（未截断）；没有可用文本时为空串
+ */
+export function dshTurnNavSummaryOf(content: readonly { readonly type: string; readonly text?: string }[] | undefined): string {
+	if (content === undefined) {
+		return '';
+	}
+	for (const block of content) {
+		if (block.type !== 'text' || typeof block.text !== 'string') {
+			continue;
+		}
+		// 只看第一行：多行提问的后续行属于详情，不是导航摘要。
+		const firstLine = block.text.split('\n')[0] ?? '';
+		const normalized = firstLine.replace(/\s+/g, ' ').trim();
+		if (normalized !== '') {
+			return normalized;
+		}
+	}
+	return '';
+}
