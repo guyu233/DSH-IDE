@@ -692,6 +692,13 @@ DshCompositeContentPart
 3. 自研组件在视觉、交互、键盘、主题、高对比度、可访问性、生命周期上像 VS Code 原生 Chat。
 4. 没有结构化节点继续靠 info/warning/markdown 文本模拟。
 5. turn、process group、reasoning、tool tree、system prompt、compaction、turn tail 均可按 DSH 语义折叠/展开。
+
+**2026-11-23 work-details 模式（CHK-351）**：本仓此前没有 `ui-chat.transcriptView` 的四档概念（`compact`/`standard`/`detailed`/`verbose`
+全仓零命中），折叠只有一个无差别开关。官方四档对**整个 Turn 折叠**的差异只有三条：`verbose` 永不折叠；
+Compact/Standard/Detailed 对合格历史 Turn 初始折叠；`detailed` 运行中隐藏组头、`compact` 组头无实时细节。
+已实现 `DshIdeTranscriptView` + `turnFoldingPolicy` / `hidesRunningGroupHeaders` / `showsLiveGroupDetail`，
+`isTurnCollapsed(turn, answerStep, eligible)` 按「用户手动 > 模式默认」判定，`eligible` 由 `alwaysOpen`（未结束/失败/有可见输入）给出。
+**未完成**：模式设置项与 Host 持久化（`ui-chat.transcriptView`）尚未接线，当前恒为 `standard`。
 6. 快照刷新、会话切换、虚拟化重绘不丢失折叠状态、草稿、pending 入口和节点身份。
 7. `tsc --noEmit` PASS，相关测试 PASS，真机验收由用户确认；未跑项严格标注 PENDING。
 

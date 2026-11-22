@@ -7,8 +7,42 @@
 // 第一层是 Turn 过程：键是 turn + answerStep，缺省表示展开，只有 collapsed === true 才收起。
 // 第二层是节点 disclosure：每次调用各自一份，所属 Turn 重置时清掉，不跨会话。
 
+import type { DshIdeTranscriptView } from '../../../../../platform/dshClient/protocol/dshIdeProtocol.js';
+
+/**
+ * 官方 work-details 模式对**整个 Turn 折叠**的影响（`conversation-nodes/README.md`「Display modes」）。
+ *
+ * 四档的差异只在这三处，别处（分组结果、单个 reasoning/tool 的展开、类别计数）完全相同：
+ *   - `verbose`：**永不折叠整个 Turn**（「Always open; duration/status header cannot collapse it」）；
+ *   - 其余三档：合格的历史 Turn **初始折叠**；
+ *   - 用户手动开合始终优先于模式默认（官方「Mode changes preserve membership and manual opening choices」）。
+ *
+ * @param view 当前模式
+ * @returns `'never'` = 永不折叠；`'collapsed-by-default'` = 初始折叠但可手动开
+ */
+export function turnFoldingPolicy(view: DshIdeTranscriptView): 'never' | 'collapsed-by-default' {
+	return view === 'verbose' ? 'never' : 'collapsed-by-default';
+}
+
+/**
+ * 官方 `detailed` 在**运行中**的 Turn 里隐藏组头（历史 Turn 保留）。
+ *
+ * 这条只影响组头是否渲染，不影响过程内容是否展开，也不影响单条 disclosure。
+ */
+export function hidesRunningGroupHeaders(view: DshIdeTranscriptView): boolean {
+	return view === 'detailed';
+}
+
+/**
+ * 官方 `compact` 的组头**不带实时细节**（`standard`/`detailed`/`verbose` 带）。
+ */
+export function showsLiveGroupDetail(view: DshIdeTranscriptView): boolean {
+	return view !== 'compact';
+}
+
 interface TurnProcessEntry {
-	readonly collapsed?: true;
+	/** 三态：`true` 手动收起、`false` 手动展开、缺省表示「没手动设过」（由模式默认决定）。 */
+	readonly collapsed: boolean;
 }
 
 /** 一个会话的折叠状态。换会话用另一份 store，不要复用这里的 Map。 */
@@ -18,9 +52,28 @@ export class DshExpansionStateStore {
 	private readonly listeners = new Set<() => void>();
 
 	readonly sessionId: string;
+	/**
+	 * 当前 work-details 模式。
+	 *
+	 * 只影响**默认**折叠：用户手动开合过的 Turn 以手动值为准（`turnProcesses` 里有记录就压过模式）。
+	 */
+	private view: DshIdeTranscriptView = 'standard';
 
 	constructor(sessionId: string) {
 		this.sessionId = sessionId;
+	}
+
+	/** 官方 `ui-chat.transcriptView`：缺省 / 非法值都用 `standard`（Desktop 默认）。 */
+	transcriptView(): DshIdeTranscriptView {
+		return this.view;
+	}
+
+	setTranscriptView(view: DshIdeTranscriptView): void {
+		if (this.view === view) {
+			return;
+		}
+		this.view = view;
+		this.emit();
 	}
 
 	onDidChange(listener: () => void): { dispose(): void } {
@@ -28,18 +81,34 @@ export class DshExpansionStateStore {
 		return { dispose: () => { this.listeners.delete(listener); } };
 	}
 
-	/** 缺省是展开。只有显式收起过才返回 true。 */
-	isTurnCollapsed(turn: number, answerStep: number): boolean {
-		return this.turnProcesses.get(turnKey(turn, answerStep))?.collapsed === true;
+	/**
+	 * 该 Turn 过程是否收起。
+	 *
+	 * 三层优先：① 用户手动设过就以手动值为准；② `verbose` 永不折叠；
+	 * ③ 其余模式对**合格的历史 Turn** 初始折叠——但「是否合格」由调用方按官方状态表判定
+	 * （未结束 / 失败 / 有可见输入等情况不可折叠），这里只回答「模式允许时默认收不收」。
+	 *
+	 * @param eligible 该 Turn 是否满足官方可折叠条件（由调用方按 `turnProcessAlwaysOpen` 等判定）
+	 */
+	isTurnCollapsed(turn: number, answerStep: number, eligible = true): boolean {
+		const manual = this.turnProcesses.get(turnKey(turn, answerStep));
+		if (manual !== undefined) {
+			return manual.collapsed;
+		}
+		if (!eligible || turnFoldingPolicy(this.view) === 'never') {
+			return false;
+		}
+		return true;
 	}
 
+	/**
+	 * 记录用户手动的开合。
+	 *
+	 * **必须三态**：`false` 是「用户手动展开过」，与「从没设过、走模式默认」是两件事——
+	 * 用 `delete` 表示展开会让模式默认（历史 Turn 初始折叠）把用户的展开又收回去。
+	 */
 	setTurnCollapsed(turn: number, answerStep: number, collapsed: boolean): void {
-		const key = turnKey(turn, answerStep);
-		if (collapsed) {
-			this.turnProcesses.set(key, { collapsed: true });
-		} else {
-			this.turnProcesses.delete(key);
-		}
+		this.turnProcesses.set(turnKey(turn, answerStep), { collapsed });
 		this.emit();
 	}
 

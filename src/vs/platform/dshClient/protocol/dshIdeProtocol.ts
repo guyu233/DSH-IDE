@@ -316,6 +316,18 @@ export interface DshIdeTurnProcessNode extends DshIdeNodeBase {
 	readonly endReason?: string;
 }
 
+/**
+ * 官方 `ui-chat` 的四档工作细节模式（`ui-chat.transcriptView`）。
+ *
+ * 官方 `conversation-nodes/README.md`「Display modes」：
+ *   - `compact`：组头只给类别摘要（无实时细节）；
+ *   - `standard`：组头给摘要 + 实时任务细节（默认）；
+ *   - `detailed`：运行中的 Turn **不显示组头**，历史 Turn 保留；
+ *   - `verbose`：**永不折叠整个 Turn**，历史 Turn 也不显示组头。
+ * 四档都保留「单个 reasoning/tool 体需手动展开」这条。
+ */
+export type DshIdeTranscriptView = 'compact' | 'standard' | 'detailed' | 'verbose';
+
 /** 官方 `ui-chat` 的 `manual-compaction`：`/compact` 命令行与它产生的压缩检查点。 */
 export interface DshIdeManualCompactionNode extends DshIdeNodeBase {
 	readonly kind: 'manual-compaction';

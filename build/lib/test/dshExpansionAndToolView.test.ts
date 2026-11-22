@@ -11,9 +11,13 @@ import { test } from 'node:test';
 import { DshExpansionStateStore } from '../../../src/vs/workbench/contrib/dsh/browser/vscode/dshExpansionStateStore.ts';
 import { dshDetailsToolCount, dshToolViewId } from '../../../src/vs/workbench/contrib/dsh/browser/vscode/dshToolViewRegistry.ts';
 
-test('turn collapse defaults to open and node disclosure resets with the turn', () => {
+test('turn collapse defaults per work-details mode and node disclosure resets with the turn', () => {
+	// 官方「Display modes」：Compact/Standard/Detailed 对合格的历史 Turn **初始折叠**，Verbose 永不折叠。
 	const store = new DshExpansionStateStore('s1');
-	assert.equal(store.isTurnCollapsed(1, 0), false);
+	assert.equal(store.isTurnCollapsed(1, 0), true, 'standard starts a completed turn collapsed');
+	store.setTranscriptView('verbose');
+	assert.equal(store.isTurnCollapsed(1, 0), false, 'verbose never folds');
+	store.setTranscriptView('standard');
 	store.setTurnCollapsed(1, 0, true);
 	store.setDisclosed(1, 'reasoning', true);
 	store.setDisclosed(1, 'tool', true);
@@ -32,6 +36,8 @@ test('turn collapse defaults to open and node disclosure resets with the turn', 
 test('two sessions do not share collapse state', () => {
 	const left = new DshExpansionStateStore('left');
 	const right = new DshExpansionStateStore('right');
+	// 用 verbose（永不折叠）做对照：右边没有手动记录，不能读到左边的手动收起。
+	right.setTranscriptView('verbose');
 	left.setTurnCollapsed(3, 1, true);
 	assert.equal(right.isTurnCollapsed(3, 1), false);
 	assert.equal(left.sessionId, 'left');

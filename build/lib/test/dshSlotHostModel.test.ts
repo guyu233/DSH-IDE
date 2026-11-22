@@ -540,3 +540,31 @@ test('the fence slot keys on the lowercased language and carries code/streaming/
 		registration.dispose();
 	}
 });
+
+test('work-details modes drive the default whole-Turn folding', async () => {
+	// 官方 conversation-nodes/README「Display modes」：Compact/Standard/Detailed 对合格的历史
+	// Turn **初始折叠**；Verbose **永不折叠**（Always open; duration/status header cannot collapse it）。
+	const { DshExpansionStateStore, turnFoldingPolicy, hidesRunningGroupHeaders, showsLiveGroupDetail } = await import('../../../src/vs/workbench/contrib/dsh/browser/vscode/dshExpansionStateStore.ts');
+
+	for (const view of ['compact', 'standard', 'detailed']) {
+		assert.equal(turnFoldingPolicy(view as never), 'collapsed-by-default', `${view} must fold completed turns`);
+	}
+	assert.equal(turnFoldingPolicy('verbose'), 'never', 'verbose never folds');
+	// Detailed 在运行中隐藏组头；Compact 的组头不带实时细节。
+	assert.equal(hidesRunningGroupHeaders('detailed'), true);
+	assert.equal(hidesRunningGroupHeaders('standard'), false);
+	assert.equal(showsLiveGroupDetail('compact'), false);
+	assert.equal(showsLiveGroupDetail('standard'), true);
+
+	const store = new DshExpansionStateStore('s1');
+	assert.equal(store.transcriptView(), 'standard', 'the default is standard');
+	assert.equal(store.isTurnCollapsed(1, 0), true, 'a standard completed turn starts collapsed');
+	// 不可折叠的 Turn（运行中 / 失败）永远不因模式而收起。
+	assert.equal(store.isTurnCollapsed(2, 0, false), false, 'an ineligible turn stays open');
+	// 用户手动展开压过模式默认。
+	store.setTurnCollapsed(1, 0, false);
+	assert.equal(store.isTurnCollapsed(1, 0), false, 'a manual choice wins over the mode default');
+	// Verbose 下即使没手动设过也不折叠。
+	store.setTranscriptView('verbose');
+	assert.equal(store.isTurnCollapsed(3, 0), false, 'verbose never folds');
+});
