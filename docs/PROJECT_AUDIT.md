@@ -4,7 +4,7 @@
 
 ## 当前总摘要
 
-**内容原子化已完成代码层收口（2026-11-23，CHK-320..330）。** 契约 §19 的六项稳定性工作里 S0（局部 revision）、S1（display signature）、S2（slot host 行级增量渲染）、S3（稳定 request 身份）、S4（fingerprint 精确化）、S5（自动滚动 hold）**全部落地并有单测**；§17 的两条渲染层已知差异里「turn 用量按 assistant 节点累加」也已按官方 `usageOf()` 修正。`test-dsh:all` 首次全绿（**810 tests / 808 pass / 0 fail / 2 skipped**）；8 项门禁里 7 项 PASS，只剩 `install-drift`（用户 profile 的 `dsh.profile.bundles` 未登记 `dsh-ide`）。当前高风险只剩**真机验收**（§15/附录 B）与 `build/tsconfig.json` 的存量错误。以最新 CHK 轮次和 `DSH-IDE内容原子化契约.md` 附录 A 为准，不读旧摘要作为现状。
+**内容原子化已完成代码层收口（2026-11-23，CHK-320..343）。** 契约 §19 的六项稳定性工作 S0–S6 **全部落地并有单测**（含移植上游 1.145+ `withScrollAnchorAtBottom`，CHK-340）；§17 的三项剩余工作里「输入区两席」「待处理提交 dock」「问答面板」均已接上（CHK-323/337/338），两条渲染层已知差异（用量口径、折叠判据）也已按官方修正（CHK-328/335/336）。`dsh*` 部件不再文本拼接、改用原生 `<details>` 结构卡（CHK-341），自研按钮补 `:focus-visible`（CHK-342）、折叠头补 `aria-controls`（CHK-343）。`test-dsh:all` 最新实跑 **839 tests / 837 pass / 0 fail / 2 skipped**；`tsc --noEmit`（`src/tsconfig.json`）与 `build/tsconfig.json` 均 0 错误；8 项门禁里 7 项 PASS，只剩 `install-drift`（用户 profile 的 `dsh.profile.bundles` 未登记 `dsh-ide`，属环境不可判定）。当前高风险只剩**真机验收**（§15/附录 B）。以最新 CHK 轮次和 `DSH-IDE内容原子化契约.md` 附录 A 为准，不读旧摘要作为现状。
 
 历史摘要：**B00 已交付；B01 的取证与补充红测已完成，生产迁移仍 PENDING。** 原审计起点 `44e0a34827f83c3a87891bc8d0ebf93b96ff09b0`，比较 merge-base `d07799b88abd0b84bb4935e0527798d868782f3d`。B00 分支 `audit/b00-baseline-redwall`；B01 从 `2c448cbd` 起在 `audit/b01-identity-readiness` 延续。同一产品的 Host 半身与 IDE 窗口未改动；不以取证完成代替问题修复。
 
