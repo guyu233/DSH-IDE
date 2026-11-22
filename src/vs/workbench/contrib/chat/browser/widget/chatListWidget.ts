@@ -423,6 +423,22 @@ export class ChatListWidget extends Disposable {
 		this._tree.scrollTop = value;
 	}
 
+	/**
+	 * 采样分页锚点（官方 `ui-chat` 的 paging anchor）。
+	 *
+	 * 历史前插（`loadOlder`）会把已有内容整体下移；在虚拟列表里浏览器自带的 scroll anchoring
+	 * 不可靠（行 DOM 会被回收重建）。这里用语义锚点：记住首个完全可见的行与它离视口顶部的偏移，
+	 * 前插完成后把它放回原屏幕位置。
+	 */
+	captureScrollAnchor(): { readonly element: ChatTreeItem; readonly offset: number } | undefined {
+		return this._tree.captureScrollAnchor();
+	}
+
+	/** 前插完成后恢复锚点位置（见 `captureScrollAnchor`）。 */
+	restoreScrollAnchor(anchor: { readonly element: ChatTreeItem; readonly offset: number }): void {
+		this._tree.restoreScrollAnchor(anchor);
+	}
+
 	get scrollHeight(): number {
 		return this._tree.scrollHeight;
 	}

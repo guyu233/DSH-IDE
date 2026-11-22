@@ -86,6 +86,47 @@ export class ObjectTree<T, TFilterData = void> extends AbstractTree<T | null, TF
 		return this.model.getListRenderCount(element);
 	}
 
+	/**
+	 * 采样「首个可见元素」作为分页锚点（官方 `ui-chat` 的 paging anchor）。
+	 *
+	 * 为什么需要它：历史前插会把已有内容整体下移。浏览器自带的 scroll anchoring 在
+	 * 虚拟列表里不可靠（行 DOM 会被回收重建），必须用**语义锚点**——
+	 * 记住「哪个元素、它离视口顶部多远」，前插后把同一个元素放回同一屏幕位置。
+	 *
+	 * @returns 锚点；没有完全可见的行时返回 undefined
+	 */
+	captureScrollAnchor(): { readonly element: T; readonly offset: number } | undefined {
+		const index = this.view.firstVisibleIndex;
+		if (index < 0 || index >= this.view.length) {
+			return undefined;
+		}
+		const node = this.view.element(index) as { readonly element?: T } | undefined;
+		const element = node?.element;
+		if (element === undefined) {
+			return undefined;
+		}
+		// `getRelativeTop` 在元素不完全可见时返回 null：那不是一个可靠的锚点。
+		const offset = this.getRelativeTop(element);
+		return offset === null ? undefined : { element, offset };
+	}
+
+	/**
+	 * 把锚点元素放回它原来的屏幕位置。
+	 *
+	 * 元素已不在树里（换窗口 / 被清空）时**什么都不做**：宁可保持现状，
+	 * 也不要用另一个元素的位置冒充，那会把读者带到无关内容。
+	 *
+	 * @param anchor `captureScrollAnchor` 的返回值
+	 */
+	restoreScrollAnchor(anchor: { readonly element: T; readonly offset: number }): void {
+		const current = this.getRelativeTop(anchor.element);
+		if (current === null) {
+			return;
+		}
+		// 与 `chatListWidget.getAnchoredScrollTop` 同一公式；base 层不能反向依赖 workbench，故此处内联。
+		this.view.scrollTop = Math.max(0, this.view.scrollTop + current - anchor.offset);
+	}
+
 	resort(element: T | null, recursive = true): void {
 		this.model.resort(element, recursive);
 	}
@@ -333,3 +374,4 @@ export class CompressibleObjectTree<T, TFilterData = void> extends ObjectTree<T,
 		return this.model.getCompressedTreeNode(element);
 	}
 }
+
