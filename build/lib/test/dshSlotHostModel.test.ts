@@ -528,3 +528,24 @@ test('commandview is a keyed slot and only the named command is overridden', asy
 	}
 	assert.equal(dshCommandRowOverride('goal', 's1'), undefined, 'disposing the occupant restores the built-in card');
 });
+
+
+
+test('the fence slot keys on the lowercased language and carries code/streaming/meta', () => {
+	// 官方 ui-chat/README「Reference previews」：entryKey 是**小写化的围栏语言**，
+	// owner props 带 lang / code / streaming / meta。历史实现只传一个 info 且只读 replacement，
+	// 插件既拿不到正文也拿不到流式状态。
+	const registration = dshChatSlotRegistry.register(DSH_MARKDOWN_FENCE_SLOT, {
+		id: 'mermaid-layer',
+		key: 'mermaid',
+		props: { replacement: 'rendered' },
+	});
+	try {
+		// 大写语言与「语言 + meta」都要能命中同一层：entryKey 是小写化的语言部分。
+		assert.equal(dshMarkdownFenceOverride('s1', 'MERMAID', 'graph TD;', true), 'rendered', 'the entry key must be the lowercased language');
+		assert.equal(dshMarkdownFenceOverride('s1', 'mermaid title="x"', 'x', false), 'rendered', 'meta must not break the key match');
+		assert.equal(dshMarkdownFenceOverride('s1', 'typescript', 'x', false), undefined);
+	} finally {
+		registration.dispose();
+	}
+});

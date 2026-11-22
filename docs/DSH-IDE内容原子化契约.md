@@ -1576,7 +1576,7 @@ DSH 的槽位有两个**独立轴**：基数（cardinality）与作用域（scop
 | `conversation.chat.message.images` | single | session | `MessageImagesOwnerProps` | `dshImageGallery`，气泡不再写 `Image:` | 图片画廊 | 部分实现 |
 | `conversation.chat.aside` | single | session | — | single 槽由 `dshAsideText(sessionId)` 消费：occupant 给 `text` 时在槽位尾部渲染一段侧栏文本，无 occupant 不显示 | 侧栏席位 | 部分实现 |
 | `conversation.chat.text-interaction` | keyed | session | `TextInteractionSurface` | keyed 槽由 `dshTextInteractions(sessionId, surface)` 消费：选中正文后出现手势条，点击把选中文本作为最后一个参数交给插件命令；缺 `command` 的条目不出现 | 文本手势 | 部分实现 |
-| `conversation.chat.markdown.fence` | hoc | session | `MarkdownDelegateFenceInfo` | hoc 槽由 `dshMarkdownFenceOverride(sessionId, info)` 消费：occupant 按围栏 info 接管该段（`ChatMarkdownContentPart` 的 `codeBlockRendererSync` 里优先查它）；无 occupant 时完全走原生渲染 | 围栏层 | 部分实现 |
+| `conversation.chat.markdown.fence` | hoc | session | `MarkdownDelegateFenceInfo` | hoc 槽由 `dshMarkdownFenceOverride(sessionId, info, code?, streaming?)` 消费：entryKey 是**小写化的围栏语言**，owner props 是官方的 `{ lang, code, streaming, meta }`（2026-11-23 CHK-346 修正；此前只传 `info` 且不小写化、只读 `replacement`）；occupant 按围栏语言接管该段（`ChatMarkdownContentPart` 的 `codeBlockRendererSync` 里优先查它）；无 occupant 时完全走原生渲染 | 围栏层 | 部分实现 |
 | `tool.call.toolview` | keyed | session | `ToolCallOwnerProps` | 槽位由 `dshToolViewOverride(toolName, sessionId)` 消费（occupant 可指定家族），缺省才用内置 `dshToolViewId`；DOM 仍是一条 `toolInvocationSerialized` | 工具视图注册表 | 部分实现 |
 | `tool.call.images` | single | session | `ToolImagesOwnerProps` | 工具结果里的图片块进 `dshImageGallery`，没有单独席位 | 工具图片画廊 | 部分实现 |
 | `shell.quota-notice` | chain | root | `QuotaNoticeOwnerProps` | 回复视图上的 `ChatQuotaExceededPart`；chain 槽由 `dshQuotaNoticeOverride(code)` 消费：首个非空 select 生效，可覆盖文案、可要求保持显示；`retainQuotaNotice` 保证缺省帧与更小 seq 不覆盖 | 配额通知链 | 部分实现 |

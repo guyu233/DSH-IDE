@@ -111,16 +111,44 @@ export const DSH_COMPOSER_DOCK_SLOT = 'conversation.composer.dock';
 export const DSH_COMMAND_VIEW_SLOT = 'conversation.chat.commandview';
 
 /**
- * 取某个围栏语言的插件包装（官方 hoc 槽：key 是围栏 info，缺省走通配层）。
+ * 围栏层的 owner props（官方 `MarkdownFenceProps`）。
+ *
+ * 官方 `ui-chat/README.md`「Reference previews」写明：entryKey 是**小写化的围栏语言**，
+ * owner props 带 `lang`、`code`（围栏正文）、`streaming`（是否仍在流式）、
+ * `meta`（info 串里语言之后的其余部分）。历史实现只传一个 `info`、只读 `replacement`，
+ * 于是插件既拿不到正文也拿不到流式状态，也无法按语言之外的参数（如 `diff` 的文件名）分层。
+ */
+export interface DshMarkdownFenceProps {
+	/** 小写化的围栏语言（与 entryKey 相同）。 */
+	readonly lang: string;
+	/** 围栏正文。 */
+	readonly code: string;
+	/** 是否仍在流式（流式时不完整内容不该被接管）。 */
+	readonly streaming: boolean;
+	/** info 串里语言之后的其余部分（可空串）。 */
+	readonly meta: string;
+}
+
+/**
+ * 取某个围栏语言的插件层（官方 hoc 槽）。
  *
  * 返回可显示的替代文本；没有 occupant 时返回 undefined，交给原生 markdown 渲染。
  * 这一层只决定「这段围栏交给谁画」，不接管 markdown 解析。
+ *
+ * @param info 完整 info 串（`lang meta`）；语言部分会小写化后作为 entryKey
+ * @param code 围栏正文（官方 `code`）
+ * @param streaming 是否仍在流式（官方 `streaming`）
  */
-export function dshMarkdownFenceOverride(sessionId: string | undefined, info: string): string | undefined {
+export function dshMarkdownFenceOverride(sessionId: string | undefined, info: string, code = '', streaming = false): string | undefined {
+	// 官方：entryKey 是**小写化的围栏语言**；`meta` 是语言之后的其余 info。
+	const trimmed = info.trim();
+	const space = trimmed.search(/\s/);
+	const lang = (space === -1 ? trimmed : trimmed.slice(0, space)).toLowerCase();
+	const meta = space === -1 ? '' : trimmed.slice(space + 1).trim();
 	const resolved = dshChatSlotRegistry.resolve(DSH_MARKDOWN_FENCE_SLOT, {
 		sessionId,
-		entryKey: info,
-		props: { info },
+		entryKey: lang,
+		props: { lang, code, streaming, meta },
 	}) as { readonly occupants?: readonly { readonly props?: Readonly<Record<string, unknown>> }[] } | undefined;
 	const text = resolved?.occupants?.[0]?.props?.['replacement'];
 	return typeof text === 'string' && text !== '' ? text : undefined;

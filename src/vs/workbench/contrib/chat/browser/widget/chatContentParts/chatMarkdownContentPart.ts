@@ -290,9 +290,11 @@ export class ChatMarkdownContentPart extends Disposable implements IChatContentP
 						const chatExtensions = store.add(instantiationService.createInstance(ChatExtensionsContentPart, { kind: 'extensions', extensions: text.split(',') }));
 						return chatExtensions.domNode;
 					}
-					// 官方 `conversation.chat.markdown.fence` 是 hoc 槽：occupant 可按围栏 info 接管这一段。
-					// 没有 occupant 时返回 undefined，走下面完全不变的原生渲染。
-					const fenceReplacement = dshMarkdownFenceOverride(element.sessionResource?.toString(), languageId);
+					// 官方 `conversation.chat.markdown.fence` 是 hoc 槽：occupant 可按围栏语言接管这一段。
+					// 官方 owner props 是 `lang` / `code` / `streaming` / `meta`——插件需要正文与流式状态
+					// 才能在流式时退回原生渲染；只给语言会让它拿到一段空壳。
+					const fenceStreaming = isResponseVM(context.element) ? !context.element.isComplete : false;
+					const fenceReplacement = dshMarkdownFenceOverride(element.sessionResource?.toString(), raw ?? languageId, text, fenceStreaming);
 					if (fenceReplacement !== undefined) {
 						const replaced = $('div');
 						replaced.textContent = fenceReplacement;
