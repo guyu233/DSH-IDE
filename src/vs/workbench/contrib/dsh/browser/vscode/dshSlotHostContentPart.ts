@@ -209,8 +209,15 @@ export class DshSlotHostContentPart extends Disposable implements IChatContentPa
 		if (binding === undefined) {
 			return;
 		}
-		const rowsToRender = this.collectRows(binding).map(row => ({ ...row, signature: this.rowSignature(row, binding) }));
-		const previous = [...this.rows].map(([key, row]) => ({ key, signature: row.signature }));
+		const collected = this.collectRows(binding);
+		const rowsToRender = collected.map(row => ({ ...row, signature: this.rowSignature(row, binding) }));
+		// 顶层 diff 只比**顶层行**：组容器的子行也进 `this.rows`（key 带路径前缀），
+		// 但它们由容器内部的 `renderGroupBody` 对齐。若把子行也算进顶层 previous，
+		// 它们会因为不在 rowsToRender 里而被判成 removed 并删除——容器里就空了。
+		const topLevelKeys = new Set(collected.map(row => row.key));
+		const previous = [...this.rows]
+			.filter(([key]) => topLevelKeys.has(key) || !key.includes('/'))
+			.map(([key, row]) => ({ key, signature: row.signature }));
 		const plan = diffDshSlotRows(previous, rowsToRender);
 		if (!plan.changed) {
 			// 没有可见变化：一次高度事件都不发，避免把上游高频增量放大成自动滚动。
@@ -454,9 +461,13 @@ export class DshSlotHostContentPart extends Disposable implements IChatContentPa
 	private rowSignature(row: DshSlotRowSpec, binding: NonNullable<ReturnType<typeof dshContentStore.get>>): string {
 		switch (row.kind) {
 			case 'group':
-				// 容器签名 = 自身展开态 + 子行签名串。子行任何变化都会让容器重画——
-				// 这是刻意的：容器是子行的父 DOM，只有整体重建才能保证结构一致。
-				return `group\u0000${row.expanded ? '1' : '0'}\u0000${row.children.map(child => this.rowSignature(child, binding)).join('\u0001')}`;
+				// 容器签名**只看展开态**——子行的变化由容器内部逐行对齐（见 `renderGroupBody`）。
+				//
+				// 为什么必须这样：官方「Turn Process Folding」要求「When new content only extends an
+				// existing group at its beginning, that group and **its old message rows retain their
+				// identities and opening choices**」。把子行签名拼进容器签名会让**任何**子行变化
+				// （包括历史前插）都重建整个容器，旧子行 DOM 全丢——身份与展开态一起丢失。
+				return `group\u0000${row.expanded ? '1' : '0'}`;
 			case 'summary':
 				// 展开状态参与签名：否则切换后增量渲染认为「没变」而不重画箭头。
 				return `summary\u0000${row.line}\u0000${row.expanded === true ? '1' : '0'}`;
@@ -485,11 +496,7 @@ export class DshSlotHostContentPart extends Disposable implements IChatContentPa
 					container.classList.add('dsh-process-group-body-expanded');
 					ensureGroupBodyStyles();
 				}
-				for (const child of row.children) {
-					const childRefs = new DisposableStore();
-					container.appendChild(this.renderRow(child, binding, childRefs));
-					refs.add(childRefs);
-				}
+				this.renderGroupBody(container, row.children, binding, refs);
 				if (row.expanded) {
 					// 官方「Group-title rules」末段的组内跟随：展开的组只在**自身**滚到底时跟随增长，
 					// 用户滚开就暂停、滚回就恢复，且与外层 transcript 的跟随完全独立。
@@ -689,6 +696,61 @@ export class DshSlotHostContentPart extends Disposable implements IChatContentPa
 	 */
 	private groupHostId(nodeKey: string): string {
 		return `${this.domIdPrefix}-group-${nodeKey.replace(/[^A-Za-z0-9_-]/g, '_')}`;
+	}
+
+	/**
+	 * 渲染组容器的子行，**复用已有 DOM**。
+	 *
+	 * 官方「Turn Process Folding」：「When new content only extends an existing group at its beginning,
+	 * that group and **its old message rows retain their identities and opening choices**」。
+	 * 所以容器内不能每次重建：按 key 对齐——key 相同且签名未变就保留原 DOM（连高度都不重测），
+	 * 只有变了的子行才重建，新增的插到正确位置。
+	 *
+	 * 子行也进 `this.rows`（key 是 `group:<turn>/node:<nodeId>` 这样的完整路径），
+	 * 所以它们的原生部件与事件同样随行释放，不会泄漏。
+	 */
+	private renderGroupBody(
+		container: HTMLElement,
+		children: readonly DshSlotRowSpec[],
+		binding: NonNullable<ReturnType<typeof dshContentStore.get>>,
+		refs: DisposableStore,
+	): void {
+		// 先收掉不再存在的子行：容器内的子行不在顶层 diff 里，必须在这里清理，
+		// 否则组缩小时旧的子行 DOM 会残留（并继续持有原生部件与事件）。
+		const keep = new Set(children.map(child => child.key));
+		for (const [key, entry] of [...this.rows]) {
+			if (keep.has(key) || !key.includes('/')) {
+				continue;
+			}
+			entry.refs.dispose();
+			entry.dom.remove();
+			this.rows.delete(key);
+		}
+		let cursor: HTMLElement | undefined = container.firstElementChild as HTMLElement | undefined;
+		for (const child of children) {
+			const signature = this.rowSignature(child, binding);
+			let entry = this.rows.get(child.key);
+			if (entry === undefined || entry.signature !== signature) {
+				const childRefs = new DisposableStore();
+				const dom = this.renderRow(child, binding, childRefs);
+				if (entry === undefined) {
+					// 子行的 refs 由容器行的 refs 统一持有，随容器一起释放。
+					refs.add(childRefs);
+				} else {
+					entry.refs.dispose();
+					entry.dom.replaceWith(dom);
+					refs.add(childRefs);
+				}
+				entry = { signature, dom, refs: childRefs };
+				this.rows.set(child.key, entry);
+				this.renderStats.rebuiltRows++;
+			}
+			if (cursor === entry.dom) {
+				cursor = cursor.nextElementSibling as HTMLElement | undefined;
+			} else {
+				container.insertBefore(entry.dom, cursor ?? null);
+			}
+		}
 	}
 
 	private renderNode(nodeId: string, binding: NonNullable<ReturnType<typeof dshContentStore.get>>, nested: boolean, refs: DisposableStore, rowKey = nodeId): HTMLElement {

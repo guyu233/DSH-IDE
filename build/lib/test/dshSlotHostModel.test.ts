@@ -744,3 +744,19 @@ test('the completed-turn footer follows the official reveal rules', async () => 
 	// 常显必须同时要求「最新 Turn」与「末条是答复」。
 	assert.ok(source.includes('node.turn === latestTurn && '), 'both conditions are required');
 });
+
+test('extending a group at its beginning keeps the old rows and the container', async () => {
+	// 官方「Turn Process Folding」：When new content only extends an existing group at its beginning,
+	// that group and **its old message rows retain their identities and opening choices**。
+	// 把子行签名拼进容器签名会让历史前插重建整组、旧子行 DOM 全丢——这正是本条要防的。
+	const { readFileSync } = await import('node:fs');
+	const source = readFileSync(new URL('../../../src/vs/workbench/contrib/dsh/browser/vscode/dshSlotHostContentPart.ts', import.meta.url), 'utf8');
+	// 容器签名不得包含子行签名。
+	assert.ok(source.includes("return `group\\u0000${row.expanded ? '1' : '0'}`"), 'the container signature must ignore child rows');
+	assert.ok(!source.includes("row.children.map(child => this.rowSignature"), 'child signatures must not leak into the container signature');
+	// 容器内必须逐行对齐（复用 DOM），而不是无脑 append。
+	assert.ok(source.includes('this.renderGroupBody(container, row.children, binding, refs)'), 'the body must go through the diffing renderer');
+	assert.ok(source.includes('entry.dom.replaceWith(dom)'), 'only changed child rows are rebuilt');
+	// 子行不能进顶层 diff（否则会被当成 removed 删掉）。
+	assert.ok(source.includes('topLevelKeys.has(key) || !key.includes('), 'child rows are excluded from the top-level diff');
+});
