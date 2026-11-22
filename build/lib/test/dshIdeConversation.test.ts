@@ -401,6 +401,8 @@ test('a retried attempt replaces the same step usage instead of stacking it', ()
 	// 先扣掉上一次再计入新的。纯累加会把被覆盖的那次也算进总量，比官方偏大。
 	const state = createDshIdeConversationState();
 	const send = (event: Record<string, unknown>) => project(state, { type: 'event', event });
+	// 官方显示前提之一：loaded window 必须包含该 Turn 的 `turn/start`。
+	send({ type: 'turn/start', seq: 199, time: 199, data: { turn: 30 } });
 	send({ type: 'assistant/message', seq: 200, time: 200, turn: 30, data: { turn: 30, step: 1, message: { content: [{ type: 'text', text: 'a' }], usage: { inputTokens: 10, outputTokens: 1 } } } });
 	send({ type: 'assistant/message', seq: 201, time: 201, turn: 30, data: { turn: 30, step: 1, message: { content: [{ type: 'text', text: 'a' }], usage: { inputTokens: 20, outputTokens: 2 } } } });
 	const view = send({ type: 'turn/end', seq: 202, time: 202, data: { turn: 30, step: 1, reason: { kind: 'completed' } } });
@@ -421,6 +423,7 @@ test('turn/end 给出 turn-tail：收尾答复之后的工具使分支不可用'
 	const usageTail = (() => {
 		const state = createDshIdeConversationState();
 		const send = (event: Record<string, unknown>) => project(state, { type: 'event', event });
+		send({ type: 'turn/start', seq: 89, time: 89, data: { turn: 9 } });
 		send({ type: 'assistant/message', seq: 90, time: 90, turn: 9, data: { turn: 9, step: 1, message: { content: [{ type: 'text', text: 'a' }], usage: { inputTokens: 2, outputTokens: 3 } } } });
 		send({ type: 'assistant/message', seq: 91, time: 91, turn: 9, data: { turn: 9, step: 2, message: { content: [{ type: 'text', text: 'b' }], usage: { inputTokens: 4, outputTokens: 5, cacheReadTokens: 1 } } } });
 		return send({ type: 'turn/end', seq: 92, time: 92, data: { turn: 9, step: 2, reason: { kind: 'completed' } } })
@@ -432,6 +435,7 @@ test('turn/end 给出 turn-tail：收尾答复之后的工具使分支不可用'
 	const bucketDropped = (() => {
 		const state = createDshIdeConversationState();
 		const send = (event: Record<string, unknown>) => project(state, { type: 'event', event });
+		send({ type: 'turn/start', seq: 99, time: 99, data: { turn: 20 } });
 		send({ type: 'assistant/message', seq: 100, time: 100, turn: 20, data: { turn: 20, step: 1, message: { content: [{ type: 'text', text: 'a' }], usage: { inputTokens: 1, outputTokens: 1, cacheReadTokens: 5, reasoningTokens: 2 } } } });
 		send({ type: 'assistant/message', seq: 101, time: 101, turn: 20, data: { turn: 20, step: 2, message: { content: [{ type: 'text', text: 'b' }], usage: { inputTokens: 1, outputTokens: 1 } } } });
 		return send({ type: 'turn/end', seq: 102, time: 102, data: { turn: 20, step: 2, reason: { kind: 'completed' } } })
@@ -971,4 +975,43 @@ test('an attempt sample and the same step\'s message sample replace instead of s
 		.nodes.find(node => node.kind === 'turn-tail') as { tokenUsage?: { input?: number; output?: number } } | undefined;
 	assert.equal(tail?.tokenUsage?.input, 12, 'the message sample replaces the attempt sample, not adds to it');
 	assert.equal(tail?.tokenUsage?.output, 2);
+});
+
+test('usage is hidden when the loaded window has no turn/start', () => {
+	// 官方 README「Turn token usage」：只有 loaded window **包含 turn/start** 时才有展开用量行。
+	// 窗口从中间切进来时累计值缺头部样本，必须整份隐藏而不是给一个偏小的数字。
+	const state = createDshIdeConversationState();
+	const project = (event: Record<string, unknown>) => projectDshIdeConversation(state, { type: 'event', event });
+	// 故意不发 turn/start。
+	project({ type: 'assistant/message', seq: 2, time: 2, data: { turn: 1, step: 0, message: { content: [{ type: 'text', text: 'a' }] }, usage: { inputTokens: 10, outputTokens: 1 } } });
+	const tail = project({ type: 'turn/end', seq: 3, time: 3, data: { turn: 1, reason: { kind: 'completed' } } })
+		.nodes.find(node => node.kind === 'turn-tail') as { tokenUsage?: unknown } | undefined;
+	assert.equal(tail?.tokenUsage, undefined, 'without turn/start the whole usage disclosure must be hidden');
+});
+
+test('usage is hidden when a started attempt reports no usage at all', () => {
+	// 官方：「every started model attempt reports safe, exact usage」——有 attempt 没报用量时
+	// 整份隐藏，而不是把缺的那次当 0（那会给出一个偏小的总数）。
+	const state = createDshIdeConversationState();
+	const project = (event: Record<string, unknown>) => projectDshIdeConversation(state, { type: 'event', event });
+	project({ type: 'turn/start', seq: 1, time: 1, data: { turn: 1 } });
+	// 第一条报用量；第二条是已开始的 attempt 但 stream 里没有 usage。
+	project({ type: 'assistant/message', seq: 2, time: 2, data: { turn: 1, step: 0, message: { content: [{ type: 'text', text: 'a' }] }, usage: { inputTokens: 10, outputTokens: 1 } } });
+	project({ type: 'assistant/attempt', seq: 3, time: 3, data: { turn: 1, step: 1, stream: [{ chunk: { type: 'text', text: 'partial' } }] } });
+	const tail = project({ type: 'turn/end', seq: 4, time: 4, data: { turn: 1, reason: { kind: 'completed' } } })
+		.nodes.find(node => node.kind === 'turn-tail') as { tokenUsage?: unknown } | undefined;
+	assert.equal(tail?.tokenUsage, undefined, 'incomplete accounting must hide the whole disclosure');
+});
+
+test('usage is shown when turn/start is present and every attempt reports usage', () => {
+	// 反向确认：两条条件都满足时必须**照常显示**，不能因为加了守卫就永远隐藏。
+	const state = createDshIdeConversationState();
+	const project = (event: Record<string, unknown>) => projectDshIdeConversation(state, { type: 'event', event });
+	project({ type: 'turn/start', seq: 1, time: 1, data: { turn: 1 } });
+	project({ type: 'assistant/message', seq: 2, time: 2, data: { turn: 1, step: 0, message: { content: [{ type: 'text', text: 'a' }] }, usage: { inputTokens: 10, outputTokens: 1 } } });
+	project({ type: 'assistant/message', seq: 3, time: 3, data: { turn: 1, step: 1, message: { content: [{ type: 'text', text: 'b' }] }, usage: { inputTokens: 5, outputTokens: 2 } } });
+	const tail = project({ type: 'turn/end', seq: 4, time: 4, data: { turn: 1, reason: { kind: 'completed' } } })
+		.nodes.find(node => node.kind === 'turn-tail') as { tokenUsage?: { input?: number; output?: number } } | undefined;
+	assert.equal(tail?.tokenUsage?.input, 15);
+	assert.equal(tail?.tokenUsage?.output, 3);
 });

@@ -97,6 +97,22 @@ interface DshIdeTurnTailState {
 	 * 这里用 `complete` 记录「是否每个已计入的尝试都报过」，缺一次就清掉该桶。
 	 */
 	usage?: { input: number; output: number; cacheRead?: number; cacheWrite?: number; reasoning?: number; cacheReadComplete: boolean; cacheWriteComplete: boolean; reasoningComplete: boolean };
+	/**
+	 * 这份 Turn 的 `turn/start` 是否在已加载窗口里（官方 `turnStarted`）。
+	 *
+	 * 官方 README「Turn token usage」：只有 loaded window **包含 `turn/start`** 时才显示用量行。
+	 * 窗口从中间切进来时（比如翻页只拿到 turn 尾部），本仓拿不到该 Turn 的起点，
+	 * 累计值可能缺头部样本；此时整份用量必须隐藏，而不是给一个偏小的数字。
+	 */
+	turnStarted?: true;
+	/** 已计入用量的 attempt 数（官方「every started model attempt reports safe, exact usage」的分子）。 */
+	usageAttempts: number;
+	/**
+	 * 已开始但**没有**报告可用用量的 attempt 数。
+	 *
+	 * 只要 > 0，官方要求整份用量隐藏（incomplete accounting），而不是把缺的那次当 0。
+	 */
+	usageAttemptsMissing: number;
 }
 
 /** 一次工作流运行的折叠状态（官方 `WorkflowState`）。 */
@@ -465,14 +481,30 @@ function applyDurable(state: DshIdeConversationState, event: Record<string, unkn
 		return;
 	}
 
+	if (type === 'turn/start') {
+		// 官方 `ChatBuilder` 用 `turn/start` 判定「这个 Turn 的起点在已加载窗口里」（`turnStarted`）。
+		// 用量行的显示前提之一就是它：窗口从中间切进来时，累计值缺头部样本，不能当完整值展示。
+		// 这里只记录事实，不产出节点（`turn/start` 不在节点白名单内）。
+		turnTailOf(state, turn).turnStarted = true;
+		return;
+	}
+
 	if (type === 'assistant/attempt') {
 		// 官方 `usageOf()` 对 `assistant/attempt` 同样生效：它读 `data.stream` 里最后一个 `usage`
 		// chunk（`lastAssistantStreamChunk(stream, 'usage')`）。重试链里被覆盖的那次 attempt 只有这个
 		// 入口，漏接会让「重试的同一 step」少算一次、总数比官方偏小。
 		const step = numberOf(data['step']) ?? 0;
 		const usage = streamUsageOf(data['stream']);
+		// 官方「every started model attempt reports safe, exact usage」：每一次已开始的 attempt
+		// 都要么报了一份可用样本，要么被记为「缺失」——后者会让整份用量隐藏（不是当 0）。
+		const attemptTail = turnTailOf(state, turn);
+		if (usage === undefined) {
+			attemptTail.usageAttemptsMissing += 1;
+		} else {
+			attemptTail.usageAttempts += 1;
+		}
 		if (usage !== undefined) {
-			const tail = turnTailOf(state, turn);
+			const tail = attemptTail;
 			const value = (input: unknown): number => typeof input === 'number' && Number.isFinite(input) ? input : 0;
 			const maybe = (input: unknown): number | undefined => typeof input === 'number' && Number.isFinite(input) ? input : undefined;
 			const delta = {
@@ -510,6 +542,11 @@ function applyDurable(state: DshIdeConversationState, event: Record<string, unkn
 			...(providerMetadataOf(message['providerMetadata']) === undefined ? {} : { providerMetadata: providerMetadataOf(message['providerMetadata']) }),
 			...(data['interrupted'] === true || message['interrupted'] === true ? { interrupted: true as const } : {}),
 		});
+		if (usage === undefined) {
+			turnTailOf(state, turn).usageAttemptsMissing += 1;
+		} else {
+			turnTailOf(state, turn).usageAttempts += 1;
+		}
 		noteTurnAssistant(state, turn, seq, blocks, usage as Parameters<typeof noteTurnAssistant>[4], messageId, step);
 		noteTurnStep(state, turn, step);
 		// durable 消息接管同回合的流式临时节点，包括已经 end、但节点还留着的那次。
@@ -920,7 +957,7 @@ function turnTailOf(state: DshIdeConversationState, turn: number): DshIdeTurnTai
 	if (existing !== undefined) {
 		return existing;
 	}
-	const created: DshIdeTurnTailState = { answerStep: 0, messageCount: 0, assistantCount: 0, toolCallCount: 0, subagentCount: 0 };
+	const created: DshIdeTurnTailState = { answerStep: 0, messageCount: 0, assistantCount: 0, toolCallCount: 0, subagentCount: 0, usageAttempts: 0, usageAttemptsMissing: 0 };
 	state.turnTails.set(turn, created);
 	return created;
 }
@@ -1146,10 +1183,35 @@ function putTurnTail(state: DshIdeConversationState, turn: number, seq: number, 
 		...(closing === undefined ? {} : { closing }),
 		...(tail?.lastAssistantMessageId === undefined ? {} : { closingMessageId: tail.lastAssistantMessageId }),
 		...(branchUnavailable ? { branchUnavailable: true } : {}),
-		...(tail?.usage === undefined ? {} : { tokenUsage: tokenUsageView(tail.usage) }),
+		...(usageDisclosureOf(tail) === undefined ? {} : { tokenUsage: tokenUsageView(usageDisclosureOf(tail)!) }),
 	} as DshIdeConversationNode);
 	// 过程组节点与尾部同批产出（官方两个 Definition 各自独立，都在 Turn 结束时成形）。
 	putTurnProcess(state, turn, seq, time);
+}
+
+/**
+ * 该 Turn 的用量是否**可以展示**（官方 README「Turn token usage」的两条硬条件）。
+ *
+ * > "A completed Turn shows an expandable usage row only when the loaded window includes
+ * >  `turn/start` and every started model attempt reports safe, exact usage.
+ * >  Incomplete or contradictory accounting hides the complete disclosure instead of
+ * >  presenting a partial total."
+ *
+ * 因此：
+ *   1. `turnStarted` 必须为真——窗口从中间切进来时累计值缺头部样本；
+ *   2. `usageAttemptsMissing` 必须为 0——有 attempt 没报用量时，整份隐藏而不是当 0。
+ *
+ * 任一不满足返回 undefined，调用方据此**不写** `tokenUsage` 字段（协议层 optional），
+ * 渲染层就不会出现一个偏小或残缺的用量行。
+ */
+function usageDisclosureOf(tail: DshIdeTurnTailState | undefined): DshIdeTurnTailState['usage'] | undefined {
+	if (tail === undefined || tail.usage === undefined) {
+		return undefined;
+	}
+	if (tail.turnStarted !== true || tail.usageAttemptsMissing > 0) {
+		return undefined;
+	}
+	return tail.usage;
 }
 
 /** 官方 `submittedPlan`：只认 `exit_plan_mode` 的参数里带标题的完整 plan。 */
