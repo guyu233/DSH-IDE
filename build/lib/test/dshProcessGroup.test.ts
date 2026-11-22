@@ -282,3 +282,37 @@ test('the collapsed process line uses live detail, not the bare tool name', () =
 	const fallback = hiddenProcessLine([{ kind: 'tool-call', name: 'read', callId: 'c2', args: { code: 'x' } }]);
 	assert.ok(fallback !== undefined && fallback.includes('read'), `expected tool-name fallback in "${fallback}"`);
 });
+
+test('a reply or steering splits the turn into separate process segments', () => {
+	// 官方「Process grouping」的示例表：
+	//   T1 → steering → T2      → G[T1] → steering → G[T2]（两组）
+	//   A1(thought, reply) → T1 → G[A1.reasoning] → A1.response → G[T1]（两组）
+	//   T1 → T2（无边界）        → G[T1, T2]（一组）
+	const [withSteering] = groupTurnProcesses([
+		node({ key: 'u', kind: 'user', seq: 1, turn: 1 }),
+		node({ key: 't1', kind: 'tool-call', seq: 2, turn: 1 }),
+		node({ key: 's', kind: 'steering', seq: 3, turn: 1 }),
+		node({ key: 't2', kind: 'tool-call', seq: 4, turn: 1 }),
+	], new Map([[1, 'completed']]));
+	assert.equal(withSteering.segments.length, 2, 'steering must split the process into two segments');
+	assert.deepEqual([...withSteering.segments[0].processKeys], ['t1']);
+	assert.deepEqual([...withSteering.segments[1].processKeys], ['t2']);
+	assert.equal(withSteering.segments[1].precededBy, 's', 'the second segment records what split it');
+	// 并集保持完整（既有消费方与折叠判定不受影响）。
+	assert.deepEqual([...withSteering.processKeys], ['t1', 't2']);
+
+	const [withReply] = groupTurnProcesses([
+		node({ key: 'a1', kind: 'assistant', seq: 2, turn: 1, step: 0 }),
+		node({ key: 't1', kind: 'tool-call', seq: 3, turn: 1 }),
+	], new Map([[1, 'completed']]));
+	// 答复在 t1 之前：答复结束「之前那段」（此处为空），t1 成独立段。
+	assert.equal(withReply.segments.length, 1);
+	assert.deepEqual([...withReply.segments[0].processKeys], ['t1']);
+
+	const [noBoundary] = groupTurnProcesses([
+		node({ key: 't1', kind: 'tool-call', seq: 2, turn: 1 }),
+		node({ key: 't2', kind: 'tool-call', seq: 3, turn: 1 }),
+	], new Map([[1, 'completed']]));
+	assert.equal(noBoundary.segments.length, 1, 'adjacent tools stay in one segment');
+	assert.deepEqual([...noBoundary.segments[0].processKeys], ['t1', 't2']);
+});

@@ -32,7 +32,28 @@ export interface DshTurnProcess {
 	 * 同为 turn 位置的节点，取到最后一条很可能是个尾部控件而不是答复。
 	 */
 	readonly replyKeys: readonly string[];
+	/**
+	 * 这个 Turn 里**按边界切开的过程段**（官方「Process grouping」）。
+	 *
+	 * 官方规则：一个 Turn 里相邻的 process 内容归一组，但**答复与输入会结束前一组**：
+	 *   `T1 → steering → T2` → `G[T1] → steering → G[T2]`（两个组，不是一组）
+	 *   `A1(thought, reply) → T1` → `G[A1.reasoning] → A1.response → G[T1]`
+	 * 历史实现把所有 process 节点塞进一个 `processKeys`，丢掉了 steering/答复的分隔，
+	 * 于是「中途插话」前后的工作被画成一整段。
+	 *
+	 * `processKeys` 仍是所有段的**并集**（保持既有消费方与折叠判定不变）；
+	 * 需要按段绘制时读 `segments`。
+	 */
+	readonly segments: readonly DshProcessSegment[];
 	readonly alwaysOpen: boolean;
+}
+
+/** 一个过程段：同一 Turn 内被输入/答复/独立根节点切开的一段连续 process 内容。 */
+export interface DshProcessSegment {
+	/** 该段的 process 节点 key（按 seq 升序）。 */
+	readonly processKeys: readonly string[];
+	/** 该段之前紧邻的分隔节点 key（`steering` / 答复 / 独立根）；第一段为 undefined。 */
+	readonly precededBy?: string;
 }
 
 export type DshGroupPosition = 'exchange' | 'input' | 'turn' | 'process';
@@ -84,15 +105,36 @@ export function groupTurnProcesses(nodes: readonly DshGroupableNode[], reasonByT
 			const processKeys: string[] = [];
 			const answerKeys: string[] = [];
 			const replyKeys: string[] = [];
+			const segments: DshProcessSegment[] = [];
+			let currentSegment: string[] = [];
+			let segmentPrecededBy: string | undefined;
 			let answerStep = 0;
 			let sawSignal = false;
 			let sawAnswer = false;
+			/**
+			 * 结束当前过程段（若有内容）。
+			 *
+			 * @param precededBy 结束它的那个节点的 key（作为下一段的前驱）
+			 */
+			const closeSegment = (precededBy: string | undefined): void => {
+				if (currentSegment.length > 0) {
+					segments.push({
+						processKeys: currentSegment,
+						...(segmentPrecededBy === undefined ? {} : { precededBy: segmentPrecededBy }),
+					});
+					currentSegment = [];
+				}
+				segmentPrecededBy = precededBy;
+			};
 			for (const node of bucket) {
 				const position = groupPositionOf(node.kind);
 				if (position === 'input') {
 					promptKeys.push(node.key);
+					// 官方：steering / 用户消息结束前一组（`T1 → steering → T2` 是两个组）。
+					closeSegment(node.key);
 				} else if (position === 'process') {
 					processKeys.push(node.key);
+					currentSegment.push(node.key);
 				} else {
 					answerKeys.push(node.key);
 					if (node.kind === 'assistant' || node.kind === 'assistant-step') {
@@ -101,18 +143,25 @@ export function groupTurnProcesses(nodes: readonly DshGroupableNode[], reasonByT
 						if (node.step !== undefined && node.step > answerStep) {
 							answerStep = node.step;
 						}
+						// 官方：答复结束前一组（答复本身独立，不属于任何过程段）。
+						closeSegment(node.key);
+					} else if (position === 'turn' && (node.kind === 'turn-error' || node.kind === 'turn-max-tokens' || node.kind === 'turn-tail')) {
+						// 官方：`turn-error` / `turn-max-tokens` / `turn-tail` 是独立根，也结束前一组。
+						closeSegment(node.key);
 					}
 				}
 				if (SIGNAL_KINDS.has(node.kind)) {
 					sawSignal = true;
 				}
 			}
+			// 结尾的段也要收：否则最后一个工具组会丢。
+			closeSegment(undefined);
 			const reason = reasonByTurn.get(turn);
 			const spec = describeTurnProcess(bucket);
 			const alwaysOpen = spec.hasInterleavedInput || (reason !== undefined
 				? turnProcessAlwaysOpen(reason)
 				: sawSignal || !sawAnswer);
-			return { turn, answerStep, promptKeys, processKeys, answerKeys, replyKeys, alwaysOpen };
+			return { turn, answerStep, promptKeys, processKeys, answerKeys, replyKeys, segments, alwaysOpen };
 		});
 }
 
