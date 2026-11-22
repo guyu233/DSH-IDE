@@ -216,7 +216,7 @@ export class DshConversationNodeTree<T extends DshIndexedNode = DshIndexedNode> 
 	}
 
 	/**
-	 * 一个节点的局部 revision（契约 §19 S0）。
+	 * 一个节点的局部 revision（契约 §19 局部 revision）。
 	 *
 	 * 用 `source(key).version`，也就是「这个 key 自己被通知过几次」，而不是整棵树的
 	 * `treeVersion`——后者任何节点变化都会 +1，拿它做 response 身份等于让所有历史行跟着变旧。
@@ -227,7 +227,7 @@ export class DshConversationNodeTree<T extends DshIndexedNode = DshIndexedNode> 
 	}
 
 	/**
-	 * 一组节点合起来的局部 revision（契约 §19 S0）。
+	 * 一组节点合起来的局部 revision（契约 §19 局部 revision）。
 	 *
 	 * 只是按成员顺序拼一个稳定字符串：`dshSlotHostRef` 把它原样带进身份比较。
 	 * 不用求和/异或——那会让 `[a,b]` 与 `[b,a]` 或两个各自变化的成员产生碰撞。

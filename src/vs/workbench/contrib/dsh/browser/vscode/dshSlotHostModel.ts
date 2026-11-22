@@ -16,7 +16,7 @@ export interface DshSlotHostRef {
 	readonly treeId: string;
 	readonly nodeIds: readonly string[];
 	/**
-	 * 这组成员的局部 revision（契约 §19 S0）。
+	 * 这组成员的局部 revision（契约 §19 局部 revision）。
 	 *
 	 * 只由 `DshConversationNodeTree.revisionFor(nodeIds)` 生成：同一段 response 的成员内容没变，
 	 * 它就不变；别的 Turn 的节点变化不会让它变。历史实现曾用整棵树的 `treeVersion` 当身份，
@@ -109,7 +109,7 @@ export function dshSlotHostRef(treeId: string, nodeIds: readonly string[], revis
 /**
  * 两段 slot host 引用是否可视为同一个。
  *
- * 比较四项（契约 §19 S0）：`treeId`、`nodeIds`、**局部 revision**、问卷身份。
+ * 比较四项（契约 §19 局部 revision）：`treeId`、`nodeIds`、**局部 revision**、问卷身份。
  *
  * `revision` 是这组成员的局部版本，不是整棵树的版本：别的 Turn 变了不会让这一段变旧。
  * 只有双方都带了 revision 才比较——旧形状（无 revision）退回只比成员列表，
