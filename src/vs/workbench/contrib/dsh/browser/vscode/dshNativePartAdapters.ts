@@ -147,7 +147,7 @@ export function adaptDshNode(node: DshIndexedNode, sessionId?: string): readonly
 		return [compactionCard(record)];
 	}
 	if (node.kind === 'command') {
-		return [commandCard(record, 'command', sessionId)];
+		return [commandCard(record, sessionId)];
 	}
 	if (node.kind === 'context') {
 		return [...contextCard(record), ...contentExtras(node, record.content, sessionId)];
@@ -156,7 +156,7 @@ export function adaptDshNode(node: DshIndexedNode, sessionId?: string): readonly
 		return [unknownCard(record.type || 'unknown', record.data)];
 	}
 	if (node.kind === 'manual-compaction') {
-		return [commandCard(record.command ?? {}, 'manual-compaction', sessionId), compactionCard(record.compaction ?? {})];
+		return [commandCard(record.command ?? {}, sessionId), compactionCard(record.compaction ?? {})];
 	}
 	if (node.kind === 'workflow-run') {
 		return [workflowRunCard(record)];
@@ -457,7 +457,6 @@ function compactionCard(record: { readonly summary?: string | null; readonly sha
 
 function commandCard(
 	record: { readonly commandId?: string; readonly name?: string | null; readonly args?: unknown; readonly outcome?: { readonly kind?: string; readonly text?: string } | null },
-	kind: 'command' | 'manual-compaction',
 	sessionId?: string,
 ): DshNativeAdaptation {
 	const outcome = record.outcome?.kind === 'success' || record.outcome?.kind === 'error' ? record.outcome.kind : null;
