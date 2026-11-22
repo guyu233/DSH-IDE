@@ -8,6 +8,7 @@
 // 还在跑、被中断、或出错的 turn 不能整段折起来。
 
 import { localize } from '../../../../../nls.js';
+import { dshLiveDetailOf } from './dshToolDetail.js';
 
 export interface DshGroupableNode {
 	readonly key: string;
@@ -232,6 +233,11 @@ export interface DshActivityNode {
 	 * 不去重就会把**一次调用数成两次**，折叠行显示的数字直接翻倍。
 	 */
 	readonly callId?: string;
+	/**
+	 * 工具参数。用于按官方「Live activity and detail」的 21 字段优先级取「这一步在做什么」。
+	 * 缺失时退回工具名（与官方「Without usable detail … falls back to the tool name」一致）。
+	 */
+	readonly args?: unknown;
 }
 
 export interface DshProcessActivitySummary {
@@ -356,7 +362,8 @@ export function summarizeProcess(nodes: readonly DshActivityNode[], hasAnswer: b
 		}
 		counts[activity] = (counts[activity] ?? 0) + 1;
 		if (node.running === true) {
-			runningNames.push(node.name || activity);
+			// 官方：running detail 走 21 字段优先级；没有可用字段时才退回工具名。
+			runningNames.push(dshLiveDetailOf(node.args) ?? node.name ?? activity);
 		}
 	}
 	if (allContext) {
@@ -392,11 +399,12 @@ export function processActivityText(activity: DshProcessActivity): string {
 }
 
 /** 被收起的过程用一行计数表示。没有活动时返回 undefined。未配对的 tool-call 算正在跑。 */
-export function hiddenProcessLine(nodes: readonly { readonly kind: string; readonly name?: string; readonly callId?: string }[]): string | undefined {
+export function hiddenProcessLine(nodes: readonly { readonly kind: string; readonly name?: string; readonly callId?: string; readonly args?: unknown }[]): string | undefined {
 	const settled = new Set(nodes.flatMap(node => node.kind === 'tool-result' && node.callId !== undefined && node.callId !== '' ? [node.callId] : []));
 	const summary = summarizeProcess(nodes.map(node => ({
 		kind: node.kind,
 		...(node.name === undefined ? {} : { name: node.name }),
+		...(node.args === undefined ? {} : { args: node.args }),
 		running: node.kind === 'tool-call' && node.callId !== undefined && node.callId !== '' && !settled.has(node.callId),
 	})), true);
 	// 活动名是内部枚举（`read` / `webSearch`），直接拼给用户等于没本地化。

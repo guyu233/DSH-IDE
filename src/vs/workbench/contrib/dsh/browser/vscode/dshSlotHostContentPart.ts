@@ -292,11 +292,15 @@ export class DshSlotHostContentPart extends Disposable implements IChatContentPa
 				if (node === undefined) {
 					return [];
 				}
-				const named = binding.tree.get(key) as { readonly name?: string; readonly callId?: string } | undefined;
+				const named = binding.tree.get(key) as { readonly name?: string; readonly callId?: string; readonly argsRaw?: string } | undefined;
+				// 官方「Live activity and detail」要的是**参数对象**；节点上存的是原始 JSON 串
+				// （流式中可能还不完整）。解析失败就不传，让 `dshLiveDetailOf` 退回工具名。
+				const parsed = parsedArgsOf(named?.argsRaw);
 				return [{
 					kind: node.kind,
 					...(typeof named?.name === 'string' ? { name: named.name } : {}),
 					...(named?.callId === undefined ? {} : { callId: named.callId }),
+					...(parsed === undefined ? {} : { args: parsed }),
 				}];
 			}));
 			// 锚点必须是真正会画出来的那一行：`turn-process` 也被算进 answerKeys（位置是 turn），
@@ -752,4 +756,21 @@ function cardLine(line: DshCardSpec['lines'][number]): HTMLElement {
 		element.style.fontSize = '0.9em';
 	}
 	return element;
+}
+
+/**
+ * 把工具节点的 `argsRaw`（原始 JSON 串）解析成参数对象。
+ *
+ * 流式中的参数可能还不完整——解析失败返回 `undefined`，让调用方退回工具名，
+ * 而不是抛错或猜测半截内容。
+ */
+function parsedArgsOf(raw: string | undefined): unknown {
+	if (raw === undefined || raw === '') {
+		return undefined;
+	}
+	try {
+		return JSON.parse(raw) as unknown;
+	} catch {
+		return undefined;
+	}
 }

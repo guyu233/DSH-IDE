@@ -268,3 +268,17 @@ test('a repeated callId counts once, so call+result does not double the number',
 	// 去重是**组内**的：另一个组的同名 callId 不受影响。
 	assert.deepEqual(summarizeProcess([{ kind: 'tool-call', name: 'bash', callId: 'c1' }], true).counts, { commands: 1 });
 });
+
+test('the collapsed process line uses live detail, not the bare tool name', () => {
+	// 官方「Live activity and detail」：running detail 走 21 字段优先级；只有没有可用字段时
+	// 才退回工具名。这条把 `dshToolDetail` 与折叠行接起来验证，防止逻辑实现却没人用。
+	const line = hiddenProcessLine([
+		{ kind: 'tool-call', name: 'exec_command', callId: 'c1', args: { cmd: 'pnpm test', description: 'Run focused tests' } },
+	]);
+	assert.ok(line !== undefined);
+	assert.ok(line.includes('Run focused tests'), `expected live detail in "${line}"`);
+	assert.ok(!line.includes('exec_command'), 'the bare tool name must not be shown when detail exists');
+	// 没有可用参数时退回工具名（官方：falls back to the tool name）。
+	const fallback = hiddenProcessLine([{ kind: 'tool-call', name: 'read', callId: 'c2', args: { code: 'x' } }]);
+	assert.ok(fallback !== undefined && fallback.includes('read'), `expected tool-name fallback in "${fallback}"`);
+});
