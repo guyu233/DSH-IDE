@@ -105,7 +105,7 @@ class DshClientContribution extends Disposable implements IWorkbenchContribution
 		// 三个选择器全部不渲染——这不是样式问题，是注册缺失。
 		this._register(chatSessionsService.registerChatSessionContribution(DshChatSessionContribution));
 		// 原生 history 里的审批 / 问卷按钮调这两个命令，真正走 answerApproval/answerQuestion。
-		this._register(registerDshAnswerCommands(client));
+		this._register(registerDshAnswerCommands(client, chatWidgetService));
 		registerDshSessionMenu();
 		// 会话搜索：服务层早就实现，这里补上 quick pick 入口。
 		this._register(registerDshSessionSearchCommands(client, this._sessions, this.quickInputService, this.instantiationService, this.notifications));

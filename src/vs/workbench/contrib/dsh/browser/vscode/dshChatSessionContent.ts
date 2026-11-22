@@ -570,8 +570,37 @@ export function registerDshChatSessionContent(client: IDshClientService, chatSes
  * 参数由 `toHistory` 生成：`[eventId, 'approve'|'reject'|选项文本]`。
  * 命令只调 `DshChatSession.answerApproval/answerQuestion`，不重发 prompt。
  */
-export function registerDshAnswerCommands(client: IDshClientService): { dispose(): void } {
+export function registerDshAnswerCommands(client: IDshClientService, chatWidgetService: IChatWidgetService): { dispose(): void } {
 	const disposables = new DisposableStore();
+	/**
+	 * Turn 导航的跳转命令（`dshTurnNavEntries` 生成的行用它）。
+	 *
+	 * 参数是**锚点节点的 key**（`DshTurnNavigationItem.anchorKey`）。宿主把它翻成树元素再
+	 * `IChatWidget.reveal(item)`——这是原生 Chat 自带的「滚到某一行」入口，不另造滚动实现。
+	 * key 找不到时**静默返回**：导航行来自同一棵树，找不到说明该 Turn 已被换出窗口，
+	 * 此时滚动到任何位置都是错的。
+	 */
+	disposables.add(CommandsRegistry.registerCommand('dsh.revealTurnAnchor', async (_accessor, anchorKey: unknown) => {
+		if (typeof anchorKey !== 'string' || anchorKey === '') {
+			return;
+		}
+		// 用「最近一个绑定了该 DSH 会话的 widget」：`getAllWidgets()` 的顺序不是用户可见顺序，
+		// 但导航行只在该会话的 widget 里出现，取第一个匹配即可。
+		const widgets = chatWidgetService.getAllWidgets();
+		for (const widget of widgets) {
+			const items = widget.viewModel?.getItems() ?? [];
+			const item = items.find(candidate => {
+				if (candidate === null || typeof candidate !== 'object') {
+					return false;
+				}
+				return (candidate as { readonly key?: unknown }).key === anchorKey;
+			});
+			if (item !== undefined) {
+				widget.reveal(item);
+				return;
+			}
+		}
+	}));
 	disposables.add(CommandsRegistry.registerCommand('dsh.answerApproval', async (_accessor, eventId: unknown, decision: unknown) => {
 		if (typeof eventId !== 'string' || (decision !== 'approve' && decision !== 'reject')) {
 			return;

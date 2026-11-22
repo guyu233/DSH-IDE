@@ -71,17 +71,20 @@ export class DshChatInputDock extends Disposable {
 	 * `owner` 只对 `conversation.input.dock` 有意义（官方 owner 是 `InputZone`）；
 	 * `composer.dock` 只用会话 id。两者都允许缺省，表示「当前没有会话」。
 	 */
-	update(sessionId: string | undefined, owner?: DshInputZoneOwner, inbox?: readonly DshIdeInboxMessage[], inboxStep?: readonly DshIdeInboxMessage[]): void {
+	update(sessionId: string | undefined, owner?: DshInputZoneOwner, inbox?: readonly DshIdeInboxMessage[], inboxStep?: readonly DshIdeInboxMessage[], turnNav?: readonly DshInputDockRow[]): void {
 		this.sessionId = sessionId;
 		this.owner = owner;
 		this.inbox = inbox;
 		this.inboxStep = inboxStep;
+		this.turnNav = turnNav ?? [];
 		this.render();
 	}
 
 	private sessionId: string | undefined;
 	private inbox: readonly DshIdeInboxMessage[] | undefined;
 	private inboxStep: readonly DshIdeInboxMessage[] | undefined;
+	/** Turn 导航行（由 content 层投影后传入；空数组表示没有 Turn）。 */
+	private turnNav: readonly DshInputDockRow[] = [];
 
 	private render(): void {
 		for (const ref of this.rowRefs) {
@@ -100,6 +103,8 @@ export class DshChatInputDock extends Disposable {
 				[
 					...dshQueueDockRows(this.inbox, 'next-turn'),
 					...dshQueueDockRows(this.inboxStep, 'next-step'),
+					// Turn 导航：官方 turn rail 的等价投影（原生 promptTimeline 的模型不匹配，见 CHK-377）。
+					...this.turnNav,
 				],
 			)
 			: dshComposerDockRows(this.sessionId);

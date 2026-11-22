@@ -290,3 +290,29 @@ test('processSource notifies only for its own turn', () => {
 	tree.accept([node({ kind: 'tool-call', seq: 1, turn: 1, callId: 'c1', text: 'changed' }), node({ kind: 'tool-call', seq: 2, turn: 2, callId: 'c2', text: 'changed' })]);
 	assert.equal(turn1, 1, 'a turn 1 change must notify it');
 });
+
+test('turn navigation projects into dock rows with stable ids and anchors', async () => {
+	// CHK-377 核实过：原生 promptTimeline 的模型是 VS Code request，而 DSH 多 Turn 是同一个
+	// request，原生 rail 只会显示一个标记。所以这里用 DSH 自己的 navigationItems() 投影。
+	const { dshTurnNavEntries, DSH_TURN_NAV_PREVIEW_MAX } = await import('../../../src/vs/workbench/contrib/dsh/browser/vscode/dshTurnNavigation.ts');
+	const items = [
+		{ turn: 1, anchorKey: 'user:u1', promptKey: 'user:u1', responseKey: 'assistant:a1' },
+		{ turn: 2, anchorKey: 'user:u2' },
+	];
+	const entries = dshTurnNavEntries(items, item => item.turn === 1 ? '  第一轮的问题  ' : '');
+	assert.equal(entries.length, 2);
+	assert.deepEqual(entries.map(e => e.id), ['turn-nav:1', 'turn-nav:2'], 'ids must be stable per turn');
+	assert.equal(entries[0].label, '#1 第一轮的问题', 'the preview is whitespace-normalized and trimmed');
+	assert.equal(entries[1].label, '#2', 'a turn without a summary shows only its number');
+	// 跳转目标就是锚点 key。
+	assert.deepEqual(entries[0].arguments, ['user:u1']);
+	assert.equal(entries[0].command, 'dsh.revealTurnAnchor');
+	// order 递增，保证 dock 里顺序稳定。
+	assert.ok(entries[1].order > entries[0].order);
+	// 超长摘要被截断到上限（含省略号）。
+	const long = dshTurnNavEntries([{ turn: 3, anchorKey: 'k' }], () => 'x'.repeat(200));
+	assert.equal([...long[0].label].length, '#3 '.length + DSH_TURN_NAV_PREVIEW_MAX);
+	assert.ok(long[0].label.endsWith('\u2026'));
+	// 没有 Turn 时不画空壳。
+	assert.deepEqual(dshTurnNavEntries([]), []);
+});

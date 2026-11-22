@@ -26,6 +26,8 @@ import { ChatAgentLocation } from '../../../chat/common/constants.js';
 import { DshChatInputDock } from './dshChatInputDock.js';
 import type { DshQueueRowAction } from './dshInputDock.js';
 import { dshSessionIdFromResource } from './dshAgentSessionsController.js';
+import { dshContentStore } from './dshContentStore.js';
+import { dshTurnNavEntries } from './dshTurnNavigation.js';
 import { dshChatSessionFor, type DshChatSession } from './dshChatSession.js';
 import { IDshClientService } from '../../../../../platform/dshClient/common/dshClientService.js';
 
@@ -116,7 +118,13 @@ export class DshChatInputDockContribution extends Disposable {
 			// 没有会话时没有队列；`DshChatSession` 是本贡献点唯一的事实来源，不在 IDE 侧自建。
 			const inbox = sessionId === undefined ? undefined : this.chat.inboxNextTurn();
 			const inboxStep = sessionId === undefined ? undefined : this.chat.inboxNextStep();
-			input.update(sessionId, session === undefined ? undefined : { session }, inbox, inboxStep);
+			// Turn 导航：官方 turn rail 的等价投影。数据来自 `DshConversationNodeTree.navigationItems()`
+			// （本仓早已实现但零消费——CHK-377 核实过原生 promptTimeline 的模型不匹配）。
+			const binding = sessionId === undefined ? undefined : dshContentStore.get(sessionId);
+			const turnNav = binding === undefined ? [] : dshTurnNavEntries(binding.tree.navigationItems()).map(entry => ({
+				id: entry.id, label: entry.label, order: entry.order, command: entry.command, arguments: entry.arguments,
+			}));
+			input.update(sessionId, session === undefined ? undefined : { session }, inbox, inboxStep, turnNav);
 			composer.update(sessionId);
 		};
 		sync();
