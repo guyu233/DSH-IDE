@@ -23,6 +23,7 @@ import { diffDshSlotRows, dshSlotHostSame, planKeysForTurn, presentDshNode, turn
 import { dshNodeDisplaySignature } from './dshConversationNodeTree.js';
 import { dshCardSpec, type DshCardSpec } from './dshCardSpec.js';
 import { applyDshButtonChrome, applyDshStaticRowChrome } from './dshButtonChrome.js';
+import { generateUuid } from '../../../../../base/common/uuid.js';
 
 export interface DshNativePartRenderer {
 	render(part: DshNativePart): IChatContentPart | undefined;
@@ -63,6 +64,14 @@ export class DshSlotHostContentPart extends Disposable implements IChatContentPa
 	 * 只有变了的行才重建。这样单个节点变化不会重建整段 slot host。
 	 */
 	private readonly rows = new Map<string, { signature: string; dom: HTMLElement; refs: DisposableStore }>();
+	/**
+	 * 本 part 的 DOM id 前缀（`generateUuid()`，与原生 `chatSubagentContentPart` 同一做法）。
+	 *
+	 * `aria-controls` 必须指向一个**真实存在且唯一**的元素 id：用固定字符串会在同屏多行
+	 * 之间撞车，用行下标会在虚拟化重绘后错位。part 实例级前缀 + 节点稳定 key 派生，
+	 * 既唯一又在重绘之间稳定。
+	 */
+	private readonly domIdPrefix = `dsh-slot-${generateUuid()}`;
 	/** 文本手势条的同步回调，按行 key 登记；行销毁时一并移除。 */
 	private readonly selectionSyncs = new Map<string, () => void>();
 	/**
@@ -532,6 +541,13 @@ export class DshSlotHostContentPart extends Disposable implements IChatContentPa
 			header.setAttribute('aria-expanded', open ? 'true' : 'false');
 		}
 		const detail = $('pre');
+		// `aria-controls` 指向的必须是真实存在的元素：不可展开时 detail 为空、不给 id。
+		if (presented.detail !== '') {
+			// 节点 key 形如 `tool-call:callId`，含冒号。HTML5 允许，但为了不依赖
+			// 「调用方永远用 getElementById 而不是 CSS 选择器」这一假设，统一编码成安全字符。
+			detail.id = `${this.domIdPrefix}-detail-${nodeId.replace(/[^A-Za-z0-9_-]/g, '_')}`;
+			header.setAttribute('aria-controls', detail.id);
+		}
 		detail.textContent = presented.detail;
 		detail.style.margin = '0 0 0 22px';
 		detail.style.whiteSpace = 'pre-wrap';

@@ -491,3 +491,18 @@ test('the shared chrome stylesheet uses the theme focus variable, not a literal 
 	assert.match(source, /var\(--vscode-focusBorder\)/, 'the ring must use the theme variable');
 	assert.doesNotMatch(source, /outline:\s*1px solid #[0-9a-fA-F]{3,6}/, 'no literal hex color for the ring');
 });
+
+test('a disclosure header points aria-controls at a real, uniquely named region', async () => {
+	// 契约 §11.4 要求 aria-controls。`aria-expanded` 单独存在时，读屏只知道「能展开」，
+	// 不知道展开的是哪块内容。这里做源码级核对：设 aria-expanded 就必须同时设 aria-controls，
+	// 且被指向的元素真的拿到 id。
+	const { readFileSync } = await import('node:fs');
+	const source = readFileSync(new URL('../../../src/vs/workbench/contrib/dsh/browser/vscode/dshSlotHostContentPart.ts', import.meta.url), 'utf8');
+	const expanded = (source.match(/setAttribute\('aria-expanded'/g) ?? []).length;
+	const controls = (source.match(/setAttribute\('aria-controls'/g) ?? []).length;
+	assert.ok(expanded > 0, 'the disclosure must still announce its state');
+	assert.equal(controls, expanded, 'every aria-expanded must be paired with an aria-controls');
+	// 被指向的元素必须有 id，且 id 用 part 级前缀（虚拟化重绘之间稳定、同屏多行不撞车）。
+	assert.match(source, /detail\.id = `\$\{this\.domIdPrefix\}/, 'the controlled region needs a stable id');
+	assert.match(source, /domIdPrefix = `dsh-slot-\$\{generateUuid\(\)\}`/, 'the prefix must be per-part, not per-row-index');
+});

@@ -703,6 +703,11 @@ DshCompositeContentPart
 已新增 `dshButtonChrome.ts` 作为唯一入口：`applyDshButtonChrome()` 统一外观，`createStyleSheet()` 注入一张共享样式表定义
 `:focus-visible`（不是 `:focus`），焦点环用 `var(--vscode-focusBorder)`（浅色/深色/高对比度自动跟随，不写死颜色），
 用 `outline` 而非 `border`（不参与布局，聚焦不推挤相邻元素）。并加了一条**源码级不变量测试**：新增按钮绕过统一入口会立刻失败。
+**2026-11-23 第 3 条续核（CHK-343）**：§11.4 的 `aria-controls` 全仓零命中，而折叠头已有 `aria-expanded`——
+读屏只知道「能展开」不知道展开的是哪块。已补 part 级 `domIdPrefix`（`generateUuid()`，与原生 `chatSubagentContentPart` 同做法）
+给 detail 生成 id 并让 header 设 `aria-controls`；不可展开时不设 id 也不设 controls（指向空元素比不指更糟）。
+另核实两处疑点结论是**不缺、不改**：live region 只有问卷一处，但 `fail()`/`dshFail()` 走原生 `INotificationService`，
+播报由原生负责；§11.2「不使用自定义 modal」也已满足。
 第 1/2/5/6 条此前各轮已逐项落地（见 §13 PR 与 §19）；第 7 条：`tsc --noEmit` PASS、`test-dsh:all` 全绿、
 真机项按本附录 B 由用户执行并标 PENDING。
 
