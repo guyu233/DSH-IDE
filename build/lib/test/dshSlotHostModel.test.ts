@@ -634,5 +634,7 @@ test('the renderer consumes multi-segment groups instead of one line per turn', 
 	assert.ok(source.includes('group.segments.length <= 1'), 'a single segment must fall back to the turn anchor');
 	assert.ok(source.includes("rows.push({ key: `summary:${nodeId}:${index}`"), 'multiple summaries per anchor must be rendered');
 	// summaryBefore 必须能存多行（否则多段会被覆盖成一行）。
-	assert.ok(source.includes('const summaryBefore = new Map<string, string[]>();'), 'the summary map must hold arrays');
+	// 组头现在是结构化的（含 line/expanded/onToggle），不再是纯字符串数组。
+	assert.ok(source.includes('const summaryBefore = new Map<string, readonly {'), 'the summary map must hold structured headers');
+	assert.ok(source.includes('onToggle: header.onToggle'), 'and forward the toggle callback to the row');
 });

@@ -24,6 +24,7 @@ import { dshNodeDisplaySignature } from './dshConversationNodeTree.js';
 import { dshCardSpec, type DshCardSpec } from './dshCardSpec.js';
 import { applyDshButtonChrome, applyDshStaticRowChrome } from './dshButtonChrome.js';
 import { generateUuid } from '../../../../../base/common/uuid.js';
+import { createStyleSheet } from '../../../../../base/browser/domStylesheets.js';
 
 export interface DshNativePartRenderer {
 	render(part: DshNativePart): IChatContentPart | undefined;
@@ -47,7 +48,21 @@ export interface DshNativePartRenderer {
 /** 一帧里的一行：`node` 是节点行，其余是过程计数行 / 问卷 / 侧栏这类附加行。 */
 type DshSlotRowSpec =
 	| { readonly key: string; readonly kind: 'node'; readonly nodeKey: string; readonly signature?: string }
-	| { readonly key: string; readonly kind: 'summary'; readonly line: string; readonly signature?: string }
+	| {
+		readonly key: string;
+		readonly kind: 'summary';
+		readonly line: string;
+		/**
+		 * 组头交互（官方「Group-title rules」）：**category icon**，hover/键盘聚焦时换成 **down arrow**，
+		 * 展开时显示 **up arrow**。`expanded`/`onToggle` 缺省表示该行不可交互（只读计数）。
+		 */
+		readonly turn?: number;
+		readonly expanded?: boolean;
+		readonly onToggle?: () => void;
+		/** `aria-controls` 的目标 id：由同一 Turn 的锚点 node 行承载（渲染时设上）。 */
+		readonly controlledId?: string;
+		readonly signature?: string;
+	}
 	| { readonly key: string; readonly kind: 'question'; readonly eventId: string; readonly signature?: string }
 	| { readonly key: string; readonly kind: 'aside'; readonly text: string; readonly signature?: string };
 
@@ -239,7 +254,7 @@ export class DshSlotHostContentPart extends Disposable implements IChatContentPa
 			}];
 		});
 		const visible = new Set<string>();
-		const summaryBefore = new Map<string, string[]>();
+		const summaryBefore = new Map<string, readonly { readonly line: string; readonly turn: number; readonly expanded: boolean; readonly onToggle: () => void }[]>();
 		// 计划卡正常随 turn tail 画；但 Turn 还没结束（没有 `turn-tail`）时它也会被跳过，
 		// 于是整张卡消失。这里记下「哪些 Turn 已有 tail」，剩下的计划卡就地画在原位。
 		const turnsWithTail = new Set<number>();
@@ -313,6 +328,12 @@ export class DshSlotHostContentPart extends Disposable implements IChatContentPa
 			//
 			// 注意 `turn-process` 也被算进 answerKeys（位置是 turn），但它在渲染时会被跳过，
 			// 挂到它上面的计数行永远不显示——所以锚点必须过滤掉它。
+			// 组头是可交互披露（官方：icon → hover 变 down arrow、展开时 up arrow）。
+			// 展开状态用节点级 disclosure，键是「这个组头的稳定 key」，与单个 reasoning/tool 的 disclosure 同一层。
+			const headerId = `process:${group.turn}:${group.answerStep}`;
+			const expanded = binding.expansion.isDisclosed(group.turn, headerId);
+			const onToggle = () => binding.expansion.setDisclosed(group.turn, headerId, !binding.expansion.isDisclosed(group.turn, headerId));
+			const spec = { line, turn: group.turn, expanded, onToggle } as const;
 			const anchors = this.segmentAnchors(group, binding);
 			if (anchors.length === 0) {
 				const fallback = group.answerKeys.find(key => {
@@ -320,12 +341,12 @@ export class DshSlotHostContentPart extends Disposable implements IChatContentPa
 					return node !== undefined && node.kind !== 'turn-process';
 				});
 				if (fallback !== undefined) {
-					summaryBefore.set(fallback, [...(summaryBefore.get(fallback) ?? []), line]);
+					summaryBefore.set(fallback, [...(summaryBefore.get(fallback) ?? []), spec]);
 				}
 				continue;
 			}
 			for (const anchor of anchors) {
-				summaryBefore.set(anchor, [...(summaryBefore.get(anchor) ?? []), line]);
+				summaryBefore.set(anchor, [...(summaryBefore.get(anchor) ?? []), spec]);
 			}
 		}
 		const rows: DshSlotRowSpec[] = [];
@@ -351,10 +372,10 @@ export class DshSlotHostContentPart extends Disposable implements IChatContentPa
 					rows.push({ key: `plan:${planKey}`, kind: 'node', nodeKey: planKey });
 				}
 			}
-			const lines = summaryBefore.get(nodeId);
+			const headers = summaryBefore.get(nodeId);
 			// 一个锚点前可能有多段各自的组头（同 Turn 多段时），按序各画一行。
-			lines?.forEach((text, index) => {
-				rows.push({ key: `summary:${nodeId}:${index}`, kind: 'summary', line: text });
+			headers?.forEach((header, index) => {
+				rows.push({ key: `summary:${nodeId}:${index}`, kind: 'summary', line: header.line, turn: header.turn, expanded: header.expanded, onToggle: header.onToggle });
 			});
 			rows.push({ key: `node:${nodeId}`, kind: 'node', nodeKey: nodeId });
 		}
@@ -372,7 +393,8 @@ export class DshSlotHostContentPart extends Disposable implements IChatContentPa
 	private rowSignature(row: DshSlotRowSpec, binding: NonNullable<ReturnType<typeof dshContentStore.get>>): string {
 		switch (row.kind) {
 			case 'summary':
-				return `summary\u0000${row.line}`;
+				// 展开状态参与签名：否则切换后增量渲染认为「没变」而不重画箭头。
+				return `summary\u0000${row.line}\u0000${row.expanded === true ? '1' : '0'}`;
 			case 'question':
 				return `question\u0000${binding.questions?.get(row.eventId)?.signature ?? row.eventId}`;
 			case 'aside':
@@ -391,8 +413,26 @@ export class DshSlotHostContentPart extends Disposable implements IChatContentPa
 	/** 按行类型构造 DOM；每行自己的监听进该行的 `refs`。 */
 	private renderRow(row: DshSlotRowSpec, binding: NonNullable<ReturnType<typeof dshContentStore.get>>, refs: DisposableStore): HTMLElement {
 		switch (row.kind) {
-			case 'summary':
-				return processSummaryRow(row.line);
+			case 'summary': {
+				const button = processSummaryRow(row.line, row.expanded === true);
+				if (row.onToggle !== undefined) {
+					button.disabled = false;
+					button.style.cursor = 'pointer';
+					const click = (event: MouseEvent) => {
+						event.stopPropagation();
+						row.onToggle?.();
+					};
+					button.addEventListener('click', click);
+					refs.add({ dispose: () => button.removeEventListener('click', click) });
+					// **不设 `aria-expanded` / `aria-controls`**：本仓的组头目前只切换图标，
+					// 并不真的隐藏/显示一块独立 DOM 容器（过程内容由 slot host 整体重绘）。
+					// 只设 `aria-expanded` 会让读屏以为存在一个可展开区域，而 `aria-controls`
+					// 又找不到真实目标——那是**假装有 disclosure**，比不设更糟。
+					// 等组内容有独立容器后再一起补（届时成对设置）。
+					button.title = row.line;
+				}
+				return button;
+			}
 			case 'aside': {
 				const panel = $('.dsh-aside');
 				panel.textContent = row.text;
@@ -641,11 +681,61 @@ export class DshSlotHostContentPart extends Disposable implements IChatContentPa
 }
 
 
-function processSummaryRow(line: string): HTMLElement {
-	const row = document.createElement('div');
+/**
+ * 过程组的组头行（官方「Group-title rules」的交互部分）。
+ *
+ * 官方：「Group headers show a **category icon**, replace it with a **down arrow on hover or keyboard focus**,
+ * and show an **up arrow while open**.」
+ *
+ * 实现用 `codicon` + CSS 的 `:hover` / `:focus-visible` 切换图标，不自绘 SVG、不用脚本监听 hover：
+ *   - 默认显示 `codicon-list-unordered`（类别图标）；
+ *   - hover / 键盘聚焦时换成 `codicon-chevron-down`；
+ *   - 展开时换成 `codicon-chevron-up`（优先级最高）。
+ * 不可交互（`onToggle` 缺省）时保持类别图标、`disabled`，不留「点了没反应」的入口。
+ *
+ * @param line 组头文案
+ * @param expanded 该组当前是否展开
+ */
+function processSummaryRow(line: string, expanded: boolean): HTMLButtonElement {
+	const row = document.createElement('button');
+	// 与原生 chat 的次按钮一致：无边框、无背景、继承字号 + `:focus-visible` 焦点环。
+	applyDshButtonChrome(row, 'link');
 	row.className = 'dsh-process-summary';
-	row.textContent = line;
+	row.disabled = true;
+	const icon = document.createElement('span');
+	icon.className = `codicon ${expanded ? 'codicon-chevron-up' : 'codicon-list-unordered'} dsh-process-summary-icon`;
+	icon.setAttribute('aria-hidden', 'true');
+	icon.style.marginRight = '4px';
+	// hover / focus 时的箭头切换交给这张一次性注入的样式表（见 `ensureProcessSummaryStyles`）。
+	ensureProcessSummaryStyles();
+	const text = document.createElement('span');
+	text.textContent = line;
+	row.appendChild(icon);
+	row.appendChild(text);
+	row.style.color = 'var(--vscode-descriptionForeground)';
 	return row;
+}
+
+let processSummaryStyles: HTMLStyleElement | undefined;
+
+/**
+ * 组头图标的 hover / focus 切换（一次性注入）。
+ *
+ * 为什么用 CSS 而不是监听 hover：图标切换是纯呈现，交给 `:hover` / `:focus-visible` 更可靠
+ * （不用管 pointerenter/leave 的边界情况），也不会给每行挂两个监听。
+ */
+function ensureProcessSummaryStyles(): void {
+	if (processSummaryStyles !== undefined && processSummaryStyles.isConnected) {
+		return;
+	}
+	processSummaryStyles = createStyleSheet(undefined, style => {
+		style.textContent = `
+			.dsh-process-summary .dsh-process-summary-icon::before { content: '\\ea75'; }
+			.dsh-process-summary:hover .dsh-process-summary-icon::before,
+			.dsh-process-summary:focus-visible .dsh-process-summary-icon::before { content: '\\eab4'; }
+			.dsh-process-summary[aria-expanded="true"] .dsh-process-summary-icon::before { content: '\\eab5'; }
+		`;
+	});
 }
 
 function renderAdaptedFallback(part: DshNativePart, host?: { reviewQuestion?: (callId: string, questions: readonly { readonly id: string; readonly question?: string; readonly header?: string }[], answers: readonly { readonly id: string; readonly selected: readonly string[]; readonly custom?: string }[]) => void }): HTMLElement {
