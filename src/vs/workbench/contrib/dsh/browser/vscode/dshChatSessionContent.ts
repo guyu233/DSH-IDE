@@ -73,6 +73,15 @@ export class DshChatSessionContent extends Disposable implements IChatSession {
 		this._register(session.onDidChangePending(syncQuestions));
 		this.nodeTree = new DshConversationNodeTree(this._sessionId ?? '');
 		this.expansion = new DshExpansionStateStore(this._sessionId ?? '');
+		// 官方 `ui-chat.transcriptView` 决定整个 Turn 的默认折叠；Host 早就实现了
+		// `presentationSettings`，但本仓从未调用。读不到就保持 store 默认（standard），
+		// 不因此报错——偏好是增强，不是前置条件。
+		void session.presentationSettings().then(settings => {
+			if (settings === undefined) {
+				return;
+			}
+			this.expansion.setTranscriptView(settings.transcriptView);
+		});
 		this.nodeTree.accept(session.nodes());
 		if (this._sessionId !== undefined) {
 			const binding = { tree: this.nodeTree, expansion: this.expansion, questions: this._questions };

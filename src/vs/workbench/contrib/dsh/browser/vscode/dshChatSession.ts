@@ -13,7 +13,7 @@ import { Emitter, Event } from '../../../../../base/common/event.js';
 import { Disposable } from '../../../../../base/common/lifecycle.js';
 import { VSBuffer, encodeBase64 } from '../../../../../base/common/buffer.js';
 import { IDshClientService } from '../../../../../platform/dshClient/common/dshClientService.js';
-import { dshErrorText, DSH_IDE_FEATURE_UNAVAILABLE, DSH_IDE_HISTORY_MAX_MESSAGES, DSH_IDE_HISTORY_TURN_WINDOW, validateDshIdeLoadOlderResult, type DshIdeConversationView, type DshIdeDeliverableView, type DshIdeGoalView, type DshIdeImageAttachmentRef, type DshIdeInboxMessage, type DshIdeQueueAction, type DshIdeLoadOlderResult, type DshIdePendingItem, type DshIdePlanView, type DshIdeQuotaNotice, type DshIdeSkillView, type DshIdeTeamView, type DshIdeTodoView, type DshIdeWorktreeView, type DshIdeViewSnapshot, type DshIdeWaterfallNotice } from '../../../../../platform/dshClient/protocol/dshIdeProtocol.js';
+import { dshErrorText, DSH_IDE_FEATURE_UNAVAILABLE, DSH_IDE_HISTORY_MAX_MESSAGES, DSH_IDE_HISTORY_TURN_WINDOW, validateDshIdeLoadOlderResult, type DshIdeConversationView, type DshIdeDeliverableView, type DshIdeGoalView, type DshIdeImageAttachmentRef, type DshIdeInboxMessage, type DshIdePresentationSettings, type DshIdeQueueAction, type DshIdeLoadOlderResult, type DshIdePendingItem, type DshIdePlanView, type DshIdeQuotaNotice, type DshIdeSkillView, type DshIdeTeamView, type DshIdeTodoView, type DshIdeWorktreeView, type DshIdeViewSnapshot, type DshIdeWaterfallNotice } from '../../../../../platform/dshClient/protocol/dshIdeProtocol.js';
 import { DshChatModel, type DshChatNode, type DshHistoryStatus } from './dshChatModel.js';
 import { settleApproval, settleQuestion, type DshQuestionDraft, type DshSettlementIntent } from './dshPendingSettlement.js';
 import { retainQuotaNotice } from './dshQuotaNotice.js';
@@ -103,6 +103,14 @@ export interface IDshChatSession {
 	inboxNextTurn(): readonly DshIdeInboxMessage[];
 	/** 排队等下一个 step 的转向输入（官方 `inbox['next-step']`）。 */
 	inboxNextStep(): readonly DshIdeInboxMessage[];
+	/**
+	 * 读 Host 的表现偏好（官方 `presentationSettings`）。
+	 *
+	 * 四项都是**表现**而非会话事实：`transcriptView` 决定整个 Turn 的默认折叠，
+	 * `collapseTiming` / `foldedReplies` / `developerTools` 同理。Host 侧早已实现，
+	 * IDE 侧此前从未调用——「数据存在但界面未显示」。
+	 */
+	presentationSettings(): Promise<DshIdePresentationSettings | undefined>;
 	firstSeq(): number | undefined;
 	historyStatus(): DshHistoryStatus;
 	selectModel(provider: string, model: string): Promise<void>;
@@ -583,6 +591,16 @@ export class DshChatSession extends Disposable implements IDshChatSession {
 
 	inboxNextStep(): readonly DshIdeInboxMessage[] {
 		return this.model.inboxNextStep();
+	}
+
+	async presentationSettings(): Promise<DshIdePresentationSettings | undefined> {
+		const result = await this.client.call<DshIdePresentationSettings>('presentationSettings', {});
+		if (!result.ok) {
+			// 偏好读不到不是错误：退回 store 的默认（standard）。不要用一条 toast
+			// 打断用户——这不是他们发起的操作。
+			return undefined;
+		}
+		return result.value;
 	}
 
 	hasMore(): boolean {

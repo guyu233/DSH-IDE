@@ -328,6 +328,23 @@ export interface DshIdeTurnProcessNode extends DshIdeNodeBase {
  */
 export type DshIdeTranscriptView = 'compact' | 'standard' | 'detailed' | 'verbose';
 
+/**
+ * 官方 `presentationSettings` 的返回值（Host 已实现，见 `ide-view-host.js`）。
+ *
+ * 四项都是「表现偏好」，不是会话事实：它们只改变渲染，不改变已记录的会话事件。
+ * `transcriptView` / `collapseTiming` / `foldedReplies` 来自 Host 的 `ui-chat` 设置段，
+ * `developerTools` 来自 `ui-settings`。本仓此前**完全没有消费这个端点**——
+ * Host 读了设置却没人用，属于「数据存在但界面未显示」。
+ */
+export interface DshIdePresentationSettings {
+	readonly transcriptView: DshIdeTranscriptView;
+	/** `completion` = 完成即折叠（默认）；`next-input` = 等下一条输入再折叠。 */
+	readonly collapseTiming: 'completion' | 'next-input';
+	/** `all` = 所有答复都留（默认）；`final` = 只留最终答复。 */
+	readonly foldedReplies: 'all' | 'final';
+	readonly developerTools: boolean;
+}
+
 /** 官方 `ui-chat` 的 `manual-compaction`：`/compact` 命令行与它产生的压缩检查点。 */
 export interface DshIdeManualCompactionNode extends DshIdeNodeBase {
 	readonly kind: 'manual-compaction';

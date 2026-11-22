@@ -568,3 +568,16 @@ test('work-details modes drive the default whole-Turn folding', async () => {
 	store.setTranscriptView('verbose');
 	assert.equal(store.isTurnCollapsed(3, 0), false, 'verbose never folds');
 });
+
+test('presentationSettings carries the four preference fields and applies transcriptView', async () => {
+	// Host 早已实现 presentationSettings（ide-view-host.js），但 IDE 侧此前从未调用——
+	// 「数据存在但界面未显示」。这条确认四个字段的形状与 transcriptView 的应用。
+	const { DshExpansionStateStore } = await import('../../../src/vs/workbench/contrib/dsh/browser/vscode/dshExpansionStateStore.ts');
+	const settings = { transcriptView: 'verbose', collapseTiming: 'next-input', foldedReplies: 'final', developerTools: true } as const;
+	const store = new DshExpansionStateStore('s1');
+	// 应用前按默认 standard：合格历史 Turn 初始折叠。
+	assert.equal(store.isTurnCollapsed(1, 0), true);
+	store.setTranscriptView(settings.transcriptView);
+	assert.equal(store.transcriptView(), 'verbose');
+	assert.equal(store.isTurnCollapsed(1, 0), false, 'verbose from Host must stop folding');
+});
