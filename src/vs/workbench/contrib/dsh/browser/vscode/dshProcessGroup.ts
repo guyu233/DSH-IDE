@@ -17,6 +17,16 @@ export interface DshGroupableNode {
 	readonly turn?: number;
 	readonly step?: number;
 	readonly parentKey?: string;
+	/**
+	 * 该答复是否**有可见回复内容**（官方：non-blank text / image / 其它可见块）。
+	 *
+	 * 官方「Turn Process Folding」对「最终答复」的定义是：
+	 * 「**the latest Step's settled Assistant reply, provided it has visible reply content
+	 * and no tool-call block**」。分组层拿不到内容，所以由调用方按内容算好这两位。
+	 */
+	readonly hasVisibleReply?: boolean;
+	/** 该答复是否**含 tool-call 块**（含则不能当最终答复）。 */
+	readonly hasToolCallBlock?: boolean;
 }
 
 export interface DshTurnProcess {
@@ -151,7 +161,12 @@ export function groupTurnProcesses(nodes: readonly DshGroupableNode[], reasonByT
 						controlKeys.push(node.key);
 					}
 					if (node.kind === 'assistant' || node.kind === 'assistant-step') {
-						replyKeys.push(node.key);
+						// 官方：最终答复必须是「有可见回复内容、无 tool-call 块」的已结算答复。
+						// 调用方没提供这两位时（例如只做分组测试）按「合格」处理，保持既有行为。
+						const eligible = node.hasVisibleReply !== false && node.hasToolCallBlock !== true;
+						if (eligible) {
+							replyKeys.push(node.key);
+						}
 						sawAnswer = true;
 						if (node.step !== undefined && node.step > answerStep) {
 							answerStep = node.step;

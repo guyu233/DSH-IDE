@@ -406,3 +406,29 @@ test('turn-position controls stay independent of whole-turn folding', () => {
 	// all：答复与控件都保留（行为不变）。
 	assert.deepEqual([...visibleProcessKeys(group, true, 'all')], ['u', 'a1', 'a2', 'tail']);
 });
+
+test('only an eligible reply can serve as the final answer', () => {
+	// 官方「Turn Process Folding」：The final answer is the latest Step's settled Assistant reply,
+	// **provided it has visible reply content and no tool-call block**。
+	// 本仓此前只取 replyKeys.at(-1)，不看内容——于是「只有工具调用的最后一步」会被当成最终答复。
+	const eligible = (key: string, seq: number, step: number) => node({ key, kind: 'assistant', seq, turn: 1, step } as never);
+	// 最后一步含 tool-call 块 → 不合格，最终答复退回到前一个合格答复。
+	const [withTool] = groupTurnProcesses([
+		node({ key: 'u', kind: 'user', seq: 1, turn: 1 }),
+		node({ key: 'a1', kind: 'assistant', seq: 2, turn: 1, step: 0, hasVisibleReply: true, hasToolCallBlock: false } as never),
+		node({ key: 'a2', kind: 'assistant', seq: 3, turn: 1, step: 1, hasVisibleReply: true, hasToolCallBlock: true } as never),
+	], new Map([[1, 'completed']]));
+	assert.deepEqual([...withTool.replyKeys], ['a1'], 'a tool-call reply is not a final answer');
+
+	// 最后一步无可见内容 → 同样不合格。
+	const [noContent] = groupTurnProcesses([
+		node({ key: 'u', kind: 'user', seq: 1, turn: 1 }),
+		node({ key: 'a1', kind: 'assistant', seq: 2, turn: 1, step: 0, hasVisibleReply: true, hasToolCallBlock: false } as never),
+		node({ key: 'a2', kind: 'assistant', seq: 3, turn: 1, step: 1, hasVisibleReply: false, hasToolCallBlock: false } as never),
+	], new Map([[1, 'completed']]));
+	assert.deepEqual([...noContent.replyKeys], ['a1'], 'an empty reply is not a final answer');
+
+	// 未提供这两位事实时按合格处理（保持既有行为，不让分组层凭空判定）。
+	const [unknown] = groupTurnProcesses([eligible('a1', 2, 0)], new Map([[1, 'completed']]));
+	assert.deepEqual([...unknown.replyKeys], ['a1']);
+});

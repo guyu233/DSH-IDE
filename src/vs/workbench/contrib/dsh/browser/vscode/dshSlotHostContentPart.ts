@@ -271,6 +271,7 @@ export class DshSlotHostContentPart extends Disposable implements IChatContentPa
 			if (node === undefined) {
 				return [];
 			}
+			const blocks = (node as { readonly blocks?: readonly { readonly kind?: string; readonly type?: string; readonly text?: string }[] }).blocks;
 			return [{
 				key: nodeId,
 				kind: node.kind,
@@ -278,6 +279,21 @@ export class DshSlotHostContentPart extends Disposable implements IChatContentPa
 				...(node.turn === undefined ? {} : { turn: node.turn }),
 				...(node.step === undefined ? {} : { step: node.step }),
 				...(binding.tree.parentKey(nodeId) === undefined ? {} : { parentKey: binding.tree.parentKey(nodeId) }),
+				// 官方「Turn Process Folding」对最终答复的定义要求两位事实，分组层看不到内容，
+				// 所以在这里按块算好交给它：
+				//   - hasVisibleReply：有非空白 text、或有 image / 其它可见块（reasoning 与 tool-call 协议块不算）；
+				//   - hasToolCallBlock：含 tool-call 块（含则不能当最终答复）。
+				...(blocks === undefined ? {} : {
+					hasVisibleReply: blocks.some(block => {
+						const kind = block.kind ?? block.type;
+						if (kind === 'text') {
+							return (block.text ?? '').trim() !== '';
+						}
+						// reasoning 与 tool-call 是协议块，不算「可见回复内容」。
+						return kind !== undefined && kind !== 'reasoning' && kind !== 'tool-call';
+					}),
+					hasToolCallBlock: blocks.some(block => (block.kind ?? block.type) === 'tool-call'),
+				}),
 			}];
 		});
 		const visible = new Set<string>();
