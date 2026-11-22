@@ -345,6 +345,18 @@ export interface DshIdePresentationSettings {
 	/** `all` = 所有答复都留（默认）；`final` = 只留最终答复。 */
 	readonly foldedReplies: 'all' | 'final';
 	readonly developerTools: boolean;
+	/**
+	 * 官方 `ui-chat.performanceUsage`：`detailed`（默认）或 `compact`。
+	 *
+	 * 官方「Turn token usage」：「**Compact shows only available output speed and cache-hit percentage
+	 * beneath the composer, without interactive statistic dialogs or per-Turn usage.** Detailed exposes
+	 * session statistics and per-Turn token usage. Neither mode shows elapsed time in the completed-turn
+	 * footer. **The preference changes presentation only**; accounting and Session events remain intact.」
+	 *
+	 * 所以它只影响**呈现**：`compact` 下 composer 只留「输出速度 + 缓存命中率」，
+	 * 不显示逐 Turn 用量；`detailed` 两者都给。
+	 */
+	readonly performanceUsage: 'detailed' | 'compact';
 }
 
 /** 官方 `ui-chat` 的 `manual-compaction`：`/compact` 命令行与它产生的压缩检查点。 */

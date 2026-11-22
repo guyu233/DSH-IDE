@@ -277,7 +277,8 @@
 		"dsh.queue.count",
 		"dsh.queue.steerCount",
 		"dsh.composer.tokens",
-		"dsh.composer.tokensCacheHit"
+		"dsh.composer.tokensCacheHit",
+		"dsh.composer.cacheHit"
 	],
 	"vs/workbench/contrib/dsh/browser/vscode/dshChatInputDockContribution": [
 		"dsh.queue.editTitle",

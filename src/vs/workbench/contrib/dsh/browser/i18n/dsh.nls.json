@@ -276,5 +276,6 @@
 	"dsh.card.plan": "Plan",
 	"dsh.card.usage": "Usage",
 	"dsh.composer.tokens": "{0} tokens",
-	"dsh.composer.tokensCacheHit": "{0} tokens · {1}% cache hit"
+	"dsh.composer.tokensCacheHit": "{0} tokens · {1}% cache hit",
+	"dsh.composer.cacheHit": "{0}% cache hit"
 }

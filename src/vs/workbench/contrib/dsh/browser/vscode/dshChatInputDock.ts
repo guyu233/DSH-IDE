@@ -72,13 +72,14 @@ export class DshChatInputDock extends Disposable {
 	 * `owner` 只对 `conversation.input.dock` 有意义（官方 owner 是 `InputZone`）；
 	 * `composer.dock` 只用会话 id。两者都允许缺省，表示「当前没有会话」。
 	 */
-	update(sessionId: string | undefined, owner?: DshInputZoneOwner, inbox?: readonly DshIdeInboxMessage[], inboxStep?: readonly DshIdeInboxMessage[], turnNav?: readonly DshInputDockRow[], usage?: DshIdeTokenUsageTotal): void {
+	update(sessionId: string | undefined, owner?: DshInputZoneOwner, inbox?: readonly DshIdeInboxMessage[], inboxStep?: readonly DshIdeInboxMessage[], turnNav?: readonly DshInputDockRow[], usage?: DshIdeTokenUsageTotal, usageMode: 'detailed' | 'compact' = 'detailed'): void {
 		this.sessionId = sessionId;
 		this.owner = owner;
 		this.inbox = inbox;
 		this.inboxStep = inboxStep;
 		this.turnNav = turnNav ?? [];
 		this.usage = usage;
+		this.usageMode = usageMode;
 		this.render();
 	}
 
@@ -89,6 +90,8 @@ export class DshChatInputDock extends Disposable {
 	private turnNav: readonly DshInputDockRow[] = [];
 	/** 官方 `tokenUsage` 投影（composer 统计控件的数据源）。 */
 	private usage: DshIdeTokenUsageTotal | undefined;
+	/** 官方 `ui-chat.performanceUsage`（只影响呈现）。 */
+	private usageMode: 'detailed' | 'compact' = 'detailed';
 
 	private render(): void {
 		for (const ref of this.rowRefs) {
@@ -111,7 +114,7 @@ export class DshChatInputDock extends Disposable {
 					...this.turnNav,
 				],
 			)
-			: dshComposerDockRows(this.sessionId, this.usage);
+			: dshComposerDockRows(this.sessionId, this.usage, this.usageMode);
 		if (rows.length === 0) {
 			this.domNode.style.display = 'none';
 			return;

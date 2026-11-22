@@ -84,7 +84,7 @@ export function dshInputDockRows(sessionId: string | undefined, zone: DshInputZo
  *
  * 这个槽没有 owner props，只按会话解析；没有会话时不解析。
  */
-export function dshComposerDockRows(sessionId: string | undefined, usage?: DshIdeTokenUsageTotal): readonly DshInputDockRow[] {
+export function dshComposerDockRows(sessionId: string | undefined, usage?: DshIdeTokenUsageTotal, mode: 'detailed' | 'compact' = 'detailed'): readonly DshInputDockRow[] {
 	if (sessionId === undefined || sessionId === '') {
 		return [];
 	}
@@ -92,7 +92,7 @@ export function dshComposerDockRows(sessionId: string | undefined, usage?: DshId
 	// `activity`（order 0）与 `usage`（order 1）。本仓没有 activity 的权威数据源
 	// （turn/step 计数在 `turn-process` 节点上、按 Turn 分散），所以只实现 `usage`——
 	// 有数据才画，没有就不占位（不伪造 0）。
-	return [...projectDockRows(DSH_COMPOSER_DOCK_SLOT, sessionId, undefined), ...dshComposerUsageRows(usage)];
+	return [...projectDockRows(DSH_COMPOSER_DOCK_SLOT, sessionId, undefined), ...dshComposerUsageRows(usage, mode)];
 }
 
 /**
@@ -104,7 +104,7 @@ export function dshComposerDockRows(sessionId: string | undefined, usage?: DshId
  * @param usage 官方 `tokenUsage` 投影（整会话累加）；缺省表示还没有任何用量
  * @returns 至多一行；没有用量时不画
  */
-export function dshComposerUsageRows(usage: DshIdeTokenUsageTotal | undefined): readonly DshInputDockRow[] {
+export function dshComposerUsageRows(usage: DshIdeTokenUsageTotal | undefined, mode: 'detailed' | 'compact' = 'detailed'): readonly DshInputDockRow[] {
 	if (usage === undefined) {
 		return [];
 	}
@@ -116,6 +116,16 @@ export function dshComposerUsageRows(usage: DshIdeTokenUsageTotal | undefined): 
 	// 缓存命中率：cacheRead 占「可缓存输入」的比例（uncached + cacheRead）。
 	const cacheable = usage.uncachedInputTokens + usage.cacheReadTokens;
 	const hitRate = cacheable <= 0 ? undefined : Math.round((usage.cacheReadTokens / cacheable) * 100);
+	// 官方 `ui-chat.performanceUsage`：`compact` **只留**「输出速度 + 缓存命中率」，不显示总量。
+	// 本仓没有权威的输出速度数据源（官方措辞是「**available** output speed」——有才显示），
+	// 所以 `compact` 下只保留命中率；没有命中率时整行不画（不伪造速度）。
+	if (mode === 'compact') {
+		return hitRate === undefined ? [] : [{
+			id: 'composer-usage',
+			label: localize('dsh.composer.cacheHit', "{0}% cache hit", hitRate),
+			order: 1,
+		}];
+	}
 	return [{
 		id: 'composer-usage',
 		label: hitRate === undefined

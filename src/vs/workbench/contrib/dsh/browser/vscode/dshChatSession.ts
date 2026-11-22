@@ -111,6 +111,13 @@ export interface IDshChatSession {
 	 * IDE 侧此前从未调用——「数据存在但界面未显示」。
 	 */
 	presentationSettings(): Promise<DshIdePresentationSettings | undefined>;
+	/**
+	 * 已读到的表现偏好（同步）。首次 `presentationSettings()` 成功后填入。
+	 *
+	 * composer 的统计行在**每次渲染**时都要知道 `performanceUsage`，不能为它再发一次异步请求；
+	 * 读到之前返回 `undefined`，调用方按官方默认（`detailed`）处理。
+	 */
+	presentationSettingsCache(): DshIdePresentationSettings | undefined;
 	firstSeq(): number | undefined;
 	historyStatus(): DshHistoryStatus;
 	selectModel(provider: string, model: string): Promise<void>;
@@ -153,6 +160,8 @@ export class DshChatSession extends Disposable implements IDshChatSession {
 	private _models: readonly DshChatModelOption[] = [];
 	private _current: { provider: string; model: string } | undefined;
 	private _running = false;
+	/** 已读到的表现偏好（官方 `presentationSettings` 的缓存，供同步读取）。 */
+	private _presentationSettings: DshIdePresentationSettings | undefined;
 	private boundSessionId: string | undefined;
 
 	/** 当前绑定会话（只读）。模型目录等会话投影的读取方据此带上发起会话。 */
@@ -593,6 +602,10 @@ export class DshChatSession extends Disposable implements IDshChatSession {
 		return this.model.inboxNextStep();
 	}
 
+	presentationSettingsCache(): DshIdePresentationSettings | undefined {
+		return this._presentationSettings;
+	}
+
 	async presentationSettings(): Promise<DshIdePresentationSettings | undefined> {
 		const result = await this.client.call<DshIdePresentationSettings>('presentationSettings', {});
 		if (!result.ok) {
@@ -600,6 +613,7 @@ export class DshChatSession extends Disposable implements IDshChatSession {
 			// 打断用户——这不是他们发起的操作。
 			return undefined;
 		}
+		this._presentationSettings = result.value;
 		return result.value;
 	}
 

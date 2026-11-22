@@ -1118,6 +1118,9 @@ function createMethodHandlers(bridge) {
 				collapseTiming: chat.collapseTiming === 'next-input' ? 'next-input' : 'completion',
 				foldedReplies: chat.foldedReplies === 'final' ? 'final' : 'all',
 				developerTools: tools.enabled !== false,
+				// 官方 `ui-chat.performanceUsage`：只影响呈现（compact 只留输出速度 + 缓存命中率）。
+				// 缺省 / 非法值都用 `detailed`（官方默认）。
+				performanceUsage: chat.performanceUsage === 'compact' ? 'compact' : 'detailed',
 			};
 		},
 		async capabilities() {

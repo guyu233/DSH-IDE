@@ -154,3 +154,27 @@ test('the composer usage row shows total tokens and cache hit rate', async () =>
 	assert.equal(noCache.length, 1);
 	assert.ok(!noCache[0].label.includes('cache hit'), `must omit the rate: "${noCache[0].label}"`);
 });
+
+test('compact performance mode keeps only the cache-hit percentage', async () => {
+	// 官方 ui-chat.performanceUsage：Compact shows only available output speed and cache-hit
+	// percentage beneath the composer, without interactive statistic dialogs or per-Turn usage。
+	// 本仓没有权威的输出速度数据源（官方措辞是 available output speed），所以 compact 只保留命中率。
+	const { dshComposerUsageRows } = await import('../../../src/vs/workbench/contrib/dsh/browser/vscode/dshInputDock.ts');
+	const usage = { uncachedInputTokens: 300, outputTokens: 100, cacheReadTokens: 100, cacheWriteTokens: 0 };
+	const detailed = dshComposerUsageRows(usage, 'detailed');
+	const compact = dshComposerUsageRows(usage, 'compact');
+	// detailed：总量 + 命中率。
+	assert.ok(detailed[0].label.includes('500'));
+	assert.ok(detailed[0].label.includes('25'));
+	// compact：只留命中率，不显示总量。
+	assert.equal(compact.length, 1);
+	assert.ok(compact[0].label.includes('25'), `keeps the rate: "${compact[0].label}"`);
+	assert.ok(!compact[0].label.includes('500'), `drops the total: "${compact[0].label}"`);
+	// compact 且没有命中率（无可缓存输入）→ 整行不画，不伪造速度。
+	const noRate = { uncachedInputTokens: 0, outputTokens: 10, cacheReadTokens: 0, cacheWriteTokens: 5 };
+	assert.deepEqual(dshComposerUsageRows(noRate, 'compact'), []);
+	// detailed 仍显示总量。
+	assert.equal(dshComposerUsageRows(noRate, 'detailed').length, 1);
+	// 缺省 mode 等价 detailed。
+	assert.deepEqual(dshComposerUsageRows(usage), dshComposerUsageRows(usage, 'detailed'));
+});
