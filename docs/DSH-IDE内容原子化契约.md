@@ -768,7 +768,7 @@ PR-02 状态：**部分实现**。
 - `records.ts` 的节点身份是 `messageId` + `seq` + `turn`/`step` + `callId`。文档早先写的 `nodeId` / `turnId` / `groupId` 在这份真源接口里不存在，不加入协议。
 PR-03 状态：**部分实现**（机制完整、12 个槽全部有生产消费点；`onDidChange` 已由输入区两个 dock 宿主消费，但聊天流本身仍不因槽位注册变化重画——ChatList 侧没有对应刷新入口，故不记 `已实现`）。
 
-本地证据：`src/vs/workbench/contrib/dsh/browser/vscode/dshSlotRegistry.ts`、`dshSlotTypes.ts`、`dshChatSlots.ts`（12 个槽声明，消费点见 §17 清单）。DSH 语义来自 `packages/client/ui-slots` 的 `SlotCore` 与 `docs/subsystems/slots.md`（低 priority 先渲染；同 cell 同 priority 拒绝；hoc 精确 key 替换同 id 通配层）。`node --experimental-strip-types --import build/lib/test/strip-ts-resolver.mjs --test build/lib/test/dshSlotRegistry.test.ts` 13 项通过。9 个槽已有生产消费点（见 §17 清单），`onDidChange` 仍未驱动 ChatList，所以这一项在差异表里是 `部分实现`。
+本地证据：`src/vs/workbench/contrib/dsh/browser/vscode/dshSlotRegistry.ts`、`dshSlotTypes.ts`、`dshChatSlots.ts`（12 个槽声明，消费点见 §17 清单）。DSH 语义来自 `packages/client/ui-slots` 的 `SlotCore` 与 `docs/subsystems/slots.md`（低 priority 先渲染；同 cell 同 priority 拒绝；hoc 精确 key 替换同 id 通配层）。`node --experimental-strip-types --import build/lib/test/strip-ts-resolver.mjs --test build/lib/test/dshSlotRegistry.test.ts` 通过（计数随新增用例变化）。12 个槽全部有生产消费点（见 §17 清单）；`onDidChange` 已由输入区两个 dock 宿主消费，但 ChatList 本身没有「槽位注册变化 → 重画历史」的入口，所以这一项在差异表里仍是 `部分实现`。
 
 PR-04 状态：**部分实现**。
 
