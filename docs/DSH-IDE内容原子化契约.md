@@ -101,7 +101,7 @@ DSH snapshot
 |---|---|---|
 | 顺序混排，不是自由组合 | 已消除：节点进 `DshConversationNodeTree`，按 `parentCallId` 成树，槽位按 key 取 | `dshConversationNodeTree.ts`、`dshSlotHostContentPart.ts` |
 | 节点身份在 `toHistory()` 中丢失 | 已消除：`kind + messageId` / `kind + callId` / `seq` 三级 key | `dshConversationNodeTree.ts` 的 `dshNodeKey` |
-| 没有 DSH slot 语义 | 已消除：`DshSlotRegistry` 五种基数、三种作用域；9 个槽有消费点 | `dshSlotRegistry.ts`、`dshChatSlots.ts` |
+| 没有 DSH slot 语义 | 已消除：`DshSlotRegistry` 五种基数、三种作用域；13 个槽全部有生产消费点 | `dshSlotRegistry.ts`、`dshChatSlots.ts` |
 | 没有 keyed node renderer 与 tool view registry | 已消除：`conversation.chat.node` 与 `tool.call.toolview` 都是 keyed 且已消费 | `dshChatSlots.ts` 的 `dshNodeRowOverride` / `dshToolViewOverride` |
 | 没有语义级折叠体系 | 已消除：Turn 级 `(turn, answerStep)` + 节点级 disclosure | `dshExpansionStateStore.ts`、`dshProcessGroup.ts` |
 | 复杂卡片靠文本模拟 | 已消除（除 §7 逐项标注的两处 command / warning 承载） | `dshNativePartAdapters.ts` 的 29 个 adapter |
