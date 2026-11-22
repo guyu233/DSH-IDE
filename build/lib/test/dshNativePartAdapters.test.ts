@@ -608,3 +608,27 @@ test('the chat view filters system-prompt instead of the projection', async () =
 	assert.ok(!view.includes("case 'system-prompt':"), 'the chat view must not build a system-prompt node');
 	assert.ok(!view.includes("kind: 'system-prompt', text:"), 'and must not map it into the chat flow');
 });
+
+test('hidden command rows follow the official three-way boundary', async () => {
+	// 官方 ui-chat「Hidden Chat rows」：隐藏 permission 与成功的 /team on|off 收据；
+	// 「failures and commands with missing or unrecognized arguments remain visible」。
+	const { isHiddenCommandRow } = await import('../../../src/vs/workbench/contrib/dsh/browser/vscode/dshCommandRows.ts');
+	const row = (over: Record<string, unknown>) => ({ commandId: 'x', name: null, args: null, outcome: { kind: 'success' }, ...over }) as never;
+
+	// ① permission：按 commandId 或记录名都算。
+	assert.equal(isHiddenCommandRow(row({ commandId: 'permission' })), true);
+	assert.equal(isHiddenCommandRow(row({ commandId: 'other', name: 'permission' })), true);
+	// ② 成功的 /team on|off（参数去空白）。
+	assert.equal(isHiddenCommandRow(row({ commandId: 'team', name: 'team', args: 'on' })), true);
+	assert.equal(isHiddenCommandRow(row({ commandId: 'team', name: 'team', args: '  off  ' })), true);
+	// ③ 失败永远可见——它是用户唯一的错误反馈。
+	assert.equal(isHiddenCommandRow(row({ commandId: 'permission', outcome: { kind: 'error' } })), false);
+	assert.equal(isHiddenCommandRow(row({ commandId: 'team', name: 'team', args: 'on', outcome: { kind: 'error' } })), false);
+	// 参数不可识别时不隐藏（官方明说 remain visible）。
+	assert.equal(isHiddenCommandRow(row({ commandId: 'team', name: 'team', args: null })), false);
+	assert.equal(isHiddenCommandRow(row({ commandId: 'team', name: 'team', args: '' })), false);
+	assert.equal(isHiddenCommandRow(row({ commandId: 'team', name: 'team', args: 'on extra' })), false);
+	// 其它命令照常显示。
+	assert.equal(isHiddenCommandRow(row({ commandId: 'compact', name: 'compact' })), false);
+	assert.equal(isHiddenCommandRow(row({ commandId: 'team', name: 'other', args: 'on' })), false, 'the recorded name decides, not the id alone');
+});

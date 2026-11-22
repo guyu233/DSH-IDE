@@ -268,6 +268,7 @@ Chat 层目标 kind（Host 投影到位前不进入节点树）：
 | `turn-tail` | `ui-chat` | turn、seq、time、closing、branchUnavailable、tokenUsage |
 | `turn-process` | `ui-chat` | turn、controlAnchorSeq、processStartSeq、answerAnchorSeq、answerStep、inlineReasoning、messageCount、toolCallCount、subagentCount |
 | `system-prompt` | `ui-chat` | text、update?（**投影仍产出，但 Chat 视图层不显示**——官方「Hidden Chat rows」：所有 work-details 模式下都不显示，且不改变已记录事件与 Trajectory；2026-11-23 CHK-347） |
+| `command`（隐藏子集） | `ui-chat` | 官方同节：`permission` 与成功的 `/team on\|off` 收据不进聊天流；**失败与参数不可识别的命令照常显示**。本仓 `isHiddenCommandRow()` 实现（2026-11-23 CHK-348） |
 | `manual-compaction` | `ui-chat` | command + compaction |
 | `submitted-plan` | `ui-plan` | SubmittedPlan（callId、title、markdown） |
 | `command-input` | `ui-goal` | GoalCommandInputData（commandId、text、time） |

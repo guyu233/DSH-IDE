@@ -18,6 +18,7 @@
 // 边界：零 `@deepseek-ai/*` import（workbench 层），只按 DSH 的公开类型形状窄化。
 
 import { Emitter, Event } from '../../../../../base/common/event.js';
+import { isHiddenCommandRow } from './dshCommandRows.js';
 import { Disposable } from '../../../../../base/common/lifecycle.js';
 import { createDshIdeConversationState, projectDshIdeConversation } from '../../../../../platform/dshClient/protocol/dshIdeConversation.js';
 import type { DshIdeConversationNode, DshIdeConversationView, DshIdeInboxMessage, DshIdeLoadOlderPage } from '../../../../../platform/dshClient/protocol/dshIdeProtocol.js';
@@ -808,6 +809,11 @@ function fromConversationNode(node: DshIdeConversationNode): DshChatNode | undef
 				...(node.turn === undefined ? {} : { turn: node.turn }),
 			} as DshChatNode;
 		case 'command':
+			// 官方「Hidden Chat rows」：`permission` 与成功的 `/team on|off` 收据不进聊天流；
+			// 失败与参数不可识别的命令照常显示（见 `isHiddenCommandRow` 的注释）。
+			if (isHiddenCommandRow(node)) {
+				return undefined;
+			}
 			return {
 				...base,
 				kind: 'command',
