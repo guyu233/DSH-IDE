@@ -849,13 +849,13 @@ PR-09 状态：**部分实现**。
 
 `adaptDshNode` 现在产出这些卡，槽位回退按卡的字段画，不再写 `Image:` / `File:`：
 
-- 图片 → `dshImageGallery`（attachmentId、mediaType、宽高、名字）。自研，因为原生没有 DSH 画廊。
-- 文件块 → `dshFileCard`（名字、attachmentId、字节数）。
-- `turn-tail.files` → `dshDeliverables`。快照级交付物仍同时留着 history 里的原生 `reference`，绝对路径可以打开。
+- 图片 → `dshImageGallery`（attachmentId、mediaType、宽高、名字）。渲染复用**原生 `ChatAttachmentsContentPart`**（经 `DshAttachmentListContentPart` 补 `IChatContentPart` 接口）：缩略图、点击打开（`ImageAttachmentWidget` 的 `openResource` / 图片轮播）、hover 预览、主题适配都由原生提供，不再自绘或列附件名。
+- 文件块 → `dshFileCard`（名字、attachmentId、字节数）。DSH 文件块**没有文件系统路径**，所以走原生 `ChatUsedReferencesListContentPart` 的可折叠引用列表；`FileAttachmentWidget` 需要 `resource: URI`，硬编路径属伪造数据（CHK-317）。
+- `turn-tail.files` → `dshDeliverables`，同样交给原生引用列表（绝对路径由原生打开器接管）；快照级交付物仍同时留着 history 里的原生 `reference`。
 - `turn-tail` 的 `tokenUsage` → `dshUsage`（input / output / total / cache / reasoning）；助手行不再重复用量。
 - `exit_plan_mode` 的计划节点 → `dshSubmittedPlan`，槽位把它收到 turn tail 渲染。
 
-还没有独立的 `DshImageGalleryContentPart` 文件，也没有点击后走原生编辑器的接线。真机 PENDING。
+没有独立的 `DshImageGalleryContentPart` 文件：图片与文件卡都直接复用原生部件，`dshSlotHostContentPart` 的回退渲染只在原生部件不可用时兜底。真机 PENDING（缩略图观感与点击打开）。
 
 PR-11 状态：**部分实现**。
 
@@ -893,9 +893,9 @@ PR-10 状态：**部分实现**。
 
 PR-12 状态：**部分实现**。
 
-- 用户气泡不再拼 `File:` / `Image:`。附件只留名字或 id，图片 URI 仍挂在该回合的 `reference` 上。文件不编 `dsh-attachment` URI。
+- 用户气泡不再拼 `File:` / `Image:`。附件只留名字或 id（正文为空时才用附件名占位，因为原生 request 需要非空 prompt）。**图片不再同时产 `reference`**：同一个 `conversation.chat.user.images` 席位由 slot host 的画廊画，两边都画会让同一张图出现两次。文件不编 `dsh-attachment` URI。
 - 带图片或文件的用户节点进入该段 `dshSlotHost` 的 nodeIds，由 `dshImageGallery` / `dshFileCard` 画。纯文本用户不重复进回复。
-- `toHistory()` 不再为 command、compaction、model-retry、turn-max-tokens、inherited-history、context 正文推 markdown 引用块。context 只保留图片 reference。这些节点由 slot host 的结构化卡画。触发器行不再带 `>`。`adaptDshNode` 对 `turn-trigger` 产出 `dshTurnTrigger`（按 `source.kind` 取标题，未知 source 只留正文）。`steering` 只留正文，不加 `**Steering:**`。`toHistory()` 里的触发器标签仍走 `localize`，但默认文案没有引用前缀。
+- `toHistory()` 不再为 command、compaction、model-retry、turn-max-tokens、inherited-history、context 正文推 markdown 引用块。context 的图片也不产 `reference`，由该段 slot host 的画廊画。这些节点由 slot host 的结构化卡画。触发器行不再带 `>`。`adaptDshNode` 对 `turn-trigger` 产出 `dshTurnTrigger`（按 `source.kind` 取标题，未知 source 只留正文）。`steering` 只留正文，不加 `**Steering:**`。`toHistory()` 里的触发器标签仍走 `localize`，但默认文案没有引用前缀。
 
 `build/lib/test/dshChatHistoryNative.test.ts` 的三条附件断言已改成无前缀。`dshSlotHostModel.test.ts` 增加「用户附件进本组」。
 

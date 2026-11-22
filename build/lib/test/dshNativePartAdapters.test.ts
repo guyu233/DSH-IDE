@@ -118,7 +118,7 @@ test('manual-compaction renders the command line and the compaction card, not ju
 
 test('reuse names a renderer that actually exists', () => {
 	// 只有原生 part 可以写原生类名；其余必须写回退渲染器，不能编一个 Dsh*ContentPart。
-	const nativeParts = new Set(['ChatMarkdownContentPart', 'ChatThinkingContentPart', 'ChatToolInvocationPart', 'ChatTaskContentPart', 'ChatTreeContentPart', 'ChatMultiDiffContentPart', 'ChatQuotaExceededPart', 'ChatErrorContentPart']);
+	const nativeParts = new Set(['ChatMarkdownContentPart', 'ChatThinkingContentPart', 'ChatToolInvocationPart', 'ChatTaskContentPart', 'ChatTreeContentPart', 'ChatMultiDiffContentPart', 'ChatQuotaExceededPart', 'ChatErrorContentPart', 'ChatAttachmentsContentPart', 'ChatUsedReferencesListContentPart']);
 	const samples: DshIndexedNode[] = [
 		{ kind: 'assistant', seq: 1, messageId: 'a', blocks: [{ kind: 'text', text: 'x' }, { kind: 'reasoning', text: 'r' }] },
 		{ kind: 'tool-call', seq: 2, callId: 'c', name: 'grep', args: {} },

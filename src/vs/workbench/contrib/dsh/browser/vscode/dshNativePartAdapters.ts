@@ -425,16 +425,21 @@ function mediaCards(blocks: readonly Block[] | undefined): DshNativeAdaptation[]
 	if (images.length > 0) {
 		parts.push({
 			adapter: 'image',
-			reuse: 'dshSlotHostContentPart:renderAdaptedFallback',
-			reason: '原生没有 DSH 图片画廊；当前由回退行列出附件名与 id，不是独立画廊组件',
+			// 渲染走原生 `ChatAttachmentsContentPart`（`DshAttachmentListContentPart` 只补
+			// `IChatContentPart` 接口）：缩略图、点击打开、hover 预览、主题适配都由原生提供。
+			reuse: 'ChatAttachmentsContentPart',
+			reason: '图片画廊复用原生附件部件，不自绘缩略图也不列附件名',
 			part: { kind: 'dshImageGallery', images },
 		});
 	}
 	if (files.length > 0) {
 		parts.push({
 			adapter: 'file',
-			reuse: 'dshSlotHostContentPart:renderAdaptedFallback',
-			reason: '原生没有文件卡；当前由回退行列出名字与字节数，不是独立卡片组件',
+			// DSH 文件块只带 attachmentId / name / bytes，没有文件系统路径，因此交给原生
+			// `ChatUsedReferencesListContentPart` 的可折叠引用列表；`FileAttachmentWidget`
+			// 需要 `resource: URI`，硬编路径属伪造数据（CHK-317）。
+			reuse: 'ChatUsedReferencesListContentPart',
+			reason: '文件卡没有可打开的路径，用原生引用列表按名字展示',
 			part: { kind: 'dshFileCard', files },
 		});
 	}
@@ -736,8 +741,10 @@ function deliverableParts(files: readonly { readonly path?: string; readonly des
 	}
 	return [{
 		adapter: 'deliverable',
-		reuse: 'dshSlotHostContentPart:renderAdaptedFallback',
-		reason: '交付物是文件列表，打开走原生 reference，不用一段说明文字',
+		// 交付物有绝对路径，交给原生引用列表（`ChatUsedReferencesListContentPart`）：
+		// 点击由原生打开器接管，不自绘列表也不写说明文字。
+		reuse: 'ChatUsedReferencesListContentPart',
+		reason: '交付物是文件列表，打开走原生 reference 列表，不用一段说明文字',
 		part: { kind: 'dshDeliverables', files: kept },
 	}];
 }
