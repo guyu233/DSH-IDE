@@ -713,7 +713,7 @@ DshCompositeContentPart
 
 ## 17. 当前立刻开始项
 
-**当前剩余工作（2026-11-22 收盘，按可执行性排序）**：
+**当前剩余工作（2026-11-23 更新：代码层 1–4 项已全部落地，只剩真机验收）**：
 
 1. 输入区两席（`conversation.input.dock` / `conversation.composer.dock`）已于 2026-11-23 接上消费点：`dshInputDock.ts` 把 occupant 投影成行，`dshChatInputDock.ts` 在原生输入卡上下方各渲染一个宿主，`dshChatInputDockContribution.ts` 用 `IChatWidgetService.onDidAddWidget` 挂到每个原生 chat widget（不改上游 `ChatInputPart`），并由 `DshSlotRegistry.onDidChange` 驱动重画。状态仍是 `部分实现`：真机未验收；且 `conversation.input.dock` 的 owner `input`（输入机状态）本仓没有建模，如实留空而不是伪造一个假值。
 2. ~~待处理提交 dock（`pendingInputs` / `InboxState['next-step']`）：当前被数据源阻塞~~ **已实现（2026-11-23，CHK-337）**——**原判断是错的**：官方 `SessionEventMap['agent/inbox/spliced']` 的 `inserted` 就是完整 `UserMessage[]`（含 `content` 的 text/image/file 块），`inbox` 投影原样上线，官方 `QueueDock` 直接读它。本仓真正的问题是投影层 `inboxIdentities()` 只取 `{id, sourceKind}`、**自己把 content 丢了**。现已保留内容块并逐层下发到 `conversation.input.dock`（`dshQueueDockRows`，`order: 20` 与官方一致）；~~编辑/删除/转向仍缺 Host 方法~~ **编辑/删除/转向已于 2026-11-23 补齐（CHK-338）**：线协议新增 `updateQueue`（42→43 个方法）→ Host 桥转成官方 `QueueAction`（edit 的 `text` 映射为 `content:[{type:'text',text}]`）→ `DshChatSession.updateQueue` → 行内动作条，官方 `queue-item-not-found` / `steer-unavailable` 原样透传。以下为历史记录（错误结论）——线协议里 inbox 只有 `agent/inbox/spliced` 事件，投影出的 `pending` 每项仅含 `id` 与 `sourceKind`（`DshIdeInboxIdentity`），**没有正文与附件**；原生 Chat 也没有输入队列机制（全仓无 `queuedMessages` / `pendingRequests` 之类状态）。只凭身份渲染队列会变成「有 2 条排队」这种空壳，属于用文本模拟，故不实现。要做需要 Host 先下发排队项的正文/附件，或由客户端自建本地队列并自行承担与 Host 的一致性。
