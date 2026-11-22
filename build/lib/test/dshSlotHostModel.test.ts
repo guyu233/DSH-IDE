@@ -679,3 +679,21 @@ test('expanded group bodies use the official 4px row spacing', async () => {
 	// 确认没有把 max-height 套到单行上。
 	assert.ok(!source.includes("row.style.maxHeight"), 'a per-row max-height would truncate each row');
 });
+
+test('an expanded group wraps its process rows in one scroll container', async () => {
+	// 官方「Grouped rendering」：the process group uses a stable div layout box, a scroll body,
+	// and an uncapped content box；Manually expanded group bodies use min(400px, 50vh) + 24px fades。
+	// 这两项必须作用在**整组容器**上，不能逐行（CHK-372 已记录逐行会切碎内容）。
+	const { readFileSync } = await import('node:fs');
+	const source = readFileSync(new URL('../../../src/vs/workbench/contrib/dsh/browser/vscode/dshSlotHostContentPart.ts', import.meta.url), 'utf8');
+	// 容器行类型存在且带 expanded。
+	assert.ok(source.includes("readonly kind: 'group'"), 'the row model must have a group container kind');
+	// 渲染成 role=group 的真实容器。
+	assert.ok(source.includes("container.setAttribute('role', 'group')"), 'the container must be a group landmark');
+	// 上限与渐变写在容器类上，且是官方数值。
+	assert.ok(source.includes('max-height: min(400px, 50vh)'), 'the official height cap');
+	assert.ok(source.includes('mask-image: linear-gradient'), 'the 24px fades');
+	assert.ok(source.includes('black 24px'), 'the fade depth is 24px');
+	// 只有展开态的 Turn 才包容器。
+	assert.ok(source.includes('expandedGroupTurns.has(node.turn)'), 'only expanded groups get a container');
+});

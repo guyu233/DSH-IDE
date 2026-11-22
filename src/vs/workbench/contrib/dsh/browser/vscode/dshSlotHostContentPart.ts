@@ -48,6 +48,22 @@ export interface DshNativePartRenderer {
 /** 一帧里的一行：`node` 是节点行，其余是过程计数行 / 问卷 / 侧栏这类附加行。 */
 type DshSlotRowSpec =
 	| { readonly key: string; readonly kind: 'node'; readonly nodeKey: string; readonly signature?: string }
+	/**
+	 * 过程组的**组体容器**（官方「Grouped rendering」：the process group uses a stable `div` layout box,
+	 * a scroll body, and an uncapped content box）。
+	 *
+	 * 为什么必须是一个真实的容器：高度上限（`min(400px, 50vh)`）、24px 方向渐变、
+	 * 组头 `aria-controls` 的语义目标、capped group 的独立滚动跟随——四件事都需要「一整组」这个 DOM 边界。
+	 * 子行各自有自己的 `key`（形如 `<父key>/<子key>`），全部进 `this.rows`，增量渲染不受影响。
+	 */
+	| {
+		readonly key: string;
+		readonly kind: 'group';
+		readonly children: readonly DshSlotRowSpec[];
+		/** 该容器是否处于展开态（决定高度上限与渐变是否生效）。 */
+		readonly expanded: boolean;
+		readonly signature?: string;
+	}
 	| {
 		readonly key: string;
 		readonly kind: 'summary';
@@ -255,6 +271,8 @@ export class DshSlotHostContentPart extends Disposable implements IChatContentPa
 		});
 		const visible = new Set<string>();
 		const summaryBefore = new Map<string, readonly { readonly line: string; readonly turn: number; readonly expanded: boolean; readonly onToggle: () => void }[]>();
+		// 展开态的组：这些 Turn 的 process 节点要包进一个组体容器（官方 min(400px,50vh) + 24px 渐变）。
+		const expandedGroupTurns = new Set<number>();
 		// 计划卡正常随 turn tail 画；但 Turn 还没结束（没有 `turn-tail`）时它也会被跳过，
 		// 于是整张卡消失。这里记下「哪些 Turn 已有 tail」，剩下的计划卡就地画在原位。
 		const turnsWithTail = new Set<number>();
@@ -342,6 +360,9 @@ export class DshSlotHostContentPart extends Disposable implements IChatContentPa
 				}
 			}
 			const spec = { line, turn: group.turn, expanded, onToggle } as const;
+			if (expanded) {
+				expandedGroupTurns.add(group.turn);
+			}
 			const anchors = this.segmentAnchors(group, binding);
 			if (anchors.length === 0) {
 				const fallback = group.answerKeys.find(key => {
@@ -392,6 +413,25 @@ export class DshSlotHostContentPart extends Disposable implements IChatContentPa
 					controlledId: this.groupHostId(nodeId),
 				});
 			});
+			// 展开态的 Turn：把连续的过程节点收进一个组体容器（官方 process group layout box）。
+			const isProcessMember = node.kind === 'tool-call' || node.kind === 'tool-result' || node.kind === 'context';
+			if (isProcessMember && node.turn !== undefined && expandedGroupTurns.has(node.turn)) {
+				const groupKey = `group:${node.turn}`;
+				const last = rows.at(-1);
+				if (last !== undefined && last.kind === 'group' && last.key === groupKey) {
+					// 追加到同一容器：把 children 换成新数组（行规格是不可变的）。
+					rows[rows.length - 1] = {
+						...last,
+						children: [...last.children, { key: `${groupKey}/node:${nodeId}`, kind: 'node', nodeKey: nodeId }],
+					};
+					continue;
+				}
+				rows.push({
+					key: groupKey, kind: 'group', expanded: true,
+					children: [{ key: `${groupKey}/node:${nodeId}`, kind: 'node', nodeKey: nodeId }],
+				});
+				continue;
+			}
 			rows.push({ key: `node:${nodeId}`, kind: 'node', nodeKey: nodeId });
 		}
 		for (const eventId of this.content.questionIds ?? []) {
@@ -407,6 +447,10 @@ export class DshSlotHostContentPart extends Disposable implements IChatContentPa
 	/** 一行的显示签名：只由这一行真正画出来的内容决定。 */
 	private rowSignature(row: DshSlotRowSpec, binding: NonNullable<ReturnType<typeof dshContentStore.get>>): string {
 		switch (row.kind) {
+			case 'group':
+				// 容器签名 = 自身展开态 + 子行签名串。子行任何变化都会让容器重画——
+				// 这是刻意的：容器是子行的父 DOM，只有整体重建才能保证结构一致。
+				return `group\u0000${row.expanded ? '1' : '0'}\u0000${row.children.map(child => this.rowSignature(child, binding)).join('\u0001')}`;
 			case 'summary':
 				// 展开状态参与签名：否则切换后增量渲染认为「没变」而不重画箭头。
 				return `summary\u0000${row.line}\u0000${row.expanded === true ? '1' : '0'}`;
@@ -428,6 +472,20 @@ export class DshSlotHostContentPart extends Disposable implements IChatContentPa
 	/** 按行类型构造 DOM；每行自己的监听进该行的 `refs`。 */
 	private renderRow(row: DshSlotRowSpec, binding: NonNullable<ReturnType<typeof dshContentStore.get>>, refs: DisposableStore): HTMLElement {
 		switch (row.kind) {
+			case 'group': {
+				const container = $('.dsh-process-group-body');
+				container.setAttribute('role', 'group');
+				if (row.expanded) {
+					container.classList.add('dsh-process-group-body-expanded');
+					ensureGroupBodyStyles();
+				}
+				for (const child of row.children) {
+					const childRefs = new DisposableStore();
+					container.appendChild(this.renderRow(child, binding, childRefs));
+					refs.add(childRefs);
+				}
+				return container;
+			}
 			case 'summary': {
 				const button = processSummaryRow(row.line, row.expanded === true);
 				if (row.onToggle !== undefined) {
@@ -970,3 +1028,30 @@ function parsedArgsOf(raw: string | undefined): unknown {
 	}
 }
 
+let groupBodyStyles: HTMLStyleElement | undefined;
+
+/**
+ * 过程组容器的高度上限与方向渐变（官方「Grouped rendering」）。
+ *
+ * 官方数值：`min(400px, 50vh)` 高度上限 + **24px directional fades**。
+ *
+ * **这次加在容器上而不是单行上**——CHK-372 曾把 `max-height` 加到每一行，会逐行截断内容，已撤回。
+ * 容器是整组的 DOM 边界，所以这里的上限与渐变才符合官方语义：
+ *   - `max-height` + `overflow-y: auto` 让整组成为可滚动窗口；
+ *   - `mask-image` 在上下各 24px 做线性淡出，提示「还有内容」。
+ * 只在**展开态**的容器上生效（收起时没有内容可滚）。
+ */
+function ensureGroupBodyStyles(): void {
+	if (groupBodyStyles !== undefined && groupBodyStyles.isConnected) {
+		return;
+	}
+	groupBodyStyles = createStyleSheet(undefined, style => {
+		style.textContent = `
+			.dsh-process-group-body-expanded {
+				max-height: min(400px, 50vh);
+				overflow-y: auto;
+				mask-image: linear-gradient(to bottom, transparent 0, black 24px, black calc(100% - 24px), transparent 100%);
+			}
+		`;
+	});
+}
