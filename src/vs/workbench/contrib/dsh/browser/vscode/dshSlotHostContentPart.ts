@@ -333,6 +333,14 @@ export class DshSlotHostContentPart extends Disposable implements IChatContentPa
 			const headerId = `process:${group.turn}:${group.answerStep}`;
 			const expanded = binding.expansion.isDisclosed(group.turn, headerId);
 			const onToggle = () => binding.expansion.setDisclosed(group.turn, headerId, !binding.expansion.isDisclosed(group.turn, headerId));
+			// **展开真的生效**：组头展开时把该 Turn 的过程节点放回可见集合。
+			// 没有这一步，点组头只会翻箭头——那是假装可交互（CHK-368 遗留）。
+			// 放在行内是因为 `visible` 是本次 collect 的局部集合，而组头的展开状态属于「这一帧」。
+			if (expanded) {
+				for (const key of group.processKeys) {
+					visible.add(key);
+				}
+			}
 			const spec = { line, turn: group.turn, expanded, onToggle } as const;
 			const anchors = this.segmentAnchors(group, binding);
 			if (anchors.length === 0) {

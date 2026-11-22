@@ -638,3 +638,17 @@ test('the renderer consumes multi-segment groups instead of one line per turn', 
 	assert.ok(source.includes('const summaryBefore = new Map<string, readonly {'), 'the summary map must hold structured headers');
 	assert.ok(source.includes('onToggle: header.onToggle'), 'and forward the toggle callback to the row');
 });
+
+test('toggling a group header actually reveals its process content', async () => {
+	// CHK-368 的组头只切图标、不影响渲染——那是「假装可交互」。这条不变量保证展开真的生效：
+	// 组头展开时必须把该 Turn 的 processKeys 放回 visible 集合。
+	const { readFileSync } = await import('node:fs');
+	const source = readFileSync(new URL('../../../src/vs/workbench/contrib/dsh/browser/vscode/dshSlotHostContentPart.ts', import.meta.url), 'utf8');
+	const index = source.indexOf('if (expanded) {');
+	assert.ok(index > 0, 'the header expansion must have a visible-effect branch');
+	const body = source.slice(index, index + 300);
+	assert.ok(body.includes('for (const key of group.processKeys)'), 'expanding must iterate the segment keys');
+	assert.ok(body.includes('visible.add(key)'), 'and add them to the visible set');
+	// 展开状态必须参与显示签名（否则切换不重绘）。
+	assert.ok(source.includes("row.expanded === true ? '1' : '0'"), 'the expanded state must be part of the row signature');
+});
