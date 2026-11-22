@@ -100,6 +100,12 @@ export const DSH_ASIDE_SLOT = 'conversation.chat.aside';
 /** markdown 围栏扩展点的槽位名（官方 hoc / session，key 是围栏 info 语言）。 */
 export const DSH_MARKDOWN_FENCE_SLOT = 'conversation.chat.markdown.fence';
 
+/** 输入卡上方整行区域的槽位名（官方 list / session，owner 是 `InputZone`）。 */
+export const DSH_INPUT_DOCK_SLOT = 'conversation.input.dock';
+
+/** 输入卡下方环境区的槽位名（官方 list / session，无 owner props）。 */
+export const DSH_COMPOSER_DOCK_SLOT = 'conversation.composer.dock';
+
 /**
  * 取某个围栏语言的插件包装（官方 hoc 槽：key 是围栏 info，缺省走通配层）。
  *
@@ -139,8 +145,8 @@ export const DSH_CHAT_SLOT_DECLARATIONS: readonly DshSlotDeclaration[] = [
 	{ name: DSH_MARKDOWN_FENCE_SLOT, cardinality: 'hoc', scope: 'session', ownerProps: ['info'] },
 	// 官方 `conversation.input.dock` 的 owner 是 `InputZone { session, input }`；
 	// `conversation.composer.dock` 与 `conversation.chat.aside` 没有 owner props。
-	{ name: 'conversation.input.dock', cardinality: 'list', scope: 'session', ownerProps: ['session', 'input'] },
-	{ name: 'conversation.composer.dock', cardinality: 'list', scope: 'session' },
+	{ name: DSH_INPUT_DOCK_SLOT, cardinality: 'list', scope: 'session', ownerProps: ['session', 'input'] },
+	{ name: DSH_COMPOSER_DOCK_SLOT, cardinality: 'list', scope: 'session' },
 ];
 
 /** 已声明过的名字。`declare` 本身允许重复，这里只避免重复登记同一份清单。 */

@@ -228,8 +228,8 @@ renderer 不能只拿 payload，必须拿到完整上下文：
 | `shell.quota-notice` | chain / root | 配额通知链 |
 | `conversation.approval.detail` | session | 审批详情席 |
 | `conversation.plan-review.actions` | session | 计划审阅动作席 |
-| `conversation.input.dock` | list / session | 输入区 dock（含 `id=queue`） |
-| `conversation.composer.dock` | session | 输入条 dock |
+| `conversation.input.dock` | list / session | 输入卡上方整行（含 `id=queue`） |
+| `conversation.composer.dock` | list / session | 输入卡下方环境区 |
 | `conversation.view` | list / session | 由 VS Code Chat 面板承载 |
 
 **校订**：`TurnUsagePanel` 是 `TurnTailNodeView` 内部的 React 组件（`CHAT/chat/TurnUsagePanel.tsx`），**不是 slot**。usage 数据由 `TurnTailChatData.tokenUsage` 提供，经 `conversation.chat.turnTail` 席位渲染；DSH-IDE 侧应做成 turn tail 内的自研 part，不为它单开槽位。
@@ -698,13 +698,13 @@ DshCompositeContentPart
 
 **当前剩余工作（2026-11-22 收盘，按可执行性排序）**：
 
-1. 仍无消费点的槽（附录 A §2 标 `未实现`）：`input.dock`、`composer.dock`。基数与作用域已在 `dshChatSlots.ts` 声明并有运行期单例 `dshChatSlotRegistry`；这两席位于输入区，接入需要改 `ChatInputPart` / `ChatWidget`，风险高于聊天流，留待单独一批。
+1. 输入区两席（`conversation.input.dock` / `conversation.composer.dock`）已于 2026-11-23 接上消费点：`dshInputDock.ts` 把 occupant 投影成行，`dshChatInputDock.ts` 在原生输入卡上下方各渲染一个宿主，`dshChatInputDockContribution.ts` 用 `IChatWidgetService.onDidAddWidget` 挂到每个原生 chat widget（不改上游 `ChatInputPart`），并由 `DshSlotRegistry.onDidChange` 驱动重画。状态仍是 `部分实现`：真机未验收；且 `conversation.input.dock` 的 owner `input`（输入机状态）本仓没有建模，如实留空而不是伪造一个假值。
 2. 待处理提交 dock（`pendingInputs` / `InboxState['next-step']`）：**当前被数据源阻塞，不是纯 UI 缺口**。线协议里 inbox 只有 `agent/inbox/spliced` 事件，投影出的 `pending` 每项仅含 `id` 与 `sourceKind`（`DshIdeInboxIdentity`），**没有正文与附件**；原生 Chat 也没有输入队列机制（全仓无 `queuedMessages` / `pendingRequests` 之类状态）。只凭身份渲染队列会变成「有 2 条排队」这种空壳，属于用文本模拟，故不实现。要做需要 Host 先下发排队项的正文/附件，或由客户端自建本地队列并自行承担与 Host 的一致性。
 3. 问答面板：官方 `userQuestionPanels.reveal/review` 可把已答问卷重新打开；本仓只有就地 `question-reply` 回执（在 transcript 里按题面回显答案），没有可重新打开的独立面板。要补需要宿主提供 `reveal` / `review` 入口与面板宿主，属新增 UI 面，不只是接线。
 4. 两条渲染层已知差异：`turn-tail` 的用量按 assistant 节点累加（官方按计量事件）；折叠判定仍在客户端 `dshProcessGroup`（官方是 `turn-process` 驱动的过程组 DOM）。
 5. 真机验收：§15 清单由用户执行；AI 不代跑 GUI。
 
-已接消费点的槽（2026-11-22）：`conversation.chat.node`（keyed，行覆盖）、`tool.call.toolview`（keyed，视图家族）、`conversation.chat.turnTail`（list，尾部追加行）、`shell.quota-notice`（chain，配额文案与 keepOpen）、`conversation.chat.reasoning.body`（single，思考正文）、`conversation.chat.assistant-actions`（list，动作按钮）、`conversation.chat.user.before`（chain，用户行上方装饰）、`conversation.chat.text-interaction`（keyed，选中手势）、`conversation.chat.aside`（single，侧栏文本）、`conversation.chat.markdown.fence`（hoc，围栏接管）。
+已接消费点的槽（2026-11-22）：`conversation.chat.node`（keyed，行覆盖）、`tool.call.toolview`（keyed，视图家族）、`conversation.chat.turnTail`（list，尾部追加行）、`shell.quota-notice`（chain，配额文案与 keepOpen）、`conversation.chat.reasoning.body`（single，思考正文）、`conversation.chat.assistant-actions`（list，动作按钮）、`conversation.chat.user.before`（chain，用户行上方装饰）、`conversation.chat.text-interaction`（keyed，选中手势）、`conversation.chat.aside`（single，侧栏文本）、`conversation.chat.markdown.fence`（hoc，围栏接管）、`conversation.input.dock`（list，输入卡上方行）、`conversation.composer.dock`（list，输入卡下方行）。
 
 历史记录（PR-01/PR-02 的回改与裁定）保留在下方，不重复。
 
@@ -1533,8 +1533,8 @@ DSH 的槽位有两个**独立轴**：基数（cardinality）与作用域（scop
 | `shell.quota-notice` | chain | root | `QuotaNoticeOwnerProps` | 回复视图上的 `ChatQuotaExceededPart`；chain 槽由 `dshQuotaNoticeOverride(code)` 消费：首个非空 select 生效，可覆盖文案、可要求保持显示；`retainQuotaNotice` 保证缺省帧与更小 seq 不覆盖 | 配额通知链 | 部分实现 |
 | `conversation.approval.detail` | — | session | — | `settleApproval`；标题是任务行，允许/拒绝仍走命令（原生 confirmation 会另发请求） | 审批详情席 | 部分实现 |
 | `conversation.plan-review.actions` | — | session | — | 计划题按普通问卷走 `settleQuestion`（选项即 approve / reject 标签）；计划卡归 turn tail，题目按钮之后追加 `Discuss`（`cancelRequest` 结算） | 计划审阅动作 | 部分实现 |
-| `conversation.input.dock` | list | session | `InputZone { session, input }` | `dshChatSlots.ts` 已声明（ownerProps 对齐官方 `InputZone`），尚无消费点 | 输入区 dock（含 `id=queue`） | 未实现 |
-| `conversation.composer.dock` | list | session | — | `dshChatSlots.ts` 已声明，尚无消费点 | 输入条 dock | 未实现 |
+| `conversation.input.dock` | list | session | `InputZone { session, input }` | `dshInputDock.ts` 投影 occupant 行；`dshChatInputDock.ts` 渲染在原生输入卡**上方**，`dshChatInputDockContribution.ts` 按 widget 挂载并随 `DshSlotRegistry.onDidChange` 重画；无 occupant 时宿主 `display:none` 不占位 | 输入区 dock（含 `id=queue`） | 部分实现 |
+| `conversation.composer.dock` | list | session | — | 同一套投影/宿主，渲染在原生输入卡**下方**；无 occupant 不占位 | 输入条 dock | 部分实现 |
 
 **校订**：原契约 §6.2 把 `TurnUsagePanel` 当成独立槽位，真源中它是 `TurnTailNodeView` 内部的 React 组件（`ui-chat/src/client/chat/TurnUsagePanel.tsx`），usage 数据由 `TurnTailChatData.tokenUsage` 提供、经 `conversation.chat.turnTail` 席位渲染。DSH-IDE 侧做成 turn tail 内的自研 part，不单开槽位。已修正。
 

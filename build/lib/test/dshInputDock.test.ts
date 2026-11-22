@@ -1,0 +1,78 @@
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) DSH-IDE contributors. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+
+// 输入区两个 dock 槽的投影单测（契约附录 A §2 的 `conversation.input.dock` /
+// `conversation.composer.dock`，以及 §1 的 list/order 语义）。
+// 运行：node --experimental-strip-types --test build/lib/test/dshInputDock.test.ts
+
+import assert from 'node:assert/strict';
+import { test } from 'node:test';
+import { dshChatSlotRegistry, DSH_COMPOSER_DOCK_SLOT, DSH_INPUT_DOCK_SLOT } from '../../../src/vs/workbench/contrib/dsh/browser/vscode/dshChatSlots.ts';
+import { dshComposerDockRows, dshInputDockRows } from '../../../src/vs/workbench/contrib/dsh/browser/vscode/dshInputDock.ts';
+
+function register(slot: string, id: string, props: Record<string, unknown>, order = 0): { dispose(): void } {
+	return dshChatSlotRegistry.register(slot, { id, order, props });
+}
+
+test('both docks are declared as official list/session slots', () => {
+	const catalog = new Map(dshChatSlotRegistry.catalog().slots.map(entry => [entry.name, entry]));
+	const input = catalog.get(DSH_INPUT_DOCK_SLOT);
+	assert.equal(input?.cardinality, 'list');
+	assert.deepEqual(input?.ownerProps, ['session', 'input'], 'the owner is the official InputZone { session, input }');
+	const composer = catalog.get(DSH_COMPOSER_DOCK_SLOT);
+	assert.equal(composer?.cardinality, 'list');
+	assert.deepEqual(composer?.ownerProps, [], 'composer.dock has no owner props in the official SlotMap');
+});
+
+test('input.dock rows sort by order and refuse to render without a session', () => {
+	const late = register(DSH_INPUT_DOCK_SLOT, 'b', { label: 'second' }, 20);
+	const early = register(DSH_INPUT_DOCK_SLOT, 'a', { label: 'first', description: 'why' }, 10);
+	try {
+		assert.deepEqual(dshInputDockRows('s1', undefined), [], 'a session-scoped slot must not render without a session');
+		const rows = dshInputDockRows('s1', { session: { id: 's1' } });
+		assert.deepEqual(rows.map(row => row.label), ['first', 'second']);
+		assert.equal(rows[0].description, 'why');
+	} finally {
+		early.dispose();
+		late.dispose();
+	}
+	assert.deepEqual(dshInputDockRows('s1', { session: { id: 's1' } }), [], 'disposing the occupants must clear the rows');
+});
+
+test('an occupant without a label is skipped instead of drawing an empty row', () => {
+	const blank = register(DSH_INPUT_DOCK_SLOT, 'blank', { label: '   ' });
+	const missing = register(DSH_INPUT_DOCK_SLOT, 'missing', {});
+	try {
+		assert.deepEqual(dshInputDockRows('s1', { session: { id: 's1' } }), []);
+	} finally {
+		blank.dispose();
+		missing.dispose();
+	}
+});
+
+test('composer.dock carries the click command and its arguments', () => {
+	const entry = register(DSH_COMPOSER_DOCK_SLOT, 'note', { label: 'Open queue', command: 'dsh.queue.open', arguments: ['s1', 1] }, 5);
+	try {
+		const rows = dshComposerDockRows('s1');
+		assert.equal(rows.length, 1);
+		assert.equal(rows[0].command, 'dsh.queue.open');
+		assert.deepEqual(rows[0].arguments, ['s1', 1]);
+		assert.deepEqual(dshComposerDockRows(undefined), [], 'composer.dock also requires a session');
+	} finally {
+		entry.dispose();
+	}
+});
+
+test('the two docks are independent projections of their own slot', () => {
+	const input = register(DSH_INPUT_DOCK_SLOT, 'only-input', { label: 'input side' });
+	const composer = register(DSH_COMPOSER_DOCK_SLOT, 'only-composer', { label: 'composer side' });
+	try {
+		assert.deepEqual(dshInputDockRows('s1', { session: { id: 's1' } }).map(row => row.id), ['only-input']);
+		assert.deepEqual(dshComposerDockRows('s1').map(row => row.id), ['only-composer']);
+	} finally {
+		input.dispose();
+		composer.dispose();
+	}
+});

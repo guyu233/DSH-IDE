@@ -44,6 +44,7 @@ import { dshSessionResource } from './vscode/dshAgentSessionsController.js';
 import { IInstantiationService } from '../../../../platform/instantiation/common/instantiation.js';
 import { IFileService } from '../../../../platform/files/common/files.js';
 import { DshAttachmentFileSystemProvider } from './vscode/dshAttachmentFileSystem.js';
+import { DshChatInputDockContribution } from './vscode/dshChatInputDockContribution.js';
 import { CommandsRegistry } from '../../../../platform/commands/common/commands.js';
 import './vscode/dshAgentSessionsController.js';
 
@@ -113,6 +114,10 @@ class DshClientContribution extends Disposable implements IWorkbenchContribution
 		this._register(registerDshTeamInputAction());
 		// DSH 图标：把语义对得上的 codicon 换成官方产品图形（混合状态，未命中保留 codicon）。
 		this._register(registerDshIconReplacement());
+		// 输入区两个官方 dock 槽（`conversation.input.dock` / `conversation.composer.dock`）：
+		// 它们是 DSH 输入区的一部分，但本仓的输入区是原生 ChatInputPart，没有消费点。
+		// 由贡献点挂在每个原生 chat widget 的输入卡上下方，无 occupant 时不占位。
+		this._register(instantiationService.createInstance(DshChatInputDockContribution));
 		// 会话附件的只读 URI 方案：原生 Chat 没有图片进度部件，附件以 `dsh-attachment:` 引用
 		// 出现，由 VS Code 自己的查看器经 Host 官方附件服务读字节。
 		this._register(new DshAttachmentFileSystemProvider(client, fileService));

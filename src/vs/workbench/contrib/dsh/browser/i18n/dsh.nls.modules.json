@@ -264,5 +264,9 @@
 	],
 	"vs/workbench/contrib/chat/browser/speechToText/dshSpeech": [
 		"dshSpeech.outOfRange"
+	],
+	"vs/workbench/contrib/dsh/browser/vscode/dshChatInputDock": [
+		"dsh.inputDock.label",
+		"dsh.composerDock.label"
 	]
 }
