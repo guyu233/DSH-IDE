@@ -76,3 +76,29 @@ test('a layout-driven scroll must not flip following into reading', () => {
 	assert.equal(dshScrollDeltaSource(100, 101), 'reader');
 	assert.equal(dshScrollDeltaSource(100, 100.5), 'reader');
 });
+
+test('a capped group follows only its own bottom, independently of the transcript', async () => {
+	// 官方「Group-title rules」末段：An open capped group follows content growth only while its own
+	// scroll position is at the bottom；Scrolling away pauses that group's following; returning to the
+	// bottom resumes it, independently of outer transcript following。
+	const { dshGroupFollowAfterScroll, dshGroupShouldFollow, DSH_GROUP_FOLLOW_INITIAL } = await import('../../../src/vs/workbench/contrib/dsh/browser/vscode/dshGroupScrollFollow.ts');
+	assert.equal(DSH_GROUP_FOLLOW_INITIAL.mode, 'following', 'a fresh group follows');
+	assert.equal(dshGroupShouldFollow(DSH_GROUP_FOLLOW_INITIAL), true);
+	const paused = dshGroupFollowAfterScroll(DSH_GROUP_FOLLOW_INITIAL, false);
+	assert.equal(paused.mode, 'paused', 'scrolling away pauses the group');
+	assert.equal(dshGroupShouldFollow(paused), false, 'a paused group must not be scrolled');
+	const resumed = dshGroupFollowAfterScroll(paused, true);
+	assert.equal(resumed.mode, 'following', 'returning to the bottom resumes');
+	// 状态迁移是幂等的：已在目标态时返回原对象（不制造无谓的重绘）。
+	assert.equal(dshGroupFollowAfterScroll(DSH_GROUP_FOLLOW_INITIAL, true), DSH_GROUP_FOLLOW_INITIAL);
+	assert.equal(dshGroupFollowAfterScroll(paused, false), paused);
+});
+
+test('manually opening a closed group starts at the top with following disabled', async () => {
+	// 官方：Manually opening an unclosed group starts at the bottom and follows growth;
+	// manually opening a closed group starts at the top with following disabled,
+	// even when its initial content fits without scrolling。
+	const { dshGroupFollowOnOpen } = await import('../../../src/vs/workbench/contrib/dsh/browser/vscode/dshGroupScrollFollow.ts');
+	assert.deepEqual(dshGroupFollowOnOpen(false), { mode: 'following' }, 'an unclosed group follows from the bottom');
+	assert.deepEqual(dshGroupFollowOnOpen(true), { mode: 'paused' }, 'a closed group starts at the top, not following');
+});

@@ -19,6 +19,7 @@ import { dshAsideText, dshAssistantActions, dshTextInteractions, dshUserBeforeDe
 import { dshContentStore } from './dshContentStore.js';
 import { adaptDshNode, type DshNativePart } from './dshNativePartAdapters.js';
 import { groupTurnProcesses, hiddenProcessLine, latestExchangeTurns, processLineFromSnapshot, visibleProcessKeys, type DshTurnProcess } from './dshProcessGroup.js';
+import { dshGroupFollowAfterScroll, dshGroupFollowOnOpen } from './dshGroupScrollFollow.js';
 import { diffDshSlotRows, dshSlotHostSame, planKeysForTurn, presentDshNode, turnProcessCounts, type DshSlotHostRef } from './dshSlotHostModel.js';
 import { dshNodeDisplaySignature } from './dshConversationNodeTree.js';
 import { dshCardSpec, type DshCardSpec } from './dshCardSpec.js';
@@ -62,6 +63,8 @@ type DshSlotRowSpec =
 		readonly children: readonly DshSlotRowSpec[];
 		/** 该容器是否处于展开态（决定高度上限与渐变是否生效）。 */
 		readonly expanded: boolean;
+		/** 该组所属 Turn 是否已结束（决定手动展开时从顶部还是底部开始，见 `dshGroupFollowOnOpen`）。 */
+		readonly groupClosed?: boolean;
 		readonly signature?: string;
 	}
 	| {
@@ -428,6 +431,8 @@ export class DshSlotHostContentPart extends Disposable implements IChatContentPa
 				}
 				rows.push({
 					key: groupKey, kind: 'group', expanded: true,
+					// 该 Turn 是否已结束：用同一个 `turn-process` 原因表判定（与折叠判定同源）。
+					groupClosed: reasonByTurn.get(node.turn) !== undefined,
 					children: [{ key: `${groupKey}/node:${nodeId}`, kind: 'node', nodeKey: nodeId }],
 				});
 				continue;
@@ -483,6 +488,23 @@ export class DshSlotHostContentPart extends Disposable implements IChatContentPa
 					const childRefs = new DisposableStore();
 					container.appendChild(this.renderRow(child, binding, childRefs));
 					refs.add(childRefs);
+				}
+				if (row.expanded) {
+					// 官方「Group-title rules」末段的组内跟随：展开的组只在**自身**滚到底时跟随增长，
+					// 用户滚开就暂停、滚回就恢复，且与外层 transcript 的跟随完全独立。
+					// 手动展开一个**已结束**的组要从顶部开始（`dshGroupFollowOnOpen(true)`），
+					// 未结束的从底部跟随——两条都由 `dshGroupScrollFollow` 表达。
+					const initialClosed = row.groupClosed === true;
+					let follow = dshGroupFollowOnOpen(initialClosed);
+					if (!initialClosed) {
+						container.scrollTop = container.scrollHeight;
+					}
+					const onScroll = () => {
+						const atBottom = container.scrollTop + container.clientHeight >= container.scrollHeight - 1;
+						follow = dshGroupFollowAfterScroll(follow, atBottom);
+					};
+					container.addEventListener('scroll', onScroll);
+					refs.add({ dispose: () => container.removeEventListener('scroll', onScroll) });
 				}
 				return container;
 			}
