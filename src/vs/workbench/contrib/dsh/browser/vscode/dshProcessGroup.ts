@@ -24,6 +24,13 @@ export interface DshTurnProcess {
 	readonly promptKeys: readonly string[];
 	readonly processKeys: readonly string[];
 	readonly answerKeys: readonly string[];
+	/**
+	 * `answerKeys` 里**真正的答复**（assistant / assistant-step），按 seq 升序。
+	 *
+	 * 不能直接用 answerKeys 的最后一项当最终答复：那个列表还含 turn-tail、turn-error 等
+	 * 同为 turn 位置的节点，取到最后一条很可能是个尾部控件而不是答复。
+	 */
+	readonly replyKeys: readonly string[];
 	readonly alwaysOpen: boolean;
 }
 
@@ -75,6 +82,7 @@ export function groupTurnProcesses(nodes: readonly DshGroupableNode[], reasonByT
 			const promptKeys: string[] = [];
 			const processKeys: string[] = [];
 			const answerKeys: string[] = [];
+			const replyKeys: string[] = [];
 			let answerStep = 0;
 			let sawSignal = false;
 			let sawAnswer = false;
@@ -87,6 +95,7 @@ export function groupTurnProcesses(nodes: readonly DshGroupableNode[], reasonByT
 				} else {
 					answerKeys.push(node.key);
 					if (node.kind === 'assistant' || node.kind === 'assistant-step') {
+						replyKeys.push(node.key);
 						sawAnswer = true;
 						if (node.step !== undefined && node.step > answerStep) {
 							answerStep = node.step;
@@ -102,7 +111,7 @@ export function groupTurnProcesses(nodes: readonly DshGroupableNode[], reasonByT
 			const alwaysOpen = spec.hasInterleavedInput || (reason !== undefined
 				? turnProcessAlwaysOpen(reason)
 				: sawSignal || !sawAnswer);
-			return { turn, answerStep, promptKeys, processKeys, answerKeys, alwaysOpen };
+			return { turn, answerStep, promptKeys, processKeys, answerKeys, replyKeys, alwaysOpen };
 		});
 }
 
@@ -225,9 +234,32 @@ export interface DshProcessActivitySummary {
 }
 
 /** 收起时只留提示和答复。不可折叠的 turn 始终返回全部 key。 */
-export function visibleProcessKeys(group: DshTurnProcess, collapsed: boolean): readonly string[] {
+/**
+ * 折叠时保留哪些答复（官方 `ui-chat.foldedReplies`）。
+ *
+ * `all`（默认）：**每条答复都留在折叠之外**，只折过程；
+ * `final`：中间答复随过程一起折起，**只留最终答复**。
+ *
+ * 官方把「最终答复」定义为**最新 Step 的已结算 Assistant 答复**，且必须「有可见回复内容、无 tool-call 块」。
+ * 不满足时（例如最后一步只有工具调用）**不猜**——保持 `all` 的行为，宁可多显示也不把唯一的答复折掉。
+ */
+export type DshFoldedReplies = 'all' | 'final';
+
+/**
+ * 折叠时可见的 key 列表。
+ *
+ * @param group 一个 Turn 的过程组
+ * @param collapsed 整个 Turn 是否收起
+ * @param foldedReplies 官方的「折叠后的答复」偏好
+ */
+export function visibleProcessKeys(group: DshTurnProcess, collapsed: boolean, foldedReplies: DshFoldedReplies = 'all'): readonly string[] {
 	if (group.alwaysOpen || !collapsed) {
 		return [...group.promptKeys, ...group.processKeys, ...group.answerKeys];
+	}
+	if (foldedReplies === 'final') {
+		// 只在**真正的答复**里取最后一条；`answerKeys` 还含 turn-tail/turn-error 等控件。
+		const finalKey = group.replyKeys.at(-1);
+		return [...group.promptKeys, ...(finalKey === undefined ? [] : [finalKey])];
 	}
 	return [...group.promptKeys, ...group.answerKeys];
 }

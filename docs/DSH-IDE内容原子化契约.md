@@ -701,8 +701,9 @@ Compact/Standard/Detailed 对合格历史 Turn 初始折叠；`detailed` 运行�
 ~~**未完成**：模式设置项与 Host 持久化（`ui-chat.transcriptView`）尚未接线~~ **已接通（2026-11-23，CHK-352）**：
 Host 侧 `presentationSettings()` 早已实现（读 `ui-chat` 设置段，含旧值 `normal`/`expanded` → `detailed` 的映射），
 缺的只有 IDE 侧——`src/vs/workbench` 零调用。现已补 `DshIdePresentationSettings` 类型、`DshChatSession.presentationSettings()`
-与 `dshChatSessionContent` 的应用点，四档模式由 Host 设置驱动。**仍未消费**：`collapseTiming` / `foldedReplies` / `developerTools`
-三项已读到但对应渲染规则（折叠时机、"只留最终答复"）尚未实现。
+与 `dshChatSessionContent` 的应用点，四档模式由 Host 设置驱动。**仍未消费**：`collapseTiming` / `developerTools` 两项已读到但对应渲染规则尚未实现。
+~~`foldedReplies`~~ **已消费（2026-11-23，CHK-353）**：`visibleProcessKeys(group, collapsed, foldedReplies)` 在 `final` 时只留最终答复；
+**并修掉一个真实 bug**——最终答复不能取 `answerKeys.at(-1)`（那里含 `turn-tail` 等控件），改为分组时单独收集的 `replyKeys`（只含 `assistant` / `assistant-step`）。
 6. 快照刷新、会话切换、虚拟化重绘不丢失折叠状态、草稿、pending 入口和节点身份。
 7. `tsc --noEmit` PASS，相关测试 PASS，真机验收由用户确认；未跑项严格标注 PENDING。
 

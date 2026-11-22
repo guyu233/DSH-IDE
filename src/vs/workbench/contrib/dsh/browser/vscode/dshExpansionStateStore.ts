@@ -58,6 +58,8 @@ export class DshExpansionStateStore {
 	 * 只影响**默认**折叠：用户手动开合过的 Turn 以手动值为准（`turnProcesses` 里有记录就压过模式）。
 	 */
 	private view: DshIdeTranscriptView = 'standard';
+	/** 官方 `ui-chat.foldedReplies`：折叠时保留所有答复（默认）还是只留最终答复。 */
+	private folded: 'all' | 'final' = 'all';
 
 	constructor(sessionId: string) {
 		this.sessionId = sessionId;
@@ -66,6 +68,19 @@ export class DshExpansionStateStore {
 	/** 官方 `ui-chat.transcriptView`：缺省 / 非法值都用 `standard`（Desktop 默认）。 */
 	transcriptView(): DshIdeTranscriptView {
 		return this.view;
+	}
+
+	/** 官方 `ui-chat.foldedReplies`。 */
+	foldedReplies(): 'all' | 'final' {
+		return this.folded;
+	}
+
+	setFoldedReplies(folded: 'all' | 'final'): void {
+		if (this.folded === folded) {
+			return;
+		}
+		this.folded = folded;
+		this.emit();
 	}
 
 	setTranscriptView(view: DshIdeTranscriptView): void {

@@ -81,6 +81,7 @@ export class DshChatSessionContent extends Disposable implements IChatSession {
 				return;
 			}
 			this.expansion.setTranscriptView(settings.transcriptView);
+			this.expansion.setFoldedReplies(settings.foldedReplies);
 		});
 		this.nodeTree.accept(session.nodes());
 		if (this._sessionId !== undefined) {

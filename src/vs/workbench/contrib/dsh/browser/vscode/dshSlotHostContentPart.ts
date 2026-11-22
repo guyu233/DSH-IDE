@@ -264,7 +264,7 @@ export class DshSlotHostContentPart extends Disposable implements IChatContentPa
 			// `eligible` = 官方可折叠条件：`alwaysOpen` 为真（未结束 / 失败 / 有可见输入）
 			// 时该 Turn 不允许整段收起，模式默认不能覆盖这条。
 			const collapsed = binding.expansion.isTurnCollapsed(group.turn, group.answerStep, !group.alwaysOpen);
-			for (const key of visibleProcessKeys(group, collapsed)) {
+			for (const key of visibleProcessKeys(group, collapsed, binding.expansion.foldedReplies())) {
 				visible.add(key);
 			}
 			if (group.alwaysOpen || !collapsed || group.processKeys.length === 0) {

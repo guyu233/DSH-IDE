@@ -212,3 +212,24 @@ test('a hidden process becomes one count line and an open call stays marked', ()
 	assert.equal(hiddenProcessLine([{ kind: 'assistant' }]), undefined);
 });
 
+
+test('foldedReplies=final keeps only the final reply, never a tail control', () => {
+	// 官方 ui-chat.foldedReplies=final：中间答复随过程一起折起，只留最终答复。
+	// 关键陷阱：answerKeys 还含 turn-tail / turn-error 等同为 turn 位置的控件，
+	// 用 answerKeys.at(-1) 会取到尾部控件，而不是答复。
+	const grouped = groupTurnProcesses([
+		node({ key: 'u', kind: 'user', seq: 1, turn: 1 }),
+		node({ key: 'a1', kind: 'assistant', seq: 2, turn: 1, step: 0 }),
+		node({ key: 't', kind: 'tool-call', seq: 3, turn: 1 }),
+		node({ key: 'a2', kind: 'assistant', seq: 4, turn: 1, step: 1 }),
+		node({ key: 'tail', kind: 'turn-tail', seq: 5, turn: 1 }),
+	], new Map([[1, 'completed']]));
+	const group = grouped[0];
+	assert.equal(group.alwaysOpen, false, 'a completed turn with replies is foldable');
+	// all：答复与控制都在。
+	assert.deepEqual([...visibleProcessKeys(group, true, 'all')], ['u', 'a1', 'a2', 'tail']);
+	// final：只剩输入与最终答复；turn-tail 不能被当成最终答复留下，中间答复 a1 也折起。
+	assert.deepEqual([...visibleProcessKeys(group, true, 'final')], ['u', 'a2']);
+	// 展开时两种偏好一致。
+	assert.deepEqual([...visibleProcessKeys(group, false, 'final')], ['u', 't', 'a1', 'a2', 'tail']);
+});
