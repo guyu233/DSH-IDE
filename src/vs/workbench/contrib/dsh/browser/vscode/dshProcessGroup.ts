@@ -462,6 +462,70 @@ export function processActivityLabel(activity: DshProcessActivity, state: 'runni
 	}
 }
 
+/**
+ * 按官方「Group-title rules」把多个类别标签连成组头文案。
+ *
+ * 官方表格：
+ *   - Closed, one category  → 用该类的 closed label，**不带计数**
+ *   - Closed, two categories → 用 "and" 连接
+ *   - Closed, three categories → 逗号连接
+ *   - Closed, more than three → 前三个 + "etc."
+ * 并规定「**English lowercases the initial letter of joined labels after the first**」
+ * 与「**Chinese removes the second leading `已` only when both labels start with it**」。
+ *
+ * @param labels 已按官方排名排好序的标签（长度 ≥ 1）
+ * @returns 连接后的文案；空数组返回 undefined
+ */
+export function joinActivityLabels(labels: readonly string[]): string | undefined {
+	if (labels.length === 0) {
+		return undefined;
+	}
+	if (labels.length === 1) {
+		return labels[0];
+	}
+	if (labels.length === 2) {
+		// 英文：第二个标签首字母小写（"Read files and ran commands"）。
+		return `${labels[0]} and ${lowerInitial(labels[1])}`;
+	}
+	if (labels.length === 3) {
+		return `${labels[0]}, ${lowerInitial(labels[1])}, ${lowerInitial(labels[2])}`;
+	}
+	// >3：前三个 + etc.，仍是逗号连接。
+	return `${labels[0]}, ${lowerInitial(labels[1])}, ${lowerInitial(labels[2])}, etc.`;
+}
+
+/**
+ * 英文标签的首字母小写化；非拉丁字母（中文等）原样返回。
+ *
+ * 官方的中文规则更特殊：只有两个标签**都以「已」开头**时才去掉第二个的「已」。
+ * 这里按语言分别处理——拉丁字母首字母小写、中文去第二个「已」。
+ */
+function lowerInitial(label: string): string {
+	const first = label.charAt(0);
+	// 拉丁大写字母：小写化。
+	if (first >= 'A' && first <= 'Z') {
+		return first.toLowerCase() + label.slice(1);
+	}
+	return label;
+}
+
+/**
+ * 中文连接：两个标签都以「已」开头时去掉第二个的「已」。
+ *
+ * 官方原文：「Chinese removes the second leading `已` only when both labels start with it.」
+ * 只在两者都以「已」开头时动手——否则会改坏一个本来不该省的词。
+ */
+export function joinActivityLabelsZh(labels: readonly string[]): string | undefined {
+	if (labels.length <= 1) {
+		return labels[0];
+	}
+	const second = labels[1].startsWith('\u5df2') && labels[0].startsWith('\u5df2') ? labels[1].slice(1) : labels[1];
+	if (labels.length === 2) {
+		return `${labels[0]}\u548c${second}`;
+	}
+	return labels.map((label, index) => index === 0 ? label : (index === 1 ? second : label)).join('\u3001') + (labels.length > 3 ? '\u7b49' : '');
+}
+
 /** 被收起的过程用一行计数表示。没有活动时返回 undefined。未配对的 tool-call 算正在跑。 */
 export function hiddenProcessLine(nodes: readonly { readonly kind: string; readonly name?: string; readonly callId?: string; readonly args?: unknown }[]): string | undefined {
 	const settled = new Set(nodes.flatMap(node => node.kind === 'tool-result' && node.callId !== undefined && node.callId !== '' ? [node.callId] : []));
@@ -474,13 +538,20 @@ export function hiddenProcessLine(nodes: readonly { readonly kind: string; reado
 	// 活动名是内部枚举（`read` / `webSearch`），直接拼给用户等于没本地化。
 	// 该行只在过程被收起时画：有正在跑的就用 running 标签，否则用 closed 标签。
 	const state = summary.running > 0 ? 'running' : 'closed';
-	const counts = Object.entries(summary.counts).flatMap(([name, count]) => typeof count === 'number'
-		? [`${processActivityLabel(name as DshProcessActivity, state)} ${count}`]
-		: []);
-	if (counts.length === 0) {
+	// 官方排名：**count 降序**；同数按该类别**首次出现**的顺序（Object.entries 保持插入序）。
+	const ranked = Object.entries(summary.counts)
+		.filter((entry): entry is [string, number] => typeof entry[1] === 'number')
+		.sort((left, right) => right[1] - left[1]);
+	if (ranked.length === 0) {
 		return undefined;
 	}
-	return summary.running > 0 ? `${counts.join(', ')} · ${summary.runningDetail}` : counts.join(', ');
+	// 官方组头：closed 的类别**不带计数**；有正在跑的类别时追加实时细节。
+	const labels = ranked.map(([name]) => processActivityLabel(name as DshProcessActivity, state));
+	const title = joinActivityLabels(labels);
+	if (title === undefined) {
+		return undefined;
+	}
+	return summary.running > 0 ? `${title} · ${summary.runningDetail}` : title;
 }
 
 /**

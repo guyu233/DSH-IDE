@@ -209,7 +209,8 @@ test('a hidden process becomes one count line and an open call stays marked', ()
 		{ kind: 'tool-result', name: 'bash', callId: 'b' },
 		{ kind: 'tool-call', name: 'grep', callId: 'c' },
 	// 有未结算的 tool-call（read / grep）→ 用 running 标签；bash 已结算但仍计数。
-	]), 'Reading files 1, Running commands 1, Searching code 1 · read, grep');
+	// 官方组头：类别**不带计数**，按 count 降序排名后连接；有正在跑的才追加实时细节。
+	]), 'Reading files, running commands, searching code · read, grep');
 	assert.equal(hiddenProcessLine([{ kind: 'assistant' }]), undefined);
 });
 
@@ -354,4 +355,35 @@ test('the collapsed line picks the label set from whether the group is still run
 		{ kind: 'tool-result', name: 'bash', callId: 'c1' },
 	]);
 	assert.ok(closedLine !== undefined && closedLine.includes('Ran commands'), `expected closed label in "${closedLine}"`);
+});
+
+test('activity titles follow the official ranking and joining rules', async () => {
+	// 官方「Group-title rules」：closed 组头按 count 降序排名，1 个直接给 label，
+	// 2 个用 "and"，3 个逗号，>3 前三个 + etc.；英文连接后首字母小写。
+	const { joinActivityLabels, joinActivityLabelsZh } = await import('../../../src/vs/workbench/contrib/dsh/browser/vscode/dshProcessGroup.ts');
+	assert.equal(joinActivityLabels([]), undefined);
+	assert.equal(joinActivityLabels(['Read files']), 'Read files', 'one category has no conjunction');
+	assert.equal(joinActivityLabels(['Read files', 'Ran commands']), 'Read files and ran commands', 'two categories use and, second lowercased');
+	assert.equal(joinActivityLabels(['Read files', 'Ran commands', 'Searched code']), 'Read files, ran commands, searched code');
+	assert.equal(joinActivityLabels(['Read files', 'Ran commands', 'Searched code', 'Wrote files']), 'Read files, ran commands, searched code, etc.');
+	// 中文：两个都以「已」开头时去掉第二个的「已」。
+	assert.equal(joinActivityLabelsZh(['已读取文件', '已运行命令']), '已读取文件和运行命令');
+	// 只有一个以「已」开头时不动（官方：only when both labels start with it）。
+	assert.equal(joinActivityLabelsZh(['已读取文件', '运行命令']), '已读取文件和运行命令');
+});
+
+test('the collapsed line ranks by count descending and omits counts', () => {
+	// 官方：closed 的类别不带计数；排名按 count 降序（同数按首次出现）。
+	const line = hiddenProcessLine([
+		{ kind: 'tool-call', name: 'bash', callId: 'b1' },
+		{ kind: 'tool-result', name: 'bash', callId: 'b1' },
+		{ kind: 'tool-call', name: 'bash', callId: 'b2' },
+		{ kind: 'tool-result', name: 'bash', callId: 'b2' },
+		{ kind: 'tool-call', name: 'read', callId: 'r1' },
+		{ kind: 'tool-result', name: 'read', callId: 'r1' },
+	]);
+	// commands=2 > read=1 → commands 先；两者都是 closed → 用 closed label，且不带数字。
+	assert.ok(line !== undefined);
+	assert.ok(line.startsWith('Ran commands'), `commands must rank first in "${line}"`);
+	assert.ok(!/\d/.test(line), `counts must not appear in a closed title: "${line}"`);
 });
