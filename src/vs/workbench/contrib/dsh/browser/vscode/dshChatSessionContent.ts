@@ -175,7 +175,9 @@ export class DshChatSessionContent extends Disposable implements IChatSession {
 		if (this._sessionId === undefined) {
 			return legacy;
 		}
-		const history = applyDshSlotHost(legacy, dshResponseNodeIds(session.nodes()), this._sessionId);
+		// 每个 response 带上它自己那组成员的局部 revision（契约 §19 S0）：只有这一段的内容变了，
+		// 它的 `dshSlotHostSame` 才判为不同；别的 Turn 的节点变化不会让历史行整段重建。
+		const history = applyDshSlotHost(legacy, dshResponseNodeIds(session.nodes()), this._sessionId, nodeIds => this.nodeTree.revisionFor(nodeIds));
 		return attachDshQuestions(history, this._sessionId, this._questions.ids(), this._questions.signature());
 	}
 

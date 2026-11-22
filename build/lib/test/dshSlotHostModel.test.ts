@@ -9,7 +9,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { formatTokens, workflowStatusText } from '../../../src/vs/workbench/contrib/dsh/browser/vscode/dshTokenFormat.ts';
-import { applyDshSlotHost, dshResponseNodeIds, dshSlotHostSame, planKeysForTurn, presentDshNode } from '../../../src/vs/workbench/contrib/dsh/browser/vscode/dshSlotHostModel.ts';
+import { applyDshSlotHost, dshResponseNodeIds, dshSlotHostRef, dshSlotHostSame, planKeysForTurn, presentDshNode } from '../../../src/vs/workbench/contrib/dsh/browser/vscode/dshSlotHostModel.ts';
 import { DSH_ASIDE_SLOT, DSH_ASSISTANT_ACTIONS_SLOT, DSH_MARKDOWN_FENCE_SLOT, DSH_NODE_SLOT, DSH_TEXT_INTERACTION_SLOT, DSH_USER_BEFORE_SLOT, dshAsideText, dshAssistantActions, dshChatSlotRegistry, dshMarkdownFenceOverride, dshNodeRowOverride, dshTextInteractions, dshUserBeforeDecoration } from '../../../src/vs/workbench/contrib/dsh/browser/vscode/dshChatSlots.ts';
 import type { DshIndexedNode } from '../../../src/vs/workbench/contrib/dsh/browser/vscode/dshConversationNodeTree.ts';
 
@@ -351,4 +351,38 @@ test('a slot host whose rows all keep their signature never fires a height event
 		}
 	}
 	assert.equal(heightEvents, 0, 'identical frames must not fire height');
+});
+
+test('a local revision only invalidates the response it belongs to', async () => {
+	// 契约 §19 S0：`dshSlotHostSame` 必须比局部 revision，而不是整棵树的版本。
+	// 这里用一个最小的树桩：两段 response 各有自己的成员组，只让第二段变化。
+	const { DshConversationNodeTree } = await import('../../../src/vs/workbench/contrib/dsh/browser/vscode/dshConversationNodeTree.ts');
+	const tree = new DshConversationNodeTree('s1');
+	tree.accept([
+		{ kind: 'user', seq: 1, messageId: 'u1', turn: 1 },
+		{ kind: 'assistant', seq: 2, messageId: 'a1', turn: 1, text: 'first' },
+		{ kind: 'user', seq: 3, messageId: 'u2', turn: 2 },
+		{ kind: 'assistant', seq: 4, messageId: 'a2', turn: 2, text: 'second' },
+	]);
+	const firstIds = ['user:u1', 'assistant:a1'];
+	const secondIds = ['user:u2', 'assistant:a2'];
+	const firstBefore = dshSlotHostRef('s1', firstIds, tree.revisionFor(firstIds));
+	const secondBefore = dshSlotHostRef('s1', secondIds, tree.revisionFor(secondIds));
+	tree.accept([
+		{ kind: 'user', seq: 1, messageId: 'u1', turn: 1 },
+		{ kind: 'assistant', seq: 2, messageId: 'a1', turn: 1, text: 'first' },
+		{ kind: 'user', seq: 3, messageId: 'u2', turn: 2 },
+		{ kind: 'assistant', seq: 4, messageId: 'a2', turn: 2, text: 'second updated' },
+	]);
+	const firstAfter = dshSlotHostRef('s1', firstIds, tree.revisionFor(firstIds));
+	const secondAfter = dshSlotHostRef('s1', secondIds, tree.revisionFor(secondIds));
+	assert.equal(dshSlotHostSame(firstBefore, firstAfter), true, 'the untouched response must keep its identity');
+	assert.equal(dshSlotHostSame(secondBefore, secondAfter), false, 'the changed response must be recognized');
+});
+
+test('a revision participates only when both sides carry one', () => {
+	// 旧形状（没有 revision）不能被当成「一定不同」：那会让每次刷新都整段重建。
+	const legacy = { kind: 'dshSlotHost' as const, treeId: 's1', nodeIds: ['assistant:a1'] };
+	assert.equal(dshSlotHostSame(legacy, { ...legacy, revision: 'r1' }), true);
+	assert.equal(dshSlotHostSame({ ...legacy, revision: 'r1' }, { ...legacy, revision: 'r2' }), false);
 });

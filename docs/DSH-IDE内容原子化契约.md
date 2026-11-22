@@ -1162,7 +1162,7 @@ DSH-IDE 当前把上游高频增量流实现成了：
 
 ### 19.3 修复计划
 
-> **2026-11-22 落地状态（CHK-320/321/322）**：S1（display signature）、S2（slot host 行级增量渲染）、S3（稳定 request 身份）、S4（fingerprint 精确化）已实现并有单测；S0 的局部 revision 未做（`dshSlotHostSame` 只比成员列表，已不再参与全局版本）；S5（自动滚动 hold）、S6 的剩余消费面仍为 PENDING。下面各小节保留原始计划原文，不再逐段改写成完成报告。
+> **2026-11-23 落地状态（CHK-320/321/322/324）**：S0（局部 revision）、S1（display signature）、S2（slot host 行级增量渲染）、S3（稳定 request 身份）、S4（fingerprint 精确化）已实现并有单测；S5（自动滚动 hold）、S6 的剩余消费面仍为 PENDING。S0 的落地方式：`DshConversationNodeTree.revisionOf(nodeId)` 取该 key 自己的 `source().version`，`revisionFor(nodeIds)` 按成员顺序拼稳定串，`dshSlotHostRef` 带上 `revision`、`dshSlotHostSame` 在双方都有时比较它；整棵树的 `treeVersion` 只留作 diagnostics。下面各小节保留原始计划原文，不再逐段改写成完成报告。
 
 #### S0：局部 revision 替代全局 treeVersion
 

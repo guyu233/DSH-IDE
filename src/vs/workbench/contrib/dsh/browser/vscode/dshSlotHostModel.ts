@@ -15,6 +15,17 @@ export interface DshSlotHostRef {
 	readonly kind: 'dshSlotHost';
 	readonly treeId: string;
 	readonly nodeIds: readonly string[];
+	/**
+	 * 这组成员的局部 revision（契约 §19 S0）。
+	 *
+	 * 只由 `DshConversationNodeTree.revisionFor(nodeIds)` 生成：同一段 response 的成员内容没变，
+	 * 它就不变；别的 Turn 的节点变化不会让它变。历史实现曾用整棵树的 `treeVersion` 当身份，
+	 * 任何节点变化都会让所有 response 判为不同——那正是「整段重绘」的根因。
+	 *
+	 * 缺省表示调用方还没提供 revision（例如单测里手写的旧形状）；此时只比成员列表，
+	 * 与旧行为一致，不假装知道内容有没有变。
+	 */
+	readonly revision?: string;
 	readonly questionIds?: readonly string[];
 	/** 问卷结构指纹：同一 eventId 的题目内容变了也要重画。 */
 	readonly questionSignature?: string;
@@ -91,20 +102,18 @@ export function hasMedia(node: DshIndexedNode): boolean {
 	}) === true;
 }
 
-export function dshSlotHostRef(treeId: string, nodeIds: readonly string[]): DshSlotHostRef {
-	return { kind: 'dshSlotHost', treeId, nodeIds };
+export function dshSlotHostRef(treeId: string, nodeIds: readonly string[], revision?: string): DshSlotHostRef {
+	return { kind: 'dshSlotHost', treeId, nodeIds, ...(revision === undefined ? {} : { revision }) };
 }
 
 /**
  * 两段 slot host 引用是否可视为同一个。
  *
- * 只比 `treeId` 与 `nodeIds`：真正决定这一行画什么的是成员列表，成员变了就该重建；
- * 成员内部内容的变化由 part 里按 key 的订阅处理。
+ * 比较四项（契约 §19 S0）：`treeId`、`nodeIds`、**局部 revision**、问卷身份。
  *
- * 这里**没有** `version` 字段。历史上它带的是整棵树的版本，任何节点变化都会 +1，
- * 一旦参与身份比较就等于「任何节点变化 → 所有 response 全部重建」，正是契约要避免的
- * 整树重绘；取消比较之后它已无任何读取方，2026-11-22 连同 `IDshSlotHostContent` 的
- * 同名字段一起删除。
+ * `revision` 是这组成员的局部版本，不是整棵树的版本：别的 Turn 变了不会让这一段变旧。
+ * 只有双方都带了 revision 才比较——旧形状（无 revision）退回只比成员列表，
+ * 不因为「一边不知道」就判成不同，避免把一次普通刷新当成整段重建。
  */
 export function dshSlotHostSame(left: DshSlotHostRef, right: DshSlotHostRef): boolean {
 	if (left.treeId !== right.treeId || left.nodeIds.length !== right.nodeIds.length) {
@@ -115,6 +124,9 @@ export function dshSlotHostSame(left: DshSlotHostRef, right: DshSlotHostRef): bo
 			return false;
 		}
 	}
+	if (left.revision !== undefined && right.revision !== undefined && left.revision !== right.revision) {
+		return false;
+	}
 	return JSON.stringify(left.questionIds ?? []) === JSON.stringify(right.questionIds ?? [])
 		&& (left.questionSignature ?? '') === (right.questionSignature ?? '');
 }
@@ -123,7 +135,7 @@ export function dshSlotHostSame(left: DshSlotHostRef, right: DshSlotHostRef): bo
  * 把每一段对话 response 收成一个 slot host。
  * 组比 response 少时，多出来的尾部（交付物、pending）保持原样。
  */
-export function applyDshSlotHost<T>(items: readonly T[], groups: readonly (readonly string[])[], treeId: string): T[] {
+export function applyDshSlotHost<T>(items: readonly T[], groups: readonly (readonly string[])[], treeId: string, revisionFor?: (nodeIds: readonly string[]) => string): T[] {
 	let responseIndex = 0;
 	return items.map(item => {
 		const response = item as T & Partial<HistoryResponse>;
@@ -136,7 +148,7 @@ export function applyDshSlotHost<T>(items: readonly T[], groups: readonly (reado
 			return item;
 		}
 		const kept = response.parts.filter(part => KEPT_PART_KINDS.has(part.kind));
-		const parts = ids.length === 0 ? kept : [dshSlotHostRef(treeId, ids), ...kept];
+		const parts = ids.length === 0 ? kept : [dshSlotHostRef(treeId, ids, revisionFor?.(ids)), ...kept];
 		return { ...response, parts } as T;
 	});
 }

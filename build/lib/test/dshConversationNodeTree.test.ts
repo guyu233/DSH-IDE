@@ -236,3 +236,25 @@ test('subCalls carried on a parent still count as display changes', () => {
 	assert.deepEqual(change.changed.sort(), ['tool-call:child', 'tool-result:root']);
 	assert.equal(tree.get('tool-call:child')?.text, 'nested');
 });
+
+test('a local revision isolates one turn from the rest', () => {
+	// 契约 §19 S0 的验收：修改第 N 轮节点时，只有第 N 轮那组 nodeIds 的 revision 变化。
+	const tree = new DshConversationNodeTree<SampleNode>('s1');
+	const turn1 = [node({ kind: 'user', seq: 1, messageId: 'u1', turn: 1, text: 'q' }), node({ kind: 'assistant', seq: 2, messageId: 'a1', turn: 1, text: 'a' })];
+	const turn2 = [node({ kind: 'user', seq: 3, messageId: 'u2', turn: 2, text: 'q2' }), node({ kind: 'assistant', seq: 4, messageId: 'a2', turn: 2, text: 'a2' })];
+	tree.accept([...turn1, ...turn2]);
+	const rev1 = tree.revisionFor(['user:u1', 'assistant:a1']);
+	const rev2 = tree.revisionFor(['user:u2', 'assistant:a2']);
+	// 第 2 轮追加一个流式块：第 1 轮的 revision 必须原样不动。
+	tree.accept([...turn1, ...turn2.slice(0, 1), node({ kind: 'assistant', seq: 4, messageId: 'a2', turn: 2, text: 'a2 updated' })]);
+	assert.equal(tree.revisionFor(['user:u1', 'assistant:a1']), rev1, 'turn 1 must not be invalidated by a turn 2 change');
+	assert.notEqual(tree.revisionFor(['user:u2', 'assistant:a2']), rev2, 'the changed turn must get a new revision');
+});
+
+test('revisionFor is order-sensitive and per-key', () => {
+	const tree = new DshConversationNodeTree<SampleNode>('s1');
+	tree.accept([node({ kind: 'user', seq: 1, messageId: 'u1' }), node({ kind: 'assistant', seq: 2, messageId: 'a1' })]);
+	assert.notEqual(tree.revisionFor(['user:u1', 'assistant:a1']), tree.revisionFor(['assistant:a1', 'user:u1']));
+	assert.equal(tree.revisionOf('user:u1'), tree.source('user:u1').version);
+	assert.equal(tree.revisionOf('missing'), 0, 'a key that was never seen has revision 0');
+});

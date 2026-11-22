@@ -215,6 +215,28 @@ export class DshConversationNodeTree<T extends DshIndexedNode = DshIndexedNode> 
 		};
 	}
 
+	/**
+	 * 一个节点的局部 revision（契约 §19 S0）。
+	 *
+	 * 用 `source(key).version`，也就是「这个 key 自己被通知过几次」，而不是整棵树的
+	 * `treeVersion`——后者任何节点变化都会 +1，拿它做 response 身份等于让所有历史行跟着变旧。
+	 * 节点不在树里时返回 0；节点从无到有同样是 0→1 的变化，因此「新增」也会被判定为不同。
+	 */
+	revisionOf(nodeId: string): number {
+		return this.sourceState(nodeId).version;
+	}
+
+	/**
+	 * 一组节点合起来的局部 revision（契约 §19 S0）。
+	 *
+	 * 只是按成员顺序拼一个稳定字符串：`dshSlotHostRef` 把它原样带进身份比较。
+	 * 不用求和/异或——那会让 `[a,b]` 与 `[b,a]` 或两个各自变化的成员产生碰撞。
+	 * 成员列表本身由 `nodeIds` 单独比较，这里只负责「成员内容变没变」。
+	 */
+	revisionFor(nodeIds: readonly string[]): string {
+		return nodeIds.map(nodeId => `${nodeId}:${this.revisionOf(nodeId)}`).join('|');
+	}
+
 	/** 一个 turn 里某一种 kind 的有序节点。别的 turn 或别的 kind 变化不通知这里。 */
 	turnDataSource(turn: number, kind: string): DshNodeListSource<T> {
 		const state = this.sliceState(sliceId(turn, kind));
