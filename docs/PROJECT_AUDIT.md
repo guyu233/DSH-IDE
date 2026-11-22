@@ -4,7 +4,7 @@
 
 ## 当前总摘要
 
-**当前工作重心已转入内容原子化。** PR-01 契约冻结与 PR-02 协议字段补齐已有审计记录（见 CHK-263 及后续轮次）；slot registry、node tree、tool view、question carousel 等已有定向测试。按契约 §19 的三个稳定性缺陷（display signature、稳定 request 身份、extras fingerprint）已在 CHK-320 落地并有单测。当前高风险是：`DshSlotHostContentPart` 仍在 tree change 时整段重绘、自动滚动 hold 未接、真机稳定性未验收。以最新 CHK 轮次和 `DSH-IDE内容原子化契约.md` 附录 A 为准，不读旧摘要作为现状。
+**内容原子化已完成代码层收口（2026-11-23，CHK-320..330）。** 契约 §19 的六项稳定性工作里 S0（局部 revision）、S1（display signature）、S2（slot host 行级增量渲染）、S3（稳定 request 身份）、S4（fingerprint 精确化）、S5（自动滚动 hold）**全部落地并有单测**；§17 的两条渲染层已知差异里「turn 用量按 assistant 节点累加」也已按官方 `usageOf()` 修正。`test-dsh:all` 首次全绿（**810 tests / 808 pass / 0 fail / 2 skipped**）；8 项门禁里 7 项 PASS，只剩 `install-drift`（用户 profile 的 `dsh.profile.bundles` 未登记 `dsh-ide`）。当前高风险只剩**真机验收**（§15/附录 B）与 `build/tsconfig.json` 的存量错误。以最新 CHK 轮次和 `DSH-IDE内容原子化契约.md` 附录 A 为准，不读旧摘要作为现状。
 
 历史摘要：**B00 已交付；B01 的取证与补充红测已完成，生产迁移仍 PENDING。** 原审计起点 `44e0a34827f83c3a87891bc8d0ebf93b96ff09b0`，比较 merge-base `d07799b88abd0b84bb4935e0527798d868782f3d`。B00 分支 `audit/b00-baseline-redwall`；B01 从 `2c448cbd` 起在 `audit/b01-identity-readiness` 延续。同一产品的 Host 半身与 IDE 窗口未改动；不以取证完成代替问题修复。
 
@@ -12,8 +12,8 @@
 |---|---|
 | 插件规范与运行时：客户端半身已改为自绘控件 + `ctx.locale` 双语字典 + 正确 inject；workbench 层用户可见文案已全部走 `localize`（`verify:dsh-ide-localization`）。 | 真机看按钮外观、焦点环、深色主题预览（AI 不代跑 GUI）。 |
 | 两半契约：`followSession`、接单器 `wireRevision`、`launch` 主体校验已对齐。发布聚合 `release-gate` 现覆盖 8 项（不再只读最早四条）。 | 真机首点开窗、二次点切会话、混装拒绝，PENDING。 |
-| 安装/产物：`dist/dsh-ide-2.0.0.tgz` 已重打（含 `icon` 字段修复），`verify:dsh-artifact` PASS。`install-drift` 在本机为 **PENDING**：profile 内未安装 `dsh-ide`，无法比对；历史记录中的「39 项逐字节、漂移 0」是当时装上后测得的值，当前环境不可复现。 | 由用户安装 `dist/dsh-ide-2.0.0.tgz` 并重启 DSH，届时 `install-drift` 才能恢复为可判定。 |
-| 全量 Node/Electron 单测与 ESLint 仍不能充当发布通过证据；本仓 `build/tsconfig.json` 有历史存量错误。 | 冻结可复算的失败对照；真机与发布验收单列 PENDING。 |
+| 安装/产物：`dist/dsh-ide-2.0.0.tgz` 已于 2026-11-23 重打（49,914,185 B，`verify:dsh-artifact` PASS）。`install-drift` 现为 **FAIL（仅剩一条配置链问题）**：51 项逐字节比对**漂移 0**，但 profile 的 `dsh.profile.bundles` 未包含 `dsh-ide`，重启后不会加载。 | 由用户把 `dsh-ide` 加入 `~/.dsh/profiles/desktop/package.json` 的 `dsh.profile.bundles` 并重启 DSH；这是安装状态，AI 不改用户 profile。 |
+| `test-dsh:all` 已全绿（810/808 pass/0 fail/2 skipped），但 `build/tsconfig.json` 仍有 **287 个存量错误**（集中在既有 `cjsToEsm` 560–581 行），`build/tsconfig.json` 不能当发布证据。 | 存量错误单独一批处理；真机与发布验收单列 PENDING。 |
 
 生效约束：一个 DSH bundle、一个 `dshIde` 通道、一套契约和校验器、原生 Chat；发送与停止带发起时的会话；换绑不取消合法审批；先保行为与外部契约，再做安全、正确性和优化。参见 [协作约定](../AGENTS.md)、[内容原子化契约](DSH-IDE内容原子化契约.md) 与 [协议真源](../src/vs/platform/dshClient/protocol/dshIdeProtocol.ts)。
 
