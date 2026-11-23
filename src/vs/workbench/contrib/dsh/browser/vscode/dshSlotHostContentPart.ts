@@ -104,6 +104,15 @@ export class DshSlotHostContentPart extends Disposable implements IChatContentPa
 	 */
 	private readonly rows = new Map<string, { signature: string; dom: HTMLElement; refs: DisposableStore }>();
 	/**
+	 * 上一帧每个 Turn 的过程成员是否可见。
+	 *
+	 * 官方「Grouped rendering」：「When an enclosing Turn **actually hides a process member**, its seat
+	 * **resets those disclosures** without replacing component keys or changing the Hook reference.」
+	 * 所以要在「可见 → 隐藏」这个转变发生的**那一帧**清掉该 Turn 的节点级展开态；
+	 * 一直隐藏的 Turn 不必每帧都清（那会把用户后来重新打开的展开态反复抹掉）。
+	 */
+	private readonly turnProcessVisible = new Map<number, boolean>();
+	/**
 	 * 本 part 的 DOM id 前缀（`generateUuid()`，与原生 `chatSubagentContentPart` 同一做法）。
 	 *
 	 * `aria-controls` 必须指向一个**真实存在且唯一**的元素 id：用固定字符串会在同屏多行
@@ -301,6 +310,8 @@ export class DshSlotHostContentPart extends Disposable implements IChatContentPa
 			}];
 		});
 		const visible = new Set<string>();
+		// 先算出本帧每个 Turn 的过程成员是否可见，再与上一帧比对，找出「刚被隐藏」的 Turn。
+		const processVisibleNow = new Map<number, boolean>();
 		const summaryBefore = new Map<string, readonly { readonly line: string; readonly turn: number; readonly expanded: boolean; readonly onToggle: () => void; readonly running: boolean; readonly tone?: 'error' | 'warning' }[]>();
 		// 展开态的组：这些 Turn 的 process 节点要包进一个组体容器（官方 min(400px,50vh) + 24px 渐变）。
 		const expandedGroupTurns = new Set<number>();
@@ -332,8 +343,18 @@ export class DshSlotHostContentPart extends Disposable implements IChatContentPa
 			// `eligible` = 官方可折叠条件：`alwaysOpen` 为真（未结束 / 失败 / 有可见输入）
 			// 时该 Turn 不允许整段收起，模式默认不能覆盖这条。
 			const collapsed = binding.expansion.isTurnCollapsed(group.turn, group.answerStep, !group.alwaysOpen);
-			for (const key of visibleProcessKeys(group, collapsed, binding.expansion.foldedReplies())) {
+			const shown = visibleProcessKeys(group, collapsed, binding.expansion.foldedReplies());
+			for (const key of shown) {
 				visible.add(key);
+			}
+			// 「过程成员是否还看得见」——用「至少有一个 processKeys 成员在 shown 里」判定。
+			// 这样 `foldedReplies=final` 只折答复、不折过程时不会被误判成隐藏。
+			const processStillVisible = group.processKeys.some(key => shown.includes(key));
+			processVisibleNow.set(group.turn, processStillVisible);
+			if (this.turnProcessVisible.get(group.turn) === true && !processStillVisible) {
+				// 官方：Turn **真的**隐藏了过程成员时，重置该 Turn 的节点级展开态。
+				// 不重建 DOM、不换 key——展开态只是数据，清掉后下一次渲染自然收起。
+				binding.expansion.resetTurn(group.turn);
 			}
 			if (group.alwaysOpen || !collapsed || group.processKeys.length === 0) {
 				continue;
@@ -415,6 +436,10 @@ export class DshSlotHostContentPart extends Disposable implements IChatContentPa
 			for (const anchor of anchors) {
 				summaryBefore.set(anchor, [...(summaryBefore.get(anchor) ?? []), spec]);
 			}
+		}
+		this.turnProcessVisible.clear();
+		for (const [turn, shown] of processVisibleNow) {
+			this.turnProcessVisible.set(turn, shown);
 		}
 		const rows: DshSlotRowSpec[] = [];
 		for (const nodeId of this.content.nodeIds) {

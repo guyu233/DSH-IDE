@@ -790,3 +790,18 @@ test('assistant action buttons keep the official 28px click target', async () =>
 	assert.ok(source.includes("button.style.minHeight = '2.15em'"), 'the target height follows the font-size delta');
 	assert.ok(source.includes("button.style.minWidth = '2.15em'"), 'and so does the width');
 });
+
+test('hiding a turn process member resets that turn node disclosures', async () => {
+	// 官方「Grouped rendering」：When an enclosing Turn **actually hides a process member**,
+	// its seat **resets those disclosures** without replacing component keys or changing the
+	// Hook reference。本仓的 resetTurn 早已实现，但**零生产消费**——死代码。
+	const { readFileSync } = await import('node:fs');
+	const source = readFileSync(new URL('../../../src/vs/workbench/contrib/dsh/browser/vscode/dshSlotHostContentPart.ts', import.meta.url), 'utf8');
+	// 必须在「可见 → 隐藏」的转变时清，而不是每帧都清。
+	assert.ok(source.includes('binding.expansion.resetTurn(group.turn)'), 'the reset must be wired');
+	assert.ok(source.includes('this.turnProcessVisible.get(group.turn) === true'), 'only the visible-to-hidden transition resets');
+	// 判据必须基于「至少一个 processKeys 成员仍可见」，否则 foldedReplies=final 会被误判。
+	assert.ok(source.includes('group.processKeys.some(key => shown.includes(key))'), 'the predicate must look at process members only');
+	// 不重建 DOM：reset 之后由下一帧渲染自然收起，不在这里动 key。
+	assert.ok(!source.includes('this.rows.delete(group.turn)'), 'the reset must not tear down rows');
+});
