@@ -826,7 +826,7 @@ PR-05 状态：**部分实现**。
 
 `renderDshAdaptedPart` 已把 task、tree、绝对路径 diff、reference、文件卡和交付物交给对应的原生构造。相对路径 diff 仍是文本回退。
 
-`node --experimental-strip-types --import ./build/lib/test/strip-ts-resolver.mjs --test build/lib/test/dshSlotHostModel.test.ts` 5 项通过。
+`node --experimental-strip-types --import ./build/lib/test/strip-ts-resolver.mjs --test build/lib/test/dshSlotHostModel.test.ts` 通过（计数随新增用例增长，以 `test-dsh:all` 实跑为准）。
 
 PR-06 状态：**部分实现**。
 
@@ -889,7 +889,7 @@ PR-10 状态：**部分实现**。
 
 真机 PENDING。
 
-`dshPendingSettlement.test.ts` 6 项、`dshQuestionCarousel.test.ts` 6 项、`dshQuestionSession.test.ts` 5 项通过（含真实 `DshChatSession` 的一次 RPC、在途互斥、终态不复活、非法草稿不发、discuss 结算）。
+`dshPendingSettlement.test.ts`、`dshQuestionCarousel.test.ts`、`dshQuestionSession.test.ts` 通过（含真实 `DshChatSession` 的一次 RPC、在途互斥、终态不复活、非法草稿不发、discuss 结算）。
 
 PR-12 状态：**部分实现**。
 
@@ -903,7 +903,7 @@ PR-13 状态：**部分实现**。
 
 2026-11-22 重新用官方转译 `node build/next/index.ts transpile --out out` 生成 ESM 产物后跑的门禁。
 
-协议校验单测 52 项通过：新增的 `question-reply`、`command-input`、`submitted-plan`、`workflow-run`、`system-prompt`、`turn-tail`、`manual-compaction` 都有「合法通过、坏数据拒绝」的用例。投影与内容层合计 166 项通过（`dshIdeConversation` 30、`dshIdeProtocol` 52、`dshChatSessionContent`/`dshChatHistoryNative`/`dshQuestionSession`/`dshQuestionCarousel` 55、`dshNativePartAdapters`/`dshSlotHostModel` 29）。
+协议校验单测（`dshIdeProtocol.test.ts`）通过：新增的 `question-reply`、`command-input`、`submitted-plan`、`workflow-run`、`system-prompt`、`turn-tail`、`manual-compaction` 都有「合法通过、坏数据拒绝」的用例。投影与内容层合计 166 项通过（`dshIdeConversation` 30、`dshIdeProtocol` 52、`dshChatSessionContent`/`dshChatHistoryNative`/`dshQuestionSession`/`dshQuestionCarousel` 55、`dshNativePartAdapters`/`dshSlotHostModel` 29）。
 
 ```text
 node --experimental-strip-types --test build/lib/test/dshIdeProtocol.test.ts
