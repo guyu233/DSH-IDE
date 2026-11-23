@@ -166,6 +166,9 @@ export function groupTurnProcesses(nodes: readonly DshGroupableNode[], reasonByT
 					answerKeys.push(node.key);
 					if (node.kind !== 'assistant' && node.kind !== 'assistant-step') {
 						// `turn` 位置的非答复控件：独立于整 Turn 折叠（官方原文）。
+						// 其中包括 `inherited-history`：官方「Inherited history divider」明确
+						// 「**A cut inside a Turn keeps the divider outside that Turn's process folding**」——
+						// 分界行绝不能因为 Turn 折叠而消失，否则读者看不出「上面是继承来的历史」。
 						controlKeys.push(node.key);
 					}
 					if (node.kind === 'assistant' || node.kind === 'assistant-step') {
