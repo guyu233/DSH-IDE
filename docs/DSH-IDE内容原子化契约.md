@@ -1624,7 +1624,7 @@ DSH 的槽位有两个**独立轴**：基数（cardinality）与作用域（scop
 | `turn-max-tokens` | `TurnMaxTokensNode` | `dshMaxTokens` 带 turn 和 step，不是 warning | 上限卡 | 部分实现 |
 | `turn-tail` | 官方 `ui-chat` 的 `turnTailDefinition`：Completed-turn 动作行与尾部事实 | 协议新增 `turn-tail`：`turn/end` 时给出 turn、closing、branchUnavailable 与 `tokenUsage`（该 Turn 的增量聚合）。用量只在尾部出卡，助手行不再重复 | turn 尾部；`TurnUsagePanel` 为其内部组件 | 部分实现 |
 | `turn-process` | 官方 `ui-chat`：一个 Turn 的过程锚点与计数（过程组行的数据） | 协议新增 `turn-process`；收起时槽位优先用它画计数行（`tools N, subagents M, messages K`），缺节点才回退现算。该节点本身不再单独画行 | turn 过程折叠 | 部分实现 |
-| `system-prompt` | 官方 `ui-chat` 的 `systemMessageDefinition` / `requestPromptDefinition` | 协议新增 `system-prompt`：`system/message` 的每次非空 append 拥有一张提示卡，文本与上一份不同时标 `update`；非 append 替换不产卡。`dshSystemPrompt` 显示 text 与 update | 系统提示卡 | 部分实现 |
+| `system-prompt` | 官方 `ui-chat` 的 `systemMessageDefinition` / `requestPromptDefinition` | 投影仍产出 `system-prompt` 节点（每次非空 append 一份，文本变化标 `update`），但 **Chat 视图层按官方「Hidden Chat rows」不显示**（CHK-347）：隐藏只发生在视图过滤，不改已记录事件、也不影响 Trajectory。`dshSystemPrompt` 卡因此只在非 Chat 表面（如排查用快照）可见 | 系统提示卡（Chat 内不显示） | 部分实现 |
 | `inherited-history` | `session/end-seed` 合成行 | `dshInheritedHistory` 分隔行，没有引用块 | 分隔行 | 部分实现 |
 | `unknown` | `UnknownSurfaceNode` | 节点和认不出的助手块都走 `dshUnknown`，保留 type 和截断后的 data | 兜底卡 | 部分实现 |
 | `submitted-plan` | 官方 `ui-plan`：`exit_plan_mode` 的完整计划（官方在 flow 里隐藏、在 turn tail 里成卡） | 协议 `submitted-plan`：`tool/call` 名为 `exit_plan_mode`、参数 JSON 带 `# 标题` 时另成节点；槽位把计划卡按 Turn 收到尾部渲染，flow 里不再单独成行 | 计划卡 | 部分实现 |
