@@ -81,6 +81,8 @@ type DshSlotRowSpec =
 		readonly onToggle?: () => void;
 		/** `aria-controls` 的目标 id：由同一 Turn 的锚点 node 行承载（渲染时设上）。 */
 		readonly controlledId?: string;
+		/** 该组所属 Turn 是否仍在运行（决定标题是否走官方 `TextShimmer`）。 */
+		readonly running?: boolean;
 		readonly signature?: string;
 	}
 	| { readonly key: string; readonly kind: 'question'; readonly eventId: string; readonly signature?: string }
@@ -297,7 +299,7 @@ export class DshSlotHostContentPart extends Disposable implements IChatContentPa
 			}];
 		});
 		const visible = new Set<string>();
-		const summaryBefore = new Map<string, readonly { readonly line: string; readonly turn: number; readonly expanded: boolean; readonly onToggle: () => void }[]>();
+		const summaryBefore = new Map<string, readonly { readonly line: string; readonly turn: number; readonly expanded: boolean; readonly onToggle: () => void; readonly running: boolean }[]>();
 		// 展开态的组：这些 Turn 的 process 节点要包进一个组体容器（官方 min(400px,50vh) + 24px 渐变）。
 		const expandedGroupTurns = new Set<number>();
 		// 计划卡正常随 turn tail 画；但 Turn 还没结束（没有 `turn-tail`）时它也会被跳过，
@@ -386,7 +388,9 @@ export class DshSlotHostContentPart extends Disposable implements IChatContentPa
 					visible.add(key);
 				}
 			}
-			const spec = { line, turn: group.turn, expanded, onToggle } as const;
+			// 运行中 = 该组仍 `alwaysOpen`（未结算的 Turn 恒为真，见 `groupTurnProcesses`）。
+			// 官方：Running group titles use the shared TextShimmer；settled 标题不带动画。
+			const spec = { line, turn: group.turn, expanded, onToggle, running: group.alwaysOpen } as const;
 			if (expanded) {
 				expandedGroupTurns.add(group.turn);
 			}
@@ -438,6 +442,8 @@ export class DshSlotHostContentPart extends Disposable implements IChatContentPa
 					// 目标 id 由**锚点节点 key**派生，与 `renderNodeRow` 里给 node 行设 id 的规则一致——
 					// 两处都算同一个函数，避免跨帧存一份状态。
 					controlledId: this.groupHostId(nodeId),
+					// 运行中的组标题走 TextShimmer；已结算的标题与 live-detail 偏好无关。
+					running: header.running === true,
 				});
 			});
 			// 展开态的 Turn：把连续的过程节点收进一个组体容器（官方 process group layout box）。
@@ -544,7 +550,7 @@ export class DshSlotHostContentPart extends Disposable implements IChatContentPa
 				return container;
 			}
 			case 'summary': {
-				const button = processSummaryRow(row.line, row.expanded === true);
+				const button = processSummaryRow(row.line, row.expanded === true, row.running === true);
 				if (row.onToggle !== undefined) {
 					button.disabled = false;
 					button.style.cursor = 'pointer';
@@ -927,7 +933,12 @@ export class DshSlotHostContentPart extends Disposable implements IChatContentPa
  * @param line 组头文案
  * @param expanded 该组当前是否展开
  */
-function processSummaryRow(line: string, expanded: boolean): HTMLButtonElement {
+/**
+ * @param running 该组所属 Turn 是否**仍在运行**——运行中的标题走官方 `TextShimmer`
+ *   （官方：「Running group titles … use the shared TextShimmer」；Settled group titles
+ *   remain independent of the live-detail preference，所以只在运行时加动画）。
+ */
+function processSummaryRow(line: string, expanded: boolean, running: boolean): HTMLButtonElement {
 	const row = document.createElement('button');
 	// 与原生 chat 的次按钮一致：无边框、无背景、继承字号 + `:focus-visible` 焦点环。
 	applyDshButtonChrome(row, 'link');
@@ -940,7 +951,13 @@ function processSummaryRow(line: string, expanded: boolean): HTMLButtonElement {
 	// hover / focus 时的箭头切换交给这张一次性注入的样式表（见 `ensureProcessSummaryStyles`）。
 	ensureProcessSummaryStyles();
 	const text = document.createElement('span');
+	text.className = 'dsh-process-summary-text';
 	text.textContent = line;
+	if (running) {
+		// 只有文字参与高亮：图标与 hover 箭头保留基色（官方明确要求）。
+		row.classList.add('dsh-process-summary-running');
+		ensureProcessShimmerStyles();
+	}
 	row.appendChild(icon);
 	row.appendChild(text);
 	row.style.color = 'var(--vscode-descriptionForeground)';
@@ -959,6 +976,55 @@ let processSummaryStyles: HTMLStyleElement | undefined;
  * 为什么用 CSS 而不是监听 hover：图标切换是纯呈现，交给 `:hover` / `:focus-visible` 更可靠
  * （不用管 pointerenter/leave 的边界情况），也不会给每行挂两个监听。
  */
+let processShimmerStyles: HTMLStyleElement | undefined;
+
+/**
+ * 运行中组头的文字高亮（官方 `ui-primitives` 的 `TextShimmer`）。
+ *
+ * 官方「Grouped rendering」：「Running group titles, reasoning previews, tool and command rows,
+ * the active retry line, and the bottom running status use the shared **TextShimmer**.
+ * Each row's text shares **one left-to-right highlight** … icons and hover chevrons
+ * retain their base appearance.」
+ *
+ * **为什么复用原生而不是自造视觉**（AGENTS §3）：VS Code 的
+ * `chat/browser/widget/media/chat.css` 已有同一套 shimmer——`chat-thinking-shimmer` keyframes、
+ * 主题变量 `--vscode-chat-thinkingShimmer`、`400% 100%` 的渐变尺寸与 `2s steps(60, end)` 节奏。
+ * 这里**照抄那份渐变与动画**，只把选择器换成组头自己的结构（原生 shimmer 挂在
+ * `.rendered-markdown.progress-step > p` 上，而组头是纯文本 button，结构不兼容）。
+ * 图标与 hover 箭头不参与：只给 `.dsh-process-summary-text` 上色。
+ */
+function ensureProcessShimmerStyles(): void {
+	if (processShimmerStyles !== undefined && processShimmerStyles.isConnected) {
+		return;
+	}
+	processShimmerStyles = createStyleSheet(undefined, style => {
+		style.textContent = `
+			.dsh-process-summary-running .dsh-process-summary-text {
+				background: linear-gradient(90deg,
+					var(--vscode-descriptionForeground) 0%,
+					var(--vscode-descriptionForeground) 30%,
+					var(--vscode-chat-thinkingShimmer) 50%,
+					var(--vscode-descriptionForeground) 70%,
+					var(--vscode-descriptionForeground) 100%);
+				background-size: 400% 100%;
+				background-clip: text;
+				-webkit-background-clip: text;
+				-webkit-text-fill-color: transparent;
+				animation: chat-thinking-shimmer 2s steps(60, end) infinite;
+				will-change: background-position;
+			}
+			/* 减少动效时立刻停掉：官方要求 reduced-motion 用户拿到即时呈现。 */
+			@media (prefers-reduced-motion: reduce) {
+				.dsh-process-summary-running .dsh-process-summary-text {
+					animation: none;
+					-webkit-text-fill-color: inherit;
+					background: none;
+				}
+			}
+		`;
+	});
+}
+
 function ensureProcessSummaryStyles(): void {
 	if (processSummaryStyles !== undefined && processSummaryStyles.isConnected) {
 		return;

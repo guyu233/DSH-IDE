@@ -760,3 +760,21 @@ test('extending a group at its beginning keeps the old rows and the container', 
 	// 子行不能进顶层 diff（否则会被当成 removed 删掉）。
 	assert.ok(source.includes('topLevelKeys.has(key) || !key.includes('), 'child rows are excluded from the top-level diff');
 });
+
+test('running group titles use the shared shimmer, settled titles do not', async () => {
+	// 官方「Grouped rendering」：Running group titles … use the shared TextShimmer。
+	// Each row's text shares one left-to-right highlight … icons and hover chevrons retain
+	// their base appearance。Settled group titles remain independent of the live-detail preference。
+	const { readFileSync } = await import('node:fs');
+	const source = readFileSync(new URL('../../../src/vs/workbench/contrib/dsh/browser/vscode/dshSlotHostContentPart.ts', import.meta.url), 'utf8');
+	// 只有运行中的组头带动画类。
+	assert.ok(source.includes("row.classList.add('dsh-process-summary-running')"), 'running titles get the shimmer class');
+	assert.ok(source.includes('if (running)'), 'the class is conditional');
+	// 只有文字参与高亮：图标与箭头不带 `dsh-process-summary-text`。
+	assert.ok(source.includes("text.className = 'dsh-process-summary-text'"), 'only the text span is highlighted');
+	// 复用原生主题变量与 keyframes，而不是自造一套视觉（AGENTS §3）。
+	assert.ok(source.includes('var(--vscode-chat-thinkingShimmer)'), 'reuse the native shimmer theme color');
+	assert.ok(source.includes('chat-thinking-shimmer 2s steps(60, end)'), 'reuse the native keyframes and rhythm');
+	// reduced-motion 用户拿到即时呈现。
+	assert.ok(source.includes('prefers-reduced-motion: reduce'), 'reduced motion disables the animation');
+});
