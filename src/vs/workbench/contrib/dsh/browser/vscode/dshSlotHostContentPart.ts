@@ -616,6 +616,16 @@ export class DshSlotHostContentPart extends Disposable implements IChatContentPa
 			// 统一走 `applyDshButtonChrome`：`border: none` 会抹掉默认焦点环，
 			// 必须由共享样式表补回 `:focus-visible`（§11.2），否则键盘用户看不到焦点。
 			applyDshButtonChrome(button, 'link');
+			// 官方「Grouped rendering」：Closing assistant messages use **28px click targets**,
+			// and their size follows the content font-size delta.
+			//
+			// 本仓的动作是**文字按钮**（`title` 由插件 occupant 给出，没有图标元数据），
+			// 所以不套官方的 16px SVG 盒 + 1px 描边那套（那是图标按钮的尺寸）；
+			// 但**最小点击目标**与无障碍有关、与形态无关，必须给足——用 `em` 让它随字号缩放。
+			// 28px / 13px（原生 Chat 正文默认字号）≈ 2.15em——用 `em` 表达，字号变化时同步缩放。
+			button.style.minHeight = '2.15em';
+			button.style.minWidth = '2.15em';
+			button.style.paddingInline = '0.25em';
 			button.textContent = action.title;
 			button.title = action.title;
 			refs.add(addClick(button, () => {

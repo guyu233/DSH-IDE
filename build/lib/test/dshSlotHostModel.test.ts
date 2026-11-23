@@ -778,3 +778,15 @@ test('running group titles use the shared shimmer, settled titles do not', async
 	// reduced-motion 用户拿到即时呈现。
 	assert.ok(source.includes('prefers-reduced-motion: reduce'), 'reduced motion disables the animation');
 });
+
+test('assistant action buttons keep the official 28px click target', async () => {
+	// 官方「Grouped rendering」：Closing assistant messages use 28px click targets,
+	// and their size and targets follow the content font-size delta。
+	// 本仓动作是文字按钮（没有图标元数据），所以不套 16px SVG 盒 + 1px 描边那套；
+	// 但最小点击目标与无障碍有关、与形态无关，必须给足且随字号缩放。
+	const { readFileSync } = await import('node:fs');
+	const source = readFileSync(new URL('../../../src/vs/workbench/contrib/dsh/browser/vscode/dshSlotHostContentPart.ts', import.meta.url), 'utf8');
+	// 28px / 13px ≈ 2.15em：用 em 表达才会随字号缩放。
+	assert.ok(source.includes("button.style.minHeight = '2.15em'"), 'the target height follows the font-size delta');
+	assert.ok(source.includes("button.style.minWidth = '2.15em'"), 'and so does the width');
+});
