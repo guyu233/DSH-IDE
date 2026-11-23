@@ -203,3 +203,25 @@ test('the composer activity row divides measured pressure by the route capacity'
 	const over = dshComposerActivityRows({ pressureTokens: 120_000, contextWindow: 100_000 });
 	assert.ok(over[0].label.includes('100'), `clamped to 100%: "${over[0].label}"`);
 });
+
+test('the composer breakdown row reports composition shares, never a total', async () => {
+	// 官方 token-meter README 两条硬约束：contextBreakdown 是 the context's composition,
+	// not its provider-billed size；Present these as approximations of composition, never as a total。
+	const { dshComposerBreakdownRows } = await import('../../../src/vs/workbench/contrib/dsh/browser/vscode/dshInputDock.ts');
+	const rows = dshComposerBreakdownRows({ systemTokens: 100, toolsTokens: 300, messageTokens: 600 });
+	assert.equal(rows.length, 1);
+	assert.equal(rows[0].order, 2);
+	assert.equal(rows[0].id, 'composer-breakdown');
+	// 比例：10% / 30% / 60%（和为 100%）。
+	assert.ok(rows[0].label.includes('10'), `system 10%: "${rows[0].label}"`);
+	assert.ok(rows[0].label.includes('30'), `tools 30%: "${rows[0].label}"`);
+	assert.ok(rows[0].label.includes('60'), `messages 60%: "${rows[0].label}"`);
+	// **不报总量**：三项之和 1000 不得出现在文案里（把和当上下文大小会误导）。
+	assert.ok(!rows[0].label.includes('1000'), `must not show the sum as a total: "${rows[0].label}"`);
+	// 三项全 0：不画空壳，也不显示 0%。
+	assert.deepEqual(dshComposerBreakdownRows({ systemTokens: 0, toolsTokens: 0, messageTokens: 0 }), []);
+	// 没有投影：不画。
+	assert.deepEqual(dshComposerBreakdownRows(undefined), []);
+	// compact：不画。
+	assert.deepEqual(dshComposerBreakdownRows({ systemTokens: 1, toolsTokens: 1, messageTokens: 1 }, 'compact'), []);
+});

@@ -278,5 +278,6 @@
 	"dsh.composer.tokens": "{0} tokens",
 	"dsh.composer.tokensCacheHit": "{0} tokens · {1}% cache hit",
 	"dsh.composer.cacheHit": "{0}% cache hit",
-	"dsh.composer.contextUsed": "{0}% context used"
+	"dsh.composer.contextUsed": "{0}% context used",
+	"dsh.composer.breakdown": "context: {0}% system, {1}% tools, {2}% messages"
 }

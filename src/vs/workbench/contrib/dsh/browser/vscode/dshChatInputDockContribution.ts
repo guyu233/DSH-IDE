@@ -137,7 +137,7 @@ export class DshChatInputDockContribution extends Disposable {
 				id: entry.id, label: entry.label, order: entry.order, command: entry.command, arguments: entry.arguments,
 			}));
 			input.update(sessionId, session === undefined ? undefined : { session }, inbox, inboxStep, turnNav);
-			composer.update(sessionId, undefined, undefined, undefined, undefined, this.chat.tokenUsage(), this.chat.presentationSettingsCache()?.performanceUsage ?? 'detailed', this.chat.contextPressure());
+			composer.update(sessionId, undefined, undefined, undefined, undefined, this.chat.tokenUsage(), this.chat.presentationSettingsCache()?.performanceUsage ?? 'detailed', this.chat.contextPressure(), this.chat.contextBreakdown());
 		};
 		sync();
 		store.add(widget.onDidChangeViewModel(() => sync()));

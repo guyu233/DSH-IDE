@@ -18,7 +18,7 @@
 
 import { localize } from '../../../../../nls.js';
 import { formatTokens } from './dshTokenFormat.js';
-import type { DshIdeContextPressure, DshIdeInboxMessage, DshIdeTokenUsageTotal } from '../../../../../platform/dshClient/protocol/dshIdeProtocol.js';
+import type { DshIdeContextBreakdown, DshIdeContextPressure, DshIdeInboxMessage, DshIdeTokenUsageTotal } from '../../../../../platform/dshClient/protocol/dshIdeProtocol.js';
 import { dshChatSlotRegistry, DSH_COMPOSER_DOCK_SLOT, DSH_INPUT_DOCK_SLOT } from './dshChatSlots.js';
 
 /** 一个 dock occupant 投影出来的一行。 */
@@ -84,7 +84,7 @@ export function dshInputDockRows(sessionId: string | undefined, zone: DshInputZo
  *
  * 这个槽没有 owner props，只按会话解析；没有会话时不解析。
  */
-export function dshComposerDockRows(sessionId: string | undefined, usage?: DshIdeTokenUsageTotal, mode: 'detailed' | 'compact' = 'detailed', pressure?: DshIdeContextPressure): readonly DshInputDockRow[] {
+export function dshComposerDockRows(sessionId: string | undefined, usage?: DshIdeTokenUsageTotal, mode: 'detailed' | 'compact' = 'detailed', pressure?: DshIdeContextPressure, breakdown?: DshIdeContextBreakdown): readonly DshInputDockRow[] {
 	if (sessionId === undefined || sessionId === '') {
 		return [];
 	}
@@ -92,7 +92,7 @@ export function dshComposerDockRows(sessionId: string | undefined, usage?: DshId
 	// `activity`（order 0）与 `usage`（order 1）。本仓没有 activity 的权威数据源
 	// （turn/step 计数在 `turn-process` 节点上、按 Turn 分散），所以只实现 `usage`——
 	// 有数据才画，没有就不占位（不伪造 0）。
-	return [...projectDockRows(DSH_COMPOSER_DOCK_SLOT, sessionId, undefined), ...dshComposerActivityRows(pressure, mode), ...dshComposerUsageRows(usage, mode)];
+	return [...projectDockRows(DSH_COMPOSER_DOCK_SLOT, sessionId, undefined), ...dshComposerActivityRows(pressure, mode), ...dshComposerUsageRows(usage, mode), ...dshComposerBreakdownRows(breakdown, mode)];
 }
 
 /**
@@ -133,6 +133,39 @@ export function dshComposerActivityRows(pressure: DshIdeContextPressure | undefi
 		id: 'composer-activity',
 		label: localize('dsh.composer.contextUsed', "{0}% context used", percent),
 		order: 0,
+	}];
+}
+
+/**
+ * composer 的上下文**构成**行（官方 `contextBreakdown`）。
+ *
+ * 官方 token-meter README 两条硬约束：
+ *   - 「`contextBreakdown` carries heuristic systemTokens, toolsTokens, and messageTokens —
+ *      **the context's composition, not its provider-billed size**」；
+ *   - 「Present these as **approximations of composition, never as a total**.」
+ *
+ * 所以这里**只报比例**（各自占三项之和的百分比），**不报总量**——三项之和不是上下文大小
+ * （CJK 与 JSON schema 按四字符一 token 会被严重低估），把和当总量显示会误导读者。
+ *
+ * @param breakdown 官方 `contextBreakdown` 投影
+ * @param mode 官方 `ui-chat.performanceUsage`；`compact` 下不画（官方 compact 只留速度与命中率）
+ * @returns 至多一行；三项全 0 或 compact 模式返回空
+ */
+export function dshComposerBreakdownRows(breakdown: DshIdeContextBreakdown | undefined, mode: 'detailed' | 'compact' = 'detailed'): readonly DshInputDockRow[] {
+	if (mode === 'compact' || breakdown === undefined) {
+		return [];
+	}
+	const total = breakdown.systemTokens + breakdown.toolsTokens + breakdown.messageTokens;
+	if (total <= 0) {
+		// 三项全 0 表示还没有可测量的表面：不画空壳，也不显示 0%。
+		return [];
+	}
+	const share = (value: number): number => Math.round((value / total) * 100);
+	// 顺序对齐官方 README 的列举顺序（system → tools → message）。
+	return [{
+		id: 'composer-breakdown',
+		label: localize('dsh.composer.breakdown', "context: {0}% system, {1}% tools, {2}% messages", share(breakdown.systemTokens), share(breakdown.toolsTokens), share(breakdown.messageTokens)),
+		order: 2,
 	}];
 }
 

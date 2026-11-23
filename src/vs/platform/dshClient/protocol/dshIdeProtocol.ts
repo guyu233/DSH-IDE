@@ -131,6 +131,8 @@ export interface DshIdeViewSnapshot {
 	readonly tokenUsageTotal?: DshIdeTokenUsageTotal;
 	/** 官方 `contextPressure` 投影：上下文占用（composer `activity` 项的数据源）。 */
 	readonly contextPressure?: DshIdeContextPressure;
+	/** 官方 `contextBreakdown` 投影：上下文**构成**（启发式，不是总量）。 */
+	readonly contextBreakdown?: DshIdeContextBreakdown;
 	readonly quotaNotice?: DshIdeQuotaNotice;
 	readonly composer?: DshIdeComposerView;
 	readonly pending?: readonly DshIdePendingItem[];
@@ -676,6 +678,25 @@ export interface DshIdeContextPressure {
 	readonly projectedTokens?: number;
 	/** 最新记录的模型容量；没有适配器声明时为缺省。 */
 	readonly contextWindow?: number;
+}
+
+/**
+ * 官方 `contextBreakdown` 投影（`llm/token-meter/src/projection.ts`）。
+ *
+ * 三项都是**启发式估算**：官方明确「the context's **composition**, not its provider-billed size」，
+ * 且「Present these as **approximations of composition, never as a total**」——
+ * 它们不会等于 `projectedTokens`（后者的 provider 锚点恰好带着这份启发式误差：
+ * CJK 文本与 JSON schema 按四字符一 token 会被严重低估）。
+ *
+ * 所以界面上只能当「构成比例」展示，**不能求和当成上下文大小**。
+ */
+export interface DshIdeContextBreakdown {
+	/** 全部非空存活 system 消息的启发式 token；没有 system 时为 0。 */
+	readonly systemTokens: number;
+	/** 最新请求信封的工具 schema 的启发式 token；首次请求前为 0。 */
+	readonly toolsTokens: number;
+	/** 其它所有可见表面节点的启发式 token。 */
+	readonly messageTokens: number;
 }
 
 /** 官方 `QuotaNoticeState`。`message` 由 Host 填好当前语言的句子，缺省时界面自己用 code。 */
@@ -1794,7 +1815,7 @@ export function validateDshIdeSnapshot(value: unknown): DshIdeSnapshot {
 
 const DSH_IDE_VIEW_KEYS = [
 	'frame', 'conversation', 'deliverables', 'attachments', 'plan', 'goal', 'todos', 'skills', 'team', 'worktrees',
-	'tokenUsageDelta', 'tokenUsageTotal', 'contextPressure', 'quotaNotice', 'composer', 'pending',
+	'tokenUsageDelta', 'tokenUsageTotal', 'contextPressure', 'contextBreakdown', 'quotaNotice', 'composer', 'pending',
 ] as const;
 
 /** 跟会话帧校验：`frame` 必填，typed 字段出现时按官方形状 fail-closed。 */
@@ -1842,6 +1863,9 @@ function validateDshIdeView(value: unknown): asserts value is DshIdeViewSnapshot
 	}
 	if (view['contextPressure'] !== undefined) {
 		validateContextPressure(view['contextPressure'], 'DshIdeSnapshot.state.view.contextPressure');
+	}
+	if (view['contextBreakdown'] !== undefined) {
+		validateContextBreakdown(view['contextBreakdown'], 'DshIdeSnapshot.state.view.contextBreakdown');
 	}
 	if (view['quotaNotice'] !== undefined) {
 		validateQuotaNotice(view['quotaNotice']);
@@ -2605,6 +2629,14 @@ function validateCommandOutcome(value: unknown, label: string): void {
 	}
 	if (outcome['text'] !== undefined) {
 		anyString(outcome['text'], `${label}.text`);
+	}
+}
+
+/** 官方 `contextBreakdown`：三项**全必填**且非负（0 是合法值：没有 system 就是 0）。 */
+function validateContextBreakdown(value: unknown, label: string): void {
+	const breakdown = exactRecord(value, ['systemTokens', 'toolsTokens', 'messageTokens'], label);
+	for (const key of ['systemTokens', 'toolsTokens', 'messageTokens'] as const) {
+		nonNegativeInteger(breakdown[key], `${label}.${key}`);
 	}
 }
 

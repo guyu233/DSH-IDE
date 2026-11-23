@@ -278,5 +278,6 @@
 	"dsh.composer.tokens": "{0} tokens",
 	"dsh.composer.tokensCacheHit": "{0} tokens · 缓存命中 {1}%",
 	"dsh.composer.cacheHit": "缓存命中 {0}%",
-	"dsh.composer.contextUsed": "上下文已用 {0}%"
+	"dsh.composer.contextUsed": "上下文已用 {0}%",
+	"dsh.composer.breakdown": "上下文构成：系统 {0}%、工具 {1}%、消息 {2}%"
 }

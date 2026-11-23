@@ -18,7 +18,7 @@
 import { $ } from '../../../../../base/browser/dom.js';
 import { Disposable } from '../../../../../base/common/lifecycle.js';
 import { localize } from '../../../../../nls.js';
-import type { DshIdeContextPressure, DshIdeTokenUsageTotal } from '../../../../../platform/dshClient/protocol/dshIdeProtocol.js';
+import type { DshIdeContextBreakdown, DshIdeContextPressure, DshIdeTokenUsageTotal } from '../../../../../platform/dshClient/protocol/dshIdeProtocol.js';
 import { dshChatSlotRegistry } from './dshChatSlots.js';
 import { dshComposerDockRows, dshInputDockRows, dshQueueDockRows, type DshInputDockRow, type DshInputZoneOwner, type DshQueueRowAction } from './dshInputDock.js';
 import type { DshIdeInboxMessage } from '../../../../../platform/dshClient/protocol/dshIdeProtocol.js';
@@ -72,7 +72,7 @@ export class DshChatInputDock extends Disposable {
 	 * `owner` 只对 `conversation.input.dock` 有意义（官方 owner 是 `InputZone`）；
 	 * `composer.dock` 只用会话 id。两者都允许缺省，表示「当前没有会话」。
 	 */
-	update(sessionId: string | undefined, owner?: DshInputZoneOwner, inbox?: readonly DshIdeInboxMessage[], inboxStep?: readonly DshIdeInboxMessage[], turnNav?: readonly DshInputDockRow[], usage?: DshIdeTokenUsageTotal, usageMode: 'detailed' | 'compact' = 'detailed', pressure?: DshIdeContextPressure): void {
+	update(sessionId: string | undefined, owner?: DshInputZoneOwner, inbox?: readonly DshIdeInboxMessage[], inboxStep?: readonly DshIdeInboxMessage[], turnNav?: readonly DshInputDockRow[], usage?: DshIdeTokenUsageTotal, usageMode: 'detailed' | 'compact' = 'detailed', pressure?: DshIdeContextPressure, breakdown?: DshIdeContextBreakdown): void {
 		this.sessionId = sessionId;
 		this.owner = owner;
 		this.inbox = inbox;
@@ -81,6 +81,7 @@ export class DshChatInputDock extends Disposable {
 		this.usage = usage;
 		this.usageMode = usageMode;
 		this.pressure = pressure;
+		this.breakdown = breakdown;
 		this.render();
 	}
 
@@ -95,6 +96,8 @@ export class DshChatInputDock extends Disposable {
 	private usageMode: 'detailed' | 'compact' = 'detailed';
 	/** 官方 `contextPressure` 投影（composer activity 项的数据源）。 */
 	private pressure: DshIdeContextPressure | undefined;
+	/** 官方 `contextBreakdown` 投影（composer 构成行的数据源）。 */
+	private breakdown: DshIdeContextBreakdown | undefined;
 
 	private render(): void {
 		for (const ref of this.rowRefs) {
@@ -117,7 +120,7 @@ export class DshChatInputDock extends Disposable {
 					...this.turnNav,
 				],
 			)
-			: dshComposerDockRows(this.sessionId, this.usage, this.usageMode, this.pressure);
+			: dshComposerDockRows(this.sessionId, this.usage, this.usageMode, this.pressure, this.breakdown);
 		if (rows.length === 0) {
 			this.domNode.style.display = 'none';
 			return;

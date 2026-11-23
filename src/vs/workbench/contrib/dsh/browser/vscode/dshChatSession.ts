@@ -13,7 +13,7 @@ import { Emitter, Event } from '../../../../../base/common/event.js';
 import { Disposable } from '../../../../../base/common/lifecycle.js';
 import { VSBuffer, encodeBase64 } from '../../../../../base/common/buffer.js';
 import { IDshClientService } from '../../../../../platform/dshClient/common/dshClientService.js';
-import { dshErrorText, DSH_IDE_FEATURE_UNAVAILABLE, DSH_IDE_HISTORY_MAX_MESSAGES, DSH_IDE_HISTORY_TURN_WINDOW, validateDshIdeLoadOlderResult, type DshIdeConversationView, type DshIdeDeliverableView, type DshIdeGoalView, type DshIdeContextPressure, type DshIdeImageAttachmentRef, type DshIdeInboxMessage, type DshIdePresentationSettings, type DshIdeQueueAction, type DshIdeLoadOlderResult, type DshIdePendingItem, type DshIdePlanView, type DshIdeQuotaNotice, type DshIdeSkillView, type DshIdeTeamView, type DshIdeTodoView, type DshIdeWorktreeView, type DshIdeViewSnapshot, type DshIdeWaterfallNotice } from '../../../../../platform/dshClient/protocol/dshIdeProtocol.js';
+import { dshErrorText, DSH_IDE_FEATURE_UNAVAILABLE, DSH_IDE_HISTORY_MAX_MESSAGES, DSH_IDE_HISTORY_TURN_WINDOW, validateDshIdeLoadOlderResult, type DshIdeConversationView, type DshIdeDeliverableView, type DshIdeGoalView, type DshIdeContextBreakdown, type DshIdeContextPressure, type DshIdeImageAttachmentRef, type DshIdeInboxMessage, type DshIdePresentationSettings, type DshIdeQueueAction, type DshIdeLoadOlderResult, type DshIdePendingItem, type DshIdePlanView, type DshIdeQuotaNotice, type DshIdeSkillView, type DshIdeTeamView, type DshIdeTodoView, type DshIdeWorktreeView, type DshIdeViewSnapshot, type DshIdeWaterfallNotice } from '../../../../../platform/dshClient/protocol/dshIdeProtocol.js';
 import { DshChatModel, type DshChatNode, type DshHistoryStatus } from './dshChatModel.js';
 import { settleApproval, settleQuestion, type DshQuestionDraft, type DshSettlementIntent } from './dshPendingSettlement.js';
 import { retainQuotaNotice } from './dshQuotaNotice.js';
@@ -88,6 +88,8 @@ export interface IDshChatSession {
 	 * 缺省表示这帧没带（保留上一次）。
 	 */
 	contextPressure(): DshIdeContextPressure | undefined;
+	/** 官方 `contextBreakdown` 投影：上下文**构成**（启发式，不是总量）。 */
+	contextBreakdown(): DshIdeContextBreakdown | undefined;
 	models(): readonly DshChatModelOption[];
 	currentModel(): { readonly provider: string; readonly model: string } | undefined;
 	pending(): readonly DshChatPending[];
@@ -172,6 +174,8 @@ export class DshChatSession extends Disposable implements IDshChatSession {
 	private _presentationSettings: DshIdePresentationSettings | undefined;
 	/** 官方 `contextPressure` 投影（「缺省=保留」：旧 Host 帧不带该字段时不误清）。 */
 	private _contextPressure: DshIdeContextPressure | undefined;
+	/** 官方 `contextBreakdown` 投影（「缺省=保留」）。 */
+	private _contextBreakdown: DshIdeContextBreakdown | undefined;
 	private boundSessionId: string | undefined;
 
 	/** 当前绑定会话（只读）。模型目录等会话投影的读取方据此带上发起会话。 */
@@ -237,6 +241,10 @@ export class DshChatSession extends Disposable implements IDshChatSession {
 
 	contextPressure(): DshIdeContextPressure | undefined {
 		return this._contextPressure;
+	}
+
+	contextBreakdown(): DshIdeContextBreakdown | undefined {
+		return this._contextBreakdown;
 	}
 
 	models(): readonly DshChatModelOption[] {
@@ -507,6 +515,9 @@ export class DshChatSession extends Disposable implements IDshChatSession {
 		// `contextPressure` 三项都是可选的 last-wins 记录；缺省表示这帧没带，保留上一次。
 		if (view.contextPressure !== undefined) {
 			this._contextPressure = view.contextPressure;
+		}
+		if (view.contextBreakdown !== undefined) {
+			this._contextBreakdown = view.contextBreakdown;
 		}
 		// extras 每帧都可能带同样的值：内容不变就不通知，避免渲染层每帧全量重建 history。
 		const nextDeliverables = view.deliverables ?? [];

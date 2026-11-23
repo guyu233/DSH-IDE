@@ -25,7 +25,7 @@ import type {
 /** `projectDshIdeProjections` 的返回值：只含本次真的读到的字段。 */
 export type DshIdeProjectionFields = Pick<
 	DshIdeViewSnapshot,
-	'plan' | 'goal' | 'todos' | 'team' | 'worktrees' | 'tokenUsageDelta' | 'tokenUsageTotal' | 'contextPressure' | 'skills' | 'deliverables' | 'attachments' | 'quotaNotice' | 'composer' | 'pending'
+	'plan' | 'goal' | 'todos' | 'team' | 'worktrees' | 'tokenUsageDelta' | 'tokenUsageTotal' | 'contextPressure' | 'contextBreakdown' | 'skills' | 'deliverables' | 'attachments' | 'quotaNotice' | 'composer' | 'pending'
 >;
 
 /**
@@ -66,10 +66,18 @@ export function projectDshIdeProjections(baseline: unknown): DshIdeProjectionFie
 		...(typeof pressure['projectedTokens'] === 'number' ? { projectedTokens: pressure['projectedTokens'] } : {}),
 		...(typeof pressure['contextWindow'] === 'number' ? { contextWindow: pressure['contextWindow'] } : {}),
 	};
+	// 官方 `contextBreakdown`：三项**全必填**（启发式估算，0 是合法值——没有 system 就是 0）。
+	const breakdown = isRecord(values['contextBreakdown']) ? values['contextBreakdown'] : undefined;
+	const contextBreakdown = breakdown === undefined ? undefined : {
+		systemTokens: typeof breakdown['systemTokens'] === 'number' ? breakdown['systemTokens'] : 0,
+		toolsTokens: typeof breakdown['toolsTokens'] === 'number' ? breakdown['toolsTokens'] : 0,
+		messageTokens: typeof breakdown['messageTokens'] === 'number' ? breakdown['messageTokens'] : 0,
+	};
 	// 只把真的读到的字段放进返回值；字段就缺席，不写 undefined。
 	return {
 		...(tokenUsageTotal === undefined ? {} : { tokenUsageTotal }),
 		...(contextPressure === undefined || Object.keys(contextPressure).length === 0 ? {} : { contextPressure }),
+		...(contextBreakdown === undefined ? {} : { contextBreakdown }),
 		...(plan === undefined ? {} : { plan }),
 		...(goal === undefined ? {} : { goal }),
 		...(todos === undefined ? {} : { todos }),

@@ -279,7 +279,8 @@
 		"dsh.composer.tokens",
 		"dsh.composer.tokensCacheHit",
 		"dsh.composer.cacheHit",
-		"dsh.composer.contextUsed"
+		"dsh.composer.contextUsed",
+		"dsh.composer.breakdown"
 	],
 	"vs/workbench/contrib/dsh/browser/vscode/dshChatInputDockContribution": [
 		"dsh.queue.editTitle",
