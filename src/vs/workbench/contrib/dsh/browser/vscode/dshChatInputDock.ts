@@ -44,6 +44,15 @@ export type DshInputDockSide = 'input' | 'composer';
  * 由 `ChatInputPart` 在当前会话变化时调用 `update()`；occupant 注册/释放时
  * 由注册表的 `onDidChange` 驱动同一个入口，因此插件热插拔不会留下旧行。
  */
+/**
+ * composer 统计控件的 id（官方 `activity` / `usage`，以及本仓按 `contextBreakdown` 加的构成行）。
+ *
+ * 官方把 composer 统计定为 `conversation.composer.dock` 的 list 项，并规定
+ * 「Each control carries its id in `data-composer-stat`」，供插件按同 id + 同 order 替换。
+ * 本仓的构成行是同一族的第三个只读读数，一并带该属性，便于按 id 定位或替换。
+ */
+const COMPOSER_STAT_IDS: ReadonlySet<string> = new Set(['composer-activity', 'composer-usage', 'composer-breakdown']);
+
 export class DshChatInputDock extends Disposable {
 	readonly domNode: HTMLElement;
 	private owner: DshInputZoneOwner | undefined;
@@ -134,6 +143,12 @@ export class DshChatInputDock extends Disposable {
 	private renderRow(row: DshInputDockRow): HTMLElement {
 		const line: HTMLDivElement | HTMLButtonElement = document.createElement(row.command === undefined ? 'div' : 'button');
 		line.className = 'dsh-input-dock-row';
+		// 官方「Turn token usage」：「**Each control carries its id in `data-composer-stat`**」——
+		// 这是插件「注册同一 id + 同一 order 即可替换该控件」的契约锚点。
+		// 只有 composer 侧的统计行带它：输入侧的队列/turn-nav 行不是统计控件。
+		if (this.side === 'composer' && COMPOSER_STAT_IDS.has(row.id)) {
+			line.setAttribute('data-composer-stat', row.id);
+		}
 		line.style.display = 'flex';
 		line.style.alignItems = 'baseline';
 		line.style.gap = '6px';

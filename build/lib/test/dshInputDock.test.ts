@@ -225,3 +225,15 @@ test('the composer breakdown row reports composition shares, never a total', asy
 	// compact：不画。
 	assert.deepEqual(dshComposerBreakdownRows({ systemTokens: 1, toolsTokens: 1, messageTokens: 1 }, 'compact'), []);
 });
+
+test('each composer statistics control carries its id in data-composer-stat', async () => {
+	// 官方「Turn token usage」：Each control carries its id in `data-composer-stat`。
+	// 这是插件「注册同一 id + 同一 order 即可替换该控件」的契约锚点。
+	const { readFileSync } = await import('node:fs');
+	const source = readFileSync(new URL('../../../src/vs/workbench/contrib/dsh/browser/vscode/dshChatInputDock.ts', import.meta.url), 'utf8');
+	assert.ok(source.includes("line.setAttribute('data-composer-stat', row.id)"), 'the control id must reach the DOM');
+	assert.ok(source.includes("this.side === 'composer'"), 'only composer rows are statistics controls');
+	assert.ok(source.includes("'composer-activity'") && source.includes("'composer-usage'"), 'both official ids are covered');
+	// 输入侧的队列/turn-nav 行不是统计控件，不能被打上该属性。
+	assert.ok(source.includes('COMPOSER_STAT_IDS.has(row.id)'), 'the attribute is limited to statistics ids');
+});
