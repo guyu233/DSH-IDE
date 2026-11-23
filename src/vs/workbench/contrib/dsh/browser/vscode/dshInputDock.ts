@@ -18,7 +18,7 @@
 
 import { localize } from '../../../../../nls.js';
 import { formatTokens } from './dshTokenFormat.js';
-import type { DshIdeInboxMessage, DshIdeTokenUsageTotal } from '../../../../../platform/dshClient/protocol/dshIdeProtocol.js';
+import type { DshIdeContextPressure, DshIdeInboxMessage, DshIdeTokenUsageTotal } from '../../../../../platform/dshClient/protocol/dshIdeProtocol.js';
 import { dshChatSlotRegistry, DSH_COMPOSER_DOCK_SLOT, DSH_INPUT_DOCK_SLOT } from './dshChatSlots.js';
 
 /** 一个 dock occupant 投影出来的一行。 */
@@ -84,7 +84,7 @@ export function dshInputDockRows(sessionId: string | undefined, zone: DshInputZo
  *
  * 这个槽没有 owner props，只按会话解析；没有会话时不解析。
  */
-export function dshComposerDockRows(sessionId: string | undefined, usage?: DshIdeTokenUsageTotal, mode: 'detailed' | 'compact' = 'detailed'): readonly DshInputDockRow[] {
+export function dshComposerDockRows(sessionId: string | undefined, usage?: DshIdeTokenUsageTotal, mode: 'detailed' | 'compact' = 'detailed', pressure?: DshIdeContextPressure): readonly DshInputDockRow[] {
 	if (sessionId === undefined || sessionId === '') {
 		return [];
 	}
@@ -92,7 +92,7 @@ export function dshComposerDockRows(sessionId: string | undefined, usage?: DshId
 	// `activity`（order 0）与 `usage`（order 1）。本仓没有 activity 的权威数据源
 	// （turn/step 计数在 `turn-process` 节点上、按 Turn 分散），所以只实现 `usage`——
 	// 有数据才画，没有就不占位（不伪造 0）。
-	return [...projectDockRows(DSH_COMPOSER_DOCK_SLOT, sessionId, undefined), ...dshComposerUsageRows(usage, mode)];
+	return [...projectDockRows(DSH_COMPOSER_DOCK_SLOT, sessionId, undefined), ...dshComposerActivityRows(pressure, mode), ...dshComposerUsageRows(usage, mode)];
 }
 
 /**
@@ -104,6 +104,38 @@ export function dshComposerDockRows(sessionId: string | undefined, usage?: DshId
  * @param usage 官方 `tokenUsage` 投影（整会话累加）；缺省表示还没有任何用量
  * @returns 至多一行；没有用量时不画
  */
+/**
+ * composer 的上下文占用行（官方 `activity` 项，order 0）。
+ *
+ * 官方「Turn token usage」把 composer 统计定为**两个** dock 项：`activity`（order 0）与 `usage`（order 1）。
+ * 官方 token-meter README 给了 activity 的算法：「A UI computes occupancy by **dividing measured pressure
+ * by the separately resolved capacity for the selected model**」。
+ *
+ * 本仓可用的两项：`pressureTokens`（最新 provider 报告的 prompt 大小）与 `contextWindow`（容量）。
+ * 两者都有才画——**缺一个就不画**，不猜分母、也不把 `projectedTokens` 冒充实测压力。
+ *
+ * @param pressure 官方 `contextPressure` 投影
+ * @param mode 官方 `ui-chat.performanceUsage`；`compact` 下不画（官方：compact 只留输出速度与命中率）
+ * @returns 至多一行；数据不全或 compact 模式返回空
+ */
+export function dshComposerActivityRows(pressure: DshIdeContextPressure | undefined, mode: 'detailed' | 'compact' = 'detailed'): readonly DshInputDockRow[] {
+	if (mode === 'compact' || pressure === undefined) {
+		return [];
+	}
+	const used = pressure.pressureTokens;
+	const capacity = pressure.contextWindow;
+	if (used === undefined || capacity === undefined || capacity <= 0) {
+		// 缺压力或缺容量都不画：分母不可猜，分子不能拿 projectedTokens 冒充。
+		return [];
+	}
+	const percent = Math.min(100, Math.round((used / capacity) * 100));
+	return [{
+		id: 'composer-activity',
+		label: localize('dsh.composer.contextUsed', "{0}% context used", percent),
+		order: 0,
+	}];
+}
+
 export function dshComposerUsageRows(usage: DshIdeTokenUsageTotal | undefined, mode: 'detailed' | 'compact' = 'detailed'): readonly DshInputDockRow[] {
 	if (usage === undefined) {
 		return [];

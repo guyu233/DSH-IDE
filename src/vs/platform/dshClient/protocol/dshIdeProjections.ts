@@ -25,7 +25,7 @@ import type {
 /** `projectDshIdeProjections` 的返回值：只含本次真的读到的字段。 */
 export type DshIdeProjectionFields = Pick<
 	DshIdeViewSnapshot,
-	'plan' | 'goal' | 'todos' | 'team' | 'worktrees' | 'tokenUsageDelta' | 'tokenUsageTotal' | 'skills' | 'deliverables' | 'attachments' | 'quotaNotice' | 'composer' | 'pending'
+	'plan' | 'goal' | 'todos' | 'team' | 'worktrees' | 'tokenUsageDelta' | 'tokenUsageTotal' | 'contextPressure' | 'skills' | 'deliverables' | 'attachments' | 'quotaNotice' | 'composer' | 'pending'
 >;
 
 /**
@@ -59,9 +59,17 @@ export function projectDshIdeProjections(baseline: unknown): DshIdeProjectionFie
 		cacheReadTokens: typeof usage['cacheReadTokens'] === 'number' ? usage['cacheReadTokens'] : 0,
 		cacheWriteTokens: typeof usage['cacheWriteTokens'] === 'number' ? usage['cacheWriteTokens'] : 0,
 	};
+	// 官方 `contextPressure`：三项都是**可选**、各自 last-wins——缺哪项就不写哪项（不补 0）。
+	const pressure = isRecord(values['contextPressure']) ? values['contextPressure'] : undefined;
+	const contextPressure = pressure === undefined ? undefined : {
+		...(typeof pressure['pressureTokens'] === 'number' ? { pressureTokens: pressure['pressureTokens'] } : {}),
+		...(typeof pressure['projectedTokens'] === 'number' ? { projectedTokens: pressure['projectedTokens'] } : {}),
+		...(typeof pressure['contextWindow'] === 'number' ? { contextWindow: pressure['contextWindow'] } : {}),
+	};
 	// 只把真的读到的字段放进返回值；字段就缺席，不写 undefined。
 	return {
 		...(tokenUsageTotal === undefined ? {} : { tokenUsageTotal }),
+		...(contextPressure === undefined || Object.keys(contextPressure).length === 0 ? {} : { contextPressure }),
 		...(plan === undefined ? {} : { plan }),
 		...(goal === undefined ? {} : { goal }),
 		...(todos === undefined ? {} : { todos }),

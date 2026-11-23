@@ -129,6 +129,8 @@ export interface DshIdeViewSnapshot {
 	readonly tokenUsageDelta?: DshIdeTokenUsageDelta;
 	/** 官方 `tokenUsage` 投影：整会话累加用量（composer 统计控件的数据源）。 */
 	readonly tokenUsageTotal?: DshIdeTokenUsageTotal;
+	/** 官方 `contextPressure` 投影：上下文占用（composer `activity` 项的数据源）。 */
+	readonly contextPressure?: DshIdeContextPressure;
 	readonly quotaNotice?: DshIdeQuotaNotice;
 	readonly composer?: DshIdeComposerView;
 	readonly pending?: readonly DshIdePendingItem[];
@@ -655,6 +657,25 @@ export interface DshIdeTokenUsageTotal {
 	readonly outputTokens: number;
 	readonly cacheReadTokens: number;
 	readonly cacheWriteTokens: number;
+}
+
+/**
+ * 官方 `contextPressure` 投影（`llm/token-meter/src/projection.ts`）。
+ *
+ * 三项都是**可选**且各自是不同时刻的 last-wins 记录——官方明确「deliberately NOT one atomic
+ * request observation」。切换模型时可能出现「新容量 + 旧压力」的短暂组合，这是刻意的取舍：
+ * 它是用户可见的参考值，不是计费或门控输入。
+ *
+ * 用于 composer 的 `activity` 项（order 0）：官方说「A UI computes occupancy by **dividing
+ * measured pressure by the separately resolved capacity for the selected model**」。
+ */
+export interface DshIdeContextPressure {
+	/** 最近一次 provider 报告的 prompt 大小（uncached + cacheRead + cacheWrite，**不含**输出）。 */
+	readonly pressureTokens?: number;
+	/** 下一次请求的 prompt 估算（pressureTokens + 之后表面的启发式增减）。 */
+	readonly projectedTokens?: number;
+	/** 最新记录的模型容量；没有适配器声明时为缺省。 */
+	readonly contextWindow?: number;
 }
 
 /** 官方 `QuotaNoticeState`。`message` 由 Host 填好当前语言的句子，缺省时界面自己用 code。 */
@@ -1773,7 +1794,7 @@ export function validateDshIdeSnapshot(value: unknown): DshIdeSnapshot {
 
 const DSH_IDE_VIEW_KEYS = [
 	'frame', 'conversation', 'deliverables', 'attachments', 'plan', 'goal', 'todos', 'skills', 'team', 'worktrees',
-	'tokenUsageDelta', 'tokenUsageTotal', 'quotaNotice', 'composer', 'pending',
+	'tokenUsageDelta', 'tokenUsageTotal', 'contextPressure', 'quotaNotice', 'composer', 'pending',
 ] as const;
 
 /** 跟会话帧校验：`frame` 必填，typed 字段出现时按官方形状 fail-closed。 */
@@ -1818,6 +1839,9 @@ function validateDshIdeView(value: unknown): asserts value is DshIdeViewSnapshot
 	}
 	if (view['tokenUsageTotal'] !== undefined) {
 		validateTokenUsageTotal(view['tokenUsageTotal'], 'DshIdeSnapshot.state.view.tokenUsageTotal');
+	}
+	if (view['contextPressure'] !== undefined) {
+		validateContextPressure(view['contextPressure'], 'DshIdeSnapshot.state.view.contextPressure');
 	}
 	if (view['quotaNotice'] !== undefined) {
 		validateQuotaNotice(view['quotaNotice']);
@@ -2581,6 +2605,20 @@ function validateCommandOutcome(value: unknown, label: string): void {
 	}
 	if (outcome['text'] !== undefined) {
 		anyString(outcome['text'], `${label}.text`);
+	}
+}
+
+/**
+ * 官方 `contextPressure`：三项**都可选**，但出现时必须是非负整数。
+ *
+ * 空对象是允许的（三项都没报），但 validator 仍要求「出现即合法」——不猜缺省值。
+ */
+function validateContextPressure(value: unknown, label: string): void {
+	const pressure = exactRecord(value, ['pressureTokens', 'projectedTokens', 'contextWindow'], label);
+	for (const key of ['pressureTokens', 'projectedTokens', 'contextWindow'] as const) {
+		if (pressure[key] !== undefined) {
+			nonNegativeInteger(pressure[key], `${label}.${key}`);
+		}
 	}
 }
 

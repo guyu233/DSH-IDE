@@ -178,3 +178,28 @@ test('compact performance mode keeps only the cache-hit percentage', async () =>
 	// 缺省 mode 等价 detailed。
 	assert.deepEqual(dshComposerUsageRows(usage), dshComposerUsageRows(usage, 'detailed'));
 });
+
+test('the composer activity row divides measured pressure by the route capacity', async () => {
+	// 官方 token-meter README：A UI computes occupancy by **dividing measured pressure by the
+	// separately resolved capacity for the selected model**。
+	// 缺分子或缺分母都不画——不猜分母、也不拿 projectedTokens 冒充实测压力。
+	const { dshComposerActivityRows } = await import('../../../src/vs/workbench/contrib/dsh/browser/vscode/dshInputDock.ts');
+	const rows = dshComposerActivityRows({ pressureTokens: 25_000, contextWindow: 100_000 });
+	assert.equal(rows.length, 1);
+	assert.equal(rows[0].order, 0, 'the activity entry is order 0');
+	assert.equal(rows[0].id, 'composer-activity');
+	assert.ok(rows[0].label.includes('25'), `25000/100000 is 25%: "${rows[0].label}"`);
+	// 缺压力：不画。
+	assert.deepEqual(dshComposerActivityRows({ contextWindow: 100_000 }), []);
+	// 缺容量：不画（分母不可猜）。
+	assert.deepEqual(dshComposerActivityRows({ pressureTokens: 25_000 }), []);
+	// 容量为 0：不画（不除以 0）。
+	assert.deepEqual(dshComposerActivityRows({ pressureTokens: 1, contextWindow: 0 }), []);
+	// 没有投影：不画。
+	assert.deepEqual(dshComposerActivityRows(undefined), []);
+	// compact 模式：不画（官方 compact 只留输出速度与命中率）。
+	assert.deepEqual(dshComposerActivityRows({ pressureTokens: 25_000, contextWindow: 100_000 }, 'compact'), []);
+	// 超过容量时钳到 100%，不报 120%。
+	const over = dshComposerActivityRows({ pressureTokens: 120_000, contextWindow: 100_000 });
+	assert.ok(over[0].label.includes('100'), `clamped to 100%: "${over[0].label}"`);
+});

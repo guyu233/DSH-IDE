@@ -13,7 +13,7 @@ import { Emitter, Event } from '../../../../../base/common/event.js';
 import { Disposable } from '../../../../../base/common/lifecycle.js';
 import { VSBuffer, encodeBase64 } from '../../../../../base/common/buffer.js';
 import { IDshClientService } from '../../../../../platform/dshClient/common/dshClientService.js';
-import { dshErrorText, DSH_IDE_FEATURE_UNAVAILABLE, DSH_IDE_HISTORY_MAX_MESSAGES, DSH_IDE_HISTORY_TURN_WINDOW, validateDshIdeLoadOlderResult, type DshIdeConversationView, type DshIdeDeliverableView, type DshIdeGoalView, type DshIdeImageAttachmentRef, type DshIdeInboxMessage, type DshIdePresentationSettings, type DshIdeQueueAction, type DshIdeLoadOlderResult, type DshIdePendingItem, type DshIdePlanView, type DshIdeQuotaNotice, type DshIdeSkillView, type DshIdeTeamView, type DshIdeTodoView, type DshIdeWorktreeView, type DshIdeViewSnapshot, type DshIdeWaterfallNotice } from '../../../../../platform/dshClient/protocol/dshIdeProtocol.js';
+import { dshErrorText, DSH_IDE_FEATURE_UNAVAILABLE, DSH_IDE_HISTORY_MAX_MESSAGES, DSH_IDE_HISTORY_TURN_WINDOW, validateDshIdeLoadOlderResult, type DshIdeConversationView, type DshIdeDeliverableView, type DshIdeGoalView, type DshIdeContextPressure, type DshIdeImageAttachmentRef, type DshIdeInboxMessage, type DshIdePresentationSettings, type DshIdeQueueAction, type DshIdeLoadOlderResult, type DshIdePendingItem, type DshIdePlanView, type DshIdeQuotaNotice, type DshIdeSkillView, type DshIdeTeamView, type DshIdeTodoView, type DshIdeWorktreeView, type DshIdeViewSnapshot, type DshIdeWaterfallNotice } from '../../../../../platform/dshClient/protocol/dshIdeProtocol.js';
 import { DshChatModel, type DshChatNode, type DshHistoryStatus } from './dshChatModel.js';
 import { settleApproval, settleQuestion, type DshQuestionDraft, type DshSettlementIntent } from './dshPendingSettlement.js';
 import { retainQuotaNotice } from './dshQuotaNotice.js';
@@ -80,6 +80,14 @@ export interface IDshChatSession {
 	 * `undefined` 表示这次 follow 没带投影 —— 用量条据此隐藏，绝不显示伪造的 0。
 	 */
 	tokenUsage(): { uncachedInputTokens: number; cacheReadTokens: number; cacheWriteTokens: number; outputTokens: number } | undefined;
+	/**
+	 * 官方 `contextPressure` 投影（composer `activity` 项的数据源）。
+	 *
+	 * 与 `tokenUsage()`（流式增量累计）不同：这是 Host 按官方 `tokenMeter` 折叠出的
+	 * 「最新 provider 报告的 prompt 大小 + 路由容量」，**只在投影里**，不在流式帧上。
+	 * 缺省表示这帧没带（保留上一次）。
+	 */
+	contextPressure(): DshIdeContextPressure | undefined;
 	models(): readonly DshChatModelOption[];
 	currentModel(): { readonly provider: string; readonly model: string } | undefined;
 	pending(): readonly DshChatPending[];
@@ -162,6 +170,8 @@ export class DshChatSession extends Disposable implements IDshChatSession {
 	private _running = false;
 	/** 已读到的表现偏好（官方 `presentationSettings` 的缓存，供同步读取）。 */
 	private _presentationSettings: DshIdePresentationSettings | undefined;
+	/** 官方 `contextPressure` 投影（「缺省=保留」：旧 Host 帧不带该字段时不误清）。 */
+	private _contextPressure: DshIdeContextPressure | undefined;
 	private boundSessionId: string | undefined;
 
 	/** 当前绑定会话（只读）。模型目录等会话投影的读取方据此带上发起会话。 */
@@ -223,6 +233,10 @@ export class DshChatSession extends Disposable implements IDshChatSession {
 
 	tokenUsage(): { uncachedInputTokens: number; cacheReadTokens: number; cacheWriteTokens: number; outputTokens: number } | undefined {
 		return this.model.tokenUsage();
+	}
+
+	contextPressure(): DshIdeContextPressure | undefined {
+		return this._contextPressure;
 	}
 
 	models(): readonly DshChatModelOption[] {
@@ -489,6 +503,10 @@ export class DshChatSession extends Disposable implements IDshChatSession {
 		// 所以缺省只可能出现在旧 Host 帧上——那种情况保留上一次，不误清。
 		if (view.pending !== undefined) {
 			this.acceptPending(view.pending);
+		}
+		// `contextPressure` 三项都是可选的 last-wins 记录；缺省表示这帧没带，保留上一次。
+		if (view.contextPressure !== undefined) {
+			this._contextPressure = view.contextPressure;
 		}
 		// extras 每帧都可能带同样的值：内容不变就不通知，避免渲染层每帧全量重建 history。
 		const nextDeliverables = view.deliverables ?? [];

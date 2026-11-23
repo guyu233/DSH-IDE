@@ -277,5 +277,6 @@
 	"dsh.card.usage": "用量",
 	"dsh.composer.tokens": "{0} tokens",
 	"dsh.composer.tokensCacheHit": "{0} tokens · 缓存命中 {1}%",
-	"dsh.composer.cacheHit": "缓存命中 {0}%"
+	"dsh.composer.cacheHit": "缓存命中 {0}%",
+	"dsh.composer.contextUsed": "上下文已用 {0}%"
 }
