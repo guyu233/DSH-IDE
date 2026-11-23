@@ -64,6 +64,14 @@ export interface DshTurnProcess {
 	 */
 	readonly segments: readonly DshProcessSegment[];
 	readonly alwaysOpen: boolean;
+	/**
+	 * 该 Turn 的结算原因（官方 `turn/end.reason.kind`）；进行中或缺省。
+	 *
+	 * 组头用它决定**语义色**：官方「Grouped rendering」要求「Process rows share one text and icon
+	 * color in every Work details mode: tertiary at rest and secondary on hover, **while error and
+	 * warning text keeps its semantic color**」——没有这个字段就分不出哪一行该保住语义色。
+	 */
+	readonly endReason?: string;
 }
 
 /** 一个过程段：同一 Turn 内被输入/答复/独立根节点切开的一段连续 process 内容。 */
@@ -189,7 +197,7 @@ export function groupTurnProcesses(nodes: readonly DshGroupableNode[], reasonByT
 			const alwaysOpen = spec.hasInterleavedInput || (reason !== undefined
 				? turnProcessAlwaysOpen(reason)
 				: sawSignal || !sawAnswer);
-			return { turn, answerStep, promptKeys, processKeys, answerKeys, replyKeys, controlKeys, segments, alwaysOpen };
+			return { turn, answerStep, promptKeys, processKeys, answerKeys, replyKeys, controlKeys, segments, alwaysOpen, ...(reason === undefined ? {} : { endReason: reason }) };
 		});
 }
 

@@ -83,6 +83,8 @@ type DshSlotRowSpec =
 		readonly controlledId?: string;
 		/** 该组所属 Turn 是否仍在运行（决定标题是否走官方 `TextShimmer`）。 */
 		readonly running?: boolean;
+		/** 该组的语义状态：错误/警告时保住语义色，不参与 hover 变色。 */
+		readonly tone?: 'error' | 'warning';
 		readonly signature?: string;
 	}
 	| { readonly key: string; readonly kind: 'question'; readonly eventId: string; readonly signature?: string }
@@ -299,7 +301,7 @@ export class DshSlotHostContentPart extends Disposable implements IChatContentPa
 			}];
 		});
 		const visible = new Set<string>();
-		const summaryBefore = new Map<string, readonly { readonly line: string; readonly turn: number; readonly expanded: boolean; readonly onToggle: () => void; readonly running: boolean }[]>();
+		const summaryBefore = new Map<string, readonly { readonly line: string; readonly turn: number; readonly expanded: boolean; readonly onToggle: () => void; readonly running: boolean; readonly tone?: 'error' | 'warning' }[]>();
 		// 展开态的组：这些 Turn 的 process 节点要包进一个组体容器（官方 min(400px,50vh) + 24px 渐变）。
 		const expandedGroupTurns = new Set<number>();
 		// 计划卡正常随 turn tail 画；但 Turn 还没结束（没有 `turn-tail`）时它也会被跳过，
@@ -390,7 +392,12 @@ export class DshSlotHostContentPart extends Disposable implements IChatContentPa
 			}
 			// 运行中 = 该组仍 `alwaysOpen`（未结算的 Turn 恒为真，见 `groupTurnProcesses`）。
 			// 官方：Running group titles use the shared TextShimmer；settled 标题不带动画。
-			const spec = { line, turn: group.turn, expanded, onToggle, running: group.alwaysOpen } as const;
+			// 官方：error and warning text keeps its semantic color。`error` / `interrupted` / `aborted`
+			// 是失败类结算原因；`max-tokens` 是警告类（输出被截断但 Turn 正常结束）。
+			const tone = group.endReason === 'error' || group.endReason === 'interrupted' || group.endReason === 'aborted'
+				? 'error' as const
+				: group.endReason === 'max-tokens' ? 'warning' as const : undefined;
+			const spec = { line, turn: group.turn, expanded, onToggle, running: group.alwaysOpen, ...(tone === undefined ? {} : { tone }) } as const;
 			if (expanded) {
 				expandedGroupTurns.add(group.turn);
 			}
@@ -444,6 +451,7 @@ export class DshSlotHostContentPart extends Disposable implements IChatContentPa
 					controlledId: this.groupHostId(nodeId),
 					// 运行中的组标题走 TextShimmer；已结算的标题与 live-detail 偏好无关。
 					running: header.running === true,
+					...(header.tone === undefined ? {} : { tone: header.tone }),
 				});
 			});
 			// 展开态的 Turn：把连续的过程节点收进一个组体容器（官方 process group layout box）。
@@ -550,7 +558,7 @@ export class DshSlotHostContentPart extends Disposable implements IChatContentPa
 				return container;
 			}
 			case 'summary': {
-				const button = processSummaryRow(row.line, row.expanded === true, row.running === true);
+				const button = processSummaryRow(row.line, row.expanded === true, row.running === true, row.tone);
 				if (row.onToggle !== undefined) {
 					button.disabled = false;
 					button.style.cursor = 'pointer';
@@ -948,7 +956,7 @@ export class DshSlotHostContentPart extends Disposable implements IChatContentPa
  *   （官方：「Running group titles … use the shared TextShimmer」；Settled group titles
  *   remain independent of the live-detail preference，所以只在运行时加动画）。
  */
-function processSummaryRow(line: string, expanded: boolean, running: boolean): HTMLButtonElement {
+function processSummaryRow(line: string, expanded: boolean, running: boolean, tone?: 'error' | 'warning'): HTMLButtonElement {
 	const row = document.createElement('button');
 	// 与原生 chat 的次按钮一致：无边框、无背景、继承字号 + `:focus-visible` 焦点环。
 	applyDshButtonChrome(row, 'link');
@@ -971,6 +979,11 @@ function processSummaryRow(line: string, expanded: boolean, running: boolean): H
 	row.appendChild(icon);
 	row.appendChild(text);
 	row.style.color = 'var(--vscode-descriptionForeground)';
+	if (tone !== undefined) {
+		// 错误/警告行保住语义色：样式表里这两类不参与 hover 变色。
+		row.classList.add(tone === 'error' ? 'dsh-process-summary-error' : 'dsh-process-summary-warning');
+		ensureProcessShimmerStyles();
+	}
 	// 官方「Grouped rendering」的间距：Ordinary flow rows sit **4px apart**；
 	// An expanded group title has **8px before its content**——展开时把下边距加到 8px，
 	// 收起时保持普通流间距。
@@ -1022,6 +1035,27 @@ function ensureProcessShimmerStyles(): void {
 				-webkit-text-fill-color: transparent;
 				animation: chat-thinking-shimmer 2s steps(60, end) infinite;
 				will-change: background-position;
+			}
+			/*
+			 * 官方「Grouped rendering」：Process rows share one text and icon color in every
+			 * Work details mode: **tertiary at rest and secondary on hover**, while error and
+			 * warning text keeps its semantic color。
+			 *
+			 * 本仓的 tertiary 就是 --vscode-descriptionForeground（组头已设），
+			 * 这里补 hover → secondary。错误/警告行带 dsh-process-summary-error /
+			 * -warning 类时**不参与 hover 变色**，保住语义色。
+			 */
+			.dsh-process-summary:not(.dsh-process-summary-error):not(.dsh-process-summary-warning):hover .dsh-process-summary-text,
+			.dsh-process-summary:not(.dsh-process-summary-error):not(.dsh-process-summary-warning):hover .dsh-process-summary-icon {
+				color: var(--vscode-foreground);
+			}
+			.dsh-process-summary-error .dsh-process-summary-text,
+			.dsh-process-summary-error .dsh-process-summary-icon {
+				color: var(--vscode-errorForeground);
+			}
+			.dsh-process-summary-warning .dsh-process-summary-text,
+			.dsh-process-summary-warning .dsh-process-summary-icon {
+				color: var(--vscode-editorWarning-foreground);
 			}
 			/* 减少动效时立刻停掉：官方要求 reduced-motion 用户拿到即时呈现。 */
 			@media (prefers-reduced-motion: reduce) {

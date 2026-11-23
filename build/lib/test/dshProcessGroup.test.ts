@@ -434,3 +434,20 @@ test('only an eligible reply can serve as the final answer', () => {
 	const [unknown] = groupTurnProcesses([eligible('a1', 2, 0)], new Map([[1, 'completed']]));
 	assert.deepEqual([...unknown.replyKeys], ['a1']);
 });
+
+test('a settled group exposes its end reason for semantic colouring', () => {
+	// 官方「Grouped rendering」：Process rows share one text and icon color in every Work details
+	// mode: tertiary at rest and secondary on hover, while error and warning text keeps its
+	// semantic color。要分出哪一行该保住语义色，组上必须暴露结算原因。
+	const [failed] = groupTurnProcesses([node({ key: 'u', kind: 'user', seq: 1, turn: 1 })], new Map([[1, 'error']]));
+	assert.equal(failed.endReason, 'error', 'a failed turn exposes its reason');
+	const [interrupted] = groupTurnProcesses([node({ key: 'u', kind: 'user', seq: 1, turn: 1 })], new Map([[1, 'interrupted']]));
+	assert.equal(interrupted.endReason, 'interrupted');
+	// 正常结束也带原因（渲染层据此判定不需要语义色）。
+	const [completed] = groupTurnProcesses([node({ key: 'u', kind: 'user', seq: 1, turn: 1 })], new Map([[1, 'completed']]));
+	assert.equal(completed.endReason, 'completed');
+	// 进行中的 Turn 没有结算原因：字段缺席，而不是空串。
+	const [running] = groupTurnProcesses([node({ key: 'u', kind: 'user', seq: 1, turn: 1 })], new Map());
+	assert.equal(running.endReason, undefined);
+	assert.equal('endReason' in running, false, 'the field is omitted, not set to undefined');
+});
