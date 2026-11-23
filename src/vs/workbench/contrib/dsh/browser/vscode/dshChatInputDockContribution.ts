@@ -141,6 +141,10 @@ export class DshChatInputDockContribution extends Disposable {
 		};
 		sync();
 		store.add(widget.onDidChangeViewModel(() => sync()));
+		// composer 的统计行（usage / contextPressure / contextBreakdown）**每帧都会变**，
+		// 只在切换会话时 sync 会让它们停在首次读到的值上——「数据接了但界面不更新」。
+		// `onDidChangeExtras` 是这些 extras 的唯一变更信号，直接复用它刷新 dock。
+		store.add(this.chat.onDidChangeExtras(() => sync()));
 	}
 
 	/**
