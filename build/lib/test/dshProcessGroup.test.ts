@@ -467,3 +467,23 @@ test('activity labels join by the interface language, not always by English rule
 	// 缺省仍是英文（数据层不读全局 locale）。
 	assert.equal(hiddenProcessLine([read, cmd]), en);
 });
+
+test('an inherited-history divider survives whole-turn folding', () => {
+	// 官方「Inherited history divider」：**A cut inside a Turn keeps the divider outside that
+	// Turn's process folding**。分界行落在 `turn` 位置，若被 `foldedReplies=final` 折掉，
+	// 读者就再也看不出「上面是继承来的历史」。
+	const [group] = groupTurnProcesses([
+		node({ key: 'div', kind: 'inherited-history', seq: 1, turn: 1 }),
+		node({ key: 'u', kind: 'user', seq: 2, turn: 1 }),
+		node({ key: 'a1', kind: 'assistant', seq: 3, turn: 1, step: 0 }),
+		node({ key: 'a2', kind: 'assistant', seq: 4, turn: 1, step: 1 }),
+	], new Map([[1, 'completed']]));
+	// 分界行被当作「turn 位置的非答复控件」，与 turn-tail 同一处理。
+	assert.ok([...group.controlKeys].includes('div'), 'the divider must be tracked as a turn control');
+	// final：中间答复 a1 折起，但分界行必须留下。
+	const visible = [...visibleProcessKeys(group, true, 'final')];
+	assert.ok(visible.includes('div'), `the divider must survive folding: ${JSON.stringify(visible)}`);
+	assert.ok(!visible.includes('a1'), 'the intermediate reply is folded');
+	// all：分界行同样在。
+	assert.ok([...visibleProcessKeys(group, true, 'all')].includes('div'));
+});
