@@ -22,6 +22,17 @@ import type { DshIdeContextBreakdown, DshIdeContextPressure, DshIdeInboxMessage,
 import { dshChatSlotRegistry, DSH_COMPOSER_DOCK_SLOT, DSH_INPUT_DOCK_SLOT } from './dshChatSlots.js';
 
 /** 一个 dock occupant 投影出来的一行。 */
+/**
+ * composer 统计控件的行 id（官方 `conversation.composer.dock` 的 `activity` / `usage`，
+ * 加上本仓按 `contextBreakdown` 加的构成行）。
+ *
+ * **单一真源**：id 在这里定义、在下面三个投影函数里使用，`dshChatInputDock` 也引用同一组常量
+ * 写 `data-composer-stat`。两处各写一遍字面量会漂移——而漂移的后果是插件按 id 定位不到控件。
+ */
+export const DSH_COMPOSER_ACTIVITY_ID = 'composer-activity';
+export const DSH_COMPOSER_USAGE_ID = 'composer-usage';
+export const DSH_COMPOSER_BREAKDOWN_ID = 'composer-breakdown';
+
 export interface DshInputDockRow {
 	readonly id: string;
 	/** 可直接显示的文本。没有文本的 occupant 不成行（不画空行）。 */
@@ -130,7 +141,7 @@ export function dshComposerActivityRows(pressure: DshIdeContextPressure | undefi
 	}
 	const percent = Math.min(100, Math.round((used / capacity) * 100));
 	return [{
-		id: 'composer-activity',
+		id: DSH_COMPOSER_ACTIVITY_ID,
 		label: localize('dsh.composer.contextUsed', "{0}% context used", percent),
 		order: 0,
 	}];
@@ -163,7 +174,7 @@ export function dshComposerBreakdownRows(breakdown: DshIdeContextBreakdown | und
 	const share = (value: number): number => Math.round((value / total) * 100);
 	// 顺序对齐官方 README 的列举顺序（system → tools → message）。
 	return [{
-		id: 'composer-breakdown',
+		id: DSH_COMPOSER_BREAKDOWN_ID,
 		label: localize('dsh.composer.breakdown', "context: {0}% system, {1}% tools, {2}% messages", share(breakdown.systemTokens), share(breakdown.toolsTokens), share(breakdown.messageTokens)),
 		order: 2,
 	}];
@@ -186,13 +197,13 @@ export function dshComposerUsageRows(usage: DshIdeTokenUsageTotal | undefined, m
 	// 所以 `compact` 下只保留命中率；没有命中率时整行不画（不伪造速度）。
 	if (mode === 'compact') {
 		return hitRate === undefined ? [] : [{
-			id: 'composer-usage',
+			id: DSH_COMPOSER_USAGE_ID,
 			label: localize('dsh.composer.cacheHit', "{0}% cache hit", hitRate),
 			order: 1,
 		}];
 	}
 	return [{
-		id: 'composer-usage',
+		id: DSH_COMPOSER_USAGE_ID,
 		label: hitRate === undefined
 			? localize('dsh.composer.tokens', "{0} tokens", formatTokens(total))
 			: localize('dsh.composer.tokensCacheHit', "{0} tokens · {1}% cache hit", formatTokens(total), hitRate),

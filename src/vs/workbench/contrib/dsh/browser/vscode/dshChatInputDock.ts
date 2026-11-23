@@ -20,7 +20,7 @@ import { Disposable } from '../../../../../base/common/lifecycle.js';
 import { localize } from '../../../../../nls.js';
 import type { DshIdeContextBreakdown, DshIdeContextPressure, DshIdeTokenUsageTotal } from '../../../../../platform/dshClient/protocol/dshIdeProtocol.js';
 import { dshChatSlotRegistry } from './dshChatSlots.js';
-import { dshComposerDockRows, dshInputDockRows, dshQueueDockRows, type DshInputDockRow, type DshInputZoneOwner, type DshQueueRowAction } from './dshInputDock.js';
+import { DSH_COMPOSER_ACTIVITY_ID, DSH_COMPOSER_BREAKDOWN_ID, DSH_COMPOSER_USAGE_ID, dshComposerDockRows, dshInputDockRows, dshQueueDockRows, type DshInputDockRow, type DshInputZoneOwner, type DshQueueRowAction } from './dshInputDock.js';
 import type { DshIdeInboxMessage } from '../../../../../platform/dshClient/protocol/dshIdeProtocol.js';
 import { applyDshButtonChrome } from './dshButtonChrome.js';
 
@@ -51,7 +51,7 @@ export type DshInputDockSide = 'input' | 'composer';
  * 「Each control carries its id in `data-composer-stat`」，供插件按同 id + 同 order 替换。
  * 本仓的构成行是同一族的第三个只读读数，一并带该属性，便于按 id 定位或替换。
  */
-const COMPOSER_STAT_IDS: ReadonlySet<string> = new Set(['composer-activity', 'composer-usage', 'composer-breakdown']);
+const COMPOSER_STAT_IDS: ReadonlySet<string> = new Set([DSH_COMPOSER_ACTIVITY_ID, DSH_COMPOSER_USAGE_ID, DSH_COMPOSER_BREAKDOWN_ID]);
 
 export class DshChatInputDock extends Disposable {
 	readonly domNode: HTMLElement;

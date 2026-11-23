@@ -233,7 +233,26 @@ test('each composer statistics control carries its id in data-composer-stat', as
 	const source = readFileSync(new URL('../../../src/vs/workbench/contrib/dsh/browser/vscode/dshChatInputDock.ts', import.meta.url), 'utf8');
 	assert.ok(source.includes("line.setAttribute('data-composer-stat', row.id)"), 'the control id must reach the DOM');
 	assert.ok(source.includes("this.side === 'composer'"), 'only composer rows are statistics controls');
-	assert.ok(source.includes("'composer-activity'") && source.includes("'composer-usage'"), 'both official ids are covered');
+	// id 现在来自 dshInputDock 的常量（单一真源），不再在 dock 里重复字面量。
+	assert.ok(source.includes('DSH_COMPOSER_ACTIVITY_ID') && source.includes('DSH_COMPOSER_USAGE_ID'), 'both official ids are covered');
 	// 输入侧的队列/turn-nav 行不是统计控件，不能被打上该属性。
 	assert.ok(source.includes('COMPOSER_STAT_IDS.has(row.id)'), 'the attribute is limited to statistics ids');
+});
+
+test('composer statistic ids have a single source of truth', async () => {
+	// 行 id 在两处用到：投影函数生成行、dock 渲染时写 data-composer-stat。
+	// 两处各写字面量会漂移，而漂移的后果是插件按 id 定位不到控件。
+	const { DSH_COMPOSER_ACTIVITY_ID, DSH_COMPOSER_USAGE_ID, DSH_COMPOSER_BREAKDOWN_ID } = await import('../../../src/vs/workbench/contrib/dsh/browser/vscode/dshInputDock.ts');
+	const { readFileSync } = await import('node:fs');
+	const inputDock = readFileSync(new URL('../../../src/vs/workbench/contrib/dsh/browser/vscode/dshInputDock.ts', import.meta.url), 'utf8');
+	const chatDock = readFileSync(new URL('../../../src/vs/workbench/contrib/dsh/browser/vscode/dshChatInputDock.ts', import.meta.url), 'utf8');
+	// 常量值与官方 id 一致。
+	assert.equal(DSH_COMPOSER_ACTIVITY_ID, 'composer-activity');
+	assert.equal(DSH_COMPOSER_USAGE_ID, 'composer-usage');
+	assert.equal(DSH_COMPOSER_BREAKDOWN_ID, 'composer-breakdown');
+	// 投影函数用常量而不是字面量。
+	assert.ok(!inputDock.includes("id: 'composer-activity'"), 'the projection must use the constant');
+	assert.ok(inputDock.includes('id: DSH_COMPOSER_ACTIVITY_ID'));
+	// dock 侧引用同一组常量。
+	assert.ok(chatDock.includes('new Set([DSH_COMPOSER_ACTIVITY_ID, DSH_COMPOSER_USAGE_ID, DSH_COMPOSER_BREAKDOWN_ID])'), 'the dock must reuse the same constants');
 });
