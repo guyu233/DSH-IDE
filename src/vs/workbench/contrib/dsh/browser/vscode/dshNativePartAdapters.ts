@@ -8,6 +8,7 @@
 // 工具复用 ChatToolInvocationPart，但 input 按 tool view 家族分开，不共用一句通用文案。
 // 文件引用、错误、配额、任务、路径树、diff 列表各自一条，不用 info/warning 引用块代替。
 
+import { localize } from '../../../../../nls.js';
 import type { DshIndexedNode } from './dshConversationNodeTree.js';
 import { dshNodeKey } from './dshConversationNodeTree.js';
 import { dshToolViewId, type DshToolViewId } from './dshToolViewRegistry.js';
@@ -491,27 +492,30 @@ function commandCard(
 
 /** 触发行标题。不带 markdown 引用前缀。未知 source 不编造身份。 */
 export function dshTurnTriggerTitle(sourceKind: string, body: string): string {
+	// 用户可见文案必须走 NLS（AGENTS §7）。带正文时用 `{0}` 占位符拼在同一句里，
+	// 这样中文语序可以调整，而不是把冒号两侧的英文硬拼起来。
 	switch (sourceKind) {
 		case 'subagent-settled':
-			return body === '' ? 'Subagent settled' : `Subagent settled: ${body}`;
+			return body === '' ? localize('dsh.trigger.subagentSettled', "Subagent settled") : localize('dsh.trigger.subagentSettledWithBody', "Subagent settled: {0}", body);
 		case 'agent-message':
-			return body === '' ? 'Message from another agent' : `Message from another agent: ${body}`;
+			return body === '' ? localize('dsh.trigger.agentMessage', "Message from another agent") : localize('dsh.trigger.agentMessageWithBody', "Message from another agent: {0}", body);
 		case 'retry':
-			return 'Continuation requested';
+			return localize('dsh.trigger.retry', "Continuation requested");
 		case 'goal':
-			return body === '' ? 'Goal continuation' : `Goal continuation: ${body}`;
+			return body === '' ? localize('dsh.trigger.goal', "Goal continuation") : localize('dsh.trigger.goalWithBody', "Goal continuation: {0}", body);
 		case 'team-message':
-			return body === '' ? 'Team message' : `Team message: ${body}`;
+			return body === '' ? localize('dsh.trigger.teamMessage', "Team message") : localize('dsh.trigger.teamMessageWithBody', "Team message: {0}", body);
 		case 'webhook':
-			return body === '' ? 'Webhook' : `Webhook: ${body}`;
+			return body === '' ? localize('dsh.trigger.webhook', "Webhook") : localize('dsh.trigger.webhookWithBody', "Webhook: {0}", body);
 		case 'schedule':
-			return body === '' ? 'Scheduled run' : `Scheduled run: ${body}`;
+			return body === '' ? localize('dsh.trigger.schedule', "Scheduled run") : localize('dsh.trigger.scheduleWithBody', "Scheduled run: {0}", body);
 		case 'tool-jobs':
-			return body === '' ? 'Background job' : `Background job: ${body}`;
+			return body === '' ? localize('dsh.trigger.toolJobs', "Background job") : localize('dsh.trigger.toolJobsWithBody', "Background job: {0}", body);
 		case 'cordis-host-runner':
-			return body === '' ? 'Plugin run' : `Plugin run: ${body}`;
+			return body === '' ? localize('dsh.trigger.pluginRun', "Plugin run") : localize('dsh.trigger.pluginRunWithBody', "Plugin run: {0}", body);
 		default:
-			return body === '' ? 'Turn trigger' : body;
+			// 未知 source 不编造身份：有正文就只显示正文，没有才用通用标题。
+			return body === '' ? localize('dsh.trigger.generic', "Turn trigger") : body;
 	}
 }
 

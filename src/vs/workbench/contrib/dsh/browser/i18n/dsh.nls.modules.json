@@ -337,5 +337,25 @@
 		"dsh.card.files",
 		"dsh.card.plan",
 		"dsh.card.usage"
+	],
+	"vs/workbench/contrib/dsh/browser/vscode/dshNativePartAdapters": [
+		"dsh.trigger.subagentSettled",
+		"dsh.trigger.subagentSettledWithBody",
+		"dsh.trigger.agentMessage",
+		"dsh.trigger.agentMessageWithBody",
+		"dsh.trigger.retry",
+		"dsh.trigger.goal",
+		"dsh.trigger.goalWithBody",
+		"dsh.trigger.teamMessage",
+		"dsh.trigger.teamMessageWithBody",
+		"dsh.trigger.webhook",
+		"dsh.trigger.webhookWithBody",
+		"dsh.trigger.schedule",
+		"dsh.trigger.scheduleWithBody",
+		"dsh.trigger.toolJobs",
+		"dsh.trigger.toolJobsWithBody",
+		"dsh.trigger.pluginRun",
+		"dsh.trigger.pluginRunWithBody",
+		"dsh.trigger.generic"
 	]
 }

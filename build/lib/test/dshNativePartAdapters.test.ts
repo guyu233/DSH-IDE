@@ -650,3 +650,24 @@ test('whitespace-only text and reasoning produce no rows', async () => {
 	assert.equal(assistant([{ type: 'text', text: 'x' }]).length, 1);
 	assert.equal(assistant([{ type: 'reasoning', text: 'x' }]).length, 1);
 });
+
+test('turn-trigger titles are localized and never invent an identity', async () => {
+	// AGENTS §7：用户可见文案必须走 NLS。这组标题此前**全部硬编码英文**——
+	// 中文界面下「Subagent settled / Continuation requested / …」原样显示。
+	const { dshTurnTriggerTitle } = await import('../../../src/vs/workbench/contrib/dsh/browser/vscode/dshNativePartAdapters.ts');
+	const { readFileSync } = await import('node:fs');
+	// 英文 source 仍是英文（出厂文案）。
+	assert.equal(dshTurnTriggerTitle('subagent-settled', ''), 'Subagent settled');
+	assert.equal(dshTurnTriggerTitle('subagent-settled', 'done'), 'Subagent settled: done');
+	assert.equal(dshTurnTriggerTitle('retry', ''), 'Continuation requested');
+	assert.equal(dshTurnTriggerTitle('tool-jobs', 'build'), 'Background job: build');
+	// 未知 source 不编造身份：有正文就只显示正文。
+	assert.equal(dshTurnTriggerTitle('something-new', 'raw body'), 'raw body');
+	assert.equal(dshTurnTriggerTitle('something-new', ''), 'Turn trigger');
+	// 源码里必须走 localize（防改回裸字符串）。
+	const source = readFileSync(new URL('../../../src/vs/workbench/contrib/dsh/browser/vscode/dshNativePartAdapters.ts', import.meta.url), 'utf8');
+	for (const key of ['dsh.trigger.subagentSettled', 'dsh.trigger.retry', 'dsh.trigger.generic']) {
+		assert.ok(source.includes(`localize('${key}'`), `${key} must go through localize`);
+	}
+	assert.ok(!source.includes("return 'Subagent settled'"), 'no bare English literal may remain');
+});
