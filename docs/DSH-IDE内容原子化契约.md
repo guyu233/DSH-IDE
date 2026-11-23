@@ -838,12 +838,12 @@ PR-06 状态：**部分实现**。
 - `todo_write` 另给 `progressTaskSerialized`（`ChatTaskContentPart`）。
 - 搜索命中另给 `treeData`（`ChatTreeContentPart`）。
 - 文件改写另给 `multiDiffData` 路径（`ChatMultiDiffContentPart`）。
-- 文件块 → `reference`。
+- 文件块 → `dshFileCard`，渲染走原生 `ChatUsedReferencesListContentPart`（DSH 文件块没有文件系统路径，不能编 URI；见 PR-09）。
 - `turn-error` / `model-retry` / `turn-max-tokens` → `warning`（`ChatErrorContentPart`）；`code` 为 `QUOTA` / `ACCOUNT_QUOTA` 时 → `errorDetails.isQuotaExceeded`（`ChatQuotaExceededPart`）。
 
-`chatListRenderer.renderDshAdaptedPart` 把 markdown、thinking、tool、warning、quota、task、tree、diff、reference、文件卡、交付物交给对应原生构造。task 用 `ChatTaskContentPart`，搜索命中用 `ChatTreeContentPart`，绝对路径 diff 用 `ChatMultiDiffContentPart`，文件名和交付物用 `ChatUsedReferencesListContentPart`。相对路径 diff 仍回退成文本，避免编出残缺 file URI。真机 PENDING。
+`chatListRenderer.renderDshAdaptedPart` 把 markdown、thinking、tool、warning、quota、task、tree、diff、reference、图片画廊（`ChatAttachmentsContentPart`）、文件卡与交付物（`ChatUsedReferencesListContentPart`）交给对应原生构造。task 用 `ChatTaskContentPart`，搜索命中用 `ChatTreeContentPart`，绝对路径 diff 用 `ChatMultiDiffContentPart`，文件名和交付物用 `ChatUsedReferencesListContentPart`。相对路径 diff 仍回退成文本，避免编出残缺 file URI。真机 PENDING。
 
-`node --experimental-strip-types --import ./build/lib/test/strip-ts-resolver.mjs --test build/lib/test/dshNativePartAdapters.test.ts` 24 项通过（当前计数，随新增卡更新）。
+`node --experimental-strip-types --import ./build/lib/test/strip-ts-resolver.mjs --test build/lib/test/dshNativePartAdapters.test.ts` 通过（计数随新增卡增长，以 `test-dsh:all` 实跑为准）。
 
 PR-09 状态：**部分实现**。
 
