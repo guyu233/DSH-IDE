@@ -20,6 +20,7 @@ import { dshContentStore } from './dshContentStore.js';
 import { adaptDshNode, type DshNativePart } from './dshNativePartAdapters.js';
 import { groupTurnProcesses, hiddenProcessLine, latestExchangeTurns, processLineFromSnapshot, visibleProcessKeys, type DshTurnProcess } from './dshProcessGroup.js';
 import { dshGroupFollowAfterScroll, dshGroupFollowOnOpen, dshGroupShouldFollow } from './dshGroupScrollFollow.js';
+import { hidesRunningGroupHeaders, showsLiveGroupDetail } from './dshExpansionStateStore.js';
 import { diffDshSlotRows, dshSlotHostSame, planKeysForTurn, presentDshNode, turnProcessCounts, type DshSlotHostRef } from './dshSlotHostModel.js';
 import { dshNodeDisplaySignature } from './dshConversationNodeTree.js';
 import { dshCardSpec, type DshCardSpec } from './dshCardSpec.js';
@@ -368,11 +369,17 @@ export class DshSlotHostContentPart extends Disposable implements IChatContentPa
 			// 页面上的「N 个工具」与 Host 给的权威计数不一致。
 			// `turnDataSource` 是「该 Turn 该 kind 的全部节点」的按 Turn 观察点，正好是这份数据的真源。
 			const snapshot = turnProcessCounts(binding.tree.turnDataSource(group.turn, 'turn-process').get());
-			const line = (snapshot === undefined ? undefined : processLineFromSnapshot({
+			// 官方 `compact`：组头**不带实时细节**（`standard`/`detailed`/`verbose` 带）。
+			// 「实时细节」正是 `hiddenProcessLine` 产出的活动名（"reading" / "searching" …），
+			// 而 `processLineFromSnapshot` 只报权威计数——所以 compact 下**只允许走计数**，
+			// 没有计数就**不画组头**，而不是退回活动名。
+			const liveDetail = showsLiveGroupDetail(binding.expansion.transcriptView());
+			const counted = snapshot === undefined ? undefined : processLineFromSnapshot({
 				toolCallCount: snapshot.toolCallCount ?? 0,
 				subagentCount: snapshot.subagentCount ?? 0,
 				messageCount: snapshot.messageCount ?? 0,
-			})) ?? hiddenProcessLine(group.processKeys.flatMap(key => {
+			});
+			const line = counted ?? (liveDetail ? hiddenProcessLine(group.processKeys.flatMap(key => {
 				const node = byKey.get(key);
 				if (node === undefined) {
 					return [];
@@ -387,7 +394,7 @@ export class DshSlotHostContentPart extends Disposable implements IChatContentPa
 					...(named?.callId === undefined ? {} : { callId: named.callId }),
 					...(parsed === undefined ? {} : { args: parsed }),
 				}];
-			}));
+			})) : undefined);
 			if (line === undefined) {
 				continue;
 			}
@@ -418,6 +425,15 @@ export class DshSlotHostContentPart extends Disposable implements IChatContentPa
 			const tone = group.endReason === 'error' || group.endReason === 'interrupted' || group.endReason === 'aborted'
 				? 'error' as const
 				: group.endReason === 'max-tokens' ? 'warning' as const : undefined;
+			// 官方四档模式的组头差异（契约 §17 第 4 项，此前两个判定函数**零生产消费**）：
+			//   - `detailed`：**运行中**的 Turn **隐藏组头**（历史 Turn 保留）——只影响组头是否渲染，
+			//     不影响过程内容是否展开，也不影响单条 disclosure；
+			//   - `compact`：组头**不带实时细节**（`standard`/`detailed`/`verbose` 带）。
+			const view = binding.expansion.transcriptView();
+			if (group.alwaysOpen && hidesRunningGroupHeaders(view)) {
+				// 返回空数组：这个组本帧不画组头（但过程内容仍按 `visible` 正常渲染）。
+				return [];
+			}
 			const spec = { line, turn: group.turn, expanded, onToggle, running: group.alwaysOpen, ...(tone === undefined ? {} : { tone }) } as const;
 			if (expanded) {
 				expandedGroupTurns.add(group.turn);

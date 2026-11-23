@@ -805,3 +805,16 @@ test('hiding a turn process member resets that turn node disclosures', async () 
 	// 不重建 DOM：reset 之后由下一帧渲染自然收起，不在这里动 key。
 	assert.ok(!source.includes('this.rows.delete(group.turn)'), 'the reset must not tear down rows');
 });
+
+test('the four transcript views really change group headers', async () => {
+	// 契约 §17 第 4 项声称「已实现 hidesRunningGroupHeaders / showsLiveGroupDetail」，
+	// 但两者此前零生产消费——文档与代码矛盾。本轮接线后必须有生产调用点。
+	const { readFileSync } = await import('node:fs');
+	const source = readFileSync(new URL('../../../src/vs/workbench/contrib/dsh/browser/vscode/dshSlotHostContentPart.ts', import.meta.url), 'utf8');
+	// detailed：运行中的 Turn 隐藏组头。
+	assert.ok(source.includes('hidesRunningGroupHeaders(view)'), 'detailed must hide running group headers');
+	assert.ok(source.includes('group.alwaysOpen && hidesRunningGroupHeaders'), 'only running turns are affected');
+	// compact：组头不带实时细节（只走权威计数）。
+	assert.ok(source.includes('showsLiveGroupDetail(binding.expansion.transcriptView())'), 'compact must drop live detail');
+	assert.ok(source.includes('counted ?? (liveDetail ? hiddenProcessLine'), 'compact falls back to nothing, not to activity names');
+});
