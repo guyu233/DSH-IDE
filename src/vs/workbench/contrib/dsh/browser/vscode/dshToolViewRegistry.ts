@@ -113,8 +113,3 @@ export function dshToolViewId(toolName: string): DshToolViewId {
 	}
 	return 'generic';
 }
-
-/** 测试和目录用：details 家族一共覆盖多少个 wire 名。 */
-export function dshDetailsToolCount(): number {
-	return DETAILS.size;
-}

@@ -451,3 +451,19 @@ test('a settled group exposes its end reason for semantic colouring', () => {
 	assert.equal(running.endReason, undefined);
 	assert.equal('endReason' in running, false, 'the field is omitted, not set to undefined');
 });
+
+test('activity labels join by the interface language, not always by English rules', () => {
+	// 官方组头的连接词是语言相关的：中文「和 / 、 / 等」并省略第二个「已」，
+	// 英文「and / , / etc.」并把第二个标签首字母小写。
+	// 本仓的 joinActivityLabelsZh 此前**零生产消费**——中文界面下一直走英文规则。
+	const read = node({ key: 't1', kind: 'tool-call', seq: 1, name: 'read', callId: 'c1' });
+	const cmd = node({ key: 't2', kind: 'tool-call', seq: 2, name: 'run_command', callId: 'c2' });
+	const en = hiddenProcessLine([read, cmd], 'en');
+	const zh = hiddenProcessLine([read, cmd], 'zh');
+	assert.ok(en !== undefined && zh !== undefined);
+	// 英文用 "and"，中文用「和」——两者必须不同。
+	assert.notEqual(en, zh, 'the two languages must not produce the same sentence');
+	assert.ok(!zh!.includes(' and '), `Chinese must not use the English conjunction: "${zh}"`);
+	// 缺省仍是英文（数据层不读全局 locale）。
+	assert.equal(hiddenProcessLine([read, cmd]), en);
+});

@@ -16,7 +16,6 @@ import {
 	dshScrollFollowAfterSend,
 	dshScrollFollowFromViewState,
 	dshScrollFollowShouldHold,
-	dshScrollFollowToBottom,
 } from '../../../src/vs/workbench/contrib/dsh/browser/vscode/dshScrollFollow.ts';
 
 test('scrolling up enters the reading lock and holds native auto-scroll', () => {
@@ -48,8 +47,11 @@ test('sending a message restores one follow', () => {
 
 test('explicitly going back to the bottom releases the reading lock', () => {
 	// 验收 3：点「回到底部」后恢复自动跟随。
+	// 本仓**没有独立的 `dshScrollFollowToBottom()`**——原生「回到底部」按钮自己会滚到底，
+	// 滚动事件经 `onDidScroll` → `dshScrollFollowAfterScroll(state, atBottom=true)` 落到同一结果。
+	// 那条独立的函数曾经存在但零生产消费（死代码），已删除；这里用真实路径表达同一行为。
 	const reading = dshScrollFollowAfterScroll(DSH_SCROLL_FOLLOW_INITIAL, false);
-	const bottom = dshScrollFollowToBottom();
+	const bottom = dshScrollFollowAfterScroll(reading, true);
 	assert.equal(bottom.mode, 'following');
 	assert.equal(dshScrollFollowShouldHold(reading), true);
 	assert.equal(dshScrollFollowShouldHold(bottom), false);

@@ -422,7 +422,11 @@ export function processActivityOf(kind: string, name = ''): DshProcessActivity |
 }
 
 /** 统计一段过程。running 只数调用方标了 running 的节点。没有任何活动且没有答复时 preparing 为真。 */
-export function summarizeProcess(nodes: readonly DshActivityNode[], hasAnswer: boolean): DshProcessActivitySummary {
+/**
+ * @param language 界面语言；决定活动标签的连接规则（中文「和/、/等」vs 英文「and / , / etc.」）。
+ *   缺省英文——本仓 `localize()` 的 source 就是英文，数据层不读全局 locale。
+ */
+export function summarizeProcess(nodes: readonly DshActivityNode[], hasAnswer: boolean, language: 'en' | 'zh' = 'en'): DshProcessActivitySummary {
 	const counts: Partial<Record<DshProcessActivity, number>> = {};
 	const runningNames: string[] = [];
 	// 官方 `processActivity`：**全部成员都是 context** 时才报一个 context 类、计成员数；
@@ -561,14 +565,17 @@ export function joinActivityLabelsZh(labels: readonly string[]): string | undefi
 }
 
 /** 被收起的过程用一行计数表示。没有活动时返回 undefined。未配对的 tool-call 算正在跑。 */
-export function hiddenProcessLine(nodes: readonly { readonly kind: string; readonly name?: string; readonly callId?: string; readonly args?: unknown }[]): string | undefined {
+/**
+ * @param language 界面语言；决定活动标签的连接规则（中文「和/、/等」vs 英文「and / , / etc.」）。
+ */
+export function hiddenProcessLine(nodes: readonly { readonly kind: string; readonly name?: string; readonly callId?: string; readonly args?: unknown }[], language: 'en' | 'zh' = 'en'): string | undefined {
 	const settled = new Set(nodes.flatMap(node => node.kind === 'tool-result' && node.callId !== undefined && node.callId !== '' ? [node.callId] : []));
 	const summary = summarizeProcess(nodes.map(node => ({
 		kind: node.kind,
 		...(node.name === undefined ? {} : { name: node.name }),
 		...(node.args === undefined ? {} : { args: node.args }),
 		running: node.kind === 'tool-call' && node.callId !== undefined && node.callId !== '' && !settled.has(node.callId),
-	})), true);
+	})), true, language);
 	// 活动名是内部枚举（`read` / `webSearch`），直接拼给用户等于没本地化。
 	// 该行只在过程被收起时画：有正在跑的就用 running 标签，否则用 closed 标签。
 	const state = summary.running > 0 ? 'running' : 'closed';
@@ -581,7 +588,10 @@ export function hiddenProcessLine(nodes: readonly { readonly kind: string; reado
 	}
 	// 官方组头：closed 的类别**不带计数**；有正在跑的类别时追加实时细节。
 	const labels = ranked.map(([name]) => processActivityLabel(name as DshProcessActivity, state));
-	const title = joinActivityLabels(labels);
+	// 连接规则按**界面语言**选：中文的「和/、/等」与「已」省略规则和英文的
+	// 「and / , / etc.」与首字母小写完全不同。语言由调用方决定（数据层不读全局 locale），
+	// 默认英文——本仓 `localize()` 的 source 就是英文。
+	const title = language === 'zh' ? joinActivityLabelsZh(labels) : joinActivityLabels(labels);
 	if (title === undefined) {
 		return undefined;
 	}

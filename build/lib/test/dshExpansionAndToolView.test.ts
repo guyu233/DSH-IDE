@@ -9,7 +9,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { DshExpansionStateStore } from '../../../src/vs/workbench/contrib/dsh/browser/vscode/dshExpansionStateStore.ts';
-import { dshDetailsToolCount, dshToolViewId } from '../../../src/vs/workbench/contrib/dsh/browser/vscode/dshToolViewRegistry.ts';
+import { dshToolViewId } from '../../../src/vs/workbench/contrib/dsh/browser/vscode/dshToolViewRegistry.ts';
 
 test('turn collapse defaults per work-details mode and node disclosure resets with the turn', () => {
 	// 官方「Display modes」：Compact/Standard/Detailed 对合格的历史 Turn **初始折叠**，Verbose 永不折叠。
@@ -55,7 +55,6 @@ test('tool names dispatch to their view family and unknown names stay generic', 
 	assert.equal(dshToolViewId('timeline_tasks'), 'details');
 	assert.equal(dshToolViewId('not_a_tool'), 'generic');
 	assert.equal(dshToolViewId(''), 'generic');
-	assert.equal(dshDetailsToolCount(), 44);
 });
 
 test('live detail follows the official field priority and the documented examples', async () => {

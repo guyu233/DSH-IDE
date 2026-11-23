@@ -47,15 +47,6 @@ export function dshScrollFollowAfterScroll(state: DshScrollFollowState, atBottom
 }
 
 /**
- * 用户显式要求回到底部（点击「回到底部」按钮，或原生 `restoreViewState({isAtBottom:true})`）。
- *
- * 这是阅读锁的唯一显式出口：恢复跟随并允许下一次高度变化把视口带到底部。
- */
-export function dshScrollFollowToBottom(): DshScrollFollowState {
-	return { mode: 'following' };
-}
-
-/**
  * 用户主动发送了一条消息。
  *
  * 发送是「我要看新回复」的明确意图，因此解除阅读锁、恢复一次跟随。

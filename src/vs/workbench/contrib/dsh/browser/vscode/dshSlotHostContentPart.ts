@@ -26,6 +26,7 @@ import { dshNodeDisplaySignature } from './dshConversationNodeTree.js';
 import { dshCardSpec, type DshCardSpec } from './dshCardSpec.js';
 import { applyDshButtonChrome, applyDshStaticRowChrome } from './dshButtonChrome.js';
 import { generateUuid } from '../../../../../base/common/uuid.js';
+import { language } from '../../../../../base/common/platform.js';
 import { createStyleSheet } from '../../../../../base/browser/domStylesheets.js';
 import { DisposableResizeObserver } from '../../../../../base/browser/dom.js';
 
@@ -394,7 +395,7 @@ export class DshSlotHostContentPart extends Disposable implements IChatContentPa
 					...(named?.callId === undefined ? {} : { callId: named.callId }),
 					...(parsed === undefined ? {} : { args: parsed }),
 				}];
-			})) : undefined);
+			}), dshActivityLanguage()) : undefined);
 			if (line === undefined) {
 				continue;
 			}
@@ -1372,4 +1373,16 @@ function ensureActionFooterStyles(): void {
 			@media (hover: none) { .dsh-actions-reveal { opacity: 1; } }
 		`;
 	});
+}
+
+/**
+ * 过程活动标签的连接规则该用哪种语言。
+ *
+ * 官方组头的连接词是**语言相关**的：中文用「和 / 、 / 等」并省略第二个「已」，
+ * 英文用「and / , / etc.」并把第二个标签首字母小写。
+ * 本仓的 `localize()` 只负责**单词**，连接规则得单独选——所以在这里把界面语言
+ * 翻成一个二值，交给数据层的纯函数，数据层不直接读全局 locale。
+ */
+function dshActivityLanguage(): 'en' | 'zh' {
+	return language.toLowerCase().startsWith('zh') ? 'zh' : 'en';
 }
