@@ -1025,3 +1025,34 @@ test('an image-only message is not sent with empty text', async () => {
 		session.dispose();
 	}
 });
+
+test('context statistics notify the composer only when they really change', () => {
+	// composer 的 activity/构成行读 contextPressure / contextBreakdown。
+	// 它们每帧都可能变，但「有新值就通知」会把高频帧放大成无谓重绘——必须按值比较。
+	const session = new DshChatSession(fakeClient());
+	let fired = 0;
+	session.onDidChangeExtras(() => fired++);
+	try {
+		session.acceptView(view({ contextPressure: { pressureTokens: 100, contextWindow: 1000 } }));
+		assert.equal(session.contextPressure()?.pressureTokens, 100);
+		assert.equal(fired, 1, 'first pressure frame notifies');
+		session.acceptView(view({ contextPressure: { pressureTokens: 100, contextWindow: 1000 } }));
+		assert.equal(fired, 1, 'identical pressure must not notify again');
+		session.acceptView(view({ contextPressure: { pressureTokens: 200, contextWindow: 1000 } }));
+		assert.equal(fired, 2, 'a real pressure change notifies');
+		// 缺省表示这帧没带：保留上一次，不通知。
+		session.acceptView(view({}));
+		assert.equal(fired, 2, 'a frame without pressure keeps the previous value');
+		assert.equal(session.contextPressure()?.pressureTokens, 200);
+		// breakdown 同理。
+		session.acceptView(view({ contextBreakdown: { systemTokens: 1, toolsTokens: 2, messageTokens: 3 } }));
+		assert.equal(fired, 3, 'first breakdown frame notifies');
+		session.acceptView(view({ contextBreakdown: { systemTokens: 1, toolsTokens: 2, messageTokens: 3 } }));
+		assert.equal(fired, 3, 'identical breakdown must not notify');
+		session.acceptView(view({ contextBreakdown: { systemTokens: 1, toolsTokens: 2, messageTokens: 4 } }));
+		assert.equal(fired, 4, 'a real breakdown change notifies');
+		assert.equal(session.contextBreakdown()?.messageTokens, 4);
+	} finally {
+		session.dispose();
+	}
+});

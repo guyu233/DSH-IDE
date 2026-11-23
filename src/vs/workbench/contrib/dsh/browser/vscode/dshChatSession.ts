@@ -513,11 +513,15 @@ export class DshChatSession extends Disposable implements IDshChatSession {
 			this.acceptPending(view.pending);
 		}
 		// `contextPressure` 三项都是可选的 last-wins 记录；缺省表示这帧没带，保留上一次。
-		if (view.contextPressure !== undefined) {
+		// 上下文统计每帧都可能变：**变了就要通知**，否则 composer 的 activity/构成行停在首帧。
+		// 与其它 extras 分开 fire：它们只喂统计行，不该触发 history 的全量重建。
+		if (view.contextPressure !== undefined && !sameContextPressure(this._contextPressure, view.contextPressure)) {
 			this._contextPressure = view.contextPressure;
+			this._onDidChangeExtras.fire();
 		}
-		if (view.contextBreakdown !== undefined) {
+		if (view.contextBreakdown !== undefined && !sameContextBreakdown(this._contextBreakdown, view.contextBreakdown)) {
 			this._contextBreakdown = view.contextBreakdown;
+			this._onDidChangeExtras.fire();
 		}
 		// extras 每帧都可能带同样的值：内容不变就不通知，避免渲染层每帧全量重建 history。
 		const nextDeliverables = view.deliverables ?? [];
@@ -1570,4 +1574,24 @@ function isConversationView(value: unknown): value is DshIdeConversationView {
 	return typeof value === 'object'
 		&& value !== null
 		&& Array.isArray((value as { nodes?: unknown }).nodes);
+}
+
+/** 官方 `contextPressure` 三项都是可选 last-wins 记录：逐项比；左值缺省视为「已变」。 */
+function sameContextPressure(left: DshIdeContextPressure | undefined, right: DshIdeContextPressure): boolean {
+	if (left === undefined) {
+		return false;
+	}
+	return left.pressureTokens === right.pressureTokens
+		&& left.projectedTokens === right.projectedTokens
+		&& left.contextWindow === right.contextWindow;
+}
+
+/** 官方 `contextBreakdown` 三项全必填：逐项比；左值缺省视为「已变」。 */
+function sameContextBreakdown(left: DshIdeContextBreakdown | undefined, right: DshIdeContextBreakdown): boolean {
+	if (left === undefined) {
+		return false;
+	}
+	return left.systemTokens === right.systemTokens
+		&& left.toolsTokens === right.toolsTokens
+		&& left.messageTokens === right.messageTokens;
 }
