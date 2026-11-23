@@ -58,6 +58,17 @@ export interface DshCardSpec {
 export function dshCardSpec(part: DshNativePart): DshCardSpec | undefined {
 	switch (part.kind) {
 		case 'dshCompaction': {
+			// 官方「Command and failure rows」：「**Automatic compaction shows a progress row until a
+			// checkpoint lands or the operation ends.**」——进行中时不显示摘要/规模（还没有），
+			// 只报「正在压缩」。
+			if (part.inProgress === true) {
+				return {
+					title: localize('dsh.card.compactionProgress', "Compacting"),
+					lines: [],
+					open: false,
+					collapsible: false,
+				};
+			}
 			// 官方 `CompactionSummaryNode` + `manual-compaction`：摘要可展开，并给出被压缩的规模。
 			const counts: string[] = [];
 			if (typeof part.shadowedItemCount === 'number') {

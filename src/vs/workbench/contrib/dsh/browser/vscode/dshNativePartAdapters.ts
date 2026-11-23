@@ -43,7 +43,7 @@ export type DshNativePart =
 	| { readonly kind: 'multiDiffData'; readonly files: readonly { readonly path: string }[] }
 	| { readonly kind: 'dshImageGallery'; readonly images: readonly DshImageRef[] }
 	| { readonly kind: 'dshFileCard'; readonly files: readonly DshFileRef[] }
-	| { readonly kind: 'dshCompaction'; readonly summary: string | null; readonly shadowedItemCount?: number | null; readonly shadowedTokenCount?: number | null }
+	| { readonly kind: 'dshCompaction'; readonly summary: string | null; readonly shadowedItemCount?: number | null; readonly shadowedTokenCount?: number | null; /** 压缩进行中（官方 `compaction/start` 已落、`end` 未到）。 */ readonly inProgress?: true }
 	| { readonly kind: 'dshCommand'; readonly commandId: string; readonly name: string | null; readonly args: string | null; readonly outcome: 'success' | 'error' | null; readonly text?: string; /** `conversation.chat.commandview` occupant 覆盖的标题。 */ readonly title?: string; readonly detail?: string; readonly icon?: string }
 	| { readonly kind: 'dshUsage'; readonly input?: number; readonly output?: number; readonly total?: number; readonly cacheRead?: number; readonly cacheWrite?: number; readonly reasoning?: number }
 	| { readonly kind: 'dshDeliverables'; readonly files: readonly { readonly path: string; readonly description?: string }[] }
@@ -451,13 +451,14 @@ function mediaCards(blocks: readonly Block[] | undefined): DshNativeAdaptation[]
 	return parts;
 }
 
-function compactionCard(record: { readonly summary?: string | null; readonly shadowedItemCount?: number | null; readonly shadowedTokenCount?: number | null }): DshNativeAdaptation {
+function compactionCard(record: { readonly summary?: string | null; readonly shadowedItemCount?: number | null; readonly shadowedTokenCount?: number | null; readonly inProgress?: true }): DshNativeAdaptation {
 	return {
 		adapter: 'compaction',
 		reuse: 'dshSlotHostContentPart:renderAdaptedFallback',
 		reason: '原生没有 DSH compaction 语义，不用 markdown 引用块',
 		part: {
 			kind: 'dshCompaction',
+			...(record.inProgress === true ? { inProgress: true as const } : {}),
 			summary: record.summary ?? null,
 			...(record.shadowedItemCount === undefined ? {} : { shadowedItemCount: record.shadowedItemCount }),
 			...(record.shadowedTokenCount === undefined ? {} : { shadowedTokenCount: record.shadowedTokenCount }),

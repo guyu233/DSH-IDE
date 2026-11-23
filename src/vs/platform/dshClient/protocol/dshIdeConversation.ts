@@ -59,6 +59,13 @@ export interface DshIdeConversationState {
 	/** 上一个 `inherited-history` 分界行的 key：官方只保留最新一个标记处的分界。 */
 	lastInheritedHistoryKey?: string;
 	/**
+	 * 进行中的压缩占位节点的 key（官方 `compaction/start` 已落、`compaction/end` 未到）。
+	 *
+	 * 只是一个 IDE 侧的呈现占位，不是会话事实：`summary` 到来时换成结果卡，
+	 * `end` 到来时撤掉（失败/取消不该显示「已完成」）。
+	 */
+	compactionProgressKey?: string;
+	/**
 	 * 官方 `inbox-next-turn`。被它认领的非人类消息是 `waking`，投影成 `turn-trigger`。
 	 */
 	inboxNextTurn: DshIdeInboxClaim;
@@ -795,7 +802,38 @@ function applyDurable(state: DshIdeConversationState, event: Record<string, unkn
 		return;
 	}
 
+	// 官方 `compaction` 子系统：`compaction/start` 与 `compaction/end` 夹住整个操作，
+	// 三个事件都是 log-only、不产生 surface 节点。但官方 Chat 要「a progress row until a
+	// checkpoint lands or the operation ends」——所以这里**在 IDE 侧**用一个占位节点表达
+	// 「压缩进行中」，等 `summary`（结果）或 `end`（失败/取消）到来时替换或撤掉。
+	// 这条占位只影响呈现，不改会话事实：它不是 DSH 事件，也没有 seq 之外的语义。
+	if (type === 'compaction/start') {
+		const key = `compaction-progress:${numberOf(data['turn']) ?? 'manual'}`;
+		put(state, key, {
+			kind: 'compaction',
+			seq,
+			time,
+			...(turn === undefined ? {} : { turn }),
+			inProgress: true,
+			summary: null,
+		});
+		state.compactionProgressKey = key;
+		return;
+	}
+	if (type === 'compaction/end') {
+		// 结束但**没有** summary：失败或取消。撤掉占位，不画假的「已完成」卡。
+		if (state.compactionProgressKey !== undefined) {
+			state.nodes.delete(state.compactionProgressKey);
+			state.compactionProgressKey = undefined;
+		}
+		return;
+	}
 	if (type === 'compaction/summary' || type === 'user/message#compaction') {
+		// 有结果了：先撤掉占位行，再按正常路径产出结果卡。
+		if (state.compactionProgressKey !== undefined) {
+			state.nodes.delete(state.compactionProgressKey);
+			state.compactionProgressKey = undefined;
+		}
 		put(state, `seq:${seq}`, {
 			kind: 'compaction',
 			seq,

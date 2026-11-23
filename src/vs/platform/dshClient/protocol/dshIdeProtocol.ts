@@ -521,6 +521,16 @@ export type DshIdeConversationNode =
 	})
 	| (DshIdeNodeBase & {
 		readonly kind: 'compaction';
+		/**
+		 * 这次压缩**还在进行中**（官方 `compaction/start` 已落、`compaction/end` 未到）。
+		 *
+		 * 官方 `ui-chat/README.md`「Command and failure rows」：「**Automatic compaction shows a
+		 * progress row until a checkpoint lands or the operation ends.**」
+		 * 官方 `compaction` 子系统文档说明这三个事件**都是 log-only**，锁由 `compaction/start` 与
+		 * `compaction/end` 夹住整个操作（「The lock brackets the **whole** operation」），
+		 * 所以「进行中」就是「有 start、还没有 end」——不需要额外状态。
+		 */
+		readonly inProgress?: true;
 		readonly summary: string | null;
 		readonly summaryEventSeq?: number | null;
 		readonly shadowedItemCount?: number | null;
@@ -2453,10 +2463,13 @@ function validateConversationNode(value: unknown, label: string, seen: Set<objec
 				return;
 			}
 			case 'compaction': {
-				const node = exactRecord(value, ['kind', 'seq', 'time', 'messageId', 'turn', 'summary', 'summaryEventSeq', 'shadowedItemCount', 'shadowedTokenCount'], label);
+				const node = exactRecord(value, ['kind', 'seq', 'time', 'messageId', 'turn', 'inProgress', 'summary', 'summaryEventSeq', 'shadowedItemCount', 'shadowedTokenCount'], label);
 				readNodeBase(node, label, false);
 				if (node['summary'] !== null && typeof node['summary'] !== 'string') {
 					throw new TypeError(`${label}.summary must be a string or null`);
+				}
+				if (node['inProgress'] !== undefined && node['inProgress'] !== true) {
+					throw new TypeError(`${label}.inProgress must be true when present`);
 				}
 				for (const key of ['summaryEventSeq', 'shadowedItemCount', 'shadowedTokenCount'] as const) {
 					if (node[key] !== undefined && node[key] !== null) {

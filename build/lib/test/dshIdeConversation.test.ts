@@ -1163,3 +1163,31 @@ test('an interrupted turn is marked structurally and carries no failure code', (
 	assert.equal(err?.interrupted, undefined);
 	assert.equal(err?.code, 'E1');
 });
+
+test('a compaction progress row exists only between start and end', () => {
+	// 官方「Command and failure rows」：Automatic compaction shows a progress row until a
+	// checkpoint lands or the operation ends。官方 compaction 子系统：compaction/start 与
+	// compaction/end 夹住整个操作，三个事件都是 log-only。
+	const state = createDshIdeConversationState();
+	const run = (event: Record<string, unknown>) => project(state, { type: 'event', event });
+	// start：出现进行中的压缩行。
+	const started = run({ type: 'compaction/start', seq: 1, time: 1, data: { turn: 1 } });
+	const progress = started.nodes.filter(node => node.kind === 'compaction');
+	assert.equal(progress.length, 1, 'a progress row appears while compacting');
+	assert.equal((progress[0] as { inProgress?: true }).inProgress, true);
+	assert.equal((progress[0] as { summary?: unknown }).summary, null, 'there is no summary yet');
+	// summary：占位换成结果卡，不再是进行中。
+	const summarized = run({ type: 'compaction/summary', seq: 2, time: 2, data: { summary: 'compacted' } });
+	const cards = summarized.nodes.filter(node => node.kind === 'compaction');
+	assert.equal(cards.length, 1, 'the placeholder is replaced, not duplicated');
+	assert.equal((cards[0] as { inProgress?: true }).inProgress, undefined, 'the result card is not in progress');
+	assert.equal((cards[0] as { summary?: unknown }).summary, 'compacted');
+});
+
+test('a compaction that ends without a summary leaves no card behind', () => {
+	// 失败或取消：撤掉占位，不画假的「已完成」。
+	const state = createDshIdeConversationState();
+	project(state, { type: 'event', event: { type: 'compaction/start', seq: 1, time: 1, data: { turn: 1 } } });
+	const ended = project(state, { type: 'event', event: { type: 'compaction/end', seq: 2, time: 2, data: { turn: 1, error: 'cancelled' } } });
+	assert.equal(ended.nodes.filter(node => node.kind === 'compaction').length, 0, 'no phantom completed card');
+});
