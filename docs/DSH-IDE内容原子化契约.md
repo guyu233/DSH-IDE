@@ -104,8 +104,8 @@ DSH snapshot
 | 没有 DSH slot 语义 | 已消除：`DshSlotRegistry` 五种基数、三种作用域；13 个槽全部有生产消费点 | `dshSlotRegistry.ts`、`dshChatSlots.ts` |
 | 没有 keyed node renderer 与 tool view registry | 已消除：`conversation.chat.node` 与 `tool.call.toolview` 都是 keyed 且已消费 | `dshChatSlots.ts` 的 `dshNodeRowOverride` / `dshToolViewOverride` |
 | 没有语义级折叠体系 | 已消除：Turn 级 `(turn, answerStep)` + 节点级 disclosure | `dshExpansionStateStore.ts`、`dshProcessGroup.ts` |
-| 复杂卡片靠文本模拟 | 已消除（除 §7 逐项标注的两处 command / warning 承载） | `dshNativePartAdapters.ts` 的 29 个 adapter |
-| 原生 renderer 分派硬编码 | 已消除：先查槽位 occupant，缺省才内置分派 | `dshNativePartAdapters.ts`（29 个 adapter）、`chatListRenderer.ts` |
+| 复杂卡片靠文本模拟 | 已消除（除 §7 逐项标注的两处 command / warning 承载） | `dshNativePartAdapters.ts` 的 `DshNativeAdapterId` 联合 |
+| 原生 renderer 分派硬编码 | 已消除：先查槽位 occupant，缺省才内置分派 | `dshNativePartAdapters.ts`（`DshNativeAdapterId` 联合）、`chatListRenderer.ts` |
 
 ## 5. 目标模块清单
 
@@ -132,7 +132,7 @@ dshExpansionStateStore.ts  Turn 级 (turn, answerStep) + 节点级 disclosure
 ```text
 dshSlotHostContentPart.ts   ChatList 里的 DSH 入口：按 nodeId 画行、折叠、侧栏、动作、手势
 dshSlotHostModel.ts         槽位引用、节点行呈现、计划卡归尾部
-dshNativePartAdapters.ts    DSH 节点 → 原生 chat part 形状（29 个 adapter）
+dshNativePartAdapters.ts    DSH 节点 → 原生 chat part 形状（`DshNativeAdapterId` 联合，逐个 adapter 说明复用与原因）
 dshQuestionCarouselContentPart.ts  原生问卷轮播
 dshQuestionCarouselAdapter.ts / dshQuestionCarouselController.ts  问卷投影与提交
 ```
