@@ -949,7 +949,7 @@ node node_modules/@typescript/native/bin/tsc -p src/tsconfig.json --noEmit --pre
 
 - 真机验收清单
 
-`steering` 的 history 文案改成只保留正文，键 `dsh.history.steering` 还在。
+`steering` 的 history 文案改成只保留正文；该文案的键 `dsh.history.steering` 已随 2026-11-23 的孤儿键清理删除（正文直接来自会话事实，不需要本地模板）。
 
 ## 17.5 文档更新纪律
 
