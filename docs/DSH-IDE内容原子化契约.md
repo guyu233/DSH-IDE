@@ -796,7 +796,7 @@ PR-04 状态：**部分实现**。
 
 未实现：
 
-- ~~协议里还没有 `assistant-step` / `turn-tail` / `turn-process` / `system-prompt` / `submitted-plan` / `workflow-run` 等官方 kind~~ **已补（2026-11-22）**：这些 kind 全部进了线协议（见 §7 的两张表）。仍缺 `turn-process` 的独立过程组 DOM 与 `snapshot` 的 timeline / legacy 两段。
+- ~~协议里还没有 `assistant-step` / `turn-tail` / `turn-process` / `system-prompt` / `submitted-plan` / `workflow-run` 等官方 kind~~ **已补（2026-11-22）**：这些 kind 全部进了线协议（见 §7 的两张表）。**2026-11-23 复核**：`turn-process` 的独立过程组 DOM 已落地（`.dsh-process-group-body` + 组头/组体/组内跟随，见 CHK-364..376）；官方 `ChatSnapshot.timeline` / `legacy` 两段**本仓不需要**——`legacy` 的用途是给官方 `StatsPills.tsx` 兜底，本仓 composer 统计已走自己的投影（`contextPressure` / `contextBreakdown` / `tokenUsage`），timeline 没有消费方。
 
 `node --experimental-strip-types --import ./build/lib/test/strip-ts-resolver.mjs --test build/lib/test/dshConversationNodeTree.test.ts` 通过。`parentCallId` 会把同级工具挂到已存在的父调用下，成环时后一个留在顶层。`dshProcessGroup.test.ts` 通过。
 
